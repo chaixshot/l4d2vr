@@ -1240,12 +1240,14 @@ public:
 	float m_AutoFlashlightForwardFarDistance = 96.0f;
 	float m_AutoFlashlightLateralOffset = 24.0f;
 	float m_AutoFlashlightVerticalOffset = -8.0f;
-	float m_AutoFlashlightSmoothingTime = 0.45f;
-	float m_AutoFlashlightMinOnTime = 2.0f;
-	float m_AutoFlashlightMinOffTime = 0.8f;
+	float m_AutoFlashlightSmoothingTime = 0.2f;
+	float m_AutoFlashlightMinOnTime = 0.9f;
+	float m_AutoFlashlightMinOffTime = 0.25f;
 	float m_AutoFlashlightManualOverrideSeconds = 6.0f;
 	bool m_AutoFlashlightDebugLog = false;
 	float m_AutoFlashlightDebugLogHz = 2.0f;
+	int m_AutoFlashlightHighConfidenceSamples = 1;
+	int m_AutoFlashlightLowConfidenceSamples = 2;
 	bool m_AutoFlashlightHasSmoothedForwardLuma = false;
 	float m_AutoFlashlightSmoothedForwardLuma = 255.0f;
 	bool m_AutoFlashlightHasSmoothedAmbientLuma = false;

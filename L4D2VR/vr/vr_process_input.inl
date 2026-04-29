@@ -1303,8 +1303,7 @@ void VR::ProcessInput()
                 vr::VROverlay()->HideOverlay(overlay);
         };
 
-    const bool isControllerVertical =
-        m_RightControllerAngAbs.x > 60.0f || m_RightControllerAngAbs.x < -45.0f ||
+    const bool isLeftControllerVertical =
         m_LeftControllerAngAbs.x > 60.0f || m_LeftControllerAngAbs.x < -45.0f;
     bool menuActive = m_Game->m_EngineClient->IsPaused();
     bool cursorVisible = m_Game->m_VguiSurface && m_Game->m_VguiSurface->IsCursorVisible();
@@ -1319,7 +1318,7 @@ void VR::ProcessInput()
     const int queueModeNow = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
     const bool scoreboardSafeNow = (queueModeNow == 0);
 
-    const bool wantsTopHud = scoreboardHeld || isControllerVertical || m_HudToggleState || cursorVisible || chatRecent;
+    const bool wantsTopHud = scoreboardHeld || isLeftControllerVertical || m_HudToggleState || cursorVisible || chatRecent;
     const bool queuedHudGate = (queueModeNow != 0);
     const auto now = std::chrono::steady_clock::now();
     const bool renderedHudNow = m_RenderedHud.load(std::memory_order_acquire);

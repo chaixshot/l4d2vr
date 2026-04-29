@@ -1595,6 +1595,12 @@ void VR::ParseConfigFile()
     m_AutoFlashlightDebugLog = getBool("AutoFlashlightDebugLog", m_AutoFlashlightDebugLog);
     m_AutoFlashlightDebugLogHz =
         std::clamp(getFloat("AutoFlashlightDebugLogHz", m_AutoFlashlightDebugLogHz), 0.0f, 20.0f);
+    m_AutoFlashlightHighConfidenceSamples =
+        std::clamp(getInt("AutoFlashlightHighConfidenceSamples", m_AutoFlashlightHighConfidenceSamples), 1, 8);
+    m_AutoFlashlightLowConfidenceSamples =
+        std::clamp(getInt("AutoFlashlightLowConfidenceSamples", m_AutoFlashlightLowConfidenceSamples), 1, 8);
+    if (m_AutoFlashlightLowConfidenceSamples < m_AutoFlashlightHighConfidenceSamples)
+        m_AutoFlashlightLowConfidenceSamples = m_AutoFlashlightHighConfidenceSamples;
 
     ParseHapticsConfigFile();
 }

@@ -6,8 +6,6 @@ namespace
     constexpr float kAutoFlashlightFallbackWeightScale = 0.2f;
     constexpr float kAutoFlashlightReliableWeight = 1.75f;
     constexpr int kAutoFlashlightReliableTraceSamples = 2;
-    constexpr int kAutoFlashlightHighConfidenceStreak = 2;
-    constexpr int kAutoFlashlightLowConfidenceStreak = 4;
 
     struct AutoFlashlightProbe
     {
@@ -452,9 +450,9 @@ void VR::UpdateAutoFlashlight(C_BasePlayer* localPlayer)
     }
 
     const int darkSamplesRequired =
-        darkGateHighConfidence ? kAutoFlashlightHighConfidenceStreak : kAutoFlashlightLowConfidenceStreak;
+        darkGateHighConfidence ? m_AutoFlashlightHighConfidenceSamples : m_AutoFlashlightLowConfidenceSamples;
     const int brightSamplesRequired =
-        brightGateHighConfidence ? kAutoFlashlightHighConfidenceStreak : kAutoFlashlightLowConfidenceStreak;
+        brightGateHighConfidence ? m_AutoFlashlightHighConfidenceSamples : m_AutoFlashlightLowConfidenceSamples;
     const char* decision = "hold";
     const float elapsedSinceToggle =
         (m_AutoFlashlightLastToggleTime.time_since_epoch().count() == 0)
