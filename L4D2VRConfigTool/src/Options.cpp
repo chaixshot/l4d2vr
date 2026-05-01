@@ -67,6 +67,38 @@ VoiceRecordCombo=Crouch+Reload
 QuickTurnCombo=SecondaryAttack+Crouch
 ViewmodelAdjustEnabled=false
 ViewmodelAdjustCombo=Reload+SecondaryAttack
+SpeechToTextEnabled=false
+SpeechToTextSendChatEnabled=true
+SpeechToTextSendVoiceEnabled=false
+SpeechToTextSendVoiceLoopbackEnabled=false
+SpeechToTextMinimumRecordSeconds=0.30
+SpeechToTextCommandPrefix=VR\speech\whisper-cli.exe
+SpeechToTextModel=VR\speech\models\ggml-base.bin
+SpeechToTextLanguage=zh
+SpeechToTextSendVoiceCommandPrefix=
+SpeechToTextSendVoiceModel=
+SpeechToTextSendVoiceWorkingDir=
+SpeechToTextSendVoiceReferenceAudio=
+SpeechToTextSendVoicePromptText=
+SpeechToTextSendVoicePromptLanguage=
+SpeechToTextSendVoiceLanguage=
+SpeechToTextSendVoiceTextSplitMethod=
+TextToSpeechEnabled=false
+TextToSpeechSurvivorOnly=true
+TextToSpeechIncludeSpeakerName=true
+TextToSpeechSkipOwnMessages=true
+TextToSpeechVolume=1.0
+TextToSpeechCommandPrefix=python api_v2.py
+TextToSpeechModel=VR\speech\GPT-SoVITS\GPT_SoVITS\configs\tts_infer.yaml
+TextToSpeechWorkingDir=VR\speech\GPT-SoVITS
+TextToSpeechServerPort=9880
+TextToSpeechReferenceAudio=VR\speech\GPT-SoVITS\reference.wav
+TextToSpeechPromptText=
+TextToSpeechPromptLanguage=zh
+TextToSpeechLanguage=zh
+TextToSpeechTextSplitMethod=cut5
+TextToSpeechWhitelistRegexes=
+TextToSpeechWhitelistSeparator=__VR_REGEX_SPLIT__
 
 AimLineOnlyWhenLaserSight=false
 BlockFireOnFriendlyAimEnabled=false
@@ -498,6 +530,48 @@ static bool IsOptionVisible(const Option& opt)
 
     if (std::strcmp(key, "HitSoundVolume") == 0)
         return IsEnabled("HitSoundEnabled") || IsEnabled("KillSoundEnabled");
+
+    if (std::strcmp(key, "SpeechToTextSendChatEnabled") == 0 ||
+        std::strcmp(key, "SpeechToTextSendVoiceEnabled") == 0 ||
+        std::strcmp(key, "SpeechToTextSendVoiceLoopbackEnabled") == 0 ||
+        std::strcmp(key, "SpeechToTextMinimumRecordSeconds") == 0 ||
+        std::strcmp(key, "SpeechToTextCommandPrefix") == 0 ||
+        std::strcmp(key, "SpeechToTextModel") == 0 ||
+        std::strcmp(key, "SpeechToTextLanguage") == 0)
+    {
+        return IsEnabled("SpeechToTextEnabled");
+    }
+
+    if (std::strcmp(key, "SpeechToTextSendVoiceCommandPrefix") == 0 ||
+        std::strcmp(key, "SpeechToTextSendVoiceModel") == 0 ||
+        std::strcmp(key, "SpeechToTextSendVoiceWorkingDir") == 0 ||
+        std::strcmp(key, "SpeechToTextSendVoiceReferenceAudio") == 0 ||
+        std::strcmp(key, "SpeechToTextSendVoicePromptText") == 0 ||
+        std::strcmp(key, "SpeechToTextSendVoicePromptLanguage") == 0 ||
+        std::strcmp(key, "SpeechToTextSendVoiceLanguage") == 0 ||
+        std::strcmp(key, "SpeechToTextSendVoiceTextSplitMethod") == 0)
+    {
+        return IsEnabled("SpeechToTextEnabled") && IsEnabled("SpeechToTextSendVoiceEnabled");
+    }
+
+    if (std::strcmp(key, "TextToSpeechSurvivorOnly") == 0 ||
+        std::strcmp(key, "TextToSpeechIncludeSpeakerName") == 0 ||
+        std::strcmp(key, "TextToSpeechSkipOwnMessages") == 0 ||
+        std::strcmp(key, "TextToSpeechVolume") == 0 ||
+        std::strcmp(key, "TextToSpeechCommandPrefix") == 0 ||
+        std::strcmp(key, "TextToSpeechModel") == 0 ||
+        std::strcmp(key, "TextToSpeechWorkingDir") == 0 ||
+        std::strcmp(key, "TextToSpeechServerPort") == 0 ||
+        std::strcmp(key, "TextToSpeechReferenceAudio") == 0 ||
+        std::strcmp(key, "TextToSpeechPromptText") == 0 ||
+        std::strcmp(key, "TextToSpeechPromptLanguage") == 0 ||
+        std::strcmp(key, "TextToSpeechLanguage") == 0 ||
+        std::strcmp(key, "TextToSpeechTextSplitMethod") == 0 ||
+        std::strcmp(key, "TextToSpeechWhitelistRegexes") == 0 ||
+        std::strcmp(key, "TextToSpeechWhitelistSeparator") == 0)
+    {
+        return IsEnabled("TextToSpeechEnabled");
+    }
 
     if (std::strcmp(key, "KillSoundNormalSpec") == 0 ||
         std::strcmp(key, "KillSoundHeadshotSpec") == 0 ||
@@ -1756,6 +1830,388 @@ Option g_Options[] =
         0.0f, 0.0f,
         "false"
     },
+    {
+        "SpeechToTextEnabled",
+        OptionType::Bool,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Enable Speech-to-Text Chat", u8"启用语音转文字聊天" },
+        { u8"Holding the dedicated SteamVR Speech To Text action records microphone audio. Releasing it transcribes the clip with Whisper and can send the result to chat.",
+          u8"按住 SteamVR 里单独注册的 Speech To Text 动作时录制麦克风；松开后用 Whisper 转写，并可把结果发到聊天。" },
+        { u8"Bind the action in SteamVR Input. Whisper is launched only when a recording is submitted.",
+          u8"请在 SteamVR Input 里给这个动作绑键。只有在提交录音时才会启动 Whisper。" },
+        0.0f, 0.0f,
+        "false"
+    },
+    {
+        "SpeechToTextSendChatEnabled",
+        OptionType::Bool,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Send Transcript to Chat", u8"转写后发送到聊天" },
+        { u8"When enabled, the recognized text is sent with Source's say command after release.",
+          u8"开启后，识别出的文本会在松开按键后通过 Source 的 say 命令发到聊天。" },
+        { u8"Turn this off if you only want to verify recognition in vrmod_log.txt first.",
+          u8"如果你只想先在 vrmod_log.txt 里验证识别结果，可以先关掉。" },
+        0.0f, 0.0f,
+        "true"
+    },
+    {
+        "SpeechToTextSendVoiceEnabled",
+        OptionType::Bool,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Synthesize and Send Voice", u8"转写后合成并发语音" },
+        { u8"After Whisper returns text, GPT-SoVITS synthesizes the transcript, plays it locally, and injects it into Source voice chat.",
+          u8"Whisper 返回文本后，调用 GPT-SoVITS 合成这句内容，一边本地播放，一边注入到 Source 游戏语音。" },
+        { u8"You can leave the dedicated voice-send TTS overrides blank to inherit the normal chat TTS profile, or fill them to use a different voice just for outbound STT audio.",
+          u8"下面的“语音发送专用 TTS 覆盖项”留空时会继承普通聊天朗读配置；填了之后，只对 STT 发语音这一路使用另一套声线。" },
+        0.0f, 0.0f,
+        "false"
+    },
+    {
+        "SpeechToTextSendVoiceLoopbackEnabled",
+        OptionType::Bool,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Voice Send Loopback", u8"语音发送本地回听" },
+        { u8"When enabled, auto-sent STT voice temporarily turns on Source's voice_loopback so you can hear the game voice channel itself.",
+          u8"开启后，自动发送的 STT 语音会临时打开 Source 的 voice_loopback，让你能听到游戏语音通道本身。" },
+        { u8"This is for verification and may sound like a second delayed copy on top of the normal local playback.",
+          u8"这是验证用开关；除了正常本地播放外，你还可能听到一份稍微延迟的第二份回声。" },
+        0.0f, 0.0f,
+        "false"
+    },
+    {
+        "SpeechToTextSendVoiceCommandPrefix",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Voice Send Server Command", u8"语音发送服务命令" },
+        { u8"Optional GPT-SoVITS launch command override for STT voice-send synthesis.",
+          u8"STT 发语音专用的 GPT-SoVITS 启动命令覆盖项。" },
+        { u8"Leave blank to inherit TextToSpeechCommandPrefix.",
+          u8"留空则继承 TextToSpeechCommandPrefix。" },
+        0.0f, 0.0f,
+        ""
+    },
+    {
+        "SpeechToTextSendVoiceModel",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Voice Send Config Path", u8"语音发送配置路径" },
+        { u8"Optional GPT-SoVITS tts_infer.yaml override for STT voice-send synthesis.",
+          u8"STT 发语音专用的 GPT-SoVITS tts_infer.yaml 覆盖项。" },
+        { u8"Leave blank to inherit TextToSpeechModel.",
+          u8"留空则继承 TextToSpeechModel。" },
+        0.0f, 0.0f,
+        ""
+    },
+    {
+        "SpeechToTextSendVoiceWorkingDir",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Voice Send Working Dir", u8"语音发送工作目录" },
+        { u8"Optional GPT-SoVITS working-directory override for STT voice-send synthesis.",
+          u8"STT 发语音专用的 GPT-SoVITS 工作目录覆盖项。" },
+        { u8"Leave blank to inherit TextToSpeechWorkingDir.",
+          u8"留空则继承 TextToSpeechWorkingDir。" },
+        0.0f, 0.0f,
+        ""
+    },
+    {
+        "SpeechToTextSendVoiceReferenceAudio",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Voice Send Reference Audio", u8"语音发送参考音频" },
+        { u8"Optional reference wav override for STT voice-send synthesis.",
+          u8"STT 发语音专用的参考 wav 覆盖项。" },
+        { u8"Leave blank to inherit TextToSpeechReferenceAudio.",
+          u8"留空则继承 TextToSpeechReferenceAudio。" },
+        0.0f, 0.0f,
+        ""
+    },
+    {
+        "SpeechToTextSendVoicePromptText",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Voice Send Prompt Text", u8"语音发送参考文本" },
+        { u8"Optional prompt_text override for STT voice-send synthesis.",
+          u8"STT 发语音专用的 prompt_text 覆盖项。" },
+        { u8"Leave blank to inherit TextToSpeechPromptText.",
+          u8"留空则继承 TextToSpeechPromptText。" },
+        0.0f, 0.0f,
+        ""
+    },
+    {
+        "SpeechToTextSendVoicePromptLanguage",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Voice Send Prompt Language", u8"语音发送参考语言" },
+        { u8"Optional prompt-language override for STT voice-send synthesis.",
+          u8"STT 发语音专用的参考语言覆盖项。" },
+        { u8"Leave blank to inherit TextToSpeechPromptLanguage.",
+          u8"留空则继承 TextToSpeechPromptLanguage。" },
+        0.0f, 0.0f,
+        ""
+    },
+    {
+        "SpeechToTextSendVoiceLanguage",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Voice Send Text Language", u8"语音发送文本语言" },
+        { u8"Optional input-text language override for STT voice-send synthesis.",
+          u8"STT 发语音专用的输入文本语言覆盖项。" },
+        { u8"Leave blank to inherit TextToSpeechLanguage.",
+          u8"留空则继承 TextToSpeechLanguage。" },
+        0.0f, 0.0f,
+        ""
+    },
+    {
+        "SpeechToTextSendVoiceTextSplitMethod",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Voice Send Split Method", u8"语音发送切分方式" },
+        { u8"Optional v2 text_split_method override for STT voice-send synthesis.",
+          u8"STT 发语音专用的 v2 text_split_method 覆盖项。" },
+        { u8"Leave blank to inherit TextToSpeechTextSplitMethod.",
+          u8"留空则继承 TextToSpeechTextSplitMethod。" },
+        0.0f, 0.0f,
+        ""
+    },
+    {
+        "SpeechToTextMinimumRecordSeconds",
+        OptionType::Float,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Minimum Record Seconds", u8"最短录音时长" },
+        { u8"Clips shorter than this are discarded instead of being transcribed.",
+          u8"短于这个时长的录音会直接丢弃，不进入转写。" },
+        { u8"Useful for filtering accidental taps on the speech button.",
+          u8"可用于过滤误触按键造成的极短录音。" },
+        0.05f, 5.0f,
+        "0.30"
+    },
+    {
+        "SpeechToTextCommandPrefix",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Whisper Command Prefix", u8"Whisper 命令前缀" },
+        { u8"Command used to launch local transcription. The default expects whisper.cpp's CLI under VR\\speech.",
+          u8"用于启动本地转写的命令。默认值假定 whisper.cpp 的 CLI 放在 VR\\speech 下。" },
+        { u8"Examples: VR\\speech\\whisper-cli.exe or a custom wrapper command.",
+          u8"示例：VR\\speech\\whisper-cli.exe，或你自己的包装命令。" },
+        0.0f, 0.0f,
+        "VR\\speech\\whisper-cli.exe"
+    },
+    {
+        "SpeechToTextModel",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Whisper Model Path", u8"Whisper 模型路径" },
+        { u8"Path to the local Whisper model file. Relative paths are resolved from the VR folder when possible.",
+          u8"本地 Whisper 模型文件路径。相对路径会优先按 VR 目录解析。" },
+        { u8"Example: VR\\speech\\models\\ggml-base.bin",
+          u8"示例：VR\\speech\\models\\ggml-base.bin" },
+        0.0f, 0.0f,
+        "VR\\speech\\models\\ggml-base.bin"
+    },
+    {
+        "SpeechToTextLanguage",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Whisper Language", u8"Whisper 语言" },
+        { u8"Language hint passed to Whisper. Leave it as zh for Chinese or change it to en/ja/etc.",
+          u8"传给 Whisper 的语言提示。中文用 zh，也可以改成 en、ja 等。" },
+        { u8"Uses Whisper's CLI language code format.",
+          u8"使用 Whisper CLI 的语言代码格式。" },
+        0.0f, 0.0f,
+        "zh"
+    },
+    {
+        "TextToSpeechEnabled",
+        OptionType::Bool,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Enable Text-to-Speech", u8"启用文本转语音" },
+        { u8"Reads captured chat lines aloud with a local GPT-SoVITS voice.",
+          u8"用本地 GPT-SoVITS 语音把捕获到的聊天内容朗读出来。" },
+        { u8"The GPT-SoVITS server is launched only when this switch is on and a chat line arrives.",
+          u8"只有开关打开且收到聊天时，才会启动 GPT-SoVITS 服务并加载模型。" },
+        0.0f, 0.0f,
+        "false"
+    },
+    {
+        "TextToSpeechSurvivorOnly",
+        OptionType::Bool,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Only Read Survivor Lines", u8"只朗读幸存者发言" },
+        { u8"By default, only survivor team player chat is read aloud in full.",
+          u8"默认情况下，只有幸存者队伍玩家说的话会被整句朗读。" },
+        { u8"Regex whitelist matches below can still force playback for non-survivor or system text.",
+          u8"下面的正则白名单命中后，非幸存者或系统文本也可以被强制播放。" },
+        0.0f, 0.0f,
+        "true"
+    },
+    {
+        "TextToSpeechIncludeSpeakerName",
+        OptionType::Bool,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Include Speaker Name", u8"朗读时带昵称" },
+        { u8"Prefixes the spoken line with the sender's name when available.",
+          u8"在有昵称时，朗读内容前会先加上发送者名字。" },
+        { u8"", u8"" },
+        0.0f, 0.0f,
+        "true"
+    },
+    {
+        "TextToSpeechSkipOwnMessages",
+        OptionType::Bool,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Skip Own Messages", u8"跳过自己消息" },
+        { u8"Prevents the game from reading back lines sent by your own player name.",
+          u8"避免把你自己昵称发出的聊天又朗读一遍。" },
+        { u8"", u8"" },
+        0.0f, 0.0f,
+        "true"
+    },
+    {
+        "TextToSpeechVolume",
+        OptionType::Float,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"TTS Volume", u8"TTS 音量" },
+        { u8"Playback gain for synthesized chat lines after GPT-SoVITS returns the wav.",
+          u8"GPT-SoVITS 生成 wav 之后，播放到本地反馈音频通道时使用的音量倍率。" },
+        { u8"1.0 keeps the generated wav at normal playback gain.",
+          u8"1.0 表示按生成 wav 的正常增益播放。" },
+        0.0f, 2.0f,
+        "1.0"
+    },
+    {
+        "TextToSpeechWhitelistRegexes",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Regex Playback Whitelist", u8"正则播放白名单" },
+        { u8"Literal delimiter-separated regex rules. If a rule matches, only the matched portion is spoken.",
+          u8"使用字面分隔符连接的多条正则规则。只要某条命中，就只朗读被匹配到的那一部分。" },
+        { u8"The last rule has the highest priority. This can override survivor-only filtering for system text.",
+          u8"最后一条规则优先级最高。它可以覆盖“只播幸存者”规则，让系统文本的匹配片段也能被朗读。" },
+        0.0f, 0.0f,
+        ""
+    },
+    {
+        "TextToSpeechWhitelistSeparator",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Whitelist Separator", u8"白名单分隔符" },
+        { u8"Literal separator string used to split the regex whitelist into multiple rules.",
+          u8"用于把正则白名单拆成多条规则的字面分隔符字符串。" },
+        { u8"Default: __VR_REGEX_SPLIT__. Pick any token that does not appear inside your regexes.",
+          u8"默认值：__VR_REGEX_SPLIT__。只要这个标记本身不出现在正则里，就不会影响正则语法。" },
+        0.0f, 0.0f,
+        "__VR_REGEX_SPLIT__"
+    },
+    {
+        "TextToSpeechCommandPrefix",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"GPT-SoVITS Server Command", u8"GPT-SoVITS 服务命令" },
+        { u8"Command used to start GPT-SoVITS inside the configured working directory.",
+          u8"用于在指定工作目录里启动 GPT-SoVITS 的命令。" },
+        { u8"Example: python api_v2.py.",
+          u8"示例：python api_v2.py。" },
+        0.0f, 0.0f,
+        "python api_v2.py"
+    },
+    {
+        "TextToSpeechModel",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"GPT-SoVITS Config Path", u8"GPT-SoVITS 配置路径" },
+        { u8"Path to the tts_infer.yaml for the voice you want to run.",
+          u8"这里填要运行声线对应的 tts_infer.yaml 路径。" },
+        { u8"Example: VR\\speech\\GPT-SoVITS\\GPT_SoVITS\\configs\\tts_infer.yaml",
+          u8"示例：VR\\speech\\GPT-SoVITS\\GPT_SoVITS\\configs\\tts_infer.yaml" },
+        0.0f, 0.0f,
+        "VR\\speech\\GPT-SoVITS\\GPT_SoVITS\\configs\\tts_infer.yaml"
+    },
+    {
+        "TextToSpeechWorkingDir",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"GPT-SoVITS Working Dir", u8"GPT-SoVITS 工作目录" },
+        { u8"Folder that contains api_v2.py and the GPT_SoVITS package. The server starts from here.",
+          u8"包含 api_v2.py 和 GPT_SoVITS 包的目录。服务会从这里启动。" },
+        { u8"Example: VR\\speech\\GPT-SoVITS",
+          u8"示例：VR\\speech\\GPT-SoVITS" },
+        0.0f, 0.0f,
+        "VR\\speech\\GPT-SoVITS"
+    },
+    {
+        "TextToSpeechServerPort",
+        OptionType::Int,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"GPT-SoVITS Port", u8"GPT-SoVITS 端口" },
+        { u8"Local HTTP port used by the hidden GPT-SoVITS server.",
+          u8"后台隐藏启动的 GPT-SoVITS 服务使用的本地 HTTP 端口。" },
+        { u8"Keep this in sync with your own wrapper only if you override the default launch command.",
+          u8"只有在你自己改了启动命令时，才需要确保这里和实际端口一致。" },
+        1.0f, 65535.0f,
+        "9880"
+    },
+    {
+        "TextToSpeechReferenceAudio",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Reference Audio Path", u8"参考音频路径" },
+        { u8"Reference wav used by GPT-SoVITS to define the target timbre.",
+          u8"GPT-SoVITS 用来定义目标音色的参考 wav 路径。" },
+        { u8"Fill this with your chosen community voice sample. TTS will not run until this file exists.",
+          u8"这里填你选好的社区音色参考音频。文件不存在时不会执行 TTS。" },
+        0.0f, 0.0f,
+        "VR\\speech\\GPT-SoVITS\\reference.wav"
+    },
+    {
+        "TextToSpeechPromptText",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Reference Transcript", u8"参考音频文本" },
+        { u8"Transcript for the reference audio, passed as prompt_text to GPT-SoVITS.",
+          u8"参考音频对应的文本，会作为 prompt_text 传给 GPT-SoVITS。" },
+        { u8"Match this to the spoken content of the reference clip for best results.",
+          u8"尽量和参考音频里实际说的话一致，效果会更稳。" },
+        0.0f, 0.0f,
+        ""
+    },
+    {
+        "TextToSpeechPromptLanguage",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Reference Language", u8"参考音频语言" },
+        { u8"Language code for the reference transcript, such as zh, en, ja, ko, or yue.",
+          u8"参考音频文本的语言代码，例如 zh、en、ja、ko、yue。" },
+        { u8"Uses GPT-SoVITS API language codes.",
+          u8"使用 GPT-SoVITS 接口的语言代码。" },
+        0.0f, 0.0f,
+        "zh"
+    },
+    {
+        "TextToSpeechLanguage",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Chat Language", u8"聊天文本语言" },
+        { u8"Language code for the incoming chat text that should be synthesized.",
+          u8"收到的聊天文本在合成时使用的语言代码。" },
+        { u8"For mixed Chinese and English voices, start with zh and adjust per voice if needed.",
+          u8"中英混读声线通常先从 zh 开始试，不合适再按声线要求调整。" },
+        0.0f, 0.0f,
+        "zh"
+    },
+    {
+        "TextToSpeechTextSplitMethod",
+        OptionType::String,
+        { u8"Voice / Speech", u8"语音 / 朗读" },
+        { u8"Text Split Method", u8"文本切分方式" },
+        { u8"text_split_method passed to GPT-SoVITS.",
+          u8"传给 GPT-SoVITS 的 text_split_method。" },
+        { u8"Available values depend on the GPT-SoVITS build you installed; cut5 is a common default.",
+          u8"可用值取决于你安装的 GPT-SoVITS 版本；cut5 是常见默认值。" },
+        0.0f, 0.0f,
+        "cut5"
+    },
     // Weapons / Fire
     {
         "AutoRepeatSemiAutoFire",
@@ -2963,10 +3419,11 @@ void DrawOptionsUI()
             std::string value = GetStr(key);
             if (value.empty())
                 value = GetDefaultStr(opt);
-            char buf[256];
-            std::snprintf(buf, sizeof(buf), "%s", value.c_str());
-            if (ImGui::InputText(L(opt.title), buf, IM_ARRAYSIZE(buf)))
-                g_Values[key] = buf;
+            const size_t bufferSize = (std::max)(static_cast<size_t>(1024), value.size() + 256);
+            std::vector<char> buf(bufferSize, '\0');
+            std::snprintf(buf.data(), buf.size(), "%s", value.c_str());
+            if (ImGui::InputText(L(opt.title), buf.data(), buf.size()))
+                g_Values[key] = buf.data();
             DrawHelp(opt);
             break;
         }

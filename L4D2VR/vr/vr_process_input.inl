@@ -52,6 +52,14 @@ void VR::ProcessInput()
             m_Game->ClientCmd_Unrestricted("-reload");
             m_ReloadCmdOwned = false;
         }
+        if (m_SpeechToTextCaptureActive)
+        {
+            EndSpeechToTextCapture(false);
+        }
+        if (m_VoiceRecordCmdOwned || m_AutoVoiceRecordRequested || m_SpeechVoiceBroadcastActive)
+        {
+            StopVoiceRecordCommandNow();
+        }
         m_PrimaryAttackDown = false;
         return;
     }
@@ -233,7 +241,18 @@ void VR::ProcessInput()
         bool& primaryJustPressed,
         bool& secondaryJustPressed)
         {
+            if (!combo.primary)
+                return false;
+
             const bool primaryValid = getActionState(combo.primary, primaryData, primaryDown, primaryJustPressed);
+            if (!combo.secondary)
+            {
+                secondaryDown = true;
+                secondaryJustPressed = false;
+                secondaryData = {};
+                return primaryValid;
+            }
+
             const bool secondaryValid = getActionState(combo.secondary, secondaryData, secondaryDown, secondaryJustPressed);
             return primaryValid && secondaryValid;
         };
@@ -991,6 +1010,10 @@ void VR::ProcessInput()
         voicePrimaryDown, voiceSecondaryDown, voicePrimaryJustPressed, voiceSecondaryJustPressed);
     const bool voiceComboActive = voiceComboValid && voicePrimaryDown && voiceSecondaryDown;
     const bool voiceComboJustActivated = voiceComboValid && ((voicePrimaryJustPressed && voiceSecondaryDown) || (voiceSecondaryJustPressed && voicePrimaryDown));
+    vr::InputDigitalActionData_t speechToTextActionData{};
+    bool speechToTextDown = false;
+    bool speechToTextJustPressed = false;
+    const bool speechToTextValid = getActionState(&m_ActionSpeechToText, speechToTextActionData, speechToTextDown, speechToTextJustPressed);
 
     vr::InputDigitalActionData_t quickTurnPrimaryData{};
     vr::InputDigitalActionData_t quickTurnSecondaryData{};
@@ -1049,14 +1072,29 @@ void VR::ProcessInput()
 
     if (!m_VoiceRecordActive && voiceComboJustActivated)
     {
-        m_Game->ClientCmd_Unrestricted("+voicerecord");
         m_VoiceRecordActive = true;
+        UpdateVoiceRecordCommandState();
     }
 
     if (m_VoiceRecordActive && (!voiceComboActive || !voiceComboValid))
     {
-        m_Game->ClientCmd_Unrestricted("-voicerecord");
         m_VoiceRecordActive = false;
+        UpdateVoiceRecordCommandState();
+    }
+
+    if (!m_SpeechToTextEnabled && m_SpeechToTextCaptureActive)
+    {
+        EndSpeechToTextCapture(false);
+    }
+
+    if (m_SpeechToTextEnabled && !m_SpeechToTextCaptureActive && speechToTextValid && speechToTextJustPressed)
+    {
+        BeginSpeechToTextCapture();
+    }
+
+    if (m_SpeechToTextCaptureActive && (!speechToTextValid || !speechToTextDown))
+    {
+        EndSpeechToTextCapture(true);
     }
 
     reloadButtonDown = (reloadButtonDown || gestureReloadActive) && !suppressReload;

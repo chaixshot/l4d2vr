@@ -3,6 +3,7 @@
 #include <iostream>
 #include <cstdio>
 #include <typeinfo>
+#include <cstdint>
 
 #include "MinHook.h"
 
@@ -104,6 +105,7 @@ typedef void(__thiscall* tConVarSetValueInt)(void* thisptr, int value);
 typedef void(__thiscall* tConVarInternalSetValueString)(void* thisptr, const char* value);
 typedef void(__thiscall* tConVarInternalSetValueFloat)(void* thisptr, float value);
 typedef void(__thiscall* tConVarInternalSetValueInt)(void* thisptr, int value);
+typedef void(__cdecl* tHudUserMessage)(void* msgData);
 
 
 class Hooks
@@ -150,6 +152,9 @@ public:
 	static inline Hook<tConVarInternalSetValueString> hkConVarInternalSetValueString;
 	static inline Hook<tConVarInternalSetValueFloat> hkConVarInternalSetValueFloat;
 	static inline Hook<tConVarInternalSetValueInt> hkConVarInternalSetValueInt;
+	static inline Hook<tHudUserMessage> hkSayText;
+	static inline Hook<tHudUserMessage> hkSayText2;
+	static inline Hook<tHudUserMessage> hkTextMsg;
 	static bool s_ServerUnderstandsVR;
 
 	Hooks() {};
@@ -198,6 +203,9 @@ public:
 	static void __fastcall dConVarInternalSetValueString(void* ecx, void* edx, const char* value);
 	static void __fastcall dConVarInternalSetValueFloat(void* ecx, void* edx, float value);
 	static void __fastcall dConVarInternalSetValueInt(void* ecx, void* edx, int value);
+	static void dSayText(void* msgData);
+	static void dSayText2(void* msgData);
+	static void dTextMsg(void* msgData);
 
 	// HUD render-target interception uses a small state machine to detect the
 	// engine's "push HUD RT" sequence:

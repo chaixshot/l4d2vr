@@ -18,6 +18,7 @@
 #include <unordered_map>
 #include <cmath>
 #include <intrin.h>
+#include <cstddef>
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -179,6 +180,288 @@ static inline bool IsReadableMemoryRange(const void* ptr, size_t bytes)
 
 	return true;
 }
+
+constexpr uintptr_t kClientSayTextHandlerOffset = 0x22BF50;
+constexpr uintptr_t kClientSayText2HandlerOffset = 0x22BF80;
+constexpr uintptr_t kClientTextMsgHandlerOffset = 0x22BFB0;
+
+struct OldBfRead
+{
+	const char* m_pDebugName = nullptr;
+	bool m_bOverflow = false;
+	uint8_t m_Padding5 = 0;
+	uint8_t m_Padding6 = 0;
+	uint8_t m_Padding7 = 0;
+	int m_nDataBits = 0;
+	uint32_t m_nDataBytes = 0;
+	uint32_t m_nInBufWord = 0;
+	int m_nBitsAvail = 0;
+	const uint32_t* m_pDataIn = nullptr;
+	const uint32_t* m_pBufferEnd = nullptr;
+	const uint32_t* m_pData = nullptr;
+
+	void GrabNextDWord(bool overflowImmediately = false)
+	{
+		if (m_pDataIn == m_pBufferEnd)
+		{
+			m_nBitsAvail = 1;
+			m_nInBufWord = 0;
+			++m_pDataIn;
+			if (overflowImmediately)
+				m_bOverflow = true;
+		}
+		else if (m_pDataIn > m_pBufferEnd)
+		{
+			m_bOverflow = true;
+			m_nInBufWord = 0;
+		}
+		else
+		{
+			m_nInBufWord = *m_pDataIn++;
+		}
+	}
+
+	uint32_t ReadByte()
+	{
+		if (m_nBitsAvail >= 8)
+		{
+			const uint32_t value = m_nInBufWord & 0xffu;
+			m_nBitsAvail -= 8;
+			if (m_nBitsAvail == 0)
+			{
+				m_nBitsAvail = 32;
+				GrabNextDWord(false);
+			}
+			else
+			{
+				m_nInBufWord >>= 8;
+			}
+			return value;
+		}
+
+		const int bitsFromCurrent = std::max(0, m_nBitsAvail);
+		uint32_t value = m_nInBufWord;
+		const int bitsNeeded = 8 - bitsFromCurrent;
+
+		m_nBitsAvail = 32;
+		GrabNextDWord(true);
+		if (m_bOverflow)
+			return 0;
+
+		const uint32_t mask = (bitsNeeded >= 32) ? 0xffffffffu : ((1u << bitsNeeded) - 1u);
+		value |= (m_nInBufWord & mask) << bitsFromCurrent;
+		m_nInBufWord >>= bitsNeeded;
+		m_nBitsAvail = 32 - bitsNeeded;
+		return value & 0xffu;
+	}
+
+	bool ReadCString(char* out, size_t outLen)
+	{
+		if (!out || outLen == 0)
+			return false;
+
+		size_t written = 0;
+		bool truncated = false;
+		out[0] = '\0';
+
+		for (size_t i = 0; i < 2048; ++i)
+		{
+			const char ch = static_cast<char>(ReadByte());
+			if (m_bOverflow)
+				break;
+
+			if (ch == '\0')
+				break;
+
+			if (written + 1 < outLen)
+			{
+				out[written++] = ch;
+			}
+			else
+			{
+				truncated = true;
+			}
+		}
+
+		out[(written < outLen) ? written : (outLen - 1)] = '\0';
+		return !m_bOverflow && !truncated;
+	}
+};
+
+static_assert(offsetof(OldBfRead, m_nDataBits) == 0x08, "Unexpected OldBfRead layout");
+static_assert(offsetof(OldBfRead, m_pDataIn) == 0x18, "Unexpected OldBfRead layout");
+static_assert(offsetof(OldBfRead, m_pData) == 0x20, "Unexpected OldBfRead layout");
+static_assert(sizeof(OldBfRead) == 0x24, "Unexpected OldBfRead size");
+
+static std::string SanitizeHudMessageField(const char* text)
+{
+	if (!text)
+		return {};
+
+	std::string sanitized;
+	sanitized.reserve(std::strlen(text));
+	for (const unsigned char ch : std::string(text))
+	{
+		if (ch == '\r')
+			sanitized += "\\r";
+		else if (ch == '\n')
+			sanitized += "\\n";
+		else if (ch == '\t')
+			sanitized += "\\t";
+		else if (ch < 0x20)
+			sanitized += '?';
+		else
+			sanitized.push_back(static_cast<char>(ch));
+	}
+	return sanitized;
+}
+
+static std::string CompactChatText(const char* text)
+{
+	std::string compact;
+	if (!text)
+		return compact;
+
+	compact.reserve(std::strlen(text));
+	bool prevSpace = false;
+	for (const unsigned char ch : std::string(text))
+	{
+		if (ch < 0x20)
+			continue;
+
+		if (ch == ' ')
+		{
+			if (!compact.empty() && !prevSpace)
+			{
+				compact.push_back(' ');
+				prevSpace = true;
+			}
+			continue;
+		}
+
+		compact.push_back(static_cast<char>(ch));
+		prevSpace = false;
+	}
+
+	while (!compact.empty() && compact.front() == ' ')
+		compact.erase(compact.begin());
+	while (!compact.empty() && compact.back() == ' ')
+		compact.pop_back();
+	return compact;
+}
+
+static bool SnapshotHudMessageReader(const void* msgData, OldBfRead& out)
+{
+	if (!msgData || !IsReadableMemoryRange(msgData, sizeof(OldBfRead)))
+		return false;
+
+	std::memcpy(&out, msgData, sizeof(out));
+	if (!out.m_pData || !out.m_pDataIn || !out.m_pBufferEnd)
+		return false;
+
+	if (out.m_nDataBits <= 0 || out.m_nDataBits > (1 << 20))
+		return false;
+
+	if (out.m_nDataBytes == 0 || out.m_nDataBytes > (1u << 16))
+		return false;
+
+	return IsReadableMemoryRange(out.m_pData, out.m_nDataBytes);
+}
+
+static void LogHudUserMessagePayload(const char* type, void* msgData)
+{
+	OldBfRead reader{};
+	if (!SnapshotHudMessageReader(msgData, reader))
+		return;
+
+	auto forwardHudChatLine = [&](const std::string& speaker, const std::string& text)
+		{
+			if (Hooks::m_VR && !text.empty())
+				Hooks::m_VR->HandleHudChatLine(speaker, text);
+		};
+
+	if (_stricmp(type, "SayText") == 0)
+	{
+		reader.ReadByte(); // sender
+		char textBuf[256]{};
+		reader.ReadCString(textBuf, sizeof(textBuf));
+		if (!reader.m_bOverflow)
+			reader.ReadByte(); // wants to chat
+
+		const std::string content = CompactChatText(textBuf);
+		if (!content.empty())
+		{
+			Game::logMsg("[HUDChat] %s", content.c_str());
+			forwardHudChatLine({}, content);
+		}
+		return;
+	}
+
+	if (_stricmp(type, "SayText2") == 0)
+	{
+		reader.ReadByte(); // sender
+		reader.ReadByte(); // wants to chat
+
+		char fields[5][256]{};
+		for (int i = 0; i < 5 && !reader.m_bOverflow; ++i)
+			reader.ReadCString(fields[i], sizeof(fields[i]));
+
+		const std::string name = CompactChatText(fields[1]);
+		const std::string content = CompactChatText(fields[2]);
+		const std::string extra1 = CompactChatText(fields[3]);
+		const std::string extra2 = CompactChatText(fields[4]);
+		const std::string token = CompactChatText(fields[0]);
+
+		if (!name.empty() && !content.empty())
+		{
+			Game::logMsg("[HUDChat] %s: %s", name.c_str(), content.c_str());
+			forwardHudChatLine(name, content);
+		}
+		else if (!content.empty())
+		{
+			Game::logMsg("[HUDChat] %s", content.c_str());
+			forwardHudChatLine({}, content);
+		}
+		else if (!name.empty() && !extra1.empty())
+		{
+			Game::logMsg("[HUDChat] %s: %s", name.c_str(), extra1.c_str());
+			forwardHudChatLine(name, extra1);
+		}
+		else if (!name.empty() && !extra2.empty())
+		{
+			Game::logMsg("[HUDChat] %s: %s", name.c_str(), extra2.c_str());
+			forwardHudChatLine(name, extra2);
+		}
+		else if (!token.empty() && token[0] != '#')
+		{
+			Game::logMsg("[HUDChat] %s", token.c_str());
+			forwardHudChatLine({}, token);
+		}
+		return;
+	}
+
+	if (_stricmp(type, "TextMsg") == 0)
+	{
+		return;
+	}
+}
+
+static void TryLogHudUserMessagePayload(const char* type, void* msgData)
+{
+#if defined(_MSC_VER)
+	__try
+	{
+		LogHudUserMessagePayload(type, msgData);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		Game::logMsg("[HUDChat][%s] decode fault", type ? type : "Unknown");
+	}
+#else
+	LogHudUserMessagePayload(type, msgData);
+#endif
+}
+
 static inline float SmoothStep01(float t)
 {
 	t = std::clamp(t, 0.0f, 1.0f);

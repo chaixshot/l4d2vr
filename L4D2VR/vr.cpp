@@ -1,6 +1,7 @@
 
 #include "vr.h"
 #include <Windows.h>
+#include <winhttp.h>
 #include <mmsystem.h>
 #include "sdk.h"
 #include "game.h"
@@ -32,6 +33,7 @@
 #include <d3d9_vr.h>
 
 #pragma comment(lib, "Winmm.lib")
+#pragma comment(lib, "Winhttp.lib")
 
 namespace
 {
@@ -40,6 +42,7 @@ namespace
     constexpr float kHitIndicatorMergeWindowSeconds = 0.12f;
     constexpr float kHitIndicatorMergeDistance = 128.0f;
     constexpr size_t kFeedbackSoundWorkerMaxQueuedJobs = 64;
+    constexpr uint32_t kSourceVoiceInputSampleRate = 11025;
     // NOTE: “被控放行”要宁可保守：只在「确实是控制者本人」且「目标非常贴近队友」时才放行。
     // Used by VR::UpdateFriendlyFireAimHit().
     constexpr float kAllowThroughControlledTeammateMaxDist = 64.0f; // units (conservative)
@@ -674,6 +677,15 @@ namespace
         return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) == 0;
     }
 
+    static bool DirectoryExistsPath(const std::string& path)
+    {
+        if (path.empty())
+            return false;
+
+        const DWORD attrs = ::GetFileAttributesA(path.c_str());
+        return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    }
+
     static bool TryGetFileLastWriteTime(const std::string& path, FILETIME& outLastWriteTime)
     {
         if (path.empty())
@@ -728,6 +740,949 @@ namespace
             return {};
 
         return path.substr(0, slash);
+    }
+
+    static std::string ResolveVrPath(const std::string& rawPath)
+    {
+        const std::string path = TrimCopy(rawPath);
+        if (path.empty())
+            return {};
+
+        if (IsAbsoluteWindowsPath(path))
+            return FileExistsPath(path) ? path : std::string{};
+
+        const std::string moduleDir = GetModuleDirectoryA();
+        if (moduleDir.empty())
+            return {};
+
+        if (StartsWithInsensitive(path, "VR\\") || StartsWithInsensitive(path, "VR/"))
+        {
+            const std::string fromModule = JoinWindowsPath(moduleDir, path);
+            return FileExistsPath(fromModule) ? fromModule : std::string{};
+        }
+
+        const std::string fromVrDir = JoinWindowsPath(JoinWindowsPath(moduleDir, "VR"), path);
+        if (FileExistsPath(fromVrDir))
+            return fromVrDir;
+
+        const std::string fromModule = JoinWindowsPath(moduleDir, path);
+        if (FileExistsPath(fromModule))
+            return fromModule;
+
+        return {};
+    }
+
+    static std::string ResolveVrDirectoryPath(const std::string& rawPath)
+    {
+        const std::string path = TrimCopy(rawPath);
+        if (path.empty())
+            return {};
+
+        if (IsAbsoluteWindowsPath(path))
+            return DirectoryExistsPath(path) ? path : std::string{};
+
+        const std::string moduleDir = GetModuleDirectoryA();
+        if (moduleDir.empty())
+            return {};
+
+        if (StartsWithInsensitive(path, "VR\\") || StartsWithInsensitive(path, "VR/"))
+        {
+            const std::string fromModule = JoinWindowsPath(moduleDir, path);
+            return DirectoryExistsPath(fromModule) ? fromModule : std::string{};
+        }
+
+        const std::string fromVrDir = JoinWindowsPath(JoinWindowsPath(moduleDir, "VR"), path);
+        if (DirectoryExistsPath(fromVrDir))
+            return fromVrDir;
+
+        const std::string fromModule = JoinWindowsPath(moduleDir, path);
+        if (DirectoryExistsPath(fromModule))
+            return fromModule;
+
+        return {};
+    }
+
+    static bool EnsureDirectoryExistsRecursive(const std::string& rawPath)
+    {
+        std::string path = TrimCopy(rawPath);
+        if (path.empty())
+            return false;
+
+        std::replace(path.begin(), path.end(), '/', '\\');
+        if (!path.empty() && path.back() == '\\')
+            path.pop_back();
+        if (path.empty())
+            return false;
+
+        size_t start = 0;
+        if (path.size() >= 2 && path[1] == ':')
+            start = 3;
+        else if (path.size() >= 2 && path[0] == '\\' && path[1] == '\\')
+        {
+            start = path.find('\\', 2);
+            if (start == std::string::npos)
+                return true;
+            start = path.find('\\', start + 1);
+            if (start == std::string::npos)
+                return true;
+            ++start;
+        }
+
+        for (size_t pos = start; pos <= path.size(); ++pos)
+        {
+            if (pos < path.size() && path[pos] != '\\')
+                continue;
+
+            const std::string partial = path.substr(0, pos);
+            if (partial.empty())
+                continue;
+
+            const DWORD attrs = ::GetFileAttributesA(partial.c_str());
+            if (attrs != INVALID_FILE_ATTRIBUTES)
+            {
+                if ((attrs & FILE_ATTRIBUTE_DIRECTORY) == 0)
+                    return false;
+                continue;
+            }
+
+            if (!::CreateDirectoryA(partial.c_str(), nullptr))
+            {
+                const DWORD error = ::GetLastError();
+                if (error != ERROR_ALREADY_EXISTS)
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    static std::string QuoteProcessArg(const std::string& value)
+    {
+        if (value.empty())
+            return "\"\"";
+
+        const bool needsQuotes = value.find_first_of(" \t\"") != std::string::npos;
+        if (!needsQuotes)
+            return value;
+
+        std::string quoted;
+        quoted.push_back('"');
+        size_t backslashCount = 0;
+        for (const char ch : value)
+        {
+            if (ch == '\\')
+            {
+                ++backslashCount;
+                continue;
+            }
+
+            if (ch == '"')
+            {
+                quoted.append(backslashCount * 2 + 1, '\\');
+                quoted.push_back('"');
+                backslashCount = 0;
+                continue;
+            }
+
+            if (backslashCount != 0)
+            {
+                quoted.append(backslashCount, '\\');
+                backslashCount = 0;
+            }
+
+            quoted.push_back(ch);
+        }
+
+        if (backslashCount != 0)
+            quoted.append(backslashCount * 2, '\\');
+        quoted.push_back('"');
+        return quoted;
+    }
+
+    static bool RunProcessHidden(const std::string& commandLine, DWORD& outExitCode)
+    {
+        outExitCode = static_cast<DWORD>(-1);
+        if (commandLine.empty())
+            return false;
+
+        STARTUPINFOA startupInfo{};
+        startupInfo.cb = sizeof(startupInfo);
+        startupInfo.dwFlags = STARTF_USESHOWWINDOW;
+        startupInfo.wShowWindow = SW_HIDE;
+
+        PROCESS_INFORMATION processInfo{};
+        std::vector<char> mutableCommand(commandLine.begin(), commandLine.end());
+        mutableCommand.push_back('\0');
+
+        const std::string workingDirectory = GetModuleDirectoryA();
+        if (!::CreateProcessA(
+            nullptr,
+            mutableCommand.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_NO_WINDOW,
+            nullptr,
+            workingDirectory.empty() ? nullptr : workingDirectory.c_str(),
+            &startupInfo,
+            &processInfo))
+        {
+            return false;
+        }
+
+        ::WaitForSingleObject(processInfo.hProcess, INFINITE);
+        ::GetExitCodeProcess(processInfo.hProcess, &outExitCode);
+        ::CloseHandle(processInfo.hThread);
+        ::CloseHandle(processInfo.hProcess);
+        return true;
+    }
+
+    static bool StartProcessHidden(const std::string& commandLine, const std::string& workingDirectory, HANDLE& outProcessHandle, DWORD& outProcessId)
+    {
+        outProcessHandle = nullptr;
+        outProcessId = 0;
+        if (commandLine.empty())
+            return false;
+
+        STARTUPINFOA startupInfo{};
+        startupInfo.cb = sizeof(startupInfo);
+        startupInfo.dwFlags = STARTF_USESHOWWINDOW;
+        startupInfo.wShowWindow = SW_HIDE;
+
+        PROCESS_INFORMATION processInfo{};
+        std::vector<char> mutableCommand(commandLine.begin(), commandLine.end());
+        mutableCommand.push_back('\0');
+
+        const char* workingDirValue = workingDirectory.empty() ? nullptr : workingDirectory.c_str();
+        if (!::CreateProcessA(
+            nullptr,
+            mutableCommand.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            CREATE_NO_WINDOW,
+            nullptr,
+            workingDirValue,
+            &startupInfo,
+            &processInfo))
+        {
+            return false;
+        }
+
+        ::CloseHandle(processInfo.hThread);
+        outProcessHandle = processInfo.hProcess;
+        outProcessId = processInfo.dwProcessId;
+        return true;
+    }
+
+    static bool IsProcessHandleRunning(HANDLE processHandle)
+    {
+        if (!processHandle)
+            return false;
+
+        const DWORD waitResult = ::WaitForSingleObject(processHandle, 0);
+        return waitResult == WAIT_TIMEOUT;
+    }
+
+    static void CloseOwnedProcessHandle(HANDLE& processHandle, DWORD& processId)
+    {
+        if (processHandle)
+        {
+            ::CloseHandle(processHandle);
+            processHandle = nullptr;
+        }
+        processId = 0;
+    }
+
+    static void CloseOwnedHandle(HANDLE& handle)
+    {
+        if (!handle)
+            return;
+
+        ::CloseHandle(handle);
+        handle = nullptr;
+    }
+
+    static std::string StripUtf8Bom(std::string value)
+    {
+        if (value.size() >= 3
+            && static_cast<unsigned char>(value[0]) == 0xEF
+            && static_cast<unsigned char>(value[1]) == 0xBB
+            && static_cast<unsigned char>(value[2]) == 0xBF)
+        {
+            value.erase(0, 3);
+        }
+        return value;
+    }
+
+    static std::string CollapseWhitespace(std::string value)
+    {
+        value = StripUtf8Bom(value);
+
+        std::string collapsed;
+        collapsed.reserve(value.size());
+        bool prevSpace = false;
+        for (const unsigned char ch : value)
+        {
+            if (ch == '\r' || ch == '\n' || ch == '\t' || ch == ' ')
+            {
+                if (!collapsed.empty() && !prevSpace)
+                {
+                    collapsed.push_back(' ');
+                    prevSpace = true;
+                }
+                continue;
+            }
+
+            if (ch < 0x20)
+                continue;
+
+            collapsed.push_back(static_cast<char>(ch));
+            prevSpace = false;
+        }
+
+        return TrimCopy(collapsed);
+    }
+
+    static std::vector<std::string> SplitLiteralDelimitedList(const std::string& rawValue, const std::string& rawDelimiter)
+    {
+        std::vector<std::string> parts;
+        const std::string value = TrimCopy(rawValue);
+        if (value.empty())
+            return parts;
+
+        const std::string delimiter = rawDelimiter.empty() ? std::string("__VR_REGEX_SPLIT__") : rawDelimiter;
+        if (delimiter.empty())
+        {
+            parts.push_back(value);
+            return parts;
+        }
+
+        size_t start = 0;
+        for (;;)
+        {
+            const size_t pos = value.find(delimiter, start);
+            const std::string part = TrimCopy(value.substr(start, pos == std::string::npos ? std::string::npos : pos - start));
+            if (!part.empty())
+                parts.push_back(part);
+
+            if (pos == std::string::npos)
+                break;
+            start = pos + delimiter.size();
+        }
+
+        return parts;
+    }
+
+    static bool TryGetPlayerTeamByNormalizedName(Game* game, const std::string& normalizedName, int& outTeam)
+    {
+        outTeam = 0;
+        if (!game || !game->m_EngineClient || normalizedName.empty())
+            return false;
+
+        for (int playerIndex = 1; playerIndex <= 64; ++playerIndex)
+        {
+            char playerName[128] = {};
+            if (!GetPlayerNameUtf8Safe(game->m_EngineClient, playerIndex, playerName, sizeof(playerName)))
+                continue;
+
+            const std::string candidateName = CollapseWhitespace(playerName);
+            if (candidateName.empty() || _stricmp(candidateName.c_str(), normalizedName.c_str()) != 0)
+                continue;
+
+            C_BasePlayer* player = reinterpret_cast<C_BasePlayer*>(game->GetClientEntity(playerIndex));
+            if (!player)
+                continue;
+
+            int team = 0;
+            if (!VR_TryReadI32(reinterpret_cast<const unsigned char*>(player), 0xE4, team))
+                continue;
+
+            outTeam = team;
+            return true;
+        }
+
+        return false;
+    }
+
+    static bool TryResolveTextToSpeechWhitelistMatch(
+        const std::string& rawText,
+        const std::string& rawRegexList,
+        const std::string& rawSeparator,
+        std::string& outMatchedText)
+    {
+        outMatchedText.clear();
+        if (rawText.empty())
+            return false;
+
+        const std::vector<std::string> regexList = SplitLiteralDelimitedList(rawRegexList, rawSeparator);
+        if (regexList.empty())
+            return false;
+
+        static std::unordered_map<std::string, bool> s_loggedInvalidRegexes;
+
+        auto normalizePatternForStdRegex = [](const std::string& rawPattern)
+            {
+                std::string normalized;
+                normalized.reserve(rawPattern.size());
+
+                bool escaped = false;
+                bool inCharClass = false;
+                for (size_t index = 0; index < rawPattern.size(); ++index)
+                {
+                    const char ch = rawPattern[index];
+                    if (escaped)
+                    {
+                        normalized.push_back(ch);
+                        escaped = false;
+                        continue;
+                    }
+
+                    if (ch == '\\')
+                    {
+                        normalized.push_back(ch);
+                        escaped = true;
+                        continue;
+                    }
+
+                    if (ch == '[' && !inCharClass)
+                    {
+                        inCharClass = true;
+                        normalized.push_back(ch);
+                        continue;
+                    }
+
+                    if (ch == ']' && inCharClass)
+                    {
+                        inCharClass = false;
+                        normalized.push_back(ch);
+                        continue;
+                    }
+
+                    if (!inCharClass
+                        && ch == '('
+                        && index + 2 < rawPattern.size()
+                        && rawPattern[index + 1] == '?'
+                        && rawPattern[index + 2] == ':')
+                    {
+                        normalized.push_back('(');
+                        index += 2;
+                        continue;
+                    }
+
+                    normalized.push_back(ch);
+                }
+
+                return normalized;
+            };
+
+        for (ptrdiff_t i = static_cast<ptrdiff_t>(regexList.size()) - 1; i >= 0; --i)
+        {
+            const std::string& pattern = regexList[static_cast<size_t>(i)];
+            try
+            {
+                const std::string normalizedPattern = normalizePatternForStdRegex(pattern);
+                const std::regex regex(normalizedPattern, std::regex_constants::ECMAScript);
+                std::smatch match;
+                if (!std::regex_search(rawText, match, regex) || match.empty())
+                    continue;
+
+                std::string matchedText;
+                for (ptrdiff_t groupIndex = static_cast<ptrdiff_t>(match.size()) - 1; groupIndex >= 1; --groupIndex)
+                {
+                    if (!match[static_cast<size_t>(groupIndex)].matched)
+                        continue;
+
+                    matchedText = CollapseWhitespace(match.str(static_cast<size_t>(groupIndex)));
+                    if (!matchedText.empty())
+                        break;
+                }
+
+                if (matchedText.empty())
+                    matchedText = CollapseWhitespace(match.str(0));
+                if (matchedText.empty())
+                    continue;
+
+                outMatchedText = matchedText;
+                return true;
+            }
+            catch (const std::regex_error&)
+            {
+                if (!s_loggedInvalidRegexes[pattern])
+                {
+                    s_loggedInvalidRegexes[pattern] = true;
+                    Game::logMsg("[Speech][TTS] invalid whitelist regex: %s", pattern.c_str());
+                }
+            }
+        }
+
+        return false;
+    }
+
+    static std::string SanitizeTextForSourceSayCommand(const std::string& rawText)
+    {
+        std::string text = CollapseWhitespace(rawText);
+        std::string sanitized;
+        sanitized.reserve(text.size());
+        for (const unsigned char ch : text)
+        {
+            if (ch == '"' || ch == ';' || ch == '\r' || ch == '\n')
+                continue;
+            sanitized.push_back(static_cast<char>(ch));
+        }
+
+        sanitized = TrimCopy(sanitized);
+        constexpr size_t kMaxChatChars = 220;
+        if (sanitized.size() > kMaxChatChars)
+            sanitized.resize(kMaxChatChars);
+        return sanitized;
+    }
+
+    static bool WriteMonoPcm16WaveFile(const std::string& path, const std::vector<int16_t>& samples, uint32_t sampleRate)
+    {
+        if (path.empty() || samples.empty() || sampleRate == 0)
+            return false;
+
+        const size_t slash = path.find_last_of("\\/");
+        if (slash != std::string::npos)
+        {
+            const std::string directory = path.substr(0, slash);
+            if (!directory.empty() && !EnsureDirectoryExistsRecursive(directory))
+                return false;
+        }
+
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        if (!file.is_open())
+            return false;
+
+        const uint16_t channels = 1;
+        const uint16_t bitsPerSample = 16;
+        const uint32_t bytesPerSecond = sampleRate * channels * (bitsPerSample / 8);
+        const uint16_t blockAlign = static_cast<uint16_t>(channels * (bitsPerSample / 8));
+        const uint32_t dataSize = static_cast<uint32_t>(samples.size() * sizeof(int16_t));
+        const uint32_t riffSize = 36u + dataSize;
+
+        file.write("RIFF", 4);
+        file.write(reinterpret_cast<const char*>(&riffSize), sizeof(riffSize));
+        file.write("WAVE", 4);
+        file.write("fmt ", 4);
+
+        const uint32_t fmtSize = 16;
+        const uint16_t formatTag = 1;
+        file.write(reinterpret_cast<const char*>(&fmtSize), sizeof(fmtSize));
+        file.write(reinterpret_cast<const char*>(&formatTag), sizeof(formatTag));
+        file.write(reinterpret_cast<const char*>(&channels), sizeof(channels));
+        file.write(reinterpret_cast<const char*>(&sampleRate), sizeof(sampleRate));
+        file.write(reinterpret_cast<const char*>(&bytesPerSecond), sizeof(bytesPerSecond));
+        file.write(reinterpret_cast<const char*>(&blockAlign), sizeof(blockAlign));
+        file.write(reinterpret_cast<const char*>(&bitsPerSample), sizeof(bitsPerSample));
+        file.write("data", 4);
+        file.write(reinterpret_cast<const char*>(&dataSize), sizeof(dataSize));
+        file.write(reinterpret_cast<const char*>(samples.data()), static_cast<std::streamsize>(dataSize));
+        return file.good();
+    }
+
+    static std::string BuildSpeechCachePath(const char* stem, const char* extension)
+    {
+        const std::string moduleDir = GetModuleDirectoryA();
+        if (moduleDir.empty())
+            return {};
+
+        const std::string cacheDir = JoinWindowsPath(JoinWindowsPath(JoinWindowsPath(moduleDir, "VR"), "speech"), "cache");
+        if (!EnsureDirectoryExistsRecursive(cacheDir))
+            return {};
+
+        static std::atomic<uint64_t> counter{ 0 };
+        const uint64_t serial = ++counter;
+        const auto now = std::chrono::system_clock::now().time_since_epoch().count();
+
+        std::ostringstream fileName;
+        fileName << (stem ? stem : "speech")
+            << "_"
+            << now
+            << "_"
+            << ::GetCurrentProcessId()
+            << "_"
+            << ::GetCurrentThreadId()
+            << "_"
+            << serial
+            << (extension ? extension : "");
+        return JoinWindowsPath(cacheDir, fileName.str());
+    }
+
+    static std::string BuildSpeechCacheFixedPath(const char* fileName)
+    {
+        const std::string moduleDir = GetModuleDirectoryA();
+        if (moduleDir.empty() || !fileName || !*fileName)
+            return {};
+
+        const std::string cacheDir = JoinWindowsPath(JoinWindowsPath(JoinWindowsPath(moduleDir, "VR"), "speech"), "cache");
+        if (!EnsureDirectoryExistsRecursive(cacheDir))
+            return {};
+
+        return JoinWindowsPath(cacheDir, fileName);
+    }
+
+    static std::string BuildProcessPrefix(const std::string& rawPrefix)
+    {
+        const std::string prefix = TrimCopy(rawPrefix);
+        if (prefix.empty())
+            return {};
+
+        const std::string resolved = ResolveVrPath(prefix);
+        if (!resolved.empty())
+            return QuoteProcessArg(resolved);
+
+        return prefix;
+    }
+
+    static std::string GetDefaultTextToSpeechCommandPrefix()
+    {
+        return "python api_v2.py";
+    }
+
+    static std::string GetEffectiveTextToSpeechCommandPrefixSpec(const std::string& rawPrefix)
+    {
+        const std::string trimmed = TrimCopy(rawPrefix);
+        if (trimmed.empty())
+            return GetDefaultTextToSpeechCommandPrefix();
+        return trimmed;
+    }
+
+    static std::string NormalizeSlashes(std::string value, char slash);
+    static std::string EscapeJsonString(const std::string& value);
+    static std::string TrimHttpResponseForLog(const std::vector<char>& responseBody);
+    static bool HttpRequest(
+        const std::string& host,
+        INTERNET_PORT port,
+        const wchar_t* method,
+        const wchar_t* path,
+        const std::string* requestBody,
+        const wchar_t* extraHeaders,
+        DWORD timeoutMs,
+        DWORD& outStatusCode,
+        std::vector<char>& outResponseBody);
+
+    static std::string BuildTextToSpeechServerLaunchSignature(const VR::TextToSpeechRuntimeConfig& config)
+    {
+        std::ostringstream signature;
+        signature
+            << config.resolvedPrefix
+            << "|"
+            << config.resolvedWorkingDir
+            << "|"
+            << config.serverPort;
+
+        if (config.hotSwitchProfileValid)
+        {
+            signature
+                << "|"
+                << ToLowerCopy(config.resolvedDevice)
+                << "|"
+                << (config.resolvedIsHalf ? "1" : "0")
+                << "|"
+                << config.resolvedBertBasePath
+                << "|"
+                << config.resolvedCnHubertBasePath;
+        }
+        else
+        {
+            signature
+                << "|"
+                << config.resolvedConfigPath;
+        }
+
+        return signature.str();
+    }
+
+    static std::string BuildTextToSpeechServerModelSignature(const VR::TextToSpeechRuntimeConfig& config)
+    {
+        if (!config.hotSwitchProfileValid)
+            return config.resolvedConfigPath;
+
+        std::ostringstream signature;
+        signature
+            << ToLowerCopy(config.resolvedModelVersion)
+            << "|"
+            << config.resolvedT2SWeightsPath
+            << "|"
+            << config.resolvedVitsWeightsPath;
+        return signature.str();
+    }
+
+    static bool IsWindowsAbsolutePath(const std::string& path)
+    {
+        return path.size() >= 2
+            && ((std::isalpha(static_cast<unsigned char>(path[0])) && path[1] == ':')
+                || (path.size() >= 2 && path[0] == '\\' && path[1] == '\\')
+                || path[0] == '/');
+    }
+
+    static int HexDigitValue(char ch)
+    {
+        if (ch >= '0' && ch <= '9')
+            return ch - '0';
+        if (ch >= 'a' && ch <= 'f')
+            return 10 + (ch - 'a');
+        if (ch >= 'A' && ch <= 'F')
+            return 10 + (ch - 'A');
+        return -1;
+    }
+
+    static void AppendUtf8Codepoint(std::string& out, unsigned int codepoint)
+    {
+        if (codepoint <= 0x7F)
+        {
+            out.push_back(static_cast<char>(codepoint));
+        }
+        else if (codepoint <= 0x7FF)
+        {
+            out.push_back(static_cast<char>(0xC0 | ((codepoint >> 6) & 0x1F)));
+            out.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+        }
+        else if (codepoint <= 0xFFFF)
+        {
+            out.push_back(static_cast<char>(0xE0 | ((codepoint >> 12) & 0x0F)));
+            out.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+        }
+        else
+        {
+            out.push_back(static_cast<char>(0xF0 | ((codepoint >> 18) & 0x07)));
+            out.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+        }
+    }
+
+    static std::string DecodeBasicYamlEscapes(const std::string& value)
+    {
+        std::string decoded;
+        decoded.reserve(value.size());
+
+        for (size_t i = 0; i < value.size(); ++i)
+        {
+            const char ch = value[i];
+            if (ch != '\\' || i + 1 >= value.size())
+            {
+                decoded.push_back(ch);
+                continue;
+            }
+
+            const char next = value[++i];
+            switch (next)
+            {
+            case '\\': decoded.push_back('\\'); break;
+            case '"': decoded.push_back('"'); break;
+            case 'n': decoded.push_back('\n'); break;
+            case 'r': decoded.push_back('\r'); break;
+            case 't': decoded.push_back('\t'); break;
+            case 'u':
+            {
+                if (i + 4 >= value.size())
+                {
+                    decoded.append("\\u");
+                    break;
+                }
+
+                unsigned int codepoint = 0;
+                bool valid = true;
+                for (size_t digit = 0; digit < 4; ++digit)
+                {
+                    const int hexValue = HexDigitValue(value[i + 1 + digit]);
+                    if (hexValue < 0)
+                    {
+                        valid = false;
+                        break;
+                    }
+                    codepoint = (codepoint << 4) | static_cast<unsigned int>(hexValue);
+                }
+
+                if (!valid)
+                {
+                    decoded.append("\\u");
+                    break;
+                }
+
+                AppendUtf8Codepoint(decoded, codepoint);
+                i += 4;
+                break;
+            }
+            default:
+                decoded.push_back(next);
+                break;
+            }
+        }
+
+        return decoded;
+    }
+
+    static std::string ParseYamlScalarValue(std::string value)
+    {
+        value = TrimCopy(value);
+        if (value.empty())
+            return {};
+
+        const bool isDoubleQuoted = value.size() >= 2 && value.front() == '"' && value.back() == '"';
+        const bool isSingleQuoted = value.size() >= 2 && value.front() == '\'' && value.back() == '\'';
+        if (isDoubleQuoted || isSingleQuoted)
+        {
+            value = value.substr(1, value.size() - 2);
+            if (isDoubleQuoted)
+                value = DecodeBasicYamlEscapes(value);
+            return value;
+        }
+
+        const size_t commentPos = value.find(" #");
+        if (commentPos != std::string::npos)
+            value = TrimCopy(value.substr(0, commentPos));
+        return value;
+    }
+
+    static bool TryParseYamlStringValue(const std::string& line, const char* key, std::string& outValue)
+    {
+        if (!key || !*key)
+            return false;
+
+        const std::string trimmed = TrimCopy(line);
+        if (trimmed.empty() || trimmed[0] == '#')
+            return false;
+        if (!StartsWithInsensitive(trimmed, key))
+            return false;
+
+        const size_t keyLen = std::strlen(key);
+        if (trimmed.size() <= keyLen || trimmed[keyLen] != ':')
+            return false;
+
+        outValue = ParseYamlScalarValue(trimmed.substr(keyLen + 1));
+        return !outValue.empty();
+    }
+
+    static bool TryParseYamlBoolValue(const std::string& line, const char* key, bool& outValue)
+    {
+        std::string parsed;
+        if (!TryParseYamlStringValue(line, key, parsed))
+            return false;
+
+        const std::string lowered = ToLowerCopy(parsed);
+        if (lowered == "true" || lowered == "1" || lowered == "yes" || lowered == "on")
+        {
+            outValue = true;
+            return true;
+        }
+        if (lowered == "false" || lowered == "0" || lowered == "no" || lowered == "off")
+        {
+            outValue = false;
+            return true;
+        }
+        return false;
+    }
+
+    static std::string ResolveTextToSpeechModelProfilePath(const std::string& rawPath, const std::string& workingDir)
+    {
+        const std::string trimmed = TrimCopy(rawPath);
+        if (trimmed.empty())
+            return {};
+
+        if (IsWindowsAbsolutePath(trimmed))
+            return NormalizeSlashes(trimmed, '\\');
+
+        if (workingDir.empty())
+            return NormalizeSlashes(trimmed, '\\');
+
+        return JoinWindowsPath(workingDir, NormalizeSlashes(trimmed, '\\'));
+    }
+
+    static bool TryLoadTextToSpeechHotSwitchProfile(VR::TextToSpeechRuntimeConfig& config)
+    {
+        config.hotSwitchProfileValid = false;
+        config.resolvedDevice.clear();
+        config.resolvedBertBasePath.clear();
+        config.resolvedCnHubertBasePath.clear();
+        config.resolvedT2SWeightsPath.clear();
+        config.resolvedVitsWeightsPath.clear();
+        config.resolvedModelVersion.clear();
+        config.resolvedIsHalf = false;
+
+        if (config.resolvedConfigPath.empty() || config.resolvedWorkingDir.empty())
+            return false;
+
+        std::ifstream file(config.resolvedConfigPath);
+        if (!file.is_open())
+            return false;
+
+        bool inCustomSection = false;
+        std::string device;
+        bool isHalf = false;
+        bool hasIsHalf = false;
+        std::string bertBasePath;
+        std::string cnhuhbertBasePath;
+        std::string t2sWeightsPath;
+        std::string vitsWeightsPath;
+        std::string version;
+
+        std::string line;
+        while (std::getline(file, line))
+        {
+            const std::string trimmed = TrimCopy(line);
+            if (trimmed.empty() || trimmed[0] == '#')
+                continue;
+
+            const bool topLevel = !line.empty() && !std::isspace(static_cast<unsigned char>(line.front()));
+            if (topLevel)
+            {
+                if (StartsWithInsensitive(trimmed, "custom:"))
+                {
+                    inCustomSection = true;
+                    continue;
+                }
+
+                if (inCustomSection)
+                    break;
+
+                continue;
+            }
+
+            if (!inCustomSection)
+                continue;
+
+            std::string parsed;
+            if (TryParseYamlStringValue(trimmed, "device", parsed))
+                device = parsed;
+            else if (TryParseYamlBoolValue(trimmed, "is_half", isHalf))
+                hasIsHalf = true;
+            else if (TryParseYamlStringValue(trimmed, "bert_base_path", parsed))
+                bertBasePath = parsed;
+            else if (TryParseYamlStringValue(trimmed, "cnhuhbert_base_path", parsed))
+                cnhuhbertBasePath = parsed;
+            else if (TryParseYamlStringValue(trimmed, "t2s_weights_path", parsed))
+                t2sWeightsPath = parsed;
+            else if (TryParseYamlStringValue(trimmed, "vits_weights_path", parsed))
+                vitsWeightsPath = parsed;
+            else if (TryParseYamlStringValue(trimmed, "version", parsed))
+                version = parsed;
+        }
+
+        if (device.empty() || !hasIsHalf || bertBasePath.empty() || cnhuhbertBasePath.empty()
+            || t2sWeightsPath.empty() || vitsWeightsPath.empty() || version.empty())
+        {
+            return false;
+        }
+
+        config.resolvedDevice = device;
+        config.resolvedIsHalf = isHalf;
+        config.resolvedBertBasePath = ResolveTextToSpeechModelProfilePath(bertBasePath, config.resolvedWorkingDir);
+        config.resolvedCnHubertBasePath = ResolveTextToSpeechModelProfilePath(cnhuhbertBasePath, config.resolvedWorkingDir);
+        config.resolvedT2SWeightsPath = ResolveTextToSpeechModelProfilePath(t2sWeightsPath, config.resolvedWorkingDir);
+        config.resolvedVitsWeightsPath = ResolveTextToSpeechModelProfilePath(vitsWeightsPath, config.resolvedWorkingDir);
+        config.resolvedModelVersion = version;
+
+        config.hotSwitchProfileValid = !config.resolvedBertBasePath.empty()
+            && !config.resolvedCnHubertBasePath.empty()
+            && !config.resolvedT2SWeightsPath.empty()
+            && !config.resolvedVitsWeightsPath.empty()
+            && !config.resolvedModelVersion.empty();
+        return config.hotSwitchProfileValid;
     }
 
     static bool TryParseConfigFloatValue(const std::string& line, const char* key, float& outValue)
@@ -1090,6 +2045,266 @@ namespace
         return file.good();
     }
 
+    static bool WriteBinaryFile(const std::string& path, const std::vector<char>& contents)
+    {
+        if (path.empty())
+            return false;
+
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        if (!file.is_open())
+            return false;
+
+        if (!contents.empty())
+            file.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+        return file.good();
+    }
+
+    static std::wstring WideFromUtf8OrAnsi(const std::string& value)
+    {
+        if (value.empty())
+            return {};
+
+        auto decode = [&](UINT codePage, DWORD flags) -> std::wstring
+            {
+                const int len = ::MultiByteToWideChar(codePage, flags, value.c_str(), -1, nullptr, 0);
+                if (len <= 1)
+                    return {};
+
+                std::wstring out(static_cast<size_t>(len), L'\0');
+                ::MultiByteToWideChar(codePage, flags, value.c_str(), -1, out.data(), len);
+                out.pop_back();
+                return out;
+            };
+
+        std::wstring wide = decode(CP_UTF8, MB_ERR_INVALID_CHARS);
+        if (!wide.empty())
+            return wide;
+
+        wide = decode(CP_UTF8, 0);
+        if (!wide.empty())
+            return wide;
+
+        return decode(CP_ACP, 0);
+    }
+
+    static std::string EscapeJsonString(const std::string& value)
+    {
+        std::ostringstream stream;
+        for (const unsigned char ch : value)
+        {
+            switch (ch)
+            {
+            case '\\': stream << "\\\\"; break;
+            case '"': stream << "\\\""; break;
+            case '\b': stream << "\\b"; break;
+            case '\f': stream << "\\f"; break;
+            case '\n': stream << "\\n"; break;
+            case '\r': stream << "\\r"; break;
+            case '\t': stream << "\\t"; break;
+            default:
+                if (ch < 0x20)
+                {
+                    stream << "\\u"
+                        << std::hex << std::setw(4) << std::setfill('0') << static_cast<int>(ch)
+                        << std::dec << std::setfill(' ');
+                }
+                else
+                {
+                    stream << static_cast<char>(ch);
+                }
+                break;
+            }
+        }
+        return stream.str();
+    }
+
+    static std::string TrimHttpResponseForLog(const std::vector<char>& responseBody)
+    {
+        if (responseBody.empty())
+            return {};
+
+        const size_t maxBytes = (std::min)(responseBody.size(), static_cast<size_t>(400));
+        return CollapseWhitespace(std::string(responseBody.data(), maxBytes));
+    }
+
+    static bool HttpRequest(
+        const std::string& host,
+        INTERNET_PORT port,
+        const wchar_t* method,
+        const wchar_t* path,
+        const std::string* requestBody,
+        const wchar_t* extraHeaders,
+        DWORD timeoutMs,
+        DWORD& outStatusCode,
+        std::vector<char>& outResponseBody)
+    {
+        outStatusCode = 0;
+        outResponseBody.clear();
+
+        const std::wstring wideHost = WideFromUtf8OrAnsi(host);
+        if (wideHost.empty() || !method || !path)
+            return false;
+
+        HINTERNET session = ::WinHttpOpen(L"L4D2VR/1.0", WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (!session)
+            return false;
+
+        bool success = false;
+        HINTERNET connect = nullptr;
+        HINTERNET request = nullptr;
+
+        do
+        {
+            ::WinHttpSetTimeouts(session, static_cast<int>(timeoutMs), static_cast<int>(timeoutMs), static_cast<int>(timeoutMs), static_cast<int>(timeoutMs));
+
+            connect = ::WinHttpConnect(session, wideHost.c_str(), port, 0);
+            if (!connect)
+                break;
+
+            request = ::WinHttpOpenRequest(connect, method, path, nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
+            if (!request)
+                break;
+
+            const void* bodyData = requestBody && !requestBody->empty() ? requestBody->data() : WINHTTP_NO_REQUEST_DATA;
+            const DWORD bodySize = requestBody ? static_cast<DWORD>(requestBody->size()) : 0;
+            const DWORD totalSize = requestBody ? bodySize : 0;
+
+            if (!::WinHttpSendRequest(request, extraHeaders, extraHeaders ? static_cast<DWORD>(-1L) : 0, const_cast<void*>(bodyData), bodySize, totalSize, 0))
+                break;
+            if (!::WinHttpReceiveResponse(request, nullptr))
+                break;
+
+            DWORD statusCodeSize = sizeof(outStatusCode);
+            if (!::WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &outStatusCode, &statusCodeSize, WINHTTP_NO_HEADER_INDEX))
+                break;
+
+            for (;;)
+            {
+                DWORD available = 0;
+                if (!::WinHttpQueryDataAvailable(request, &available))
+                    break;
+                if (available == 0)
+                {
+                    success = true;
+                    break;
+                }
+
+                const size_t oldSize = outResponseBody.size();
+                outResponseBody.resize(oldSize + available);
+                DWORD downloaded = 0;
+                if (!::WinHttpReadData(request, outResponseBody.data() + oldSize, available, &downloaded))
+                    break;
+                outResponseBody.resize(oldSize + downloaded);
+            }
+        } while (false);
+
+        if (request)
+            ::WinHttpCloseHandle(request);
+        if (connect)
+            ::WinHttpCloseHandle(connect);
+        if (session)
+            ::WinHttpCloseHandle(session);
+        return success;
+    }
+
+    static bool IsLocalHttpDocsReady(INTERNET_PORT port, DWORD timeoutMs)
+    {
+        DWORD statusCode = 0;
+        std::vector<char> responseBody;
+        return HttpRequest("127.0.0.1", port, L"GET", L"/docs", nullptr, nullptr, timeoutMs, statusCode, responseBody)
+            && statusCode == 200;
+    }
+
+    static void TryStopExistingTextToSpeechHttpServer(INTERNET_PORT port)
+    {
+        DWORD statusCode = 0;
+        std::vector<char> responseBody;
+        HttpRequest("127.0.0.1", port, L"GET", L"/control?command=exit", nullptr, nullptr, 1500, statusCode, responseBody);
+
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(8);
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            if (!IsLocalHttpDocsReady(port, 500))
+                return;
+
+            ::Sleep(150);
+        }
+    }
+
+    static std::string UrlEncodeHttpQueryValue(const std::string& value)
+    {
+        static constexpr char kHex[] = "0123456789ABCDEF";
+
+        std::string encoded;
+        encoded.reserve(value.size() * 3);
+        for (unsigned char ch : value)
+        {
+            const bool isUnreserved =
+                (ch >= 'A' && ch <= 'Z') ||
+                (ch >= 'a' && ch <= 'z') ||
+                (ch >= '0' && ch <= '9') ||
+                ch == '-' || ch == '_' || ch == '.' || ch == '~';
+
+            if (isUnreserved)
+            {
+                encoded.push_back(static_cast<char>(ch));
+            }
+            else
+            {
+                encoded.push_back('%');
+                encoded.push_back(kHex[(ch >> 4) & 0x0F]);
+                encoded.push_back(kHex[ch & 0x0F]);
+            }
+        }
+        return encoded;
+    }
+
+    static bool HttpGetUtf8Path(
+        const std::string& host,
+        INTERNET_PORT port,
+        const std::string& utf8Path,
+        DWORD timeoutMs,
+        DWORD& outStatusCode,
+        std::vector<char>& outResponseBody)
+    {
+        const std::wstring widePath = WideFromUtf8OrAnsi(utf8Path);
+        if (widePath.empty())
+            return false;
+
+        return HttpRequest(host, port, L"GET", widePath.c_str(), nullptr, nullptr, timeoutMs, outStatusCode, outResponseBody);
+    }
+
+    static bool TryHotSwitchTextToSpeechServerModel(INTERNET_PORT port, const VR::TextToSpeechRuntimeConfig& config)
+    {
+        if (!config.hotSwitchProfileValid)
+            return false;
+
+        auto callSwitchEndpoint = [&](const char* endpointName, const std::string& requestPath) -> bool
+            {
+                DWORD statusCode = 0;
+                std::vector<char> responseBody;
+                if (!HttpGetUtf8Path("127.0.0.1", port, requestPath, 30000, statusCode, responseBody) || statusCode != 200)
+                {
+                    Game::logMsg("[Speech][TTS] %s failed: status=%lu response=%s",
+                        endpointName,
+                        static_cast<unsigned long>(statusCode),
+                        TrimHttpResponseForLog(responseBody).c_str());
+                    return false;
+                }
+                return true;
+            };
+
+        const std::string setSovitsPath = "/set_sovits_weights?weights_path=" + UrlEncodeHttpQueryValue(config.resolvedVitsWeightsPath);
+        if (!callSwitchEndpoint("set_sovits_weights", setSovitsPath))
+            return false;
+
+        const std::string setGptPath = "/set_gpt_weights?weights_path=" + UrlEncodeHttpQueryValue(config.resolvedT2SWeightsPath);
+        if (!callSwitchEndpoint("set_gpt_weights", setGptPath))
+            return false;
+
+        return true;
+    }
+
     static std::string EscapeMciString(std::string value)
     {
         std::string escaped;
@@ -1222,6 +2437,112 @@ namespace
         outSampleRate = sampleRate;
         outChannels = channels;
         return true;
+    }
+
+    static std::vector<std::string> BuildVoiceInputWavePaths()
+    {
+        std::vector<std::string> paths;
+        const std::string moduleDir = GetModuleDirectoryA();
+        if (moduleDir.empty())
+            return paths;
+
+        paths.push_back(JoinWindowsPath(moduleDir, "voice_input.wav"));
+
+        const std::string gameDirPath = JoinWindowsPath(moduleDir, "left4dead2");
+        const std::string gameVoiceInputPath = JoinWindowsPath(gameDirPath, "voice_input.wav");
+        if (_stricmp(paths.front().c_str(), gameVoiceInputPath.c_str()) != 0)
+            paths.push_back(gameVoiceInputPath);
+
+        return paths;
+    }
+
+    static std::vector<int16_t> ResampleMonoPcm16Linear(const std::vector<int16_t>& inputSamples, uint32_t inputSampleRate, uint32_t outputSampleRate)
+    {
+        if (inputSamples.empty() || inputSampleRate == 0 || outputSampleRate == 0)
+            return {};
+        if (inputSampleRate == outputSampleRate)
+            return inputSamples;
+
+        const double ratio = static_cast<double>(outputSampleRate) / static_cast<double>(inputSampleRate);
+        const size_t outputFrameCount = std::max<size_t>(
+            1,
+            static_cast<size_t>(std::llround(static_cast<double>(inputSamples.size()) * ratio)));
+        std::vector<int16_t> outputSamples(outputFrameCount);
+        if (inputSamples.size() == 1)
+        {
+            std::fill(outputSamples.begin(), outputSamples.end(), inputSamples.front());
+            return outputSamples;
+        }
+
+        for (size_t outputIndex = 0; outputIndex < outputFrameCount; ++outputIndex)
+        {
+            const double inputPosition = static_cast<double>(outputIndex) * static_cast<double>(inputSampleRate) / static_cast<double>(outputSampleRate);
+            const size_t leftIndex = static_cast<size_t>(std::floor(inputPosition));
+            const size_t rightIndex = std::min(leftIndex + 1, inputSamples.size() - 1);
+            const double frac = inputPosition - static_cast<double>(leftIndex);
+            const double interpolated =
+                static_cast<double>(inputSamples[leftIndex]) * (1.0 - frac)
+                + static_cast<double>(inputSamples[rightIndex]) * frac;
+            outputSamples[outputIndex] = ClampFeedbackSoundSample(static_cast<int32_t>(std::lround(interpolated)));
+        }
+
+        return outputSamples;
+    }
+
+    static bool PrepareVoiceInputWaveFile(const std::string& sourcePath, std::string& outVoiceInputPath, float& outDurationSeconds)
+    {
+        outVoiceInputPath.clear();
+        outDurationSeconds = 0.0f;
+
+        std::vector<int16_t> sourceSamples;
+        uint32_t sampleRate = 0;
+        uint16_t channels = 0;
+        if (!TryLoadFeedbackSoundWavePcm(sourcePath, sourceSamples, sampleRate, channels))
+            return false;
+        if (sourceSamples.empty() || sampleRate == 0 || (channels != 1 && channels != 2))
+            return false;
+
+        std::vector<int16_t> monoSamples;
+        if (channels == 1)
+        {
+            monoSamples = sourceSamples;
+        }
+        else
+        {
+            const size_t frameCount = sourceSamples.size() / 2u;
+            monoSamples.resize(frameCount);
+            for (size_t frameIndex = 0; frameIndex < frameCount; ++frameIndex)
+            {
+                const int32_t mixed = static_cast<int32_t>(sourceSamples[frameIndex * 2u + 0u])
+                    + static_cast<int32_t>(sourceSamples[frameIndex * 2u + 1u]);
+                monoSamples[frameIndex] = ClampFeedbackSoundSample(mixed / 2);
+            }
+        }
+
+        if (monoSamples.empty())
+            return false;
+
+        const std::vector<int16_t> voiceInputSamples = ResampleMonoPcm16Linear(monoSamples, sampleRate, kSourceVoiceInputSampleRate);
+        if (voiceInputSamples.empty())
+            return false;
+
+        const std::vector<std::string> candidatePaths = BuildVoiceInputWavePaths();
+        bool wroteAny = false;
+        for (const std::string& candidatePath : candidatePaths)
+        {
+            if (!WriteMonoPcm16WaveFile(candidatePath, voiceInputSamples, kSourceVoiceInputSampleRate))
+                continue;
+
+            if (outVoiceInputPath.empty())
+                outVoiceInputPath = candidatePath;
+            wroteAny = true;
+        }
+
+        if (!wroteAny)
+            return false;
+
+        outDurationSeconds = static_cast<float>(voiceInputSamples.size()) / static_cast<float>(kSourceVoiceInputSampleRate);
+        return outDurationSeconds > 0.0f;
     }
 
     static bool TryPlayFeedbackSoundWaveVoice(FeedbackSoundVoiceState& voice, int leftVolume, int rightVolume)
@@ -4069,6 +5390,1015 @@ void VR::FeedbackSoundWorkerMain()
             break;
         }
     }
+}
+
+void VR::EnsureSpeechWorkerThread()
+{
+    bool expected = false;
+    if (!m_SpeechWorkerStarted.compare_exchange_strong(expected, true))
+        return;
+
+    try
+    {
+        std::thread worker(&VR::SpeechWorkerMain, this);
+        worker.detach();
+    }
+    catch (const std::system_error&)
+    {
+        m_SpeechWorkerStarted.store(false);
+    }
+}
+
+void VR::PumpSpeechToTextCapture()
+{
+    std::lock_guard<std::mutex> lock(m_SpeechCaptureMutex);
+    if (!m_SpeechCaptureWaveIn || !m_SpeechToTextCaptureActive || m_SpeechCaptureStopping)
+        return;
+
+    for (auto& buffer : m_SpeechCaptureBuffers)
+    {
+        if (!buffer.prepared || (buffer.header.dwFlags & WHDR_DONE) == 0)
+            continue;
+
+        if (buffer.header.dwBytesRecorded >= sizeof(int16_t) && buffer.header.lpData)
+        {
+            const size_t sampleCount = static_cast<size_t>(buffer.header.dwBytesRecorded / sizeof(int16_t));
+            const size_t oldSize = m_SpeechCapturePcm.size();
+            m_SpeechCapturePcm.resize(oldSize + sampleCount);
+            std::memcpy(m_SpeechCapturePcm.data() + oldSize, buffer.header.lpData, sampleCount * sizeof(int16_t));
+        }
+
+        buffer.header.dwBytesRecorded = 0;
+        const MMRESULT addResult = ::waveInAddBuffer(m_SpeechCaptureWaveIn, &buffer.header, sizeof(WAVEHDR));
+        if (addResult != MMSYSERR_NOERROR)
+            Game::logMsg("[Speech][STT] waveInAddBuffer(pump) failed: %u", static_cast<unsigned>(addResult));
+    }
+}
+
+bool VR::BeginSpeechToTextCapture()
+{
+    if (!m_SpeechToTextEnabled)
+        return false;
+
+    std::lock_guard<std::mutex> lock(m_SpeechCaptureMutex);
+    if (m_SpeechCaptureWaveIn)
+        return true;
+
+    m_SpeechCapturePcm.clear();
+    m_SpeechCaptureStopping = false;
+    m_SpeechCaptureStartedAt = std::chrono::steady_clock::now();
+
+    WAVEFORMATEX format{};
+    format.wFormatTag = WAVE_FORMAT_PCM;
+    format.nChannels = 1;
+    format.nSamplesPerSec = 16000;
+    format.wBitsPerSample = 16;
+    format.nBlockAlign = static_cast<WORD>((format.nChannels * format.wBitsPerSample) / 8);
+    format.nAvgBytesPerSec = format.nSamplesPerSec * format.nBlockAlign;
+
+    auto cleanupCapture = [&]()
+        {
+            if (m_SpeechCaptureWaveIn)
+            {
+                ::waveInStop(m_SpeechCaptureWaveIn);
+                ::waveInReset(m_SpeechCaptureWaveIn);
+            }
+
+            for (auto& buffer : m_SpeechCaptureBuffers)
+            {
+                if (m_SpeechCaptureWaveIn && buffer.prepared)
+                    ::waveInUnprepareHeader(m_SpeechCaptureWaveIn, &buffer.header, sizeof(WAVEHDR));
+                buffer.header = {};
+                buffer.prepared = false;
+            }
+
+            if (m_SpeechCaptureWaveIn)
+            {
+                ::waveInClose(m_SpeechCaptureWaveIn);
+                m_SpeechCaptureWaveIn = nullptr;
+            }
+
+            m_SpeechToTextCaptureActive = false;
+            m_SpeechCaptureStopping = false;
+            m_SpeechCapturePcm.clear();
+            m_SpeechCaptureStartedAt = {};
+        };
+
+    const MMRESULT openResult = ::waveInOpen(
+        &m_SpeechCaptureWaveIn,
+        WAVE_MAPPER,
+        &format,
+        0,
+        0,
+        CALLBACK_NULL);
+    if (openResult != MMSYSERR_NOERROR)
+    {
+        Game::logMsg("[Speech][STT] waveInOpen failed: %u", static_cast<unsigned>(openResult));
+        cleanupCapture();
+        return false;
+    }
+
+    for (auto& buffer : m_SpeechCaptureBuffers)
+    {
+        buffer.header = {};
+        buffer.header.lpData = buffer.bytes.data();
+        buffer.header.dwBufferLength = static_cast<DWORD>(buffer.bytes.size());
+
+        const MMRESULT prepareResult = ::waveInPrepareHeader(m_SpeechCaptureWaveIn, &buffer.header, sizeof(WAVEHDR));
+        if (prepareResult != MMSYSERR_NOERROR)
+        {
+            Game::logMsg("[Speech][STT] waveInPrepareHeader failed: %u", static_cast<unsigned>(prepareResult));
+            cleanupCapture();
+            return false;
+        }
+
+        buffer.prepared = true;
+        const MMRESULT addResult = ::waveInAddBuffer(m_SpeechCaptureWaveIn, &buffer.header, sizeof(WAVEHDR));
+        if (addResult != MMSYSERR_NOERROR)
+        {
+            Game::logMsg("[Speech][STT] waveInAddBuffer failed: %u", static_cast<unsigned>(addResult));
+            cleanupCapture();
+            return false;
+        }
+    }
+
+    const MMRESULT startResult = ::waveInStart(m_SpeechCaptureWaveIn);
+    if (startResult != MMSYSERR_NOERROR)
+    {
+        Game::logMsg("[Speech][STT] waveInStart failed: %u", static_cast<unsigned>(startResult));
+        cleanupCapture();
+        return false;
+    }
+
+    m_SpeechToTextCaptureActive = true;
+    Game::logMsg("[Speech][STT] capture started");
+    return true;
+}
+
+void VR::EndSpeechToTextCapture(bool queueTranscription)
+{
+    std::vector<int16_t> capturedSamples;
+    {
+        std::lock_guard<std::mutex> lock(m_SpeechCaptureMutex);
+        if (!m_SpeechCaptureWaveIn && !m_SpeechToTextCaptureActive)
+            return;
+
+        m_SpeechCaptureStopping = true;
+        if (m_SpeechCaptureWaveIn)
+        {
+            ::waveInStop(m_SpeechCaptureWaveIn);
+            ::waveInReset(m_SpeechCaptureWaveIn);
+
+            for (auto& buffer : m_SpeechCaptureBuffers)
+            {
+                if (buffer.header.dwBytesRecorded >= sizeof(int16_t) && buffer.header.lpData)
+                {
+                    const size_t sampleCount = static_cast<size_t>(buffer.header.dwBytesRecorded / sizeof(int16_t));
+                    const size_t oldSize = m_SpeechCapturePcm.size();
+                    m_SpeechCapturePcm.resize(oldSize + sampleCount);
+                    std::memcpy(m_SpeechCapturePcm.data() + oldSize, buffer.header.lpData, sampleCount * sizeof(int16_t));
+                    buffer.header.dwBytesRecorded = 0;
+                }
+            }
+
+            for (auto& buffer : m_SpeechCaptureBuffers)
+            {
+                if (buffer.prepared)
+                {
+                    ::waveInUnprepareHeader(m_SpeechCaptureWaveIn, &buffer.header, sizeof(WAVEHDR));
+                    buffer.prepared = false;
+                }
+                buffer.header = {};
+            }
+
+            ::waveInClose(m_SpeechCaptureWaveIn);
+            m_SpeechCaptureWaveIn = nullptr;
+        }
+
+        m_SpeechToTextCaptureActive = false;
+        m_SpeechCaptureStopping = false;
+        m_SpeechCaptureStartedAt = {};
+        capturedSamples.swap(m_SpeechCapturePcm);
+    }
+
+    if (!queueTranscription || !m_SpeechToTextEnabled)
+        return;
+
+    const float durationSeconds = static_cast<float>(capturedSamples.size()) / 16000.0f;
+    if (capturedSamples.empty() || durationSeconds < m_SpeechToTextMinimumRecordSeconds)
+    {
+        Game::logMsg("[Speech][STT] capture discarded (%.2fs)", durationSeconds);
+        return;
+    }
+
+    const std::string inputWavePath = BuildSpeechCachePath("stt_input", ".wav");
+    const std::string outputBasePath = BuildSpeechCachePath("stt_output", "");
+    if (inputWavePath.empty() || outputBasePath.empty())
+    {
+        Game::logMsg("[Speech][STT] failed to allocate temp paths");
+        return;
+    }
+
+    if (!WriteMonoPcm16WaveFile(inputWavePath, capturedSamples, 16000))
+    {
+        Game::logMsg("[Speech][STT] failed to write %s", inputWavePath.c_str());
+        return;
+    }
+
+    EnsureSpeechWorkerThread();
+    if (!m_SpeechWorkerStarted.load())
+    {
+        Game::logMsg("[Speech][STT] worker thread unavailable");
+        return;
+    }
+
+    SpeechWorkerJob job{};
+    job.type = SpeechWorkerJob::Type::TranscribeWave;
+    job.inputPath = inputWavePath;
+    job.outputPath = outputBasePath;
+
+    {
+        std::lock_guard<std::mutex> lock(m_SpeechWorkerMutex);
+        if (m_SpeechWorkerJobs.size() >= 16)
+            m_SpeechWorkerJobs.pop_front();
+        m_SpeechWorkerJobs.push_back(std::move(job));
+    }
+
+    m_SpeechWorkerCv.notify_one();
+    Game::logMsg("[Speech][STT] queued %.2fs capture", durationSeconds);
+}
+
+VR::TextToSpeechRuntimeConfig VR::BuildTextToSpeechRuntimeConfig(bool useSpeechToTextSendVoiceProfile) const
+{
+    TextToSpeechRuntimeConfig config{};
+
+    auto pickSpec = [&](const std::string& overrideValue, const std::string& fallbackValue) -> std::string
+        {
+            return TrimCopy(overrideValue).empty() ? fallbackValue : overrideValue;
+        };
+    config.commandPrefixSpec = GetEffectiveTextToSpeechCommandPrefixSpec(
+        useSpeechToTextSendVoiceProfile
+        ? pickSpec(m_SpeechToTextSendVoiceCommandPrefix, m_TextToSpeechCommandPrefix)
+        : m_TextToSpeechCommandPrefix);
+    config.modelSpec = useSpeechToTextSendVoiceProfile ? pickSpec(m_SpeechToTextSendVoiceModel, m_TextToSpeechModel) : m_TextToSpeechModel;
+    config.workingDirSpec = useSpeechToTextSendVoiceProfile ? pickSpec(m_SpeechToTextSendVoiceWorkingDir, m_TextToSpeechWorkingDir) : m_TextToSpeechWorkingDir;
+    config.referenceAudioSpec = useSpeechToTextSendVoiceProfile ? pickSpec(m_SpeechToTextSendVoiceReferenceAudio, m_TextToSpeechReferenceAudio) : m_TextToSpeechReferenceAudio;
+    config.promptText = useSpeechToTextSendVoiceProfile && !TrimCopy(m_SpeechToTextSendVoicePromptText).empty()
+        ? m_SpeechToTextSendVoicePromptText
+        : m_TextToSpeechPromptText;
+    config.promptLanguage = useSpeechToTextSendVoiceProfile ? pickSpec(m_SpeechToTextSendVoicePromptLanguage, m_TextToSpeechPromptLanguage) : m_TextToSpeechPromptLanguage;
+    config.textLanguage = useSpeechToTextSendVoiceProfile ? pickSpec(m_SpeechToTextSendVoiceLanguage, m_TextToSpeechLanguage) : m_TextToSpeechLanguage;
+    config.textSplitMethod = useSpeechToTextSendVoiceProfile ? pickSpec(m_SpeechToTextSendVoiceTextSplitMethod, m_TextToSpeechTextSplitMethod) : m_TextToSpeechTextSplitMethod;
+    config.serverPort = std::clamp(m_TextToSpeechServerPort, 1, 65535);
+    config.volume = std::clamp(m_TextToSpeechVolume, 0.0f, 2.0f);
+    config.includeSpeakerName = m_TextToSpeechIncludeSpeakerName;
+
+    config.resolvedPrefix = BuildProcessPrefix(config.commandPrefixSpec);
+    config.resolvedWorkingDir = ResolveVrDirectoryPath(config.workingDirSpec);
+    config.resolvedReferenceAudioPath = ResolveVrPath(config.referenceAudioSpec);
+    config.resolvedConfigPath = ResolveVrPath(config.modelSpec);
+    TryLoadTextToSpeechHotSwitchProfile(config);
+    config.resolvedLaunchConfigPath = config.hotSwitchProfileValid
+        ? BuildSpeechCacheFixedPath("gpt_sovits_runtime.yaml")
+        : config.resolvedConfigPath;
+    if (config.resolvedLaunchConfigPath.empty())
+        config.resolvedLaunchConfigPath = config.resolvedConfigPath;
+
+    return config;
+}
+
+bool VR::EnsureTextToSpeechServerReady(const TextToSpeechRuntimeConfig& config)
+{
+    if (config.resolvedPrefix.empty() || config.resolvedWorkingDir.empty() || config.resolvedConfigPath.empty() || config.resolvedLaunchConfigPath.empty())
+    {
+        Game::logMsg("[Speech][TTS] missing GPT-SoVITS command, working dir, or config");
+        Game::logMsg("[Speech][TTS] raw prefix='%s' raw workingDir='%s' raw config='%s' raw launchConfig='%s'",
+            config.commandPrefixSpec.c_str(),
+            config.workingDirSpec.c_str(),
+            config.modelSpec.c_str(),
+            config.resolvedLaunchConfigPath.c_str());
+        return false;
+    }
+
+    const std::string launchSignature = BuildTextToSpeechServerLaunchSignature(config);
+    const std::string modelSignature = BuildTextToSpeechServerModelSignature(config);
+
+    HANDLE staleProcess = nullptr;
+    HANDLE staleJob = nullptr;
+    DWORD staleProcessId = 0;
+    bool shouldHotSwitchModel = false;
+
+    {
+        std::lock_guard<std::mutex> lock(m_TextToSpeechServerMutex);
+        if (m_TextToSpeechServerProcess && !IsProcessHandleRunning(m_TextToSpeechServerProcess))
+        {
+            CloseOwnedHandle(m_TextToSpeechServerJob);
+            CloseOwnedProcessHandle(m_TextToSpeechServerProcess, m_TextToSpeechServerProcessId);
+            m_TextToSpeechServerLaunchSignature.clear();
+            m_TextToSpeechServerModelSignature.clear();
+        }
+
+        if (m_TextToSpeechServerProcess && m_TextToSpeechServerLaunchSignature != launchSignature)
+        {
+            staleProcess = m_TextToSpeechServerProcess;
+            staleJob = m_TextToSpeechServerJob;
+            staleProcessId = m_TextToSpeechServerProcessId;
+            m_TextToSpeechServerProcess = nullptr;
+            m_TextToSpeechServerJob = nullptr;
+            m_TextToSpeechServerProcessId = 0;
+            m_TextToSpeechServerLaunchSignature.clear();
+            m_TextToSpeechServerModelSignature.clear();
+        }
+    }
+
+    auto stopDetachedServer = [&](HANDLE processHandle, HANDLE jobHandle, DWORD processId)
+        {
+            if (!processHandle)
+                return;
+
+            CloseOwnedHandle(jobHandle);
+            if (IsProcessHandleRunning(processHandle))
+            {
+                ::TerminateProcess(processHandle, 0);
+                ::WaitForSingleObject(processHandle, 5000);
+            }
+            CloseOwnedProcessHandle(processHandle, processId);
+        };
+
+    if (staleProcess)
+        stopDetachedServer(staleProcess, staleJob, staleProcessId);
+
+    auto waitForServerReady = [&]() -> bool
+        {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+            while (std::chrono::steady_clock::now() < deadline)
+            {
+                DWORD statusCode = 0;
+                std::vector<char> responseBody;
+                if (HttpRequest("127.0.0.1", static_cast<INTERNET_PORT>(config.serverPort), L"GET", L"/docs", nullptr, nullptr, 1500, statusCode, responseBody)
+                    && statusCode == 200)
+                {
+                    return true;
+                }
+
+                {
+                    std::lock_guard<std::mutex> lock(m_TextToSpeechServerMutex);
+                    if (m_TextToSpeechServerProcess && !IsProcessHandleRunning(m_TextToSpeechServerProcess))
+                    {
+                        CloseOwnedHandle(m_TextToSpeechServerJob);
+                        CloseOwnedProcessHandle(m_TextToSpeechServerProcess, m_TextToSpeechServerProcessId);
+                        m_TextToSpeechServerLaunchSignature.clear();
+                        m_TextToSpeechServerModelSignature.clear();
+                        break;
+                    }
+                }
+
+                ::Sleep(250);
+            }
+
+            Game::logMsg("[Speech][TTS] GPT-SoVITS server did not become ready");
+            return false;
+        };
+
+    auto startServer = [&]() -> bool
+        {
+            if (config.resolvedLaunchConfigPath != config.resolvedConfigPath)
+            {
+                const std::string configContents = ReadWholeTextFile(config.resolvedConfigPath);
+                if (configContents.empty() || !WriteWholeTextFileIfChanged(config.resolvedLaunchConfigPath, configContents))
+                {
+                    Game::logMsg("[Speech][TTS] failed to prepare runtime config copy: %s -> %s",
+                        config.resolvedConfigPath.c_str(),
+                        config.resolvedLaunchConfigPath.c_str());
+                    return false;
+                }
+            }
+
+            TryStopExistingTextToSpeechHttpServer(static_cast<INTERNET_PORT>(config.serverPort));
+
+            std::string commandLine = config.resolvedPrefix
+                + " -a 127.0.0.1 -p " + std::to_string(config.serverPort)
+                + " -c " + QuoteProcessArg(config.resolvedLaunchConfigPath);
+
+            HANDLE processHandle = nullptr;
+            DWORD processId = 0;
+            if (!StartProcessHidden(commandLine, config.resolvedWorkingDir, processHandle, processId))
+            {
+                Game::logMsg("[Speech][TTS] failed to launch GPT-SoVITS server: %s", commandLine.c_str());
+                return false;
+            }
+
+            HANDLE jobHandle = ::CreateJobObjectA(nullptr, nullptr);
+            if (jobHandle)
+            {
+                JOBOBJECT_EXTENDED_LIMIT_INFORMATION jobInfo{};
+                jobInfo.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                if (!::SetInformationJobObject(jobHandle, JobObjectExtendedLimitInformation, &jobInfo, sizeof(jobInfo))
+                    || !::AssignProcessToJobObject(jobHandle, processHandle))
+                {
+                    CloseOwnedHandle(jobHandle);
+                    Game::logMsg("[Speech][TTS] warning: GPT-SoVITS process is running without job-object auto-cleanup");
+                }
+            }
+            else
+            {
+                Game::logMsg("[Speech][TTS] warning: failed to create GPT-SoVITS job object");
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(m_TextToSpeechServerMutex);
+                if (!m_TextToSpeechServerProcess)
+                {
+                    m_TextToSpeechServerProcess = processHandle;
+                    m_TextToSpeechServerJob = jobHandle;
+                    m_TextToSpeechServerProcessId = processId;
+                    m_TextToSpeechServerLaunchSignature = launchSignature;
+                    m_TextToSpeechServerModelSignature = modelSignature;
+                    processHandle = nullptr;
+                    jobHandle = nullptr;
+                    processId = 0;
+                }
+            }
+
+            if (jobHandle)
+                CloseOwnedHandle(jobHandle);
+            if (processHandle)
+                CloseOwnedProcessHandle(processHandle, processId);
+
+            Game::logMsg("[Speech][TTS] started GPT-SoVITS server on 127.0.0.1:%d", config.serverPort);
+            return true;
+        };
+
+    auto detachRunningServer = [&](HANDLE& outProcess, HANDLE& outJob, DWORD& outProcessId)
+        {
+            outProcess = nullptr;
+            outJob = nullptr;
+            outProcessId = 0;
+
+            std::lock_guard<std::mutex> lock(m_TextToSpeechServerMutex);
+            if (!m_TextToSpeechServerProcess)
+                return;
+
+            outProcess = m_TextToSpeechServerProcess;
+            outJob = m_TextToSpeechServerJob;
+            outProcessId = m_TextToSpeechServerProcessId;
+            m_TextToSpeechServerProcess = nullptr;
+            m_TextToSpeechServerJob = nullptr;
+            m_TextToSpeechServerProcessId = 0;
+            m_TextToSpeechServerLaunchSignature.clear();
+            m_TextToSpeechServerModelSignature.clear();
+        };
+
+    bool shouldStartServer = false;
+    {
+        std::lock_guard<std::mutex> lock(m_TextToSpeechServerMutex);
+        shouldStartServer = m_TextToSpeechServerProcess == nullptr;
+        shouldHotSwitchModel = !shouldStartServer && m_TextToSpeechServerModelSignature != modelSignature;
+    }
+
+    if (shouldStartServer)
+    {
+        if (!startServer())
+            return false;
+    }
+
+    if (!waitForServerReady())
+        return false;
+
+    if (shouldHotSwitchModel)
+    {
+        Game::logMsg("[Speech][TTS] hot-switching GPT-SoVITS model: version=%s",
+            config.resolvedModelVersion.empty() ? "<unknown>" : config.resolvedModelVersion.c_str());
+
+        if (!TryHotSwitchTextToSpeechServerModel(static_cast<INTERNET_PORT>(config.serverPort), config))
+        {
+            Game::logMsg("[Speech][TTS] hot-switch failed, restarting GPT-SoVITS server");
+
+            HANDLE runningProcess = nullptr;
+            HANDLE runningJob = nullptr;
+            DWORD runningProcessId = 0;
+            detachRunningServer(runningProcess, runningJob, runningProcessId);
+            stopDetachedServer(runningProcess, runningJob, runningProcessId);
+
+            if (!startServer())
+                return false;
+
+            if (!waitForServerReady())
+                return false;
+        }
+        else
+        {
+            std::lock_guard<std::mutex> lock(m_TextToSpeechServerMutex);
+            m_TextToSpeechServerModelSignature = modelSignature;
+            if (!m_TextToSpeechServerLaunchSignature.empty())
+            {
+                Game::logMsg("[Speech][TTS] hot-switched GPT-SoVITS model to %s",
+                    config.resolvedModelVersion.empty() ? config.resolvedVitsWeightsPath.c_str() : config.resolvedModelVersion.c_str());
+            }
+        }
+    }
+
+    return true;
+}
+
+void VR::ShutdownTextToSpeechServer()
+{
+    HANDLE processHandle = nullptr;
+    HANDLE jobHandle = nullptr;
+    DWORD processId = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_TextToSpeechServerMutex);
+        if (!m_TextToSpeechServerProcess)
+            return;
+
+        processHandle = m_TextToSpeechServerProcess;
+        jobHandle = m_TextToSpeechServerJob;
+        processId = m_TextToSpeechServerProcessId;
+        m_TextToSpeechServerProcess = nullptr;
+        m_TextToSpeechServerJob = nullptr;
+        m_TextToSpeechServerProcessId = 0;
+        m_TextToSpeechServerLaunchSignature.clear();
+        m_TextToSpeechServerModelSignature.clear();
+    }
+
+    CloseOwnedHandle(jobHandle);
+    if (processHandle && IsProcessHandleRunning(processHandle))
+    {
+        const DWORD waitResult = ::WaitForSingleObject(processHandle, 5000);
+        if (waitResult == WAIT_TIMEOUT)
+        {
+            ::TerminateProcess(processHandle, 0);
+            ::WaitForSingleObject(processHandle, 5000);
+        }
+    }
+
+    CloseOwnedProcessHandle(processHandle, processId);
+    Game::logMsg("[Speech][TTS] GPT-SoVITS server stopped");
+}
+
+void VR::UpdateVoiceRecordCommandState()
+{
+    if (!m_Game)
+        return;
+
+    const bool wantVoiceRecord = m_VoiceRecordActive || m_AutoVoiceRecordRequested;
+    if (wantVoiceRecord && !m_VoiceRecordCmdOwned)
+    {
+        m_Game->ClientCmd_Unrestricted("+voicerecord");
+        m_VoiceRecordCmdOwned = true;
+    }
+    else if (!wantVoiceRecord && m_VoiceRecordCmdOwned)
+    {
+        m_Game->ClientCmd_Unrestricted("-voicerecord");
+        m_VoiceRecordCmdOwned = false;
+    }
+}
+
+void VR::StopVoiceRecordCommandNow(bool disableVoiceInputFromFile)
+{
+    m_VoiceRecordActive = false;
+    m_AutoVoiceRecordRequested = false;
+    m_SpeechVoiceBroadcastActive = false;
+    m_SpeechVoiceBroadcastStopAt = {};
+
+    if (m_Game)
+    {
+        if (disableVoiceInputFromFile)
+            m_Game->ClientCmd_Unrestricted("voice_inputfromfile 0");
+        if (m_SpeechVoiceLoopbackCmdOwned)
+            m_Game->ClientCmd_Unrestricted("voice_loopback 0");
+    }
+    m_SpeechVoiceLoopbackCmdOwned = false;
+
+    if (m_Game && m_VoiceRecordCmdOwned)
+        m_Game->ClientCmd_Unrestricted("-voicerecord");
+    m_VoiceRecordCmdOwned = false;
+}
+
+void VR::SpeechWorkerMain()
+{
+    for (;;)
+    {
+        SpeechWorkerJob job{};
+        {
+            std::unique_lock<std::mutex> lock(m_SpeechWorkerMutex);
+            m_SpeechWorkerCv.wait(lock, [&]()
+                {
+                    return !m_SpeechWorkerJobs.empty();
+                });
+
+            job = std::move(m_SpeechWorkerJobs.front());
+            m_SpeechWorkerJobs.pop_front();
+        }
+
+        if (job.type == SpeechWorkerJob::Type::TranscribeWave)
+        {
+            const std::string prefix = BuildProcessPrefix(m_SpeechToTextCommandPrefix);
+            const std::string modelPath = ResolveVrPath(m_SpeechToTextModel);
+            if (prefix.empty() || modelPath.empty())
+            {
+                Game::logMsg("[Speech][STT] missing command prefix or model path");
+                if (!job.inputPath.empty())
+                    ::DeleteFileA(job.inputPath.c_str());
+                continue;
+            }
+
+            const std::string language = TrimCopy(m_SpeechToTextLanguage);
+            std::string commandLine = prefix
+                + " -m " + QuoteProcessArg(modelPath)
+                + " -f " + QuoteProcessArg(job.inputPath)
+                + " -otxt -of " + QuoteProcessArg(job.outputPath)
+                + " -np -nt";
+            if (!language.empty())
+                commandLine += " -l " + QuoteProcessArg(language);
+
+            DWORD exitCode = 0;
+            if (!RunProcessHidden(commandLine, exitCode))
+            {
+                Game::logMsg("[Speech][STT] failed to launch: %s", commandLine.c_str());
+                if (!job.inputPath.empty())
+                    ::DeleteFileA(job.inputPath.c_str());
+                continue;
+            }
+
+            const std::string transcriptPath = job.outputPath + ".txt";
+            const std::string transcript = CollapseWhitespace(ReadWholeTextFile(transcriptPath));
+            if (!job.inputPath.empty())
+                ::DeleteFileA(job.inputPath.c_str());
+            if (!transcriptPath.empty())
+                ::DeleteFileA(transcriptPath.c_str());
+
+            if (exitCode != 0)
+            {
+                Game::logMsg("[Speech][STT] process exit code %lu", static_cast<unsigned long>(exitCode));
+                continue;
+            }
+
+            if (transcript.empty())
+            {
+                Game::logMsg("[Speech][STT] empty transcript");
+                continue;
+            }
+
+            Game::logMsg("[Speech][STT] %s", transcript.c_str());
+            if (m_SpeechToTextSendChatEnabled)
+            {
+                std::lock_guard<std::mutex> lock(m_SpeechResultMutex);
+                if (m_PendingSpeechToTextChatMessages.size() >= 8)
+                    m_PendingSpeechToTextChatMessages.pop_front();
+                m_PendingSpeechToTextChatMessages.push_back(transcript);
+            }
+
+            if (m_SpeechToTextSendVoiceEnabled)
+                QueueSpeechToTextVoicePlayback(transcript);
+            continue;
+        }
+
+        if (job.type == SpeechWorkerJob::Type::SpeakText)
+        {
+            if (!m_TextToSpeechEnabled && !job.allowWhenTextToSpeechDisabled)
+                continue;
+
+            const TextToSpeechRuntimeConfig ttsConfig = BuildTextToSpeechRuntimeConfig(job.useSpeechToTextSendVoiceProfile);
+            std::string text = CollapseWhitespace(job.text);
+            std::string speaker = CollapseWhitespace(job.speaker);
+            if (text.empty())
+                continue;
+
+            if (job.includeSpeakerName && ttsConfig.includeSpeakerName && !speaker.empty())
+                text = speaker + ": " + text;
+
+            const std::string refAudioPath = ttsConfig.resolvedReferenceAudioPath;
+            if (refAudioPath.empty())
+            {
+                Game::logMsg("[Speech][TTS] missing GPT-SoVITS reference audio");
+                continue;
+            }
+
+            if (job.outputPath.empty())
+            {
+                Game::logMsg("[Speech][TTS] failed to allocate temp output path");
+                continue;
+            }
+
+            if (!EnsureTextToSpeechServerReady(ttsConfig))
+                continue;
+
+            const std::string textLanguage = TrimCopy(ttsConfig.textLanguage);
+            const std::string promptLanguage = TrimCopy(ttsConfig.promptLanguage);
+            const std::string promptText = TrimCopy(ttsConfig.promptText);
+            const std::string splitMethod = TrimCopy(ttsConfig.textSplitMethod);
+            if (textLanguage.empty() || promptLanguage.empty())
+            {
+                Game::logMsg("[Speech][TTS] missing GPT-SoVITS text language or prompt language");
+                continue;
+            }
+
+            std::ostringstream requestBody;
+            requestBody
+                << "{"
+                << "\"text\":\"" << EscapeJsonString(text) << "\","
+                << "\"text_lang\":\"" << EscapeJsonString(textLanguage) << "\","
+                << "\"ref_audio_path\":\"" << EscapeJsonString(refAudioPath) << "\","
+                << "\"prompt_text\":\"" << EscapeJsonString(promptText) << "\","
+                << "\"prompt_lang\":\"" << EscapeJsonString(promptLanguage) << "\","
+                << "\"text_split_method\":\"" << EscapeJsonString(splitMethod.empty() ? std::string("cut5") : splitMethod) << "\","
+                << "\"media_type\":\"wav\","
+                << "\"streaming_mode\":false"
+                << "}";
+
+            const std::string requestJson = requestBody.str();
+            DWORD statusCode = 0;
+            std::vector<char> responseBody;
+            const wchar_t* headers = L"Content-Type: application/json; charset=utf-8\r\nAccept: audio/wav\r\n";
+            if (!HttpRequest("127.0.0.1", static_cast<INTERNET_PORT>(std::clamp(ttsConfig.serverPort, 1, 65535)), L"POST", L"/tts", &requestJson, headers, 120000, statusCode, responseBody))
+            {
+                Game::logMsg("[Speech][TTS] HTTP request to GPT-SoVITS failed");
+                continue;
+            }
+
+            if (statusCode != 200)
+            {
+                const std::string responsePreview = TrimHttpResponseForLog(responseBody);
+                Game::logMsg("[Speech][TTS] GPT-SoVITS returned HTTP %lu%s%s",
+                    static_cast<unsigned long>(statusCode),
+                    responsePreview.empty() ? "" : ": ",
+                    responsePreview.empty() ? "" : responsePreview.c_str());
+                continue;
+            }
+
+            if (!WriteBinaryFile(job.outputPath, responseBody))
+            {
+                Game::logMsg("[Speech][TTS] failed to write %s", job.outputPath.c_str());
+                continue;
+            }
+
+            if (job.sendToVoiceChat)
+                QueueGeneratedSpeechVoiceBroadcast(job.outputPath);
+
+            if (job.playLocally)
+            {
+                const int playbackVolume = std::clamp(
+                    static_cast<int>(std::lround(std::clamp(ttsConfig.volume, 0.0f, 2.0f) * 1000.0f)),
+                    0,
+                    1000);
+                if (playbackVolume > 0)
+                    EnqueueFeedbackSoundPlayback(job.outputPath, playbackVolume, playbackVolume, false);
+            }
+        }
+    }
+}
+
+void VR::PumpSpeechToTextResults()
+{
+    std::deque<std::string> pending;
+    {
+        std::lock_guard<std::mutex> lock(m_SpeechResultMutex);
+        pending.swap(m_PendingSpeechToTextChatMessages);
+    }
+
+    for (const std::string& rawText : pending)
+    {
+        const std::string chatText = SanitizeTextForSourceSayCommand(rawText);
+        if (chatText.empty() || !m_Game || !m_Game->m_EngineClient || !m_Game->m_EngineClient->IsInGame())
+            continue;
+
+        const std::string command = "say \"" + chatText + "\"";
+        m_Game->ClientCmd_Unrestricted(command.c_str());
+        Game::logMsg("[Speech][STT] sent chat: %s", chatText.c_str());
+    }
+}
+
+void VR::QueueSpeechToTextVoicePlayback(const std::string& text)
+{
+    std::string collapsedText = CollapseWhitespace(text);
+    if (collapsedText.empty())
+        return;
+
+    EnsureSpeechWorkerThread();
+    if (!m_SpeechWorkerStarted.load())
+        return;
+
+    SpeechWorkerJob job{};
+    job.type = SpeechWorkerJob::Type::SpeakText;
+    job.text = collapsedText;
+    job.outputPath = BuildSpeechCachePath("stt_tts_output", ".wav");
+    job.allowWhenTextToSpeechDisabled = true;
+    job.includeSpeakerName = false;
+    job.playLocally = true;
+    job.sendToVoiceChat = true;
+    job.useSpeechToTextSendVoiceProfile = true;
+    if (job.outputPath.empty())
+        return;
+
+    {
+        std::lock_guard<std::mutex> lock(m_SpeechWorkerMutex);
+        if (m_SpeechWorkerJobs.size() >= 16)
+        {
+            auto it = std::find_if(
+                m_SpeechWorkerJobs.begin(),
+                m_SpeechWorkerJobs.end(),
+                [](const SpeechWorkerJob& queuedJob)
+                {
+                    return queuedJob.type == SpeechWorkerJob::Type::SpeakText;
+                });
+            if (it != m_SpeechWorkerJobs.end())
+                m_SpeechWorkerJobs.erase(it);
+            else
+                m_SpeechWorkerJobs.pop_front();
+        }
+
+        m_SpeechWorkerJobs.push_back(std::move(job));
+    }
+
+    m_SpeechWorkerCv.notify_one();
+}
+
+void VR::QueueGeneratedSpeechVoiceBroadcast(const std::string& wavPath)
+{
+    if (wavPath.empty())
+        return;
+
+    std::lock_guard<std::mutex> lock(m_SpeechVoiceBroadcastMutex);
+    if (m_PendingSpeechVoiceBroadcasts.size() >= 4)
+        m_PendingSpeechVoiceBroadcasts.pop_front();
+    m_PendingSpeechVoiceBroadcasts.push_back({ wavPath });
+}
+
+void VR::PumpSpeechToTextVoiceBroadcast()
+{
+    if (!m_SpeechToTextSendVoiceEnabled)
+    {
+        {
+            std::lock_guard<std::mutex> lock(m_SpeechVoiceBroadcastMutex);
+            m_PendingSpeechVoiceBroadcasts.clear();
+        }
+
+        if (m_SpeechVoiceBroadcastActive || m_AutoVoiceRecordRequested)
+        {
+            m_AutoVoiceRecordRequested = false;
+            m_SpeechVoiceBroadcastActive = false;
+            m_SpeechVoiceBroadcastStopAt = {};
+            if (m_Game)
+            {
+                m_Game->ClientCmd_Unrestricted("voice_inputfromfile 0");
+                if (m_SpeechVoiceLoopbackCmdOwned)
+                    m_Game->ClientCmd_Unrestricted("voice_loopback 0");
+            }
+            m_SpeechVoiceLoopbackCmdOwned = false;
+            UpdateVoiceRecordCommandState();
+        }
+        return;
+    }
+
+    if (!m_Game || !m_Game->m_EngineClient || !m_Game->m_EngineClient->IsInGame())
+    {
+        if (m_SpeechVoiceBroadcastActive || m_AutoVoiceRecordRequested)
+            StopVoiceRecordCommandNow(true);
+        return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (m_SpeechVoiceBroadcastActive && now >= m_SpeechVoiceBroadcastStopAt)
+    {
+        m_SpeechVoiceBroadcastActive = false;
+        m_AutoVoiceRecordRequested = false;
+        m_SpeechVoiceBroadcastStopAt = {};
+        m_Game->ClientCmd_Unrestricted("voice_inputfromfile 0");
+        if (m_SpeechVoiceLoopbackCmdOwned)
+            m_Game->ClientCmd_Unrestricted("voice_loopback 0");
+        m_SpeechVoiceLoopbackCmdOwned = false;
+        UpdateVoiceRecordCommandState();
+        Game::logMsg("[Speech][VoiceSend] playback finished");
+    }
+
+    if (m_SpeechVoiceBroadcastActive || m_SpeechToTextCaptureActive || m_VoiceRecordActive || m_SuppressPlayerInput)
+        return;
+
+    std::string queuedWavePath;
+    {
+        std::lock_guard<std::mutex> lock(m_SpeechVoiceBroadcastMutex);
+        if (m_PendingSpeechVoiceBroadcasts.empty())
+            return;
+
+        queuedWavePath = std::move(m_PendingSpeechVoiceBroadcasts.front().wavPath);
+        m_PendingSpeechVoiceBroadcasts.pop_front();
+    }
+
+    if (queuedWavePath.empty())
+        return;
+
+    std::string voiceInputPath;
+    float durationSeconds = 0.0f;
+    if (!PrepareVoiceInputWaveFile(queuedWavePath, voiceInputPath, durationSeconds))
+    {
+        Game::logMsg("[Speech][VoiceSend] failed to prepare voice_input.wav from %s", queuedWavePath.c_str());
+        return;
+    }
+
+    constexpr float kVoiceSendPaddingSeconds = 0.20f;
+    m_Game->ClientCmd_Unrestricted("voice_inputfromfile 1");
+    if (m_SpeechToTextSendVoiceLoopbackEnabled && !m_SpeechVoiceLoopbackCmdOwned)
+    {
+        m_Game->ClientCmd_Unrestricted("voice_loopback 1");
+        m_SpeechVoiceLoopbackCmdOwned = true;
+    }
+    m_AutoVoiceRecordRequested = true;
+    m_SpeechVoiceBroadcastActive = true;
+    m_SpeechVoiceBroadcastStopAt = now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<float>(std::max(0.10f, durationSeconds + kVoiceSendPaddingSeconds)));
+    UpdateVoiceRecordCommandState();
+    Game::logMsg("[Speech][VoiceSend] broadcasting %.2fs at %u Hz from %s%s",
+        durationSeconds,
+        static_cast<unsigned>(kSourceVoiceInputSampleRate),
+        voiceInputPath.c_str(),
+        m_SpeechVoiceLoopbackCmdOwned ? " (voice_loopback=1)" : "");
+}
+
+void VR::QueueChatTextToSpeech(const std::string& speaker, const std::string& text)
+{
+    if (!m_TextToSpeechEnabled)
+        return;
+
+    std::string collapsedText = CollapseWhitespace(text);
+    if (collapsedText.empty())
+        return;
+
+    std::string collapsedSpeaker = CollapseWhitespace(speaker);
+    if (m_TextToSpeechSkipOwnMessages && !collapsedSpeaker.empty() && m_Game && m_Game->m_EngineClient)
+    {
+        const int localPlayerIndex = m_Game->m_EngineClient->GetLocalPlayer();
+        player_info_t playerInfo{};
+        if (localPlayerIndex > 0 && m_Game->m_EngineClient->GetPlayerInfo(localPlayerIndex, &playerInfo))
+        {
+            const std::string localName = CollapseWhitespace(playerInfo.name);
+            if (!localName.empty() && _stricmp(localName.c_str(), collapsedSpeaker.c_str()) == 0)
+                return;
+        }
+    }
+
+    bool whitelistMatched = false;
+    std::string whitelistMatchedText;
+    if (!m_TextToSpeechWhitelistRegexes.empty())
+    {
+        whitelistMatched = TryResolveTextToSpeechWhitelistMatch(
+            collapsedText,
+            m_TextToSpeechWhitelistRegexes,
+            m_TextToSpeechWhitelistSeparator,
+            whitelistMatchedText);
+    }
+
+    if (whitelistMatched)
+    {
+        collapsedText = whitelistMatchedText;
+        collapsedSpeaker.clear();
+    }
+    else if (m_TextToSpeechSurvivorOnly)
+    {
+        int speakerTeam = 0;
+        if (collapsedSpeaker.empty() || !TryGetPlayerTeamByNormalizedName(m_Game, collapsedSpeaker, speakerTeam) || speakerTeam != 2)
+            return;
+    }
+
+    EnsureSpeechWorkerThread();
+    if (!m_SpeechWorkerStarted.load())
+        return;
+
+    SpeechWorkerJob job{};
+    job.type = SpeechWorkerJob::Type::SpeakText;
+    job.speaker = collapsedSpeaker;
+    job.text = collapsedText;
+    job.includeSpeakerName = !whitelistMatched;
+    job.outputPath = BuildSpeechCachePath("tts_output", ".wav");
+    if (job.outputPath.empty())
+        return;
+
+    {
+        std::lock_guard<std::mutex> lock(m_SpeechWorkerMutex);
+        if (m_SpeechWorkerJobs.size() >= 16)
+        {
+            auto it = std::find_if(
+                m_SpeechWorkerJobs.begin(),
+                m_SpeechWorkerJobs.end(),
+                [](const SpeechWorkerJob& queuedJob)
+                {
+                    return queuedJob.type == SpeechWorkerJob::Type::SpeakText;
+                });
+            if (it != m_SpeechWorkerJobs.end())
+                m_SpeechWorkerJobs.erase(it);
+            else
+                m_SpeechWorkerJobs.pop_front();
+        }
+
+        m_SpeechWorkerJobs.push_back(std::move(job));
+    }
+
+    m_SpeechWorkerCv.notify_one();
+}
+
+void VR::HandleHudChatLine(const std::string& speaker, const std::string& text)
+{
+    QueueChatTextToSpeech(speaker, text);
 }
 
 void VR::ComputeFeedbackSoundStereoVolumes(const Vector* worldPos, float baseVolume, int& outLeftVolume, int& outRightVolume) const

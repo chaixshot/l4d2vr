@@ -1,4 +1,4 @@
-void VR::UpdateTracking()
+﻿void VR::UpdateTracking()
 {
     GetPoses();
     // Map load / reconnect detection:

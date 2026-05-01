@@ -42,6 +42,12 @@ Hooks::Hooks(Game* game)
 	hkVgui_Paint.enableHook();
 	hkIsSplitScreen.enableHook();
 	hkPrePushRenderTarget.enableHook();
+	if (hkSayText.pTarget)
+		hkSayText.enableHook();
+	if (hkSayText2.pTarget)
+		hkSayText2.enableHook();
+	if (hkTextMsg.pTarget)
+		hkTextMsg.enableHook();
 	if (hkUpdateLaserSight.pTarget)
 		hkUpdateLaserSight.enableHook();
 	if (hkConVarSetValueString.pTarget)
@@ -152,6 +158,15 @@ int Hooks::initSourceHooks()
 
 	LPVOID PrePushRenderTargetAddr = (LPVOID)(m_Game->m_Offsets->PrePushRenderTarget.address);
 	hkPrePushRenderTarget.createHook(PrePushRenderTargetAddr, &dPrePushRenderTarget);
+
+	LPVOID SayTextAddr = reinterpret_cast<LPVOID>(m_Game->m_BaseClient + kClientSayTextHandlerOffset);
+	hkSayText.createHook(SayTextAddr, &dSayText);
+
+	LPVOID SayText2Addr = reinterpret_cast<LPVOID>(m_Game->m_BaseClient + kClientSayText2HandlerOffset);
+	hkSayText2.createHook(SayText2Addr, &dSayText2);
+
+	LPVOID TextMsgAddr = reinterpret_cast<LPVOID>(m_Game->m_BaseClient + kClientTextMsgHandlerOffset);
+	hkTextMsg.createHook(TextMsgAddr, &dTextMsg);
 
 	if (m_Game->m_Offsets->UpdateLaserSight.valid)
 	{

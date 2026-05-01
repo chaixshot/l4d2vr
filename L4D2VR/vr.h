@@ -3,6 +3,7 @@
 #define NOMINMAX
 #endif
 #include <Windows.h>
+#include <mmsystem.h>
 #ifdef min
 #undef min
 #endif
@@ -222,7 +223,6 @@ public:
 	bool m_HadLocalPlayerPrev = false;
 	bool m_WasInGamePrev = false;
 	std::chrono::steady_clock::time_point m_ThirdPersonMapLoadCooldownEnd{};
-
 	int m_ThirdPersonHoldFrames = 0;
 	Vector m_ThirdPersonViewOrigin = { 0,0,0 };
 	QAngle m_ThirdPersonViewAngles = { 0,0,0 };
@@ -704,6 +704,8 @@ public:
 	bool m_LocomotionActive = false;
 	bool m_CrouchToggleActive = false;
 	bool m_VoiceRecordActive = false;
+	bool m_VoiceRecordCmdOwned = false;
+	bool m_SpeechToTextCaptureActive = false;
 	bool m_QuickTurnTriggered = false;
 	bool m_PrimaryAttackDown = false;
 	// We drive +attack/+attack2 via ClientCmd for VR actions. In mouse-mode, spamming "-attack"
@@ -732,6 +734,38 @@ public:
 	ActionCombo m_VoiceRecordCombo{ &m_ActionCrouch, &m_ActionReload };
 	ActionCombo m_QuickTurnCombo{ &m_ActionCrouch, &m_ActionSecondaryAttack };
 	ActionCombo m_ViewmodelAdjustCombo{ &m_ActionReload, &m_ActionSecondaryAttack };
+	bool m_SpeechToTextEnabled = false;
+	bool m_SpeechToTextSendChatEnabled = true;
+	bool m_SpeechToTextSendVoiceEnabled = false;
+	bool m_SpeechToTextSendVoiceLoopbackEnabled = false;
+	float m_SpeechToTextMinimumRecordSeconds = 0.30f;
+	std::string m_SpeechToTextCommandPrefix = "VR\\speech\\whisper-cli.exe";
+	std::string m_SpeechToTextModel = "VR\\speech\\models\\ggml-base.bin";
+	std::string m_SpeechToTextLanguage = "zh";
+	std::string m_SpeechToTextSendVoiceCommandPrefix;
+	std::string m_SpeechToTextSendVoiceModel;
+	std::string m_SpeechToTextSendVoiceWorkingDir;
+	std::string m_SpeechToTextSendVoiceReferenceAudio;
+	std::string m_SpeechToTextSendVoicePromptText;
+	std::string m_SpeechToTextSendVoicePromptLanguage;
+	std::string m_SpeechToTextSendVoiceLanguage;
+	std::string m_SpeechToTextSendVoiceTextSplitMethod;
+	bool m_TextToSpeechEnabled = false;
+	bool m_TextToSpeechSurvivorOnly = true;
+	bool m_TextToSpeechIncludeSpeakerName = true;
+	bool m_TextToSpeechSkipOwnMessages = true;
+	float m_TextToSpeechVolume = 1.0f;
+	std::string m_TextToSpeechCommandPrefix = "python api_v2.py";
+	std::string m_TextToSpeechModel = "VR\\speech\\GPT-SoVITS\\GPT_SoVITS\\configs\\tts_infer.yaml";
+	std::string m_TextToSpeechWorkingDir = "VR\\speech\\GPT-SoVITS";
+	int m_TextToSpeechServerPort = 9880;
+	std::string m_TextToSpeechReferenceAudio = "VR\\speech\\GPT-SoVITS\\reference.wav";
+	std::string m_TextToSpeechPromptText;
+	std::string m_TextToSpeechPromptLanguage = "zh";
+	std::string m_TextToSpeechLanguage = "zh";
+	std::string m_TextToSpeechTextSplitMethod = "cut5";
+	std::string m_TextToSpeechWhitelistRegexes;
+	std::string m_TextToSpeechWhitelistSeparator = "__VR_REGEX_SPLIT__";
 
 	// action set
 	vr::VRActionSetHandle_t m_ActionSet;
@@ -755,6 +789,7 @@ public:
 	vr::VRActionHandle_t m_ActionInventoryQuickSwitch;
 	vr::VRActionHandle_t m_ActionSpecialInfectedAutoAimToggle;
 	vr::VRActionHandle_t m_ActionEffectiveAttackRangeAutoFireToggle;
+	vr::VRActionHandle_t m_ActionSpeechToText;
 	vr::VRActionHandle_t m_ActionActivateVR;
 	vr::VRActionHandle_t m_MenuSelect;
 	vr::VRActionHandle_t m_MenuBack;
@@ -1561,6 +1596,87 @@ public:
 	std::deque<FeedbackSoundWorkerJob> m_FeedbackSoundWorkerJobs;
 	std::atomic<bool> m_FeedbackSoundWorkerStarted{ false };
 	std::string m_FeedbackSoundWarmupSignature;
+	struct TextToSpeechRuntimeConfig
+	{
+		std::string commandPrefixSpec;
+		std::string modelSpec;
+		std::string workingDirSpec;
+		int serverPort = 9880;
+		std::string referenceAudioSpec;
+		std::string promptText;
+		std::string promptLanguage;
+		std::string textLanguage;
+		std::string textSplitMethod;
+		float volume = 1.0f;
+		bool includeSpeakerName = true;
+		std::string resolvedPrefix;
+		std::string resolvedWorkingDir;
+		std::string resolvedConfigPath;
+		std::string resolvedLaunchConfigPath;
+		std::string resolvedReferenceAudioPath;
+		std::string resolvedDevice;
+		bool resolvedIsHalf = false;
+		std::string resolvedBertBasePath;
+		std::string resolvedCnHubertBasePath;
+		std::string resolvedT2SWeightsPath;
+		std::string resolvedVitsWeightsPath;
+		std::string resolvedModelVersion;
+		bool hotSwitchProfileValid = false;
+	};
+	struct SpeechWorkerJob
+	{
+		enum class Type
+		{
+			TranscribeWave,
+			SpeakText
+		};
+
+		Type type = Type::TranscribeWave;
+		std::string inputPath;
+		std::string outputPath;
+		std::string speaker;
+		std::string text;
+		bool allowWhenTextToSpeechDisabled = false;
+		bool includeSpeakerName = true;
+		bool playLocally = true;
+		bool sendToVoiceChat = false;
+		bool useSpeechToTextSendVoiceProfile = false;
+	};
+	struct PendingSpeechVoiceBroadcast
+	{
+		std::string wavPath;
+	};
+	struct SpeechCaptureBuffer
+	{
+		WAVEHDR header{};
+		std::array<char, 4096> bytes{};
+		bool prepared = false;
+	};
+	std::mutex m_SpeechWorkerMutex{};
+	std::condition_variable m_SpeechWorkerCv{};
+	std::deque<SpeechWorkerJob> m_SpeechWorkerJobs;
+	std::atomic<bool> m_SpeechWorkerStarted{ false };
+	std::mutex m_SpeechResultMutex{};
+	std::deque<std::string> m_PendingSpeechToTextChatMessages;
+	std::mutex m_SpeechVoiceBroadcastMutex{};
+	std::deque<PendingSpeechVoiceBroadcast> m_PendingSpeechVoiceBroadcasts;
+	std::mutex m_SpeechCaptureMutex{};
+	HWAVEIN m_SpeechCaptureWaveIn = nullptr;
+	std::array<SpeechCaptureBuffer, 4> m_SpeechCaptureBuffers{};
+	std::vector<int16_t> m_SpeechCapturePcm;
+	bool m_SpeechCaptureStopping = false;
+	std::chrono::steady_clock::time_point m_SpeechCaptureStartedAt{};
+	bool m_SpeechVoiceBroadcastActive = false;
+	bool m_AutoVoiceRecordRequested = false;
+	bool m_SpeechVoiceLoopbackCmdOwned = false;
+	std::chrono::steady_clock::time_point m_SpeechVoiceBroadcastStopAt{};
+	uint64_t m_SpeechTempSerial = 1;
+	std::mutex m_TextToSpeechServerMutex{};
+	HANDLE m_TextToSpeechServerProcess = nullptr;
+	HANDLE m_TextToSpeechServerJob = nullptr;
+	DWORD m_TextToSpeechServerProcessId = 0;
+	std::string m_TextToSpeechServerLaunchSignature;
+	std::string m_TextToSpeechServerModelSignature;
 	IMaterial* m_KillIndicatorHitMaterial = nullptr;
 	IMaterial* m_KillIndicatorNormalMaterial = nullptr;
 	IMaterial* m_KillIndicatorHeadshotMaterial = nullptr;
@@ -2147,6 +2263,22 @@ public:
 	void EnqueueFeedbackSoundWarmupPath(const std::string& resolvedPath);
 	void ResetFeedbackSoundWorkerState();
 	void FeedbackSoundWorkerMain();
+	void EnsureSpeechWorkerThread();
+	void SpeechWorkerMain();
+	bool BeginSpeechToTextCapture();
+	void EndSpeechToTextCapture(bool queueTranscription = true);
+	void PumpSpeechToTextCapture();
+	void PumpSpeechToTextResults();
+	void PumpSpeechToTextVoiceBroadcast();
+	void QueueSpeechToTextVoicePlayback(const std::string& text);
+	void QueueGeneratedSpeechVoiceBroadcast(const std::string& wavPath);
+	void UpdateVoiceRecordCommandState();
+	void StopVoiceRecordCommandNow(bool disableVoiceInputFromFile = true);
+	void QueueChatTextToSpeech(const std::string& speaker, const std::string& text);
+	void HandleHudChatLine(const std::string& speaker, const std::string& text);
+	TextToSpeechRuntimeConfig BuildTextToSpeechRuntimeConfig(bool useSpeechToTextSendVoiceProfile) const;
+	bool EnsureTextToSpeechServerReady(const TextToSpeechRuntimeConfig& config);
+	void ShutdownTextToSpeechServer();
 	void SpawnHitIndicator(const Vector& worldPos);
 	void SpawnKillIndicator(bool headshot, const Vector& worldPos);
 	void DrawKillIndicators(IMatRenderContext* renderContext, ITexture* hudTexture);

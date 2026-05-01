@@ -184,6 +184,11 @@
 			"name": "/actions/main/in/EffectiveAttackRangeAutoFireToggle",
 			"type": "boolean",
 			"requirement": "optional"
+		},
+		{
+			"name": "/actions/main/in/SpeechToText",
+			"type": "boolean",
+			"requirement": "optional"
 		}
 	],
 
@@ -234,7 +239,8 @@
 			"/actions/main/in/ScopeMagnificationToggle": "Toggle Scope Magnification",
 			"/actions/main/in/FriendlyFireBlockToggle": "Friendly Fire Block Toggle",
 			"/actions/main/in/InventoryQuickSwitch": "Inventory Quick Switch",
-			"/actions/main/in/EffectiveAttackRangeAutoFireToggle": "Effective Range Auto Fire Toggle"
+			"/actions/main/in/EffectiveAttackRangeAutoFireToggle": "Effective Range Auto Fire Toggle",
+			"/actions/main/in/SpeechToText": "Speech To Text"
 		}
 	]
 }

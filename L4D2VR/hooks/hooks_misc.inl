@@ -1084,6 +1084,24 @@ DWORD* Hooks::dPrePushRenderTarget(void* ecx, void* edx, int a2)
     return hkPrePushRenderTarget.fOriginal(ecx, a2);
 }
 
+void Hooks::dSayText(void* msgData)
+{
+	TryLogHudUserMessagePayload("SayText", msgData);
+	hkSayText.fOriginal(msgData);
+}
+
+void Hooks::dSayText2(void* msgData)
+{
+	TryLogHudUserMessagePayload("SayText2", msgData);
+	hkSayText2.fOriginal(msgData);
+}
+
+void Hooks::dTextMsg(void* msgData)
+{
+	TryLogHudUserMessagePayload("TextMsg", msgData);
+	hkTextMsg.fOriginal(msgData);
+}
+
 void Hooks::dConVarSetValueString(void* ecx, void* edx, const char* value)
 {
     const bool blocked = ShouldBlockLockedConVarWrite(ecx, value);

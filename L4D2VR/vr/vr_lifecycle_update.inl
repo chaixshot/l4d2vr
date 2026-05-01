@@ -659,12 +659,17 @@ void VR::Update()
 
     UpdateTracking();
     UpdateKillSoundFeedback();
+    PumpSpeechToTextCapture();
+    PumpSpeechToTextResults();
+    if (!m_TextToSpeechEnabled && !m_SpeechToTextSendVoiceEnabled)
+        ShutdownTextToSpeechServer();
     UpdateKillIndicatorOverlays();
     UpdateDamageFeedback();
 
 
     if (!m_Game->m_VguiSurface)
     {
+        PumpSpeechToTextVoiceBroadcast();
         FlushHapticMixer();
         return;
     }
@@ -674,6 +679,7 @@ void VR::Update()
     else
         ProcessInput();
 
+    PumpSpeechToTextVoiceBroadcast();
     FlushHapticMixer();
 }
 
