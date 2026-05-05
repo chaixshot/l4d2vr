@@ -353,6 +353,7 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 	{
 		modelName = m_Game->m_ModelInfo->GetModelName(info.pModel);
 		m_VR->ScanSpecialInfectedEntitiesFromClientList();
+		m_VR->ScanItemModelLabelEntitiesFromClientList();
 
 		const C_BaseEntity* entity = nullptr;
 		if (m_Game->m_ClientEntityList && info.entity_index > 0)
@@ -368,6 +369,7 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 			className = m_Game->GetNetworkClassName(reinterpret_cast<uintptr_t*>(const_cast<C_BaseEntity*>(entity)));
 			isPlayerClass = className && (std::strcmp(className, "CTerrorPlayer") == 0 || std::strcmp(className, "C_TerrorPlayer") == 0);
 		}
+		m_VR->DrawItemModelLabel(info.entity_index, modelName, info.origin, entity, className);
 		// Scope RTT pass: optionally hide the local player model so scoped view isn't blocked by your own head/body.
 		if (m_VR->m_ScopeRenderingPass && m_VR->m_ScopeHideLocalPlayerModelInScope && isPlayerClass && m_Game->m_EngineClient)
 		{

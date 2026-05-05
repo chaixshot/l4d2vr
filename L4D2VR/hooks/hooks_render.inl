@@ -1587,6 +1587,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		m_VR->RenderDrawGameLaserSight(localPlayer);
 	hkRenderView.fOriginal(ecx, leftEyeView, hudLeft, nClearFlags, whatToDraw);
 	if (m_VR->m_IsVREnabled)
+		m_VR->DrawProjectedItemLabels(rndrContext, leftEyeView);
+	if (m_VR->m_IsVREnabled)
 		m_VR->UpdateD3DAimLineOverlayForView(localPlayer, leftEyeView, 0);
 	m_PushedHud = false;
 
@@ -1609,6 +1611,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 	rndrContext->SetRenderTarget(m_VR->m_RightEyeTexture);
 	hkRenderView.fOriginal(ecx, rightEyeView, hudRight, nClearFlags, whatToDraw);
+	if (m_VR->m_IsVREnabled)
+		m_VR->DrawProjectedItemLabels(rndrContext, rightEyeView);
 	if (m_VR->m_IsVREnabled)
 		m_VR->UpdateD3DAimLineOverlayForView(localPlayer, rightEyeView, 1);
 

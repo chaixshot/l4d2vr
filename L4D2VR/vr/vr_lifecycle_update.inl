@@ -723,6 +723,7 @@ void VR::CreateVRTextures()
 
     DestroyHandHudWorldQuadTextures();
     DestroyKillIndicatorOverlayTextures();
+    DestroyItemLabelOverlayTexture();
 
     LogVAS("before CreateVRTextures");
 

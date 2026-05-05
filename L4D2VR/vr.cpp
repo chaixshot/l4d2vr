@@ -3582,6 +3582,223 @@ namespace
         outY = static_cast<int>(std::lround((0.5f - clampedY * 0.5f) * static_cast<float>(screenHeight)));
         return true;
     }
+
+    struct ProjectedItemLabelVertex
+    {
+        float x;
+        float y;
+        float z;
+        float rhw;
+        D3DCOLOR color;
+        float u;
+        float v;
+    };
+
+    static constexpr DWORD kProjectedItemLabelFvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1;
+
+    static float GetProjectedItemLabelHoldSeconds(const VR* vr)
+    {
+        if (!vr)
+            return 0.90f;
+
+        const float hz = (std::max)(1.0f, vr->m_ItemModelLabelMaxHz);
+        return std::clamp(20.0f / hz, 0.75f, 1.50f);
+    }
+
+    static int SafeGetProjectedItemLabelHighestEntityIndex(VR* vr)
+    {
+        if (!vr || !vr->m_Game || !vr->m_Game->m_ClientEntityList)
+            return 0;
+#ifdef _MSC_VER
+        __try
+        {
+            return vr->m_Game->m_ClientEntityList->GetHighestEntityIndex();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return 0;
+        }
+#else
+        return vr->m_Game->m_ClientEntityList->GetHighestEntityIndex();
+#endif
+    }
+
+    static C_BaseEntity* SafeGetProjectedItemLabelClientEntity(VR* vr, int entityIndex)
+    {
+        if (!vr || !vr->m_Game || !vr->m_Game->m_ClientEntityList || entityIndex <= 0)
+            return nullptr;
+#ifdef _MSC_VER
+        __try
+        {
+            return static_cast<C_BaseEntity*>(vr->m_Game->m_ClientEntityList->GetClientEntity(entityIndex));
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return nullptr;
+        }
+#else
+        return static_cast<C_BaseEntity*>(vr->m_Game->m_ClientEntityList->GetClientEntity(entityIndex));
+#endif
+    }
+
+    static bool SafeGetProjectedItemLabelAbsOrigin(const C_BaseEntity* entity, Vector& out)
+    {
+        out = Vector();
+        if (!entity)
+            return false;
+#ifdef _MSC_VER
+        __try
+        {
+            out = const_cast<C_BaseEntity*>(entity)->GetAbsOrigin();
+            return std::isfinite(out.x) && std::isfinite(out.y) && std::isfinite(out.z);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            out = Vector();
+            return false;
+        }
+#else
+        out = const_cast<C_BaseEntity*>(entity)->GetAbsOrigin();
+        return std::isfinite(out.x) && std::isfinite(out.y) && std::isfinite(out.z);
+#endif
+    }
+
+    static bool IsProjectedItemLabelAlivePlayer(VR* vr, const C_BaseEntity* entity)
+    {
+        if (!vr || !vr->m_Game || !entity)
+            return false;
+
+        const char* playerClass =
+            vr->m_Game->GetNetworkClassName(reinterpret_cast<uintptr_t*>(const_cast<C_BaseEntity*>(entity)));
+        if (!playerClass)
+            return false;
+
+        if (std::strcmp(playerClass, "CTerrorPlayer") != 0 &&
+            std::strcmp(playerClass, "C_TerrorPlayer") != 0)
+        {
+            return false;
+        }
+
+        return vr->IsEntityAlive(entity);
+    }
+
+    static bool ShouldSuppressProjectedItemLabelNearPlayer(VR* vr, const Vector& worldPos)
+    {
+        if (!vr || !vr->m_Game || !vr->m_Game->m_ClientEntityList)
+            return false;
+
+        const float suppressRadius = std::max(0.0f, vr->m_ItemModelLabelPlayerSuppressRadius);
+        if (suppressRadius <= 0.0f)
+            return false;
+
+        const float suppressMinZ = (std::min)(vr->m_ItemModelLabelPlayerSuppressMinZ, vr->m_ItemModelLabelPlayerSuppressMaxZ);
+        const float suppressMaxZ = (std::max)(vr->m_ItemModelLabelPlayerSuppressMinZ, vr->m_ItemModelLabelPlayerSuppressMaxZ);
+        const float suppressRadiusSq = suppressRadius * suppressRadius;
+        const auto isWithinSuppressVolume = [&](const Vector& anchor, float radiusSq, float minZ, float maxZ) -> bool
+            {
+                const Vector delta = worldPos - anchor;
+                const float horizontalDistSq = delta.x * delta.x + delta.y * delta.y;
+                return horizontalDistSq <= radiusSq && delta.z >= minZ && delta.z <= maxZ;
+            };
+
+        const int localPlayerIndex =
+            (vr->m_Game->m_EngineClient != nullptr) ? vr->m_Game->m_EngineClient->GetLocalPlayer() : -1;
+        const int maxEntityIndex = (std::min)(32, SafeGetProjectedItemLabelHighestEntityIndex(vr));
+        for (int entityIndex = 1; entityIndex <= maxEntityIndex; ++entityIndex)
+        {
+            C_BaseEntity* player = SafeGetProjectedItemLabelClientEntity(vr, entityIndex);
+            if (!player || !IsProjectedItemLabelAlivePlayer(vr, player))
+                continue;
+
+            Vector playerOrigin{};
+            bool playerShouldDraw = false;
+            const bool hasRenderableOrigin =
+                SafeGetRenderableOriginAndShouldDraw(vr, player, playerOrigin, playerShouldDraw);
+            if (!hasRenderableOrigin && !SafeGetProjectedItemLabelAbsOrigin(player, playerOrigin))
+                continue;
+
+            if (isWithinSuppressVolume(playerOrigin, suppressRadiusSq, suppressMinZ, suppressMaxZ))
+            {
+                return true;
+            }
+
+            if (entityIndex == localPlayerIndex)
+            {
+                const float localRadius = (std::min)(48.0f, suppressRadius);
+                if (localRadius > 0.0f)
+                {
+                    const float localRadiusSq = localRadius * localRadius;
+                    if (isWithinSuppressVolume(vr->m_HmdPosAbs, localRadiusSq, -48.0f, 48.0f))
+                        return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    static int EstimateProjectedItemLabelWidth(const std::string& text, int fontPx)
+    {
+        const int units = (std::max)(1, Utf8HudUnits(text.c_str()));
+        const int approx = static_cast<int>(std::lround(static_cast<float>(units) * static_cast<float>(fontPx) * 0.58f)) + 14;
+        return (std::max)(48, approx);
+    }
+
+    static int EstimateProjectedItemLabelHeight(int fontPx, bool hasNonAscii)
+    {
+        return fontPx + (hasNonAscii ? 12 : 10);
+    }
+
+    static int QuantizeProjectedItemLabelFontPx(int fontPx)
+    {
+        if (fontPx <= 12)
+            return fontPx;
+        return ((fontPx + 1) / 2) * 2;
+    }
+
+    static std::string BuildProjectedItemLabelCacheKey(const std::string& text, int fontPx, const Rgba& color)
+    {
+        std::string key;
+        key.reserve(text.size() + 32);
+        key.append(std::to_string(fontPx));
+        key.push_back('|');
+        key.append(std::to_string(static_cast<int>(color.r)));
+        key.push_back(',');
+        key.append(std::to_string(static_cast<int>(color.g)));
+        key.push_back(',');
+        key.append(std::to_string(static_cast<int>(color.b)));
+        key.push_back(',');
+        key.append(std::to_string(static_cast<int>(color.a)));
+        key.push_back('|');
+        key.append(text);
+        return key;
+    }
+
+    static bool GetProjectedItemLabelColor(VR::ItemModelLabelCategory category, Rgba& outColor)
+    {
+        switch (category)
+        {
+        case VR::ItemModelLabelCategory::Firearm:
+            outColor = { 255, 220, 96, 255 };
+            return true;
+        case VR::ItemModelLabelCategory::Melee:
+            outColor = { 255, 150, 72, 255 };
+            return true;
+        case VR::ItemModelLabelCategory::Throwable:
+            outColor = { 96, 255, 180, 255 };
+            return true;
+        case VR::ItemModelLabelCategory::MedicalPack:
+            outColor = { 255, 96, 96, 255 };
+            return true;
+        case VR::ItemModelLabelCategory::Medicine:
+            outColor = { 96, 180, 255, 255 };
+            return true;
+        default:
+            break;
+        }
+
+        return false;
+    }
 }
 
 bool VR::ReadLocalKillCounters(C_BasePlayer* localPlayer, int& outCommon, int& outSpecial)
@@ -7394,6 +7611,391 @@ void VR::SpawnKillIndicator(bool headshot, const Vector& worldPos)
     }
 
     AddOrRecycleKillIndicator(indicatorPos, true, headshot, now, true);
+}
+
+void VR::DestroyItemLabelOverlayTexture()
+{
+    for (auto& pair : m_ItemLabelTextureCache)
+    {
+        auto& cached = pair.second;
+        if (cached.texture)
+        {
+            cached.texture->Release();
+            cached.texture = nullptr;
+        }
+        cached.width = 0;
+        cached.height = 0;
+    }
+
+    m_ItemLabelTextureCache.clear();
+}
+
+IDirect3DTexture9* VR::GetOrCreateProjectedItemLabelTexture(
+    IDirect3DDevice9* device,
+    const std::string& text,
+    int fontPx,
+    int colorR,
+    int colorG,
+    int colorB,
+    int colorA,
+    int& outWidth,
+    int& outHeight)
+{
+    outWidth = 0;
+    outHeight = 0;
+    if (!device || text.empty())
+        return nullptr;
+
+    const bool hasNonAscii = ContainsNonAscii(text.c_str());
+    fontPx = QuantizeProjectedItemLabelFontPx(fontPx);
+    const Rgba color
+    {
+        static_cast<uint8_t>(std::clamp(colorR, 0, 255)),
+        static_cast<uint8_t>(std::clamp(colorG, 0, 255)),
+        static_cast<uint8_t>(std::clamp(colorB, 0, 255)),
+        static_cast<uint8_t>(std::clamp(colorA, 0, 255))
+    };
+    const std::string cacheKey = BuildProjectedItemLabelCacheKey(text, fontPx, color);
+    const auto now = std::chrono::steady_clock::now();
+
+    auto found = m_ItemLabelTextureCache.find(cacheKey);
+    if (found != m_ItemLabelTextureCache.end() && found->second.texture)
+    {
+        found->second.lastUsed = now;
+        outWidth = found->second.width;
+        outHeight = found->second.height;
+        return found->second.texture;
+    }
+
+    const int width = EstimateProjectedItemLabelWidth(text, fontPx);
+    const int height = EstimateProjectedItemLabelHeight(fontPx, hasNonAscii);
+    if (width <= 0 || height <= 0)
+        return nullptr;
+
+    std::vector<uint8_t> pixels(static_cast<size_t>(width) * static_cast<size_t>(height) * 4u, 0u);
+    HudSurface surface{ pixels.data(), width, height, width * 4 };
+    DrawTextUtf8OutlinedGdiClippedEx(
+        surface,
+        0,
+        0,
+        width,
+        text.c_str(),
+        fontPx,
+        color,
+        false);
+
+    IDirect3DTexture9* texture = nullptr;
+    const HRESULT createHr = device->CreateTexture(
+        static_cast<UINT>(width),
+        static_cast<UINT>(height),
+        1,
+        D3DUSAGE_DYNAMIC,
+        D3DFMT_A8R8G8B8,
+        D3DPOOL_DEFAULT,
+        &texture,
+        nullptr);
+    if (FAILED(createHr) || !texture)
+    {
+        if (m_ItemModelLabelDebugLog)
+            Game::logMsg(
+                "[VR][ItemLabel][d3d] CreateTexture failed hr=0x%08X label=%s size=%dx%d",
+                static_cast<unsigned int>(createHr),
+                text.c_str(),
+                width,
+                height);
+        return nullptr;
+    }
+
+    D3DLOCKED_RECT lockedRect{};
+    const HRESULT lockHr = texture->LockRect(0, &lockedRect, nullptr, D3DLOCK_DISCARD);
+    if (FAILED(lockHr) || !lockedRect.pBits)
+    {
+        if (m_ItemModelLabelDebugLog)
+            Game::logMsg(
+                "[VR][ItemLabel][d3d] LockRect failed hr=0x%08X label=%s size=%dx%d",
+                static_cast<unsigned int>(lockHr),
+                text.c_str(),
+                width,
+                height);
+        texture->Release();
+        return nullptr;
+    }
+
+    const uint8_t* src = pixels.data();
+    for (int y = 0; y < height; ++y)
+    {
+        std::memcpy(
+            static_cast<unsigned char*>(lockedRect.pBits) + static_cast<size_t>(y) * static_cast<size_t>(lockedRect.Pitch),
+            src + static_cast<size_t>(y) * static_cast<size_t>(width) * 4u,
+            static_cast<size_t>(width) * 4u);
+    }
+    texture->UnlockRect(0);
+
+    auto& cached = m_ItemLabelTextureCache[cacheKey];
+    if (cached.texture)
+        cached.texture->Release();
+    cached.texture = texture;
+    cached.width = width;
+    cached.height = height;
+    cached.lastUsed = now;
+    outWidth = width;
+    outHeight = height;
+    return cached.texture;
+}
+
+void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSetup& view)
+{
+    if (!renderContext)
+        return;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (!m_ItemModelLabelEnabled || !m_Game || !m_Game->m_EngineClient || !m_Game->m_EngineClient->IsInGame())
+    {
+        m_ProjectedItemLabels.clear();
+        return;
+    }
+
+    const float holdSeconds = GetProjectedItemLabelHoldSeconds(this);
+    for (auto it = m_ProjectedItemLabels.begin(); it != m_ProjectedItemLabels.end();)
+    {
+        const float ageSeconds = std::chrono::duration<float>(now - it->second.lastSeen).count();
+        if (ageSeconds < 0.0f || ageSeconds > holdSeconds)
+            it = m_ProjectedItemLabels.erase(it);
+        else
+            ++it;
+    }
+
+    if (m_ProjectedItemLabels.empty())
+        return;
+
+    int screenWidth = view.width;
+    int screenHeight = view.height;
+    if (screenWidth <= 0 || screenHeight <= 0)
+        return;
+
+    QAngle viewAngles(view.angles.x, view.angles.y, view.angles.z);
+    Vector forward{};
+    Vector right{};
+    Vector up{};
+    QAngle::AngleVectors(viewAngles, &forward, &right, &up);
+    if (forward.IsZero() || right.IsZero() || up.IsZero())
+        return;
+
+    VectorNormalize(forward);
+    VectorNormalize(right);
+    VectorNormalize(up);
+
+    const float aspect = (view.m_flAspectRatio > 0.01f)
+        ? view.m_flAspectRatio
+        : (static_cast<float>(screenWidth) / static_cast<float>(std::max(screenHeight, 1)));
+    const float tanHalfFovX = std::tan(DEG2RAD(view.fov * 0.5f));
+    const float tanHalfFovY = tanHalfFovX / std::max(aspect, 0.01f);
+    if (tanHalfFovX <= 0.0001f || tanHalfFovY <= 0.0001f)
+        return;
+
+    struct VisibleProjectedItemLabel
+    {
+        int screenX = 0;
+        int screenY = 0;
+        float depth = 0.0f;
+        const ProjectedItemLabel* label = nullptr;
+    };
+
+    std::vector<VisibleProjectedItemLabel> visibleLabels;
+    visibleLabels.reserve(m_ProjectedItemLabels.size());
+
+    for (const auto& pair : m_ProjectedItemLabels)
+    {
+        const ProjectedItemLabel& projected = pair.second;
+        if (ShouldSuppressProjectedItemLabelNearPlayer(this, projected.worldPos))
+            continue;
+
+        const float maxDistance = std::max(0.0f, m_ItemModelLabelMaxDistance);
+        if (maxDistance > 0.0f)
+        {
+            const Vector deltaFromView = projected.worldPos - view.origin;
+            if (deltaFromView.LengthSqr() > (maxDistance * maxDistance))
+                continue;
+        }
+
+        float screenX = 0.0f;
+        float screenY = 0.0f;
+        float depth = 0.0f;
+        if (!VR_ProjectAimLinePointToView(view, forward, right, up, projected.worldPos, tanHalfFovX, tanHalfFovY, screenX, screenY, depth))
+            continue;
+        if (depth <= std::max(view.zNear, 1.0f))
+            continue;
+
+        VisibleProjectedItemLabel candidate{
+            static_cast<int>(std::lround(screenX)),
+            static_cast<int>(std::lround(screenY)),
+            depth,
+            &projected
+        };
+
+        bool suppressedDuplicate = false;
+        if (projected.category == ItemModelLabelCategory::Firearm ||
+            projected.category == ItemModelLabelCategory::Melee)
+        {
+            for (VisibleProjectedItemLabel& existing : visibleLabels)
+            {
+                if (!existing.label || existing.label->category != projected.category)
+                    continue;
+
+                const Vector delta = existing.label->worldPos - projected.worldPos;
+                const float horizontalDistSq = delta.x * delta.x + delta.y * delta.y;
+                if (horizontalDistSq > (18.0f * 18.0f) || std::fabs(delta.z) > 28.0f)
+                    continue;
+
+                if (projected.worldPos.z > existing.label->worldPos.z + 0.25f ||
+                    (std::fabs(projected.worldPos.z - existing.label->worldPos.z) <= 0.25f && candidate.depth < existing.depth))
+                {
+                    existing = candidate;
+                }
+
+                suppressedDuplicate = true;
+                break;
+            }
+        }
+
+        if (!suppressedDuplicate)
+            visibleLabels.push_back(candidate);
+    }
+
+    if (visibleLabels.empty())
+        return;
+
+    std::sort(
+        visibleLabels.begin(),
+        visibleLabels.end(),
+        [](const VisibleProjectedItemLabel& lhs, const VisibleProjectedItemLabel& rhs)
+        {
+            return lhs.depth < rhs.depth;
+        });
+
+    constexpr size_t kMaxProjectedItemLabelsPerEye = 48;
+    if (visibleLabels.size() > kMaxProjectedItemLabelsPerEye)
+        visibleLabels.resize(kMaxProjectedItemLabelsPerEye);
+
+    std::sort(
+        visibleLabels.begin(),
+        visibleLabels.end(),
+        [](const VisibleProjectedItemLabel& lhs, const VisibleProjectedItemLabel& rhs)
+        {
+            return lhs.depth > rhs.depth;
+        });
+
+    IDirect3DDevice9* device = GetKillIndicatorD3DDevice(this);
+    if (!device)
+    {
+        if (m_ItemModelLabelDebugLog)
+            Game::logMsg("[VR][ItemLabel][d3d] no D3D device during draw");
+        return;
+    }
+
+    for (auto it = m_ItemLabelTextureCache.begin(); it != m_ItemLabelTextureCache.end();)
+    {
+        const float ageSeconds = std::chrono::duration<float>(now - it->second.lastUsed).count();
+        const bool stale = ageSeconds > 8.0f;
+        const bool overBudget = (m_ItemLabelTextureCache.size() > 96) && ageSeconds > 2.0f;
+        if (!it->second.texture || stale || overBudget)
+        {
+            if (it->second.texture)
+                it->second.texture->Release();
+            it = m_ItemLabelTextureCache.erase(it);
+            continue;
+        }
+        ++it;
+    }
+
+    IDirect3DStateBlock9* stateBlock = nullptr;
+    if (SUCCEEDED(device->CreateStateBlock(D3DSBT_ALL, &stateBlock)) && stateBlock)
+        stateBlock->Capture();
+
+    device->SetVertexShader(nullptr);
+    device->SetPixelShader(nullptr);
+    device->SetFVF(kProjectedItemLabelFvf);
+    device->SetRenderState(D3DRS_ZENABLE, FALSE);
+    device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+    device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+    device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+    device->SetRenderState(D3DRS_LIGHTING, FALSE);
+    device->SetRenderState(D3DRS_FOGENABLE, FALSE);
+    device->SetRenderState(D3DRS_COLORWRITEENABLE,
+        D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE | D3DCOLORWRITEENABLE_ALPHA);
+    device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+    device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+    device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+    device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+    device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+    device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+    device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+    device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+    device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+    device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+
+    for (const VisibleProjectedItemLabel& visible : visibleLabels)
+    {
+        if (!visible.label)
+            continue;
+
+        Rgba color{};
+        if (!GetProjectedItemLabelColor(visible.label->category, color))
+            continue;
+
+        const float worldTextHeight = 9.0f * std::clamp(m_ItemModelLabelTextScale, 0.25f, 4.0f);
+        int fontPx = static_cast<int>(std::lround((worldTextHeight / (visible.depth * tanHalfFovY * 2.0f)) * static_cast<float>(screenHeight)));
+        const bool hasNonAscii = ContainsNonAscii(visible.label->label.c_str());
+        const float textScale = std::clamp(m_ItemModelLabelTextScale, 0.25f, 4.0f);
+        const int minFontPx = (std::max)(6, static_cast<int>(std::lround((hasNonAscii ? 12.0f : 10.0f) * textScale)));
+        const int maxFontPx = (std::max)(minFontPx, static_cast<int>(std::lround((hasNonAscii ? 28.0f : 24.0f) * textScale)));
+        fontPx = std::clamp(fontPx, minFontPx, maxFontPx);
+        fontPx = QuantizeProjectedItemLabelFontPx(fontPx);
+
+        int texW = 0;
+        int texH = 0;
+        IDirect3DTexture9* texture = GetOrCreateProjectedItemLabelTexture(
+            device,
+            visible.label->label,
+            fontPx,
+            static_cast<int>(color.r),
+            static_cast<int>(color.g),
+            static_cast<int>(color.b),
+            static_cast<int>(color.a),
+            texW,
+            texH);
+        if (!texture || texW <= 0 || texH <= 0)
+            continue;
+
+        const int drawX = std::clamp(visible.screenX - texW / 2, 2, (std::max)(2, screenWidth - texW - 2));
+        const int drawY = std::clamp(visible.screenY - texH / 2, 2, (std::max)(2, screenHeight - texH - 2));
+        const float left = static_cast<float>(drawX) - 0.5f;
+        const float top = static_cast<float>(drawY) - 0.5f;
+        const float right = left + static_cast<float>(texW);
+        const float bottom = top + static_cast<float>(texH);
+
+        const ProjectedItemLabelVertex quad[4] =
+        {
+            { left, top, 0.0f, 1.0f, 0xFFFFFFFFu, 0.0f, 0.0f },
+            { right, top, 0.0f, 1.0f, 0xFFFFFFFFu, 1.0f, 0.0f },
+            { left, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0.0f, 1.0f },
+            { right, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 1.0f, 1.0f }
+        };
+
+        device->SetTexture(0, texture);
+        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(ProjectedItemLabelVertex));
+    }
+
+    if (stateBlock)
+    {
+        stateBlock->Apply();
+        stateBlock->Release();
+    }
+
+    device->Release();
 }
 
 void VR::DrawKillIndicators(IMatRenderContext* renderContext, ITexture* hudTexture)

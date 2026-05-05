@@ -1391,6 +1391,39 @@ public:
 		Count
 	};
 
+	enum class ItemModelLabelCategory
+	{
+		None = 0,
+		Firearm,
+		Melee,
+		Throwable,
+		MedicalPack,
+		Medicine
+	};
+
+	struct ItemModelLabelInfo
+	{
+		ItemModelLabelCategory category = ItemModelLabelCategory::None;
+		std::string label;
+	};
+
+	struct ProjectedItemLabel
+	{
+		Vector worldPos = { 0,0,0 };
+		ItemModelLabelCategory category = ItemModelLabelCategory::None;
+		std::string label;
+		std::chrono::steady_clock::time_point lastSeen{};
+	};
+
+
+	struct CachedProjectedItemLabelTexture
+	{
+		IDirect3DTexture9* texture = nullptr;
+		int width = 0;
+		int height = 0;
+		std::chrono::steady_clock::time_point lastUsed{};
+	};
+
 	static constexpr int kZombieClassOffset = 0x1c90;
 	static constexpr int kLifeStateOffset = 0x147;
 	static constexpr int kTeamNumOffset = 0xE4; // DT_BaseEntity::m_iTeamNum
@@ -1965,6 +1998,20 @@ public:
 	bool m_SpecialInfectedWarningAttack2CmdOwned = false;
 	bool m_SpecialInfectedWarningJumpCmdOwned = false;
 	std::chrono::steady_clock::time_point m_SpecialInfectedWarningNextActionTime{};
+	bool m_ItemModelLabelEnabled = true;
+	bool m_ItemModelLabelShowWeapons = true;
+	bool m_ItemModelLabelShowThrowables = true;
+	bool m_ItemModelLabelShowMedical = true;
+	bool m_ItemModelLabelDebugLog = false;
+	float m_ItemModelLabelMaxHz = 60.0f;
+	float m_ItemModelLabelTextScale = 1.0f;
+	float m_ItemModelLabelMaxDistance = 4096.0f;
+	float m_ItemModelLabelPlayerSuppressRadius = 96.0f;
+	float m_ItemModelLabelPlayerSuppressMinZ = -32.0f;
+	float m_ItemModelLabelPlayerSuppressMaxZ = 128.0f;
+	mutable std::unordered_map<int, std::chrono::steady_clock::time_point> m_LastItemModelLabelTime{};
+	std::unordered_map<int, ProjectedItemLabel> m_ProjectedItemLabels{};
+	std::unordered_map<std::string, CachedProjectedItemLabelTexture> m_ItemLabelTextureCache{};
 	int m_AimLineWarningColorR = 255;
 	int m_AimLineWarningColorG = 255;
 	int m_AimLineWarningColorB = 0;
@@ -2282,6 +2329,17 @@ public:
 	void SpawnHitIndicator(const Vector& worldPos);
 	void SpawnKillIndicator(bool headshot, const Vector& worldPos);
 	void DrawKillIndicators(IMatRenderContext* renderContext, ITexture* hudTexture);
+	void DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSetup& view);
+	IDirect3DTexture9* GetOrCreateProjectedItemLabelTexture(
+		IDirect3DDevice9* device,
+		const std::string& text,
+		int fontPx,
+		int colorR,
+		int colorG,
+		int colorB,
+		int colorA,
+		int& outWidth,
+		int& outHeight);
 	void UpdateKillIndicatorOverlays();
 	IMaterial* ResolveHitIndicatorMaterial();
 	IMaterial* ResolveKillIndicatorMaterial(bool headshot);
@@ -2289,6 +2347,7 @@ public:
 	void DestroyKillIndicatorOverlayTexture(int materialIndex);
 	bool EnsureKillIndicatorOverlayTexture(int materialIndex, int width, int height);
 	bool UploadKillIndicatorOverlayTexture(int materialIndex, const uint8_t* rgba, int width, int height, uint32_t frameIndex = 0, bool fromDecodedFrames = false);
+	void DestroyItemLabelOverlayTexture();
 	void TrimExpiredKillIndicators(std::chrono::steady_clock::time_point now, bool clearAll = false);
 	void MaybeTrimExpiredKillIndicators(std::chrono::steady_clock::time_point now, bool force = false);
 	void MaybeLogKillIndicatorStats(std::chrono::steady_clock::time_point now);
@@ -2326,9 +2385,12 @@ public:
 	bool IsLocalPlayerEntityIndex(int entityIndex) const;
 	SpecialInfectedType GetSpecialInfectedType(const C_BaseEntity* entity) const;
 	SpecialInfectedType GetSpecialInfectedTypeFromModel(const std::string& modelName) const;
+	bool TryGetItemModelLabelInfo(const std::string& modelName, ItemModelLabelInfo& out) const;
 	bool IsEntityAlive(const C_BaseEntity* entity) const;
 	void DrawSpecialInfectedArrow(const Vector& origin, SpecialInfectedType type);
+	void DrawItemModelLabel(int entityIndex, const std::string& modelName, const Vector& modelOrigin, const C_BaseEntity* entity, const char* className);
 	void ScanSpecialInfectedEntitiesFromClientList();
+	void ScanItemModelLabelEntitiesFromClientList();
 	void RefreshSpecialInfectedPreWarning(const Vector& infectedOrigin, SpecialInfectedType type, int entityIndex, bool isPlayerClass);
 	void RefreshSpecialInfectedBlindSpotWarning(const Vector& infectedOrigin);
 	bool HasLineOfSightToSpecialInfected(const Vector& infectedOrigin, int entityIndex) const;

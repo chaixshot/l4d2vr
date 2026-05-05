@@ -1447,6 +1447,19 @@ void VR::ParseConfigFile()
     m_SpecialInfectedDebug = getBool("SpecialInfectedDebug", m_SpecialInfectedDebug);
     m_SpecialInfectedArrowDebugLog = getBool("SpecialInfectedArrowDebugLog", m_SpecialInfectedArrowDebugLog);
     m_SpecialInfectedArrowDebugLogHz = std::clamp(getFloat("SpecialInfectedArrowDebugLogHz", m_SpecialInfectedArrowDebugLogHz), 0.0f, 20.0f);
+    m_ItemModelLabelEnabled = getBool("ItemModelLabelEnabled", m_ItemModelLabelEnabled);
+    m_ItemModelLabelShowWeapons = getBool("ItemModelLabelShowWeapons", m_ItemModelLabelShowWeapons);
+    m_ItemModelLabelShowThrowables = getBool("ItemModelLabelShowThrowables", m_ItemModelLabelShowThrowables);
+    m_ItemModelLabelShowMedical = getBool("ItemModelLabelShowMedical", m_ItemModelLabelShowMedical);
+    m_ItemModelLabelDebugLog = getBool("ItemModelLabelDebugLog", m_ItemModelLabelDebugLog);
+    m_ItemModelLabelMaxHz = std::max(0.0f, getFloat("ItemModelLabelMaxHz", m_ItemModelLabelMaxHz));
+    m_ItemModelLabelTextScale = std::clamp(getFloat("ItemModelLabelTextScale", m_ItemModelLabelTextScale), 0.25f, 4.0f);
+    m_ItemModelLabelMaxDistance = std::max(0.0f, getFloat("ItemModelLabelMaxDistance", m_ItemModelLabelMaxDistance));
+    m_ItemModelLabelPlayerSuppressRadius = std::max(0.0f, getFloat("ItemModelLabelPlayerSuppressRadius", m_ItemModelLabelPlayerSuppressRadius));
+    m_ItemModelLabelPlayerSuppressMinZ = getFloat("ItemModelLabelPlayerSuppressMinZ", m_ItemModelLabelPlayerSuppressMinZ);
+    m_ItemModelLabelPlayerSuppressMaxZ = getFloat("ItemModelLabelPlayerSuppressMaxZ", m_ItemModelLabelPlayerSuppressMaxZ);
+    if (m_ItemModelLabelPlayerSuppressMinZ > m_ItemModelLabelPlayerSuppressMaxZ)
+        std::swap(m_ItemModelLabelPlayerSuppressMinZ, m_ItemModelLabelPlayerSuppressMaxZ);
     m_SpecialInfectedArrowSize = std::max(0.0f, getFloat("SpecialInfectedArrowSize", m_SpecialInfectedArrowSize));
     m_SpecialInfectedArrowHeight = std::max(0.0f, getFloat("SpecialInfectedArrowHeight", m_SpecialInfectedArrowHeight));
     m_SpecialInfectedArrowThickness = std::max(0.0f, getFloat("SpecialInfectedArrowThickness", m_SpecialInfectedArrowThickness));
