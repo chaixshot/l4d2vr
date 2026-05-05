@@ -3596,14 +3596,25 @@ namespace
 
     static constexpr DWORD kProjectedItemLabelFvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1;
 
-    static float GetProjectedItemLabelHoldSeconds(const VR* vr)
-    {
-        if (!vr)
-            return 0.90f;
+static float GetProjectedItemLabelHoldSeconds(const VR* vr)
+{
+    if (!vr)
+        return 0.90f;
 
-        const float hz = (std::max)(1.0f, vr->m_ItemModelLabelMaxHz);
-        return std::clamp(20.0f / hz, 0.75f, 1.50f);
-    }
+    const float hz = (std::max)(1.0f, vr->m_ItemModelLabelMaxHz);
+    return std::clamp(20.0f / hz, 0.75f, 1.50f);
+}
+
+static bool ShouldSuppressProjectedItemLabelForMotion(const VR::ProjectedItemLabel& label, const std::chrono::steady_clock::time_point& now)
+{
+    constexpr float kItemLabelStillSeconds = 3.0f;
+
+    if (label.stableSince.time_since_epoch().count() == 0)
+        return true;
+
+    const float stableSeconds = std::chrono::duration<float>(now - label.stableSince).count();
+    return stableSeconds >= 0.0f && stableSeconds < kItemLabelStillSeconds;
+}
 
     static int SafeGetProjectedItemLabelHighestEntityIndex(VR* vr)
     {
@@ -7807,6 +7818,9 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
     for (const auto& pair : m_ProjectedItemLabels)
     {
         const ProjectedItemLabel& projected = pair.second;
+        if (ShouldSuppressProjectedItemLabelForMotion(projected, now))
+            continue;
+
         if (ShouldSuppressProjectedItemLabelNearPlayer(this, projected.worldPos))
             continue;
 

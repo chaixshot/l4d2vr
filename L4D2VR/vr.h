@@ -1410,9 +1410,11 @@ public:
 	struct ProjectedItemLabel
 	{
 		Vector worldPos = { 0,0,0 };
+		Vector stableAnchorWorldPos = { 0,0,0 };
 		ItemModelLabelCategory category = ItemModelLabelCategory::None;
 		std::string label;
 		std::chrono::steady_clock::time_point lastSeen{};
+		std::chrono::steady_clock::time_point stableSince{};
 	};
 
 
