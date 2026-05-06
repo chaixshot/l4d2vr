@@ -1413,6 +1413,7 @@ public:
 		Vector stableAnchorWorldPos = { 0,0,0 };
 		ItemModelLabelCategory category = ItemModelLabelCategory::None;
 		std::string label;
+		int sourceEntityIndex = 0;
 		std::chrono::steady_clock::time_point lastSeen{};
 		std::chrono::steady_clock::time_point stableSince{};
 	};
@@ -2006,8 +2007,11 @@ public:
 	bool m_ItemModelLabelShowMedical = true;
 	bool m_ItemModelLabelDebugLog = false;
 	float m_ItemModelLabelMaxHz = 60.0f;
+	float m_ItemModelLabelScanHz = 6.0f;
 	float m_ItemModelLabelTextScale = 1.0f;
+	float m_ItemModelLabelQueuedTextScale = 1.0f;
 	float m_ItemModelLabelMaxDistance = 4096.0f;
+	int m_ItemModelLabelMaxVisiblePerEye = 18;
 	float m_ItemModelLabelPlayerSuppressRadius = 96.0f;
 	float m_ItemModelLabelPlayerSuppressMinZ = -32.0f;
 	float m_ItemModelLabelPlayerSuppressMaxZ = 128.0f;

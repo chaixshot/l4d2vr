@@ -1582,12 +1582,22 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	CViewSetup hudLeft = hudViewSetup;
 	hudLeft.origin = leftEyeView.origin;
 	hudLeft.angles = renderViewAngles;
+	if (m_VR->m_IsVREnabled && queueMode != 0)
+		m_VR->DrawProjectedItemLabels(rndrContext, leftEyeView);
 	rndrContext->SetRenderTarget(m_VR->m_LeftEyeTexture);
 	if (m_VR->m_IsVREnabled)
 		m_VR->RenderDrawGameLaserSight(localPlayer);
 	hkRenderView.fOriginal(ecx, leftEyeView, hudLeft, nClearFlags, whatToDraw);
 	if (m_VR->m_IsVREnabled)
-		m_VR->DrawProjectedItemLabels(rndrContext, leftEyeView);
+	{
+		if (queueMode == 0)
+		{
+			rndrContext->SetRenderTarget(m_VR->m_LeftEyeTexture);
+			if (hkViewport.fOriginal)
+				hkViewport.fOriginal(rndrContext, 0, 0, m_VR->m_RenderWidth, m_VR->m_RenderHeight);
+			m_VR->DrawProjectedItemLabels(rndrContext, leftEyeView);
+		}
+	}
 	if (m_VR->m_IsVREnabled)
 		m_VR->UpdateD3DAimLineOverlayForView(localPlayer, leftEyeView, 0);
 	m_PushedHud = false;
@@ -1611,8 +1621,13 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 	rndrContext->SetRenderTarget(m_VR->m_RightEyeTexture);
 	hkRenderView.fOriginal(ecx, rightEyeView, hudRight, nClearFlags, whatToDraw);
-	if (m_VR->m_IsVREnabled)
+	if (m_VR->m_IsVREnabled && queueMode == 0)
+	{
+		rndrContext->SetRenderTarget(m_VR->m_RightEyeTexture);
+		if (hkViewport.fOriginal)
+			hkViewport.fOriginal(rndrContext, 0, 0, m_VR->m_RenderWidth, m_VR->m_RenderHeight);
 		m_VR->DrawProjectedItemLabels(rndrContext, rightEyeView);
+	}
 	if (m_VR->m_IsVREnabled)
 		m_VR->UpdateD3DAimLineOverlayForView(localPlayer, rightEyeView, 1);
 

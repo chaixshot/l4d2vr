@@ -1453,8 +1453,11 @@ void VR::ParseConfigFile()
     m_ItemModelLabelShowMedical = getBool("ItemModelLabelShowMedical", m_ItemModelLabelShowMedical);
     m_ItemModelLabelDebugLog = getBool("ItemModelLabelDebugLog", m_ItemModelLabelDebugLog);
     m_ItemModelLabelMaxHz = std::max(0.0f, getFloat("ItemModelLabelMaxHz", m_ItemModelLabelMaxHz));
+    m_ItemModelLabelScanHz = std::clamp(getFloat("ItemModelLabelScanHz", m_ItemModelLabelScanHz), 1.0f, 60.0f);
     m_ItemModelLabelTextScale = std::clamp(getFloat("ItemModelLabelTextScale", m_ItemModelLabelTextScale), 0.25f, 4.0f);
+    m_ItemModelLabelQueuedTextScale = std::clamp(getFloat("ItemModelLabelQueuedTextScale", m_ItemModelLabelQueuedTextScale), 0.25f, 4.0f);
     m_ItemModelLabelMaxDistance = std::max(0.0f, getFloat("ItemModelLabelMaxDistance", m_ItemModelLabelMaxDistance));
+    m_ItemModelLabelMaxVisiblePerEye = std::clamp(getInt("ItemModelLabelMaxVisiblePerEye", m_ItemModelLabelMaxVisiblePerEye), 1, 64);
     m_ItemModelLabelPlayerSuppressRadius = std::max(0.0f, getFloat("ItemModelLabelPlayerSuppressRadius", m_ItemModelLabelPlayerSuppressRadius));
     m_ItemModelLabelPlayerSuppressMinZ = getFloat("ItemModelLabelPlayerSuppressMinZ", m_ItemModelLabelPlayerSuppressMinZ);
     m_ItemModelLabelPlayerSuppressMaxZ = getFloat("ItemModelLabelPlayerSuppressMaxZ", m_ItemModelLabelPlayerSuppressMaxZ);

@@ -3810,6 +3810,69 @@ static bool ShouldSuppressProjectedItemLabelForMotion(const VR::ProjectedItemLab
 
         return false;
     }
+
+    static const unsigned char* QueuedGlyph5x7(char ch)
+    {
+        static const unsigned char kQMark[7] = { 0x0E,0x11,0x01,0x06,0x04,0x00,0x04 };
+        static const unsigned char kSpace[7] = { 0,0,0,0,0,0,0 };
+        static const unsigned char kDash[7] = { 0,0,0,0x1F,0,0,0 };
+        static const unsigned char kSlash[7] = { 0x01,0x02,0x04,0x08,0x10,0,0 };
+        static const unsigned char kPlus[7] = { 0,0x04,0x04,0x1F,0x04,0x04,0 };
+
+        static const unsigned char kDigits[10][7] = {
+            { 0x0E,0x11,0x13,0x15,0x19,0x11,0x0E },
+            { 0x04,0x0C,0x04,0x04,0x04,0x04,0x0E },
+            { 0x0E,0x11,0x01,0x02,0x04,0x08,0x1F },
+            { 0x1E,0x01,0x01,0x0E,0x01,0x01,0x1E },
+            { 0x02,0x06,0x0A,0x12,0x1F,0x02,0x02 },
+            { 0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E },
+            { 0x06,0x08,0x10,0x1E,0x11,0x11,0x0E },
+            { 0x1F,0x01,0x02,0x04,0x08,0x08,0x08 },
+            { 0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E },
+            { 0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C },
+        };
+
+        static const unsigned char kUpper[26][7] = {
+            { 0x0E,0x11,0x11,0x1F,0x11,0x11,0x11 }, { 0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E },
+            { 0x0E,0x11,0x10,0x10,0x10,0x11,0x0E }, { 0x1E,0x11,0x11,0x11,0x11,0x11,0x1E },
+            { 0x1F,0x10,0x10,0x1E,0x10,0x10,0x1F }, { 0x1F,0x10,0x10,0x1E,0x10,0x10,0x10 },
+            { 0x0E,0x11,0x10,0x17,0x11,0x11,0x0F }, { 0x11,0x11,0x11,0x1F,0x11,0x11,0x11 },
+            { 0x0E,0x04,0x04,0x04,0x04,0x04,0x0E }, { 0x07,0x02,0x02,0x02,0x12,0x12,0x0C },
+            { 0x11,0x12,0x14,0x18,0x14,0x12,0x11 }, { 0x10,0x10,0x10,0x10,0x10,0x10,0x1F },
+            { 0x11,0x1B,0x15,0x15,0x11,0x11,0x11 }, { 0x11,0x19,0x15,0x13,0x11,0x11,0x11 },
+            { 0x0E,0x11,0x11,0x11,0x11,0x11,0x0E }, { 0x1E,0x11,0x11,0x1E,0x10,0x10,0x10 },
+            { 0x0E,0x11,0x11,0x11,0x15,0x12,0x0D }, { 0x1E,0x11,0x11,0x1E,0x14,0x12,0x11 },
+            { 0x0F,0x10,0x10,0x0E,0x01,0x01,0x1E }, { 0x1F,0x04,0x04,0x04,0x04,0x04,0x04 },
+            { 0x11,0x11,0x11,0x11,0x11,0x11,0x0E }, { 0x11,0x11,0x11,0x11,0x0A,0x0A,0x04 },
+            { 0x11,0x11,0x11,0x15,0x15,0x15,0x0A }, { 0x11,0x11,0x0A,0x04,0x0A,0x11,0x11 },
+            { 0x11,0x11,0x0A,0x04,0x04,0x04,0x04 }, { 0x1F,0x01,0x02,0x04,0x08,0x10,0x1F },
+        };
+
+        static const unsigned char kLower[26][7] = {
+            { 0x00,0x00,0x0E,0x01,0x0F,0x11,0x0F }, { 0x10,0x10,0x16,0x19,0x11,0x11,0x1E },
+            { 0x00,0x00,0x0E,0x10,0x10,0x11,0x0E }, { 0x01,0x01,0x0D,0x13,0x11,0x11,0x0F },
+            { 0x00,0x00,0x0E,0x11,0x1F,0x10,0x0E }, { 0x06,0x09,0x08,0x1C,0x08,0x08,0x08 },
+            { 0x00,0x00,0x0F,0x11,0x0F,0x01,0x0E }, { 0x10,0x10,0x16,0x19,0x11,0x11,0x11 },
+            { 0x04,0x00,0x0C,0x04,0x04,0x04,0x0E }, { 0x02,0x00,0x06,0x02,0x02,0x12,0x0C },
+            { 0x10,0x10,0x12,0x14,0x18,0x14,0x12 }, { 0x0C,0x04,0x04,0x04,0x04,0x04,0x0E },
+            { 0x00,0x00,0x1A,0x15,0x15,0x15,0x15 }, { 0x00,0x00,0x16,0x19,0x11,0x11,0x11 },
+            { 0x00,0x00,0x0E,0x11,0x11,0x11,0x0E }, { 0x00,0x00,0x1E,0x11,0x1E,0x10,0x10 },
+            { 0x00,0x00,0x0D,0x13,0x0F,0x01,0x01 }, { 0x00,0x00,0x16,0x19,0x10,0x10,0x10 },
+            { 0x00,0x00,0x0F,0x10,0x0E,0x01,0x1E }, { 0x08,0x08,0x1C,0x08,0x08,0x09,0x06 },
+            { 0x00,0x00,0x11,0x11,0x11,0x13,0x0D }, { 0x00,0x00,0x11,0x11,0x0A,0x0A,0x04 },
+            { 0x00,0x00,0x11,0x15,0x15,0x15,0x0A }, { 0x00,0x00,0x11,0x0A,0x04,0x0A,0x11 },
+            { 0x00,0x00,0x11,0x11,0x0F,0x01,0x0E }, { 0x00,0x00,0x1F,0x02,0x04,0x08,0x1F },
+        };
+
+        if (ch == ' ') return kSpace;
+        if (ch == '-') return kDash;
+        if (ch == '/') return kSlash;
+        if (ch == '+') return kPlus;
+        if (ch >= '0' && ch <= '9') return kDigits[ch - '0'];
+        if (ch >= 'A' && ch <= 'Z') return kUpper[ch - 'A'];
+        if (ch >= 'a' && ch <= 'z') return kLower[ch - 'a'];
+        return kQMark;
+    }
 }
 
 bool VR::ReadLocalKillCounters(C_BasePlayer* localPlayer, int& outCommon, int& outSpecial)
@@ -7760,6 +7823,7 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
         return;
 
     const auto now = std::chrono::steady_clock::now();
+    const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
     if (!m_ItemModelLabelEnabled || !m_Game || !m_Game->m_EngineClient || !m_Game->m_EngineClient->IsInGame())
     {
         m_ProjectedItemLabels.clear();
@@ -7821,7 +7885,7 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
         if (ShouldSuppressProjectedItemLabelForMotion(projected, now))
             continue;
 
-        if (ShouldSuppressProjectedItemLabelNearPlayer(this, projected.worldPos))
+        if (queueMode == 0 && ShouldSuppressProjectedItemLabelNearPlayer(this, projected.worldPos))
             continue;
 
         const float maxDistance = std::max(0.0f, m_ItemModelLabelMaxDistance);
@@ -7887,9 +7951,11 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
             return lhs.depth < rhs.depth;
         });
 
-    constexpr size_t kMaxProjectedItemLabelsPerEye = 48;
-    if (visibleLabels.size() > kMaxProjectedItemLabelsPerEye)
-        visibleLabels.resize(kMaxProjectedItemLabelsPerEye);
+    size_t maxProjectedItemLabelsPerEye = static_cast<size_t>(std::clamp(m_ItemModelLabelMaxVisiblePerEye, 1, 64));
+    if (queueMode != 0)
+        maxProjectedItemLabelsPerEye = (std::min)(maxProjectedItemLabelsPerEye, static_cast<size_t>(6));
+    if (visibleLabels.size() > maxProjectedItemLabelsPerEye)
+        visibleLabels.resize(maxProjectedItemLabelsPerEye);
 
     std::sort(
         visibleLabels.begin(),
@@ -7898,6 +7964,106 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
         {
             return lhs.depth > rhs.depth;
         });
+
+    if (queueMode != 0)
+    {
+        if (!m_Game || !m_Game->m_DebugOverlay)
+            return;
+
+        const float durationSec = std::clamp((std::max)(m_LastFrameDuration, 0.03f), 0.01f, 0.08f);
+        const Vector glyphRight = right;
+        const Vector glyphUp = up;
+
+        auto drawGlyphRun = [&](const Vector& topLeft, float x0, float y0, float x1, float y1, const Rgba& color)
+            {
+                const Vector p0 = topLeft + glyphRight * x0 - glyphUp * y0;
+                const Vector p1 = topLeft + glyphRight * x1 - glyphUp * y0;
+                const Vector p2 = topLeft + glyphRight * x1 - glyphUp * y1;
+                const Vector p3 = topLeft + glyphRight * x0 - glyphUp * y1;
+
+                m_Game->m_DebugOverlay->AddTriangleOverlay(
+                    p0,
+                    p1,
+                    p2,
+                    color.r,
+                    color.g,
+                    color.b,
+                    255,
+                    true,
+                    durationSec);
+                m_Game->m_DebugOverlay->AddTriangleOverlay(
+                    p0,
+                    p2,
+                    p3,
+                    color.r,
+                    color.g,
+                    color.b,
+                    255,
+                    true,
+                    durationSec);
+            };
+
+        for (const VisibleProjectedItemLabel& visible : visibleLabels)
+        {
+            if (!visible.label)
+                continue;
+
+            Rgba color{};
+            if (!GetProjectedItemLabelColor(visible.label->category, color))
+                continue;
+
+            const float textScale = std::clamp(m_ItemModelLabelQueuedTextScale, 0.25f, 4.0f);
+            const float worldTextHeight = 8.5f * textScale;
+            const float cellSize = worldTextHeight / 7.0f;
+            const float charAdvance = cellSize * 6.0f;
+            const size_t charCount = visible.label->label.size();
+            if (charCount == 0)
+                continue;
+
+            const float textWidth = charAdvance * static_cast<float>(charCount) - cellSize;
+            const Vector topLeft =
+                visible.label->worldPos
+                - glyphRight * (textWidth * 0.5f)
+                + glyphUp * (worldTextHeight * 0.5f);
+
+            float penX = 0.0f;
+            for (char ch : visible.label->label)
+            {
+                const unsigned char* rows = QueuedGlyph5x7(ch);
+                for (int yy = 0; yy < 7; ++yy)
+                {
+                    const unsigned char bits = rows[yy];
+                    int runStart = -1;
+                    for (int xx = 0; xx <= 5; ++xx)
+                    {
+                        const bool filled = (xx < 5) && ((bits & (1u << (4 - xx))) != 0);
+                        if (filled)
+                        {
+                            if (runStart < 0)
+                                runStart = xx;
+                            continue;
+                        }
+
+                        if (runStart < 0)
+                            continue;
+
+                        const float inset = cellSize * 0.08f;
+                        drawGlyphRun(
+                            topLeft,
+                            penX + static_cast<float>(runStart) * cellSize + inset,
+                            static_cast<float>(yy) * cellSize + inset,
+                            penX + static_cast<float>(xx) * cellSize - inset,
+                            (static_cast<float>(yy) + 1.0f) * cellSize - inset,
+                            color);
+                        runStart = -1;
+                    }
+                }
+
+                penX += charAdvance;
+            }
+        }
+        return;
+    }
 
     IDirect3DDevice9* device = GetKillIndicatorD3DDevice(this);
     if (!device)
