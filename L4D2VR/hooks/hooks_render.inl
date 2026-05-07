@@ -21,7 +21,37 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		m_VR->HandleMissingRenderContext("Hooks::dRenderView");
 		return hkRenderView.fOriginal(ecx, setup, hudViewSetup, nClearFlags, whatToDraw);
 	}
-
+	struct RenderContextStateGuard
+	{
+		IMatRenderContext* ctx = nullptr;
+		ITexture* rt = nullptr;
+		int x = 0;
+		int y = 0;
+		int w = 0;
+		int h = 0;
+		bool hasViewport = false;
+		RenderContextStateGuard(IMatRenderContext* renderContext)
+			: ctx(renderContext)
+		{
+			if (!ctx)
+				return;
+			rt = ctx->GetRenderTarget();
+			if (hkGetViewport.fOriginal)
+			{
+				hkGetViewport.fOriginal(ctx, x, y, w, h);
+				hasViewport = true;
+			}
+		}
+		~RenderContextStateGuard()
+		{
+			if (!ctx)
+				return;
+			ctx->SetRenderTarget(rt);
+			if (hasViewport && hkViewport.fOriginal)
+				hkViewport.fOriginal(ctx, x, y, w, h);
+		}
+	};
+	RenderContextStateGuard renderContextStateGuard(rndrContext);
 	// Reset "HUD painted" flag once per VR frame (prevents double HUD captures across eyes).
 	m_VR->m_HudPaintedThisFrame.store(false, std::memory_order_release);
 

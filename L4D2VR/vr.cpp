@@ -7954,7 +7954,7 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
 
     size_t maxProjectedItemLabelsPerEye = static_cast<size_t>(std::clamp(m_ItemModelLabelMaxVisiblePerEye, 1, 64));
     if (queueMode != 0)
-        maxProjectedItemLabelsPerEye = (std::min)(maxProjectedItemLabelsPerEye, static_cast<size_t>(6));
+        maxProjectedItemLabelsPerEye = (std::min)(maxProjectedItemLabelsPerEye, static_cast<size_t>(4));
     if (visibleLabels.size() > maxProjectedItemLabelsPerEye)
         visibleLabels.resize(maxProjectedItemLabelsPerEye);
 
@@ -7975,33 +7975,11 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
         const Vector glyphRight = right;
         const Vector glyphUp = up;
 
-        auto drawGlyphRun = [&](const Vector& topLeft, float x0, float y0, float x1, float y1, const Rgba& color)
+        auto drawGlyphRun = [&](const Vector& topLeft, float x0, float yMid, float x1, const Rgba& color)
             {
-                const Vector p0 = topLeft + glyphRight * x0 - glyphUp * y0;
-                const Vector p1 = topLeft + glyphRight * x1 - glyphUp * y0;
-                const Vector p2 = topLeft + glyphRight * x1 - glyphUp * y1;
-                const Vector p3 = topLeft + glyphRight * x0 - glyphUp * y1;
-
-                m_Game->m_DebugOverlay->AddTriangleOverlay(
-                    p0,
-                    p1,
-                    p2,
-                    color.r,
-                    color.g,
-                    color.b,
-                    255,
-                    true,
-                    durationSec);
-                m_Game->m_DebugOverlay->AddTriangleOverlay(
-                    p0,
-                    p2,
-                    p3,
-                    color.r,
-                    color.g,
-                    color.b,
-                    255,
-                    true,
-                    durationSec);
+                const Vector p0 = topLeft + glyphRight * x0 - glyphUp * yMid;
+                const Vector p1 = topLeft + glyphRight * x1 - glyphUp * yMid;
+                m_Game->m_DebugOverlay->AddLineOverlay(p0, p1, color.r, color.g, color.b, true, durationSec);
             };
 
         for (const VisibleProjectedItemLabel& visible : visibleLabels)
@@ -8048,13 +8026,12 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
                         if (runStart < 0)
                             continue;
 
-                        const float inset = cellSize * 0.08f;
+                        const float inset = cellSize * 0.12f;
                         drawGlyphRun(
                             topLeft,
                             penX + static_cast<float>(runStart) * cellSize + inset,
-                            static_cast<float>(yy) * cellSize + inset,
+                            (static_cast<float>(yy) + 0.5f) * cellSize,
                             penX + static_cast<float>(xx) * cellSize - inset,
-                            (static_cast<float>(yy) + 1.0f) * cellSize - inset,
                             color);
                         runStart = -1;
                     }
