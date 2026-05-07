@@ -1230,6 +1230,19 @@ public:
 	std::unordered_map<int, EnvProjectedTextureEntityDefaults> m_EnvProjectedTextureEntityDefaults;
 	std::atomic<bool> m_ShadowSettingsDirty{ true };
 
+	// Desktop-window mirror. This copies one VR eye into the implicit D3D9 swapchain
+	// backbuffer before Present(), so the normal desktop game window can show a live
+	// mirror without re-rendering the scene.
+	//   DesktopMirrorEnabled=true/false
+	//   DesktopMirrorEye=right/left or 1/0
+	//   DesktopMirrorKeepAspect=true/false
+	//   DesktopMirrorLinearFilter=true/false
+	bool m_DesktopMirrorEnabled = true;
+	int  m_DesktopMirrorEye = 1; // 0 = left eye, 1 = right eye
+	bool m_DesktopMirrorKeepAspect = true;
+	bool m_DesktopMirrorLinearFilter = true;
+
+
 	bool m_FlashlightEnhancementEnabled = false;
 	bool m_FlashlightEnhancementApplied = false;
 	bool m_FlashlightEnhancementOriginalsCaptured = false;

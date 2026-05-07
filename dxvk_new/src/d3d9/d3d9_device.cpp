@@ -342,6 +342,206 @@ namespace dxvk {
 
             device->EndScene();
         }
+        static void VrResolveSurfaceToSubmit(
+            D3D9DeviceEx* device,
+            IDirect3DSurface9* source,
+            IDirect3DSurface9* submitTarget) {
+            if (!device || !source || !submitTarget || source == submitTarget)
+                return;
+
+            HRESULT resolveResult = device->StretchRect(source, nullptr, submitTarget, nullptr, D3DTEXF_NONE);
+            if (FAILED(resolveResult))
+                Logger::warn(str::format("VR eye MSAA resolve to submit texture failed: 0x", std::hex, resolveResult));
+        }
+
+        static RECT VrComputeDesktopMirrorDestRect(
+            const D3DSURFACE_DESC& sourceDesc,
+            const D3DSURFACE_DESC& backBufferDesc,
+            bool keepAspect) {
+            RECT dst{};
+            dst.left = 0;
+            dst.top = 0;
+            dst.right = static_cast<LONG>(backBufferDesc.Width);
+            dst.bottom = static_cast<LONG>(backBufferDesc.Height);
+
+            if (!keepAspect || sourceDesc.Width == 0 || sourceDesc.Height == 0 ||
+                backBufferDesc.Width == 0 || backBufferDesc.Height == 0)
+                return dst;
+
+            const double srcAspect = static_cast<double>(sourceDesc.Width) / static_cast<double>(sourceDesc.Height);
+            const double dstAspect = static_cast<double>(backBufferDesc.Width) / static_cast<double>(backBufferDesc.Height);
+            if (!std::isfinite(srcAspect) || !std::isfinite(dstAspect) || srcAspect <= 0.0 || dstAspect <= 0.0)
+                return dst;
+
+            if (dstAspect > srcAspect) {
+                const LONG width = static_cast<LONG>(std::lround(static_cast<double>(backBufferDesc.Height) * srcAspect));
+                dst.left = (static_cast<LONG>(backBufferDesc.Width) - width) / 2;
+                dst.right = dst.left + width;
+            }
+            else if (dstAspect < srcAspect) {
+                const LONG height = static_cast<LONG>(std::lround(static_cast<double>(backBufferDesc.Width) / srcAspect));
+                dst.top = (static_cast<LONG>(backBufferDesc.Height) - height) / 2;
+                dst.bottom = dst.top + height;
+            }
+
+            return dst;
+        }
+
+        struct VrDesktopHudVertex {
+            float x;
+            float y;
+            float z;
+            float rhw;
+            float u;
+            float v;
+        };
+
+        static void VrDrawNativeHudToDesktopBackBuffer(
+            D3D9DeviceEx* device,
+            IDirect3DSurface9* backBuffer,
+            IDirect3DSurface9* hudSurface,
+            const D3DSURFACE_DESC& backBufferDesc) {
+            if (!device || !backBuffer || !hudSurface || backBufferDesc.Width == 0 || backBufferDesc.Height == 0)
+                return;
+
+            D3DSURFACE_DESC hudDesc{};
+            if (FAILED(hudSurface->GetDesc(&hudDesc)) || hudDesc.Width == 0 || hudDesc.Height == 0)
+                return;
+
+            IDirect3DTexture9* hudTexture = nullptr;
+            if (FAILED(hudSurface->GetContainer(__uuidof(IDirect3DTexture9), reinterpret_cast<void**>(&hudTexture))) || !hudTexture)
+                return;
+
+            if (FAILED(device->BeginScene())) {
+                hudTexture->Release();
+                return;
+            }
+
+            IDirect3DStateBlock9* stateBlock = nullptr;
+            if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &stateBlock))) {
+                device->EndScene();
+                hudTexture->Release();
+                return;
+            }
+
+            IDirect3DSurface9* oldRenderTarget = nullptr;
+            device->GetRenderTarget(0, &oldRenderTarget);
+
+            D3DVIEWPORT9 oldViewport{};
+            const bool hasOldViewport = SUCCEEDED(device->GetViewport(&oldViewport));
+
+            D3DVIEWPORT9 viewport{};
+            viewport.X = 0;
+            viewport.Y = 0;
+            viewport.Width = backBufferDesc.Width;
+            viewport.Height = backBufferDesc.Height;
+            viewport.MinZ = 0.0f;
+            viewport.MaxZ = 1.0f;
+
+            device->SetRenderTarget(0, backBuffer);
+            device->SetViewport(&viewport);
+            device->SetVertexShader(nullptr);
+            device->SetPixelShader(nullptr);
+            device->SetTexture(0, hudTexture);
+            device->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
+            device->SetRenderState(D3DRS_LIGHTING, FALSE);
+            device->SetRenderState(D3DRS_FOGENABLE, FALSE);
+            device->SetRenderState(D3DRS_ZENABLE, FALSE);
+            device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+            device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+            device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+            device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+            device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+            device->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+            device->SetRenderState(D3DRS_COLORWRITEENABLE,
+                D3DCOLORWRITEENABLE_RED |
+                D3DCOLORWRITEENABLE_GREEN |
+                D3DCOLORWRITEENABLE_BLUE |
+                D3DCOLORWRITEENABLE_ALPHA);
+            device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+            device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+            device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+            device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+            device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+            device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+            device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+            device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+            device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+            device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+            device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+
+            // Keep the native Source/VGUI HUD in desktop coordinates.  The eye mirror may
+            // use letterboxing, but the HUD texture was rendered as a 2D desktop panel.
+            const float left = 0.0f;
+            const float top = 0.0f;
+            const float right = static_cast<float>(backBufferDesc.Width);
+            const float bottom = static_cast<float>(backBufferDesc.Height);
+
+            const VrDesktopHudVertex vertices[4] = {
+                { left,  top,    0.0f, 1.0f, 0.0f, 0.0f },
+                { right, top,    0.0f, 1.0f, 1.0f, 0.0f },
+                { left,  bottom, 0.0f, 1.0f, 0.0f, 1.0f },
+                { right, bottom, 0.0f, 1.0f, 1.0f, 1.0f },
+            };
+            device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, vertices, sizeof(VrDesktopHudVertex));
+
+            if (stateBlock) {
+                stateBlock->Apply();
+                stateBlock->Release();
+            }
+
+            if (oldRenderTarget) {
+                device->SetRenderTarget(0, oldRenderTarget);
+                oldRenderTarget->Release();
+            }
+
+            if (hasOldViewport)
+                device->SetViewport(&oldViewport);
+
+            device->EndScene();
+            hudTexture->Release();
+        }
+
+        static void VrMirrorEyeToDesktopBackBuffer(D3D9DeviceEx* device, VR* vr) {
+            if (!device || !vr || !vr->m_DesktopMirrorEnabled)
+                return;
+
+            IDirect3DSurface9* source = nullptr;
+            if (vr->m_DesktopMirrorEye == 0)
+                source = vr->m_D9LeftEyeSubmitSurface ? vr->m_D9LeftEyeSubmitSurface : vr->m_D9LeftEyeSurface;
+            else
+                source = vr->m_D9RightEyeSubmitSurface ? vr->m_D9RightEyeSubmitSurface : vr->m_D9RightEyeSurface;
+
+            if (!source)
+                return;
+
+            IDirect3DSurface9* backBuffer = nullptr;
+            HRESULT hr = device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backBuffer);
+            if (FAILED(hr) || !backBuffer)
+                return;
+
+            D3DSURFACE_DESC sourceDesc{};
+            D3DSURFACE_DESC backBufferDesc{};
+            const bool haveSourceDesc = SUCCEEDED(source->GetDesc(&sourceDesc));
+            const bool haveBackBufferDesc = SUCCEEDED(backBuffer->GetDesc(&backBufferDesc));
+
+            const RECT dstRect = (haveSourceDesc && haveBackBufferDesc)
+                ? VrComputeDesktopMirrorDestRect(sourceDesc, backBufferDesc, vr->m_DesktopMirrorKeepAspect)
+                : RECT{ 0, 0, 0, 0 };
+
+            const RECT* dstRectPtr = (dstRect.right > dstRect.left && dstRect.bottom > dstRect.top) ? &dstRect : nullptr;
+            const D3DTEXTUREFILTERTYPE filter = vr->m_DesktopMirrorLinearFilter ? D3DTEXF_LINEAR : D3DTEXF_NONE;
+            hr = device->StretchRect(source, nullptr, backBuffer, dstRectPtr, filter);
+            if (FAILED(hr) && filter != D3DTEXF_NONE)
+                hr = device->StretchRect(source, nullptr, backBuffer, dstRectPtr, D3DTEXF_NONE);
+
+            if (FAILED(hr))
+                Logger::warn(str::format("VR desktop mirror StretchRect failed: 0x", std::hex, hr));
+            else if (haveBackBufferDesc && vr->m_D9HUDSurface)
+                VrDrawNativeHudToDesktopBackBuffer(device, backBuffer, vr->m_D9HUDSurface, backBufferDesc);
+
+            backBuffer->Release();
+        }
 
     }
 
@@ -4498,13 +4698,6 @@ namespace dxvk {
             }
         }
 
-        HRESULT result = m_implicitSwapchain->Present(
-            pSourceRect,
-            pDestRect,
-            hDestWindowOverride,
-            pDirtyRegion,
-            dwFlags);
-
         if (g_Game && g_Game->m_VR && g_Game->m_VR->m_CreatedVRTextures) {
             VR* vr = g_Game->m_VR;
             const bool inGame = (g_Game->m_EngineClient && g_Game->m_EngineClient->IsInGame());
@@ -4536,6 +4729,38 @@ namespace dxvk {
                 if (completed > submitted)
                     vr->m_QueuedSubmitStaleStreak.store(0, std::memory_order_release);
             }
+            // The desktop swapchain is presented below. Do all eye-surface resolve and optional
+            // right/left-eye desktop mirroring before Present(), otherwise the window shows the old
+            // backbuffer for this frame.
+            if (!inGame) {
+                vr->ClearD3DAimLineOverlay();
+            }
+            else if (vr->m_D3DAimLineOverlayEnabled && !queued) {
+                if (vr->m_D9LeftEyeSurface)
+                    VrAimLineDrawOverlayToSurface(this, vr, 0, vr->m_D9LeftEyeSurface);
+                if (vr->m_D9RightEyeSurface)
+                    VrAimLineDrawOverlayToSurface(this, vr, 1, vr->m_D9RightEyeSurface);
+            }
+
+            if (vr->m_D9LeftEyeSubmitSurface)
+                VrResolveSurfaceToSubmit(this, vr->m_D9LeftEyeSurface, vr->m_D9LeftEyeSubmitSurface);
+            if (vr->m_D9RightEyeSubmitSurface)
+                VrResolveSurfaceToSubmit(this, vr->m_D9RightEyeSurface, vr->m_D9RightEyeSubmitSurface);
+
+            VrMirrorEyeToDesktopBackBuffer(this, vr);
+        }
+
+        HRESULT result = m_implicitSwapchain->Present(
+            pSourceRect,
+            pDestRect,
+            hDestWindowOverride,
+            pDirtyRegion,
+            dwFlags);
+
+        if (g_Game && g_Game->m_VR && g_Game->m_VR->m_CreatedVRTextures) {
+            VR* vr = g_Game->m_VR;
+            const bool inGame = (g_Game->m_EngineClient && g_Game->m_EngineClient->IsInGame());
+            const bool queued = (g_Game->GetMatQueueMode() != 0);
 
             if (vr->m_RenderPipelineDebugLog) {
                 static DWORD s_lastRenderPipelinePresentLogMs = 0;
@@ -4560,30 +4785,6 @@ namespace dxvk {
                         static_cast<unsigned long>(dwFlags));
                 }
             }
-
-            auto resolveVrSurfaceToSubmit = [this](IDirect3DSurface9* source, IDirect3DSurface9* submitTarget) {
-                if (source == nullptr || submitTarget == nullptr || source == submitTarget)
-                    return;
-
-                HRESULT resolveResult = StretchRect(source, nullptr, submitTarget, nullptr, D3DTEXF_NONE);
-                if (FAILED(resolveResult))
-                    Logger::warn(str::format("VR eye MSAA resolve to submit texture failed: 0x", std::hex, resolveResult));
-                };
-
-            if (!inGame) {
-                vr->ClearD3DAimLineOverlay();
-            }
-            else if (vr->m_D3DAimLineOverlayEnabled && !queued) {
-                if (vr->m_D9LeftEyeSurface)
-                    VrAimLineDrawOverlayToSurface(this, vr, 0, vr->m_D9LeftEyeSurface);
-                if (vr->m_D9RightEyeSurface)
-                    VrAimLineDrawOverlayToSurface(this, vr, 1, vr->m_D9RightEyeSurface);
-            }
-
-            if (vr->m_D9LeftEyeSubmitSurface)
-                resolveVrSurfaceToSubmit(vr->m_D9LeftEyeSurface, vr->m_D9LeftEyeSubmitSurface);
-            if (vr->m_D9RightEyeSubmitSurface)
-                resolveVrSurfaceToSubmit(vr->m_D9RightEyeSurface, vr->m_D9RightEyeSubmitSurface);
         }
 
         // Keep conservative sync behavior for stability.

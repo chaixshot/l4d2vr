@@ -1486,6 +1486,19 @@ void VR::ParseConfigFile()
     m_ItemModelLabelQueuedTextScale = std::clamp(getFloat("ItemModelLabelQueuedTextScale", m_ItemModelLabelQueuedTextScale), 0.25f, 4.0f);
     m_ItemModelLabelMaxDistance = std::max(0.0f, getFloat("ItemModelLabelMaxDistance", m_ItemModelLabelMaxDistance));
     m_ItemModelLabelMaxVisiblePerEye = std::clamp(getInt("ItemModelLabelMaxVisiblePerEye", m_ItemModelLabelMaxVisiblePerEye), 1, 64);
+    m_DesktopMirrorEnabled = getBool("DesktopMirrorEnabled", m_DesktopMirrorEnabled);
+    {
+        std::string eye = getString("DesktopMirrorEye", m_DesktopMirrorEye == 0 ? "left" : "right");
+        std::transform(eye.begin(), eye.end(), eye.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+            });
+        if (eye == "left" || eye == "0")
+            m_DesktopMirrorEye = 0;
+        else if (eye == "right" || eye == "1")
+            m_DesktopMirrorEye = 1;
+    }
+    m_DesktopMirrorKeepAspect = getBool("DesktopMirrorKeepAspect", m_DesktopMirrorKeepAspect);
+    m_DesktopMirrorLinearFilter = getBool("DesktopMirrorLinearFilter", m_DesktopMirrorLinearFilter);
     m_ItemModelLabelQueuedMaxVisiblePerEye = std::clamp(getInt("ItemModelLabelQueuedMaxVisiblePerEye", m_ItemModelLabelQueuedMaxVisiblePerEye), 1, 16);
     m_ItemModelLabelQueuedMaxChars = std::clamp(getInt("ItemModelLabelQueuedMaxChars", m_ItemModelLabelQueuedMaxChars), 4, 32);
     m_ItemModelLabelPlayerSuppressRadius = std::max(0.0f, getFloat("ItemModelLabelPlayerSuppressRadius", m_ItemModelLabelPlayerSuppressRadius));
