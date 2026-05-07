@@ -502,6 +502,22 @@ namespace dxvk {
             hudTexture->Release();
         }
 
+        static bool VrShouldCompositeNativeHudToDesktop(const VR* vr) {
+            if (!vr || !vr->m_Game || !vr->m_Game->m_EngineClient)
+                return true;
+
+            const bool inGame = vr->m_Game->m_EngineClient->IsInGame();
+            const bool isPaused = vr->m_Game->m_EngineClient->IsPaused();
+            // Keep this matched with Hooks::dVGui_Paint().  In live gameplay we suppress
+            // Source's normal VGUI/backbuffer path and use the captured native HUD texture
+            // for the desktop mirror.  Chat is still live gameplay: if we stop compositing
+            // just because the chat/cursor path is active, the desktop mirror loses both the
+            // chat box and the normal HUD.
+            // Pause/menu paths are allowed to use Source's normal path, so don't add a second
+            // desktop HUD layer there.
+            return inGame && !isPaused;
+        }
+
         static void VrMirrorEyeToDesktopBackBuffer(D3D9DeviceEx* device, VR* vr) {
             if (!device || !vr || !vr->m_DesktopMirrorEnabled)
                 return;
@@ -537,7 +553,7 @@ namespace dxvk {
 
             if (FAILED(hr))
                 Logger::warn(str::format("VR desktop mirror StretchRect failed: 0x", std::hex, hr));
-            else if (haveBackBufferDesc && vr->m_D9HUDSurface)
+            else if (haveBackBufferDesc && vr->m_D9HUDSurface && VrShouldCompositeNativeHudToDesktop(vr))
                 VrDrawNativeHudToDesktopBackBuffer(device, backBuffer, vr->m_D9HUDSurface, backBufferDesc);
 
             backBuffer->Release();

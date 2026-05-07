@@ -991,7 +991,11 @@ void Hooks::dVGui_Paint(void* ecx, void* edx, int mode)
     const bool inGame = m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame();
     const bool isPaused = m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsPaused();
     const bool cursorVisible = (m_Game && m_Game->m_VguiSurface) ? m_Game->m_VguiSurface->IsCursorVisible() : false;
-    const bool allowBackbufferVgui = !inGame || isPaused || cursorVisible;
+    // In-game chat/cursor VGUI must still be captured into the HUD texture instead of being
+    // allowed to draw through the normal backbuffer/eye path.  Otherwise the desktop mirror
+    // either gets a duplicate HUD layer or loses the chat box when the mirror skips its HUD
+    // composite.  Pause/menu is the only in-game path that still uses Source's normal VGUI path.
+    const bool allowBackbufferVgui = !inGame || isPaused;
 
     if (m_VR->m_RenderPipelineDebugLog)
     {
