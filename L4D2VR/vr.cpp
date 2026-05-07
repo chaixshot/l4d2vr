@@ -7954,7 +7954,9 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
 
     size_t maxProjectedItemLabelsPerEye = static_cast<size_t>(std::clamp(m_ItemModelLabelMaxVisiblePerEye, 1, 64));
     if (queueMode != 0)
-        maxProjectedItemLabelsPerEye = (std::min)(maxProjectedItemLabelsPerEye, static_cast<size_t>(4));
+        maxProjectedItemLabelsPerEye = (std::min)(
+            maxProjectedItemLabelsPerEye,
+            static_cast<size_t>(std::clamp(m_ItemModelLabelQueuedMaxVisiblePerEye, 1, 16)));
     if (visibleLabels.size() > maxProjectedItemLabelsPerEye)
         visibleLabels.resize(maxProjectedItemLabelsPerEye);
 
@@ -7995,7 +7997,9 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
             const float worldTextHeight = 8.5f * textScale;
             const float cellSize = worldTextHeight / 7.0f;
             const float charAdvance = cellSize * 6.0f;
-            const size_t charCount = visible.label->label.size();
+            const std::string& fullText = visible.label->label;
+            const size_t maxChars = static_cast<size_t>(std::clamp(m_ItemModelLabelQueuedMaxChars, 4, 32));
+            const size_t charCount = (std::min)(fullText.size(), maxChars);
             if (charCount == 0)
                 continue;
 
@@ -8006,8 +8010,9 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
                 + glyphUp * (worldTextHeight * 0.5f);
 
             float penX = 0.0f;
-            for (char ch : visible.label->label)
+            for (size_t charIndex = 0; charIndex < charCount; ++charIndex)
             {
+                const char ch = fullText[charIndex];
                 const unsigned char* rows = QueuedGlyph5x7(ch);
                 for (int yy = 0; yy < 7; ++yy)
                 {

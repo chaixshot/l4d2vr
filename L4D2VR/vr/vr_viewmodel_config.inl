@@ -1458,6 +1458,8 @@ void VR::ParseConfigFile()
     m_ItemModelLabelQueuedTextScale = std::clamp(getFloat("ItemModelLabelQueuedTextScale", m_ItemModelLabelQueuedTextScale), 0.25f, 4.0f);
     m_ItemModelLabelMaxDistance = std::max(0.0f, getFloat("ItemModelLabelMaxDistance", m_ItemModelLabelMaxDistance));
     m_ItemModelLabelMaxVisiblePerEye = std::clamp(getInt("ItemModelLabelMaxVisiblePerEye", m_ItemModelLabelMaxVisiblePerEye), 1, 64);
+    m_ItemModelLabelQueuedMaxVisiblePerEye = std::clamp(getInt("ItemModelLabelQueuedMaxVisiblePerEye", m_ItemModelLabelQueuedMaxVisiblePerEye), 1, 16);
+    m_ItemModelLabelQueuedMaxChars = std::clamp(getInt("ItemModelLabelQueuedMaxChars", m_ItemModelLabelQueuedMaxChars), 4, 32);
     m_ItemModelLabelPlayerSuppressRadius = std::max(0.0f, getFloat("ItemModelLabelPlayerSuppressRadius", m_ItemModelLabelPlayerSuppressRadius));
     m_ItemModelLabelPlayerSuppressMinZ = getFloat("ItemModelLabelPlayerSuppressMinZ", m_ItemModelLabelPlayerSuppressMinZ);
     m_ItemModelLabelPlayerSuppressMaxZ = getFloat("ItemModelLabelPlayerSuppressMaxZ", m_ItemModelLabelPlayerSuppressMaxZ);

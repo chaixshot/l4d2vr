@@ -2012,6 +2012,8 @@ public:
 	float m_ItemModelLabelQueuedTextScale = 1.0f;
 	float m_ItemModelLabelMaxDistance = 4096.0f;
 	int m_ItemModelLabelMaxVisiblePerEye = 18;
+	int m_ItemModelLabelQueuedMaxVisiblePerEye = 3;
+	int m_ItemModelLabelQueuedMaxChars = 12;
 	float m_ItemModelLabelPlayerSuppressRadius = 96.0f;
 	float m_ItemModelLabelPlayerSuppressMinZ = -32.0f;
 	float m_ItemModelLabelPlayerSuppressMaxZ = 128.0f;

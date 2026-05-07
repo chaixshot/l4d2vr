@@ -140,6 +140,27 @@ namespace
 
         return true;
     }
+
+    inline bool SafeScanItemModelLabelEntities(VR* vr)
+    {
+        if (!vr)
+            return false;
+
+#ifdef _MSC_VER
+        __try
+        {
+            vr->ScanItemModelLabelEntitiesFromClientList();
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+#else
+        vr->ScanItemModelLabelEntitiesFromClientList();
+        return true;
+#endif
+    }
 }
 
 void VR::ResetAutoFlashlightState()
@@ -654,6 +675,39 @@ void VR::Update()
             const int playerIndex = m_Game->m_EngineClient->GetLocalPlayer();
             localPlayer = (C_BasePlayer*)m_Game->GetClientEntity(playerIndex);
         }
+
+        {
+            static bool s_itemLabelHadStableLocalPlayer = false;
+            static std::chrono::steady_clock::time_point s_itemLabelScanReadyAt{};
+            const auto now = std::chrono::steady_clock::now();
+
+            if (!m_ItemModelLabelEnabled || !localPlayer)
+            {
+                s_itemLabelHadStableLocalPlayer = false;
+                s_itemLabelScanReadyAt = {};
+                if (!m_ItemModelLabelEnabled)
+                    m_ProjectedItemLabels.clear();
+            }
+            else
+            {
+                if (!s_itemLabelHadStableLocalPlayer)
+                {
+                    s_itemLabelHadStableLocalPlayer = true;
+                    s_itemLabelScanReadyAt = now + std::chrono::seconds(3);
+                }
+
+                if (s_itemLabelScanReadyAt.time_since_epoch().count() != 0 && now >= s_itemLabelScanReadyAt)
+                {
+                    if (!SafeScanItemModelLabelEntities(this))
+                    {
+                        m_ProjectedItemLabels.clear();
+                        s_itemLabelHadStableLocalPlayer = false;
+                        s_itemLabelScanReadyAt = now + std::chrono::seconds(3);
+                    }
+                }
+            }
+        }
+
         UpdateAutoFlashlight(localPlayer);
     }
 

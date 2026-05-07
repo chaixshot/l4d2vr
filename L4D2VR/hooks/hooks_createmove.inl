@@ -1,24 +1,3 @@
-namespace
-{
-	static C_BaseEntity* HooksCreateMoveSafeGetClientEntity(Game* game, int entityIndex)
-	{
-		if (!game || !game->m_ClientEntityList || entityIndex <= 0 || entityIndex > 2048)
-			return nullptr;
-#ifdef _MSC_VER
-		__try
-		{
-			return game->GetClientEntity(entityIndex);
-		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-			return nullptr;
-		}
-#else
-		return game->GetClientEntity(entityIndex);
-#endif
-	}
-}
-
 bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime, CUserCmd* cmd)
 {
 	// When returning from spectator/observer back to a live player entity ("rescued"),
@@ -79,40 +58,6 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 	bool result = hkCreateMove.fOriginal(ecx, flInputSampleTime, cmd);
 
 	m_VR->m_EffectiveAttackRangeAutoFireActive = false;
-
-	{
-		static bool s_itemLabelWasInGame = false;
-		static std::chrono::steady_clock::time_point s_itemLabelScanReadyAt{};
-		const auto now = std::chrono::steady_clock::now();
-		const bool inGame = m_VR && m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame();
-
-		if (!inGame || !m_VR->m_ItemModelLabelEnabled)
-		{
-			s_itemLabelWasInGame = false;
-			s_itemLabelScanReadyAt = {};
-		}
-		else
-		{
-			const int localPlayerIndex = m_Game->m_EngineClient->GetLocalPlayer();
-			C_BaseEntity* localPlayer = HooksCreateMoveSafeGetClientEntity(m_Game, localPlayerIndex);
-			if (!localPlayer)
-			{
-				s_itemLabelWasInGame = false;
-				s_itemLabelScanReadyAt = {};
-			}
-			else
-			{
-				if (!s_itemLabelWasInGame)
-				{
-					s_itemLabelWasInGame = true;
-					s_itemLabelScanReadyAt = now + std::chrono::seconds(3);
-				}
-
-				if (s_itemLabelScanReadyAt.time_since_epoch().count() != 0 && now >= s_itemLabelScanReadyAt)
-					m_VR->ScanItemModelLabelEntitiesFromClientList();
-			}
-		}
-	}
 
 	auto resetEffectiveRangeMeleeCycle = [&]()
 		{
