@@ -634,6 +634,23 @@ void VR::ParseConfigFile()
         return value.empty() ? defVal : value;
         };
 
+    auto getStringList = [&](const char* k, const char separator = ',')->std::vector<std::string> {
+        std::vector<std::string> values;
+        auto it = userConfig.find(k);
+        if (it == userConfig.end() || it->second.empty())
+            return values;
+
+        std::stringstream ss(it->second);
+        std::string token;
+        while (std::getline(ss, token, separator))
+        {
+            trim(token);
+            if (!token.empty())
+                values.push_back(token);
+        }
+        return values;
+        };
+
     const std::string injectedCmd = getString("cmd", getString("Cmd", ""));
     if (!injectedCmd.empty())
     {
@@ -1452,6 +1469,17 @@ void VR::ParseConfigFile()
     m_ItemModelLabelShowThrowables = getBool("ItemModelLabelShowThrowables", m_ItemModelLabelShowThrowables);
     m_ItemModelLabelShowMedical = getBool("ItemModelLabelShowMedical", m_ItemModelLabelShowMedical);
     m_ItemModelLabelDebugLog = getBool("ItemModelLabelDebugLog", m_ItemModelLabelDebugLog);
+    m_ItemModelLabelBlacklist.clear();
+    for (std::string token : getStringList("ItemModelLabelBlacklist"))
+    {
+        std::transform(token.begin(), token.end(), token.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (!token.empty())
+            m_ItemModelLabelBlacklist.insert(token);
+    }
+    // Drop stale projected labels when config is reloaded so newly blacklisted text disappears immediately.
+    m_ProjectedItemLabels.clear();
+    m_LastItemModelLabelTime.clear();
     m_ItemModelLabelMaxHz = std::max(0.0f, getFloat("ItemModelLabelMaxHz", m_ItemModelLabelMaxHz));
     m_ItemModelLabelScanHz = std::clamp(getFloat("ItemModelLabelScanHz", m_ItemModelLabelScanHz), 1.0f, 60.0f);
     m_ItemModelLabelTextScale = std::clamp(getFloat("ItemModelLabelTextScale", m_ItemModelLabelTextScale), 0.25f, 4.0f);

@@ -2006,6 +2006,9 @@ public:
 	bool m_ItemModelLabelShowThrowables = true;
 	bool m_ItemModelLabelShowMedical = true;
 	bool m_ItemModelLabelDebugLog = false;
+	// Comma-separated exact display-text blacklist parsed from ItemModelLabelBlacklist.
+	// Tokens are trimmed and compared case-insensitively for ASCII text.
+	std::unordered_set<std::string> m_ItemModelLabelBlacklist{};
 	float m_ItemModelLabelMaxHz = 60.0f;
 	float m_ItemModelLabelScanHz = 6.0f;
 	float m_ItemModelLabelTextScale = 1.0f;
@@ -2394,6 +2397,7 @@ public:
 	SpecialInfectedType GetSpecialInfectedType(const C_BaseEntity* entity) const;
 	SpecialInfectedType GetSpecialInfectedTypeFromModel(const std::string& modelName) const;
 	bool TryGetItemModelLabelInfo(const std::string& modelName, ItemModelLabelInfo& out) const;
+	bool IsItemModelLabelBlacklisted(const std::string& label) const;
 	bool IsEntityAlive(const C_BaseEntity* entity) const;
 	void DrawSpecialInfectedArrow(const Vector& origin, SpecialInfectedType type);
 	void DrawItemModelLabel(int entityIndex, const std::string& modelName, const Vector& modelOrigin, const C_BaseEntity* entity, const char* className);
