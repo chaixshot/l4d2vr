@@ -169,6 +169,42 @@ namespace
     std::mutex s_TrackedConVarTraceMutex;
     std::unordered_map<std::string, std::chrono::steady_clock::time_point> s_TrackedConVarTraceLastLog;
 
+    C_BaseEntity* HooksSafeGetClientEntity(Game* game, int entityIndex)
+    {
+        if (!game || !game->m_ClientEntityList || entityIndex <= 0 || entityIndex > 2048)
+            return nullptr;
+#ifdef _MSC_VER
+        __try
+        {
+            return game->GetClientEntity(entityIndex);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return nullptr;
+        }
+#else
+        return game->GetClientEntity(entityIndex);
+#endif
+    }
+
+    const char* HooksSafeGetNetworkClassName(Game* game, C_BaseEntity* entity)
+    {
+        if (!game || !entity)
+            return nullptr;
+#ifdef _MSC_VER
+        __try
+        {
+            return game->GetNetworkClassName(reinterpret_cast<uintptr_t*>(entity));
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return nullptr;
+        }
+#else
+        return game->GetNetworkClassName(reinterpret_cast<uintptr_t*>(entity));
+#endif
+    }
+
     inline bool ShouldThrottleTrackedConVarTrace(const std::string& key, float maxHz = 5.0f)
     {
         if (key.empty() || maxHz <= 0.0f)
@@ -353,23 +389,21 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 	{
 		modelName = m_Game->m_ModelInfo->GetModelName(info.pModel);
 		m_VR->ScanSpecialInfectedEntitiesFromClientList();
-		m_VR->ScanItemModelLabelEntitiesFromClientList();
 
 		const C_BaseEntity* entity = nullptr;
-		if (m_Game->m_ClientEntityList && info.entity_index > 0)
+		if (m_Game->m_ClientEntityList && info.entity_index > 0 && info.entity_index <= 2048)
 		{
-			const int maxEntityIndex = m_Game->m_ClientEntityList->GetHighestEntityIndex();
-			if (info.entity_index <= maxEntityIndex)
-				entity = m_Game->GetClientEntity(info.entity_index);
+			entity = HooksSafeGetClientEntity(m_Game, info.entity_index);
 		}
 		bool isPlayerClass = false;
 		const char* className = nullptr;
 		if (entity)
 		{
-			className = m_Game->GetNetworkClassName(reinterpret_cast<uintptr_t*>(const_cast<C_BaseEntity*>(entity)));
+			className = HooksSafeGetNetworkClassName(m_Game, const_cast<C_BaseEntity*>(entity));
 			isPlayerClass = className && (std::strcmp(className, "CTerrorPlayer") == 0 || std::strcmp(className, "C_TerrorPlayer") == 0);
 		}
-		m_VR->DrawItemModelLabel(info.entity_index, modelName, info.origin, entity, className);
+		if (info.entity_index == -1 || (info.entity_index > 0 && info.entity_index <= 2048))
+			m_VR->DrawItemModelLabel(info.entity_index, modelName, info.origin, entity, className);
 		// Scope RTT pass: optionally hide the local player model so scoped view isn't blocked by your own head/body.
 		if (m_VR->m_ScopeRenderingPass && m_VR->m_ScopeHideLocalPlayerModelInScope && isPlayerClass && m_Game->m_EngineClient)
 		{

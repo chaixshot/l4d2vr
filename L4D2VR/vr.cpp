@@ -7823,12 +7823,13 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
         return;
 
     const auto now = std::chrono::steady_clock::now();
-    const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
     if (!m_ItemModelLabelEnabled || !m_Game || !m_Game->m_EngineClient || !m_Game->m_EngineClient->IsInGame())
     {
         m_ProjectedItemLabels.clear();
         return;
     }
+
+    const int queueMode = m_Game->GetMatQueueMode();
 
     const float holdSeconds = GetProjectedItemLabelHoldSeconds(this);
     for (auto it = m_ProjectedItemLabels.begin(); it != m_ProjectedItemLabels.end();)
