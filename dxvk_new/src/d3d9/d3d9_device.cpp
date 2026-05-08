@@ -1076,10 +1076,11 @@ namespace dxvk {
 
 
     HRESULT STDMETHODCALLTYPE D3D9DeviceEx::Reset(D3DPRESENT_PARAMETERS* pPresentationParameters) {
-        if (pPresentationParameters != nullptr && g_Game && g_Game->m_VR) {
-            pPresentationParameters->BackBufferWidth = g_Game->m_VR->m_RenderWidth;
-            pPresentationParameters->BackBufferHeight = g_Game->m_VR->m_RenderHeight;
-        }
+        // Source applies video settings through IDirect3DDevice9::Reset.  The desktop
+        // swapchain must keep the game's requested size; VR eye render targets are
+        // separate textures and are recreated after the reset.
+        if (g_Game && g_Game->m_VR)
+            g_Game->m_VR->ReleaseVRRenderTargetsForDeviceReset();
 
         D3D9DeviceLock lock = LockDevice();
 
@@ -1123,10 +1124,18 @@ namespace dxvk {
           * This matches what Windows D3D9 does.
         */
         if (unlikely(m_losableResourceCounter.load() != 0 && !IsExtended() && m_d3d9Options.countLosableResources)) {
-            Logger::warn(str::format("Device reset failed because device still has alive losable resources: Device not reset. Remaining resources: ", m_losableResourceCounter.load()));
-            m_deviceLostState = D3D9DeviceLostState::NotReset;
-            // D3D8 returns D3DERR_DEVICELOST here, whereas D3D9 returns D3DERR_INVALIDCALL.
-            return m_isD3D8Compatible ? D3DERR_DEVICELOST : D3DERR_INVALIDCALL;
+            const uint32_t remainingLosableResources = m_losableResourceCounter.load();
+            if (g_Game && g_Game->m_VR) {
+                Logger::warn(str::format(
+                    "Device reset continuing after L4D2VR texture cleanup despite remaining losable resources: ",
+                    remainingLosableResources));
+            }
+            else {
+                Logger::warn(str::format("Device reset failed because device still has alive losable resources: Device not reset. Remaining resources: ", remainingLosableResources));
+                m_deviceLostState = D3D9DeviceLostState::NotReset;
+                // D3D8 returns D3DERR_DEVICELOST here, whereas D3D9 returns D3DERR_INVALIDCALL.
+                return m_isD3D8Compatible ? D3DERR_DEVICELOST : D3DERR_INVALIDCALL;
+            }
         }
 
         hr = ResetSwapChain(pPresentationParameters, nullptr);
@@ -1151,6 +1160,9 @@ namespace dxvk {
 
         if (m_d3d9Options.deferSurfaceCreation)
             m_resetCtr++;
+
+        if (g_Game && g_Game->m_VR)
+            g_Game->m_VR->RefreshBackBufferTexture(true);
 
         return D3D_OK;
     }
@@ -5059,11 +5071,17 @@ namespace dxvk {
     HRESULT STDMETHODCALLTYPE D3D9DeviceEx::ResetEx(
         D3DPRESENT_PARAMETERS* pPresentationParameters,
         D3DDISPLAYMODEEX* pFullscreenDisplayMode) {
+        if (g_Game && g_Game->m_VR)
+            g_Game->m_VR->ReleaseVRRenderTargetsForDeviceReset();
+
         D3D9DeviceLock lock = LockDevice();
 
         HRESULT hr = ResetSwapChain(pPresentationParameters, pFullscreenDisplayMode);
         if (FAILED(hr))
             return hr;
+
+        if (g_Game && g_Game->m_VR)
+            g_Game->m_VR->RefreshBackBufferTexture(true);
 
         return D3D_OK;
     }

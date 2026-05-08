@@ -628,23 +628,23 @@ public:
 		Texture_Blank
 	};
 
-	ITexture* m_LeftEyeTexture;
-	ITexture* m_RightEyeTexture;
+	ITexture* m_LeftEyeTexture = nullptr;
+	ITexture* m_RightEyeTexture = nullptr;
 	ITexture* m_LeftEyeSubmitTexture = nullptr;
 	ITexture* m_RightEyeSubmitTexture = nullptr;
-	ITexture* m_HUDTexture;
+	ITexture* m_HUDTexture = nullptr;
 	ITexture* m_ScopeTexture = nullptr;
 	ITexture* m_RearMirrorTexture = nullptr;
 	ITexture* m_BlankTexture = nullptr;
 
-	IDirect3DSurface9* m_D9LeftEyeSurface;
-	IDirect3DSurface9* m_D9RightEyeSurface;
+	IDirect3DSurface9* m_D9LeftEyeSurface = nullptr;
+	IDirect3DSurface9* m_D9RightEyeSurface = nullptr;
 	IDirect3DSurface9* m_D9LeftEyeSubmitSurface = nullptr;
 	IDirect3DSurface9* m_D9RightEyeSubmitSurface = nullptr;
-	IDirect3DSurface9* m_D9HUDSurface;
-	IDirect3DSurface9* m_D9ScopeSurface;
+	IDirect3DSurface9* m_D9HUDSurface = nullptr;
+	IDirect3DSurface9* m_D9ScopeSurface = nullptr;
 	IDirect3DSurface9* m_D9RearMirrorSurface = nullptr;
-	IDirect3DSurface9* m_D9BlankSurface;
+	IDirect3DSurface9* m_D9BlankSurface = nullptr;
 
 	SharedTextureHolder m_VKLeftEye;
 	SharedTextureHolder m_VKRightEye;
@@ -653,6 +653,7 @@ public:
 	SharedTextureHolder m_VKScope;
 	SharedTextureHolder m_VKRearMirror;
 	SharedTextureHolder m_VKBlankTexture;
+	bool m_BackBufferTextureValid = false;
 
 	// Protects VR texture lifecycle and SteamVR texture submissions when render/update threads overlap.
 	mutable TextureStateMutex m_TextureMutex;
@@ -1158,9 +1159,6 @@ public:
 	bool m_AutoMatQueueMode = false;
 	int  m_AutoMatQueueModeLastRequested = -999;
 	std::chrono::steady_clock::time_point m_AutoMatQueueModeLastCmdTime{};
-
-	// One-shot menu ConVar injection: apply launch-style visual defaults after the first main-menu entry.
-	bool m_MainMenuOneShotVisualCvarsInjected = false;
 
 	// Auto fps_max in main menu: set fps_max to match HMD refresh rate when VR is active.
 	bool m_MenuFpsMaxSent = false;
@@ -2207,6 +2205,8 @@ public:
 	void RestoreShadowEntityDefaults();
 	void ResetShadowEntityOverrideTracking();
 	void UpdateAutoMatQueueMode();
+	void ReleaseVRRenderTargetsForDeviceReset();
+	bool RefreshBackBufferTexture(bool forceRefresh = false);
 	void CreateVRTextures();
 	void EnsureOpticsRTTTextures();
 	void LogVAS(const char* tag);

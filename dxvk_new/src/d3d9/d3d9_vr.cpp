@@ -125,18 +125,21 @@ namespace dxvk {
       if (unlikely(backBufferData == nullptr))
         return D3DERR_INVALIDCALL;
 
-      IDirect3DSurface9* backBufferSurface;
+      IDirect3DSurface9* backBufferSurface = nullptr;
 
       HRESULT res = m_device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backBufferSurface);
-      if (FAILED(res))
-        return res;
+      if (FAILED(res) || backBufferSurface == nullptr)
+        return FAILED(res) ? res : D3DERR_INVALIDCALL;
 
-      D3D9_TEXTURE_VR_DESC textureDesc;
+      D3D9_TEXTURE_VR_DESC textureDesc = {};
 
-      GetVRDesc(backBufferSurface, &textureDesc);
+      res = GetVRDesc(backBufferSurface, &textureDesc);
 
       if (backBufferSurface != nullptr)
         backBufferSurface->Release();
+
+      if (FAILED(res))
+        return res;
 
       std::memcpy(&backBufferData->m_VulkanData, &textureDesc, sizeof(vr::VRVulkanTextureData_t));
       backBufferData->m_VRTexture.handle = &backBufferData->m_VulkanData;

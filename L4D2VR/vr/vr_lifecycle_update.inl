@@ -767,6 +767,110 @@ void VR::LogVAS(const char* tag)
         BytesToMiB(st.committed));
 }
 
+void VR::ReleaseVRRenderTargetsForDeviceReset()
+{
+    // D3D9 Reset requires all D3DPOOL_DEFAULT resources owned by the app to be released.
+    // The VR render targets are created through Source's material system, but DXVK still
+    // counts their backing D3D resources as reset-blocking default-pool resources.
+    std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
+
+    auto SafeReleaseD3D = [](auto*& ptr)
+        {
+            if (!ptr)
+                return;
+            ptr->Release();
+            ptr = nullptr;
+        };
+
+    auto SafeReleaseSourceTexture = [](ITexture*& ptr)
+        {
+            if (!ptr)
+                return;
+            ptr->Release();
+            ptr = nullptr;
+        };
+
+    m_CreatedVRTextures.store(false, std::memory_order_release);
+    m_MenuBlankSubmitted = false;
+    m_BackBufferTextureValid = false;
+    m_CreatingTextureID = Texture_None;
+
+    m_RenderCompletedFrameId.store(0, std::memory_order_release);
+    m_LastSubmittedFrameId.store(0, std::memory_order_release);
+    m_SubmitPoseToken.store(0, std::memory_order_release);
+    m_LastSubmittedPoseToken.store(0, std::memory_order_release);
+    m_SubmitInFlight.store(false, std::memory_order_release);
+    m_LastSubmittedCompositorFrameIndex.store(0, std::memory_order_release);
+    m_QueuedSubmitStaleStreak.store(0, std::memory_order_release);
+    m_RenderedNewFrame.store(false, std::memory_order_release);
+    m_RenderedHud.store(false, std::memory_order_release);
+    m_HudPaintedThisFrame.store(false, std::memory_order_release);
+
+    for (int eyeIndex = 0; eyeIndex < static_cast<int>(m_D3DAimLineOverlayBackupSurfaces.size()); ++eyeIndex)
+    {
+        m_D3DAimLineOverlayBackupValid[eyeIndex] = false;
+        SafeReleaseD3D(m_D3DAimLineOverlayBackupSurfaces[eyeIndex]);
+    }
+
+    DestroyHandHudWorldQuadTextures();
+    DestroyKillIndicatorOverlayTextures();
+    DestroyItemLabelOverlayTexture();
+
+    SafeReleaseD3D(m_D9LeftEyeSurface);
+    SafeReleaseD3D(m_D9RightEyeSurface);
+    SafeReleaseD3D(m_D9LeftEyeSubmitSurface);
+    SafeReleaseD3D(m_D9RightEyeSubmitSurface);
+    SafeReleaseD3D(m_D9HUDSurface);
+    SafeReleaseD3D(m_D9ScopeSurface);
+    SafeReleaseD3D(m_D9RearMirrorSurface);
+    SafeReleaseD3D(m_D9BlankSurface);
+
+    SafeReleaseSourceTexture(m_LeftEyeTexture);
+    SafeReleaseSourceTexture(m_RightEyeTexture);
+    SafeReleaseSourceTexture(m_LeftEyeSubmitTexture);
+    SafeReleaseSourceTexture(m_RightEyeSubmitTexture);
+    SafeReleaseSourceTexture(m_HUDTexture);
+    SafeReleaseSourceTexture(m_ScopeTexture);
+    SafeReleaseSourceTexture(m_RearMirrorTexture);
+    SafeReleaseSourceTexture(m_BlankTexture);
+
+    std::memset(&m_VKLeftEye, 0, sizeof(m_VKLeftEye));
+    std::memset(&m_VKRightEye, 0, sizeof(m_VKRightEye));
+    std::memset(&m_VKHUD, 0, sizeof(m_VKHUD));
+    std::memset(&m_VKScope, 0, sizeof(m_VKScope));
+    std::memset(&m_VKRearMirror, 0, sizeof(m_VKRearMirror));
+    std::memset(&m_VKBlankTexture, 0, sizeof(m_VKBlankTexture));
+    std::memset(&m_VKBackBuffer, 0, sizeof(m_VKBackBuffer));
+}
+
+bool VR::RefreshBackBufferTexture(bool forceRefresh)
+{
+    std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
+
+    if (!g_D3DVR9)
+        return false;
+
+    if (!forceRefresh && m_BackBufferTextureValid && m_VKBackBuffer.m_VRTexture.handle)
+        return true;
+
+    SharedTextureHolder refreshed{};
+    const HRESULT hr = g_D3DVR9->GetBackBufferData(&refreshed);
+    if (FAILED(hr) || !refreshed.m_VRTexture.handle)
+    {
+        m_BackBufferTextureValid = false;
+        std::memset(&m_VKBackBuffer, 0, sizeof(m_VKBackBuffer));
+        Game::logMsg("[VR][D3DReset] failed to refresh backbuffer VR texture hr=0x%08X", static_cast<unsigned int>(hr));
+        return false;
+    }
+
+    m_VKBackBuffer = refreshed;
+    // GetBackBufferData fills the handle with the address of the target holder.
+    // Copying through a temporary would otherwise leave a dangling handle.
+    m_VKBackBuffer.m_VRTexture.handle = &m_VKBackBuffer.m_VulkanData;
+    m_BackBufferTextureValid = true;
+    return true;
+}
+
 void VR::CreateVRTextures()
 {
     // CreateNamedRenderTargetTextureEx re-enters DXVK and populates m_VK* via m_CreatingTextureID.
@@ -775,9 +879,12 @@ void VR::CreateVRTextures()
     if (m_CreatedVRTextures.load(std::memory_order_acquire))
         return;
 
-    DestroyHandHudWorldQuadTextures();
-    DestroyKillIndicatorOverlayTextures();
-    DestroyItemLabelOverlayTexture();
+    // If a menu/video reset invalidated the textures, release the previous backing resources
+    // before creating replacements with the same render-target names.
+    ReleaseVRRenderTargetsForDeviceReset();
+
+    // ReleaseVRRenderTargetsForDeviceReset clears the flag while holding the same recursive
+    // texture mutex; keep creating the fresh textures in this call.
 
     LogVAS("before CreateVRTextures");
 
@@ -931,6 +1038,9 @@ void VR::SubmitVRTextures()
     // trips driver/runtime instability inside vrclient/vulkan.
     if (!renderedNewFrame && !inGame && m_MenuBlankSubmitted)
     {
+        if (!RefreshBackBufferTexture(false))
+            return;
+
         if (!vr::VROverlay()->IsOverlayVisible(m_MainMenuHandle))
             RepositionOverlays();
 
@@ -1159,6 +1269,9 @@ void VR::SubmitVRTextures()
 
         if (!m_BlankTexture)
             CreateVRTextures();
+
+        if (!RefreshBackBufferTexture(false))
+            return;
 
         if (!vr::VROverlay()->IsOverlayVisible(m_MainMenuHandle))
             RepositionOverlays();
@@ -1782,11 +1895,16 @@ void VR::RepositionOverlays()
     vr::ETrackingUniverseOrigin trackingOrigin = vr::VRCompositor()->GetTrackingSpace();
 
     // Reposition main menu overlay
-    float renderWidth = m_VKBackBuffer.m_VulkanData.m_nWidth;
-    float renderHeight = m_VKBackBuffer.m_VulkanData.m_nHeight;
+    if (!RefreshBackBufferTexture(false))
+        return;
 
-    float widthRatio = windowWidth / renderWidth;
-    float heightRatio = windowHeight / renderHeight;
+    float renderWidth = static_cast<float>(m_VKBackBuffer.m_VulkanData.m_nWidth);
+    float renderHeight = static_cast<float>(m_VKBackBuffer.m_VulkanData.m_nHeight);
+    if (renderWidth <= 0.0f || renderHeight <= 0.0f)
+        return;
+
+    float widthRatio = static_cast<float>(windowWidth) / renderWidth;
+    float heightRatio = static_cast<float>(windowHeight) / renderHeight;
     menuTransform.m[0][0] *= widthRatio;
     menuTransform.m[1][1] *= heightRatio;
 
