@@ -78,15 +78,47 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		if (!ShouldThrottleLog(s_lastRenderPipeLog, m_VR->m_RenderPipelineDebugLogHz))
 		{
 			ITexture* currentRt = DebugCurrentRenderTarget(rndrContext);
-			int rtW = 0;
-			int rtH = 0;
-			DebugTextureSize(currentRt, rtW, rtH);
+			int rtMapW = 0;
+			int rtMapH = 0;
+			int rtActualW = 0;
+			int rtActualH = 0;
+			DebugTextureFullSize(currentRt, rtMapW, rtMapH, rtActualW, rtActualH);
+
+			ITexture* hudTexture = nullptr;
+			{
+				std::lock_guard<TextureStateMutex> textureLock(m_VR->m_TextureMutex);
+				hudTexture = m_VR->m_HUDTexture;
+			}
+			int hudMapW = 0;
+			int hudMapH = 0;
+			int hudActualW = 0;
+			int hudActualH = 0;
+			DebugTextureFullSize(hudTexture, hudMapW, hudMapH, hudActualW, hudActualH);
+
+			int windowW = 0;
+			int windowH = 0;
+			int backBufferW = 0;
+			int backBufferH = 0;
+			int clientW = 0;
+			int clientH = 0;
+			int vpX = 0;
+			int vpY = 0;
+			int vpW = 0;
+			int vpH = 0;
+			DebugRenderContextWindowSize(rndrContext, windowW, windowH);
+			DebugBackBufferDimensions(m_Game ? m_Game->m_MaterialSystem : nullptr, backBufferW, backBufferH);
+			DebugClientRectSize(clientW, clientH);
+			DebugGetViewport(rndrContext, vpX, vpY, vpW, vpH);
 
 			const bool inGame = m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame();
-			Game::logMsg("[VR][RenderPipe][RenderView] tid=%lu q=%d inGame=%d setup=%dx%d hud=%dx%d rt=%s(%dx%d) clear=0x%X draw=0x%X created=%d",
+			Game::logMsg("[VR][DesktopHUD][RenderView] tid=%lu q=%d inGame=%d setup=%dx%d unscaled=%dx%d hudSetup=%dx%d hudUnscaled=%dx%d win=%dx%d client=%dx%d bb=%dx%d vp=%d,%d %dx%d rt=%s(map=%dx%d actual=%dx%d) hudTex=%s(map=%dx%d actual=%dx%d) eye=%ux%u clear=0x%X draw=0x%X created=%d",
 				GetCurrentThreadId(), queueMode, inGame ? 1 : 0,
-				setup.width, setup.height, hudViewSetup.width, hudViewSetup.height,
-				DebugTextureName(currentRt), rtW, rtH,
+				setup.width, setup.height, setup.m_nUnscaledWidth, setup.m_nUnscaledHeight,
+				hudViewSetup.width, hudViewSetup.height, hudViewSetup.m_nUnscaledWidth, hudViewSetup.m_nUnscaledHeight,
+				windowW, windowH, clientW, clientH, backBufferW, backBufferH, vpX, vpY, vpW, vpH,
+				DebugTextureName(currentRt), rtMapW, rtMapH, rtActualW, rtActualH,
+				DebugTextureName(hudTexture), hudMapW, hudMapH, hudActualW, hudActualH,
+				m_VR->m_RenderWidth, m_VR->m_RenderHeight,
 				nClearFlags, whatToDraw,
 				m_VR->m_CreatedVRTextures.load(std::memory_order_acquire) ? 1 : 0);
 		}

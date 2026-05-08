@@ -891,6 +891,10 @@ void VR::CreateVRTextures()
     int windowWidth, windowHeight;
     m_Game->m_MaterialSystem->GetRenderContext()->GetWindowSize(windowWidth, windowHeight);
 
+    int backBufferWidth = 0;
+    int backBufferHeight = 0;
+    m_Game->m_MaterialSystem->GetBackBufferDimensions(backBufferWidth, backBufferHeight);
+
     m_Game->m_MaterialSystem->isGameRunning = false;
     m_Game->m_MaterialSystem->BeginRenderTargetAllocation();
     m_Game->m_MaterialSystem->isGameRunning = true;
@@ -920,6 +924,27 @@ void VR::CreateVRTextures()
 
     m_CreatingTextureID = Texture_HUD;
     m_HUDTexture = m_Game->m_MaterialSystem->CreateNamedRenderTargetTextureEx("vrHUD", windowWidth, windowHeight, RT_SIZE_NO_CHANGE, backBufferFormat, MATERIAL_RT_DEPTH_SHARED, TEXTUREFLAGS_NOMIP);
+
+    if (m_RenderPipelineDebugLog)
+    {
+        int hudMapW = 0;
+        int hudMapH = 0;
+        int hudActualW = 0;
+        int hudActualH = 0;
+        if (m_HUDTexture)
+        {
+            hudMapW = m_HUDTexture->GetMappingWidth();
+            hudMapH = m_HUDTexture->GetMappingHeight();
+            hudActualW = m_HUDTexture->GetActualWidth();
+            hudActualH = m_HUDTexture->GetActualHeight();
+        }
+
+        Game::logMsg("[VR][DesktopHUD][CreateRT] tid=%lu win=%dx%d bb=%dx%d eye=%ux%u hudTex=%s map=%dx%d actual=%dx%d format=%d",
+            GetCurrentThreadId(), windowWidth, windowHeight, backBufferWidth, backBufferHeight,
+            m_RenderWidth, m_RenderHeight,
+            m_HUDTexture ? m_HUDTexture->GetName() : "<null>",
+            hudMapW, hudMapH, hudActualW, hudActualH, static_cast<int>(backBufferFormat));
+    }
 
     // Optional RTTs: scope + rear-mirror can be extremely expensive in 32-bit VAS
     // when their sizes are set high. Only pre-create them if requested.
@@ -1067,7 +1092,32 @@ void VR::SubmitVRTextures()
         const uint32_t lastSubmittedFrameId = m_LastSubmittedFrameId.load(std::memory_order_acquire);
         const uint32_t currentPoseToken = m_SubmitPoseToken.load(std::memory_order_acquire);
         const uint32_t lastSubmittedPoseToken = m_LastSubmittedPoseToken.load(std::memory_order_acquire);
-        Game::logMsg("[VR][RenderPipe][Submit] tid=%lu q=%d inGame=%d renderedNew=%d completed=%u submitted=%u pose=%u lastPose=%u submitInFlight=%d renderedHud=%d hudPainted=%d menuBlank=%d",
+        int windowW = 0;
+        int windowH = 0;
+        int backBufferW = 0;
+        int backBufferH = 0;
+        int hudMapW = 0;
+        int hudMapH = 0;
+        int hudActualW = 0;
+        int hudActualH = 0;
+        if (m_Game && m_Game->m_MaterialSystem)
+        {
+            if (IMatRenderContext* ctx = m_Game->m_MaterialSystem->GetRenderContext())
+                ctx->GetWindowSize(windowW, windowH);
+            m_Game->m_MaterialSystem->GetBackBufferDimensions(backBufferW, backBufferH);
+        }
+        {
+            std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
+            if (m_HUDTexture)
+            {
+                hudMapW = m_HUDTexture->GetMappingWidth();
+                hudMapH = m_HUDTexture->GetMappingHeight();
+                hudActualW = m_HUDTexture->GetActualWidth();
+                hudActualH = m_HUDTexture->GetActualHeight();
+            }
+        }
+
+        Game::logMsg("[VR][DesktopHUD][Submit] tid=%lu q=%d inGame=%d renderedNew=%d completed=%u submitted=%u pose=%u lastPose=%u submitInFlight=%d renderedHud=%d hudPainted=%d menuBlank=%d win=%dx%d bb=%dx%d hudTex=%dx%d actual=%dx%d",
             GetCurrentThreadId(), queued ? 1 : 0, inGame ? 1 : 0,
             renderedNewFrame ? 1 : 0,
             renderCompletedFrameId, lastSubmittedFrameId,
@@ -1075,7 +1125,8 @@ void VR::SubmitVRTextures()
             m_SubmitInFlight.load(std::memory_order_acquire) ? 1 : 0,
             m_RenderedHud.load(std::memory_order_acquire) ? 1 : 0,
             m_HudPaintedThisFrame.load(std::memory_order_acquire) ? 1 : 0,
-            m_MenuBlankSubmitted ? 1 : 0);
+            m_MenuBlankSubmitted ? 1 : 0,
+            windowW, windowH, backBufferW, backBufferH, hudMapW, hudMapH, hudActualW, hudActualH);
     }
 
     struct SubmitInFlightGuard

@@ -116,6 +116,143 @@ static inline void DebugTextureSize(ITexture* texture, int& width, int& height)
 	}
 }
 
+static inline void DebugTextureFullSize(ITexture* texture, int& mapW, int& mapH, int& actualW, int& actualH)
+{
+	mapW = 0;
+	mapH = 0;
+	actualW = 0;
+	actualH = 0;
+	if (!texture)
+		return;
+
+	__try
+	{
+		mapW = texture->GetMappingWidth();
+		mapH = texture->GetMappingHeight();
+		actualW = texture->GetActualWidth();
+		actualH = texture->GetActualHeight();
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		mapW = -1;
+		mapH = -1;
+		actualW = -1;
+		actualH = -1;
+	}
+}
+
+static inline void DebugRenderContextWindowSize(IMatRenderContext* context, int& width, int& height)
+{
+	width = 0;
+	height = 0;
+	if (!context)
+		return;
+
+	__try
+	{
+		context->GetWindowSize(width, height);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		width = -1;
+		height = -1;
+	}
+}
+
+static inline void DebugBackBufferDimensions(IMaterialSystem* materialSystem, int& width, int& height)
+{
+	width = 0;
+	height = 0;
+	if (!materialSystem)
+		return;
+
+	__try
+	{
+		materialSystem->GetBackBufferDimensions(width, height);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		width = -1;
+		height = -1;
+	}
+}
+
+struct DebugWindowSearchContext
+{
+	DWORD processId = 0;
+	HWND hwnd = nullptr;
+};
+
+static BOOL CALLBACK DebugFindMainWindowProc(HWND hwnd, LPARAM lParam)
+{
+	auto* ctx = reinterpret_cast<DebugWindowSearchContext*>(lParam);
+	if (!ctx || !IsWindow(hwnd))
+		return TRUE;
+
+	DWORD windowProcessId = 0;
+	GetWindowThreadProcessId(hwnd, &windowProcessId);
+	if (windowProcessId != ctx->processId)
+		return TRUE;
+
+	if (GetWindow(hwnd, GW_OWNER) != nullptr)
+		return TRUE;
+
+	LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
+	if ((style & WS_VISIBLE) == 0)
+		return TRUE;
+
+	ctx->hwnd = hwnd;
+	return FALSE;
+}
+
+static inline HWND DebugFindCurrentProcessMainWindow()
+{
+	DebugWindowSearchContext ctx;
+	ctx.processId = GetCurrentProcessId();
+	EnumWindows(DebugFindMainWindowProc, reinterpret_cast<LPARAM>(&ctx));
+	return ctx.hwnd;
+}
+
+static inline void DebugClientRectSize(int& width, int& height)
+{
+	width = 0;
+	height = 0;
+	HWND hwnd = DebugFindCurrentProcessMainWindow();
+	if (!hwnd)
+		return;
+
+	RECT rc{};
+	if (GetClientRect(hwnd, &rc))
+	{
+		width = static_cast<int>(rc.right - rc.left);
+		height = static_cast<int>(rc.bottom - rc.top);
+	}
+}
+
+static inline bool DebugGetViewport(void* context, int& x, int& y, int& width, int& height)
+{
+	x = 0;
+	y = 0;
+	width = 0;
+	height = 0;
+	if (!context || !Hooks::hkGetViewport.fOriginal)
+		return false;
+
+	__try
+	{
+		Hooks::hkGetViewport.fOriginal(context, x, y, width, height);
+		return true;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		x = -1;
+		y = -1;
+		width = -1;
+		height = -1;
+		return false;
+	}
+}
+
 static inline ITexture* DebugCurrentRenderTarget(IMatRenderContext* context)
 {
 	if (!context)

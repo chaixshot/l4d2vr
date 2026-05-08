@@ -68,6 +68,37 @@ namespace dxvk {
             return ((color >> 24) & 0xFFu) != 0u;
         }
 
+
+        static bool VrForceSwapchainBackBufferToEyeSize(
+            VR* vr,
+            D3DPRESENT_PARAMETERS* params,
+            D3DDISPLAYMODEEX* fullscreenMode = nullptr) {
+            if (!vr || !params || vr->m_RenderWidth == 0 || vr->m_RenderHeight == 0)
+                return false;
+
+            const UINT eyeWidth = static_cast<UINT>(vr->m_RenderWidth);
+            const UINT eyeHeight = static_cast<UINT>(vr->m_RenderHeight);
+            const UINT oldWidth = params->BackBufferWidth;
+            const UINT oldHeight = params->BackBufferHeight;
+
+            params->BackBufferWidth = eyeWidth;
+            params->BackBufferHeight = eyeHeight;
+
+            if (!params->Windowed && fullscreenMode) {
+                fullscreenMode->Width = eyeWidth;
+                fullscreenMode->Height = eyeHeight;
+            }
+
+            const bool changed = oldWidth != eyeWidth || oldHeight != eyeHeight;
+            if (changed) {
+                Logger::info(str::format(
+                    "L4D2VR forcing reset backbuffer to VR eye size: ",
+                    oldWidth, "x", oldHeight, " -> ", eyeWidth, "x", eyeHeight));
+            }
+
+            return changed;
+        }
+
         static void VrAimLineDrawQuad(
             D3D9DeviceEx* device,
             const VrAimLineOverlayVertex& a,
@@ -1076,11 +1107,15 @@ namespace dxvk {
 
 
     HRESULT STDMETHODCALLTYPE D3D9DeviceEx::Reset(D3DPRESENT_PARAMETERS* pPresentationParameters) {
-        // Source applies video settings through IDirect3DDevice9::Reset.  The desktop
-        // swapchain must keep the game's requested size; VR eye render targets are
-        // separate textures and are recreated after the reset.
-        if (g_Game && g_Game->m_VR)
-            g_Game->m_VR->ReleaseVRRenderTargetsForDeviceReset();
+        // Source applies video settings through IDirect3DDevice9::Reset. Keep the
+        // implicit swapchain locked to the VR eye size across resets; otherwise a
+        // user-selected desktop resolution leaves viewport, HUD capture, menu overlay,
+        // and desktop mirror paths disagreeing about the active backbuffer size.
+        VR* vr = (g_Game != nullptr) ? g_Game->m_VR : nullptr;
+        if (vr) {
+            vr->ReleaseVRRenderTargetsForDeviceReset();
+            VrForceSwapchainBackBufferToEyeSize(vr, pPresentationParameters);
+        }
 
         D3D9DeviceLock lock = LockDevice();
 
@@ -5071,8 +5106,11 @@ namespace dxvk {
     HRESULT STDMETHODCALLTYPE D3D9DeviceEx::ResetEx(
         D3DPRESENT_PARAMETERS* pPresentationParameters,
         D3DDISPLAYMODEEX* pFullscreenDisplayMode) {
-        if (g_Game && g_Game->m_VR)
-            g_Game->m_VR->ReleaseVRRenderTargetsForDeviceReset();
+        VR* vr = (g_Game != nullptr) ? g_Game->m_VR : nullptr;
+        if (vr) {
+            vr->ReleaseVRRenderTargetsForDeviceReset();
+            VrForceSwapchainBackBufferToEyeSize(vr, pPresentationParameters, pFullscreenDisplayMode);
+        }
 
         D3D9DeviceLock lock = LockDevice();
 
