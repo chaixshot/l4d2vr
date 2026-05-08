@@ -7,6 +7,8 @@
 #include <vector>
 #include <sstream>
 #include <cwctype>
+#include <system_error>
+#include <shellapi.h>
 #include "game.h"
 #include "hooks.h"
 #include "vr.h"
@@ -159,6 +161,172 @@ namespace
 
         LocalFree(szArglist);
         return noHmdEnabled;
+    }
+
+    struct LaunchArgumentState
+    {
+        bool hasHeapSize = false;
+        bool hasWidth = false;
+        bool hasHeight = false;
+    };
+
+    bool IsExactLaunchArg(const wchar_t* value, const wchar_t* expected)
+    {
+        return value && expected && _wcsicmp(value, expected) == 0;
+    }
+
+    bool IsLaunchArgName(const wchar_t* value, const wchar_t* expected)
+    {
+        if (!value || !expected)
+            return false;
+
+        if (_wcsicmp(value, expected) == 0)
+            return true;
+
+        const size_t expectedLen = wcslen(expected);
+        return _wcsnicmp(value, expected, expectedLen) == 0 && value[expectedLen] == L'=';
+    }
+
+    LaunchArgumentState ReadLaunchArgumentState()
+    {
+        LaunchArgumentState state;
+
+        int nArgs = 0;
+        LPWSTR* szArglist = CommandLineToArgvW(GetCommandLineW(), &nArgs);
+        if (!szArglist)
+            return state;
+
+        for (int i = 0; i < nArgs; ++i)
+        {
+            if (IsLaunchArgName(szArglist[i], L"-heapsize"))
+                state.hasHeapSize = true;
+            else if (IsExactLaunchArg(szArglist[i], L"-w"))
+                state.hasWidth = true;
+            else if (IsExactLaunchArg(szArglist[i], L"-h"))
+                state.hasHeight = true;
+        }
+
+        LocalFree(szArglist);
+        return state;
+    }
+
+    std::filesystem::path GetLaunchArgumentNoticePath()
+    {
+        wchar_t exePath[MAX_PATH] = {};
+        if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) == 0)
+            return {};
+
+        std::filesystem::path noticePath(exePath);
+        return noticePath.parent_path() / L"left4dead2" / L"cfg" / L"l4d2vr_launch_argument_notice.txt";
+    }
+
+    bool FileExistsNoThrow(const std::filesystem::path& path)
+    {
+        if (path.empty())
+            return false;
+
+        std::error_code ec;
+        return std::filesystem::exists(path, ec);
+    }
+
+    std::filesystem::path GetLeft4NekoDllPath()
+    {
+        wchar_t exePath[MAX_PATH] = {};
+        if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) == 0)
+            return {};
+
+        std::filesystem::path gameRootPath(exePath);
+        return gameRootPath.parent_path() / L"bin" / L"left4neko.dll";
+    }
+
+    bool ShouldUseChineseLaunchArgumentPrompt()
+    {
+        const LANGID uiLang = GetUserDefaultUILanguage();
+        if (PRIMARYLANGID(uiLang) == LANG_CHINESE)
+            return true;
+
+        wchar_t localeName[LOCALE_NAME_MAX_LENGTH] = {};
+        if (GetUserDefaultLocaleName(localeName, _countof(localeName)) > 0)
+            return _wcsnicmp(localeName, L"zh", 2) == 0;
+
+        return false;
+    }
+
+    bool LaunchArgumentNoticeAlreadyShown(const std::filesystem::path& noticePath)
+    {
+        if (!FileExistsNoThrow(noticePath))
+            return false;
+
+        std::wifstream input(noticePath);
+        if (!input.is_open())
+            return true;
+
+        std::wstring line;
+        while (std::getline(input, line))
+        {
+            if (line.find(L"LaunchArgumentNoticeVersion=2") != std::wstring::npos)
+                return true;
+        }
+
+        return false;
+    }
+
+    void MarkLaunchArgumentNoticeShown(const std::filesystem::path& noticePath)
+    {
+        if (noticePath.empty())
+            return;
+
+        std::error_code ec;
+        std::filesystem::create_directories(noticePath.parent_path(), ec);
+
+        std::wofstream output(noticePath, std::ios::trunc);
+        if (!output.is_open())
+            return;
+
+        output << L"LaunchArgumentNoticeShown=1\n";
+        output << L"LaunchArgumentNoticeVersion=2\n";
+        output << L"CheckedArgs=-heapsize,-w,-h,left4neko.dll\n";
+    }
+
+    void ShowLaunchArgumentNoticeIfNeeded()
+    {
+        const std::filesystem::path noticePath = GetLaunchArgumentNoticePath();
+        if (LaunchArgumentNoticeAlreadyShown(noticePath))
+            return;
+
+        const LaunchArgumentState state = ReadLaunchArgumentState();
+        const bool left4NekoExists = FileExistsNoThrow(GetLeft4NekoDllPath());
+        const bool missingHeapSize = !state.hasHeapSize && !left4NekoExists;
+        const bool hasResolutionLaunchArgs = state.hasWidth || state.hasHeight;
+        if (!missingHeapSize && !hasResolutionLaunchArgs)
+            return;
+
+        const bool useChinese = ShouldUseChineseLaunchArgumentPrompt();
+        const wchar_t* title = useChinese ? L"L4D2VR \u542f\u52a8\u53c2\u6570\u63d0\u793a" : L"L4D2VR Launch Options";
+
+        std::wstring message;
+        if (useChinese)
+        {
+            message = L"\u68c0\u6d4b\u5230\u5f53\u524d\u542f\u52a8\u53c2\u6570\u53ef\u80fd\u4e0d\u9002\u5408 L4D2VR\uff1a\n\n";
+            if (missingHeapSize)
+                message += L"- \u672a\u68c0\u6d4b\u5230 -heapsize\uff0c\u4e14\u672a\u68c0\u6d4b\u5230 bin\\left4neko.dll\u3002\u5efa\u8bae\u5728 Steam \u542f\u52a8\u53c2\u6570\u4e2d\u52a0\u5165 -heapsize 524288\u3002\n";
+            if (hasResolutionLaunchArgs)
+                message += L"- \u68c0\u6d4b\u5230 -w \u6216 -h\u3002\u5efa\u8bae\u4ece Steam \u542f\u52a8\u53c2\u6570\u4e2d\u5220\u9664\u5b83\u4eec\uff0c\u907f\u514d\u8986\u76d6\u63d2\u4ef6\u7ba1\u7406\u7684\u7a97\u53e3\u5206\u8fa8\u7387\u3002\n";
+            message += L"\n\u6b64\u63d0\u793a\u53ea\u663e\u793a\u4e00\u6b21\u3002";
+        }
+        else
+        {
+            message = L"The current launch options may not be suitable for L4D2VR:\n\n";
+            if (missingHeapSize)
+                message += L"- -heapsize was not detected, and bin\\left4neko.dll was not found. Add -heapsize 524288 to the Steam launch options.\n";
+            if (hasResolutionLaunchArgs)
+                message += L"- -w or -h was detected. Remove them from the Steam launch options to avoid overriding the window resolution managed by the plugin.\n";
+            message += L"\nThis notice will only be shown once.";
+        }
+
+        HWND owner = FindCurrentProcessMainWindow();
+        MessageBoxW(owner, message.c_str(), title, MB_OK | MB_ICONINFORMATION | MB_TOPMOST | MB_SETFOREGROUND);
+        MarkLaunchArgumentNoticeShown(noticePath);
     }
 
     bool ReplaceConfigValueInLine(std::wstring& line, const wchar_t* key, const wchar_t* expectedValue)
@@ -369,17 +537,17 @@ namespace
         input.close();
 
         auto insertLineBeforeClosingBrace = [&lines](const std::wstring& text)
-        {
-            for (auto it = lines.begin(); it != lines.end(); ++it)
             {
-                if (TrimWhitespace(*it) == L"}")
+                for (auto it = lines.begin(); it != lines.end(); ++it)
                 {
-                    lines.insert(it, text);
-                    return;
+                    if (TrimWhitespace(*it) == L"}")
+                    {
+                        lines.insert(it, text);
+                        return;
+                    }
                 }
-            }
-            lines.push_back(text);
-        };
+                lines.push_back(text);
+            };
 
         if (!foundRes)
         {
@@ -435,6 +603,8 @@ DWORD WINAPI InitL4D2VR(HMODULE hModule)
         EnsureNoHmdAutoexecCrosshair();
         return 0;
     }
+
+    ShowLaunchArgumentNoticeIfNeeded();
 
     CreateThread(nullptr, 0, FocusGameWindowWorker, nullptr, 0, nullptr);
     CreateThread(nullptr, 0, MaintainWindowTitleWorker, nullptr, 0, nullptr);
