@@ -1070,6 +1070,15 @@ void VR::UpdateAutoMatQueueMode()
 
     const bool inGame = m_Game->m_EngineClient->IsInGame();
 
+    // Apply launch-option style visual defaults once after the first main-menu entry.
+    // Use the same direct ConVar path as ShadowTweaks instead of injecting console commands.
+    if (!inGame && !m_MainMenuOneShotVisualCvarsInjected)
+    {
+        m_Game->SetConVarInt("crosshair", 0);
+        m_Game->SetConVarFloat("mat_grain_scale_override", 0.0f);
+        m_MainMenuOneShotVisualCvarsInjected = true;
+    }
+
     // In the main menu, set fps_max once to match the HMD refresh rate.
     // This is independent from AutoMatQueueMode and helps avoid "menu stuck at 60 FPS".
     if (!inGame)

@@ -1159,6 +1159,9 @@ public:
 	int  m_AutoMatQueueModeLastRequested = -999;
 	std::chrono::steady_clock::time_point m_AutoMatQueueModeLastCmdTime{};
 
+	// One-shot menu ConVar injection: apply launch-style visual defaults after the first main-menu entry.
+	bool m_MainMenuOneShotVisualCvarsInjected = false;
+
 	// Auto fps_max in main menu: set fps_max to match HMD refresh rate when VR is active.
 	bool m_MenuFpsMaxSent = false;
 	int  m_MenuFpsMaxLastHz = 0;

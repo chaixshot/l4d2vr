@@ -644,6 +644,7 @@
     <None Include="..\dxvk_new\lib32\libd3dcompiler_43.def" />
     <None Include="..\dxvk_new\lib\libd3dcompiler_43.def" />
     <None Include="..\dxvk_new\src\d3d9\d3d9.def" />
+    <None Include="..\README.md" />
     <None Include="hooks\hooks_combat_network.inl" />
     <None Include="hooks\hooks_createmove.inl" />
     <None Include="hooks\hooks_init.inl" />

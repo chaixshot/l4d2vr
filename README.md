@@ -6,10 +6,10 @@
 ## Things that work
 * Singleplayer and multiplayer (see below)
 * 6DoF VR view
-* Roomscale movement support
 * Motion controls for guns and melee weapons
 * Workshop content
-* Multi-core rendering support
+* Multi-core rendering support(Set it in L4D2VRConfigTool.exe, not in-game.When enabled, moving the HMD causes ghosting, so only seated play is supported.)
+* AntiAliasing support(Set it in L4D2VRConfigTool.exe, not in-game.)
   
 ## Things that need fixing
 * Interactions and throwables require you to aim with your face(Except for servers that do not support non‑VR)
@@ -22,11 +22,10 @@
 1. Download [L4D2VR.zip](https://github.com/liu547161153/l4d2vr/releases) and extract the files to your Left 4 Dead 2 directory (steamapps\common\Left 4 Dead 2)
 2. Launch SteamVR, then launch Left 4 Dead 2 with these launch options:
    
-   ```-insecure -heapsize 524288 -processheap -high -novid +crosshair 0 -w 1280 -h 720 +mat_queue_mode 0 +mat_vsync 0 +mat_antialias 0 +mat_grain_scale_override 0 ```
+   ``-heapsize 524288 -processheap -high -novid```
 
-3. At the menu, feel free to change [these video settings](https://i.imgur.com/yYQMXs6.jpg).
-4. Load into a campaign.
-5. To recenter the camera height, press down on the left stick. To see the HUD, aim the controller up or down.
+3. Join or create your campaign and enjoy the game.
+4. To recenter the camera height, press down on the left stick. To see the HUD, aim the left controller up or down.
 
 
 

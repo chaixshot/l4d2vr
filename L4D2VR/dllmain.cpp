@@ -227,8 +227,7 @@ namespace
         {
             changed |= ReplaceConfigValueInLine(line, L"\"setting.mat_antialias\"", L"1");
             changed |= ReplaceConfigValueInLine(line, L"\"setting.mat_vsync\"", L"0");
-            changed |= ReplaceConfigValueInLine(line, L"\"setting.defaultres\"", L"3840");
-            changed |= ReplaceConfigValueInLine(line, L"\"setting.defaultresheight\"", L"2160");
+            changed |= ReplaceConfigValueInLine(line, L"\"setting.mat_queue_mode\"", L"0");
             changed |= ReplaceConfigValueInLine(line, L"\"setting.fullscreen\"", L"0");
             changed |= ReplaceConfigValueInLine(line, L"\"setting.nowindowborder\"", L"1");
             lines.push_back(line);

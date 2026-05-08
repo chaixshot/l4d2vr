@@ -354,38 +354,97 @@ namespace dxvk {
                 Logger::warn(str::format("VR eye MSAA resolve to submit texture failed: 0x", std::hex, resolveResult));
         }
 
-        static RECT VrComputeDesktopMirrorDestRect(
-            const D3DSURFACE_DESC& sourceDesc,
+        static bool VrGetPositiveRectSize(const RECT* rect, UINT& width, UINT& height) {
+            if (!rect || rect->right <= rect->left || rect->bottom <= rect->top)
+                return false;
+
+            width = static_cast<UINT>(rect->right - rect->left);
+            height = static_cast<UINT>(rect->bottom - rect->top);
+            return width > 0 && height > 0;
+        }
+
+        static bool VrGetClientRectSize(HWND window, UINT& width, UINT& height) {
+            if (!window)
+                return false;
+
+            RECT clientRect{};
+            if (!GetClientRect(window, &clientRect))
+                return false;
+
+            return VrGetPositiveRectSize(&clientRect, width, height);
+        }
+
+        static void VrGetDesktopMirrorOutputSize(
+            D3D9DeviceEx* device,
+            const RECT* presentDestRect,
+            HWND presentWindowOverride,
             const D3DSURFACE_DESC& backBufferDesc,
+            UINT& outputWidth,
+            UINT& outputHeight) {
+            outputWidth = backBufferDesc.Width;
+            outputHeight = backBufferDesc.Height;
+
+            // Reset() forces the swapchain backbuffer to the VR eye render size.
+            // Present() then stretches that VR-sized backbuffer into the desktop
+            // window. Mirror cover must therefore target the final displayed
+            // window/destination aspect, not the intermediate backbuffer aspect.
+            if (VrGetPositiveRectSize(presentDestRect, outputWidth, outputHeight))
+                return;
+
+            HWND window = presentWindowOverride ? presentWindowOverride : nullptr;
+            if (!window && device)
+                window = device->GetWindow();
+
+            if (VrGetClientRectSize(window, outputWidth, outputHeight))
+                return;
+
+            outputWidth = backBufferDesc.Width;
+            outputHeight = backBufferDesc.Height;
+        }
+
+        static RECT VrComputeDesktopMirrorSourceRect(
+            const D3DSURFACE_DESC& sourceDesc,
+            UINT outputWidth,
+            UINT outputHeight,
             bool keepAspect) {
-            RECT dst{};
-            dst.left = 0;
-            dst.top = 0;
-            dst.right = static_cast<LONG>(backBufferDesc.Width);
-            dst.bottom = static_cast<LONG>(backBufferDesc.Height);
+            RECT src{};
+            src.left = 0;
+            src.top = 0;
+            src.right = static_cast<LONG>(sourceDesc.Width);
+            src.bottom = static_cast<LONG>(sourceDesc.Height);
 
             if (!keepAspect || sourceDesc.Width == 0 || sourceDesc.Height == 0 ||
-                backBufferDesc.Width == 0 || backBufferDesc.Height == 0)
-                return dst;
+                outputWidth == 0 || outputHeight == 0)
+                return src;
 
             const double srcAspect = static_cast<double>(sourceDesc.Width) / static_cast<double>(sourceDesc.Height);
-            const double dstAspect = static_cast<double>(backBufferDesc.Width) / static_cast<double>(backBufferDesc.Height);
-            if (!std::isfinite(srcAspect) || !std::isfinite(dstAspect) || srcAspect <= 0.0 || dstAspect <= 0.0)
-                return dst;
+            const double outputAspect = static_cast<double>(outputWidth) / static_cast<double>(outputHeight);
+            if (!std::isfinite(srcAspect) || !std::isfinite(outputAspect) || srcAspect <= 0.0 || outputAspect <= 0.0)
+                return src;
 
-            if (dstAspect > srcAspect) {
-                const LONG width = static_cast<LONG>(std::lround(static_cast<double>(backBufferDesc.Height) * srcAspect));
-                dst.left = (static_cast<LONG>(backBufferDesc.Width) - width) / 2;
-                dst.right = dst.left + width;
+            // Cover mode: crop the eye to the final desktop/window aspect and
+            // stretch that crop into the full VR-sized backbuffer. The final
+            // Present() stretch then cancels the intermediate aspect mismatch.
+            if (srcAspect > outputAspect) {
+                const LONG cropWidth = std::clamp(
+                    static_cast<LONG>(std::lround(static_cast<double>(sourceDesc.Height) * outputAspect)),
+                    1L,
+                    static_cast<LONG>(sourceDesc.Width));
+                src.left = (static_cast<LONG>(sourceDesc.Width) - cropWidth) / 2;
+                src.right = src.left + cropWidth;
             }
-            else if (dstAspect < srcAspect) {
-                const LONG height = static_cast<LONG>(std::lround(static_cast<double>(backBufferDesc.Width) / srcAspect));
-                dst.top = (static_cast<LONG>(backBufferDesc.Height) - height) / 2;
-                dst.bottom = dst.top + height;
+            else if (srcAspect < outputAspect) {
+                const LONG cropHeight = std::clamp(
+                    static_cast<LONG>(std::lround(static_cast<double>(sourceDesc.Width) / outputAspect)),
+                    1L,
+                    static_cast<LONG>(sourceDesc.Height));
+                src.top = (static_cast<LONG>(sourceDesc.Height) - cropHeight) / 2;
+                src.bottom = src.top + cropHeight;
             }
 
-            return dst;
+            return src;
         }
+
 
         struct VrDesktopHudVertex {
             float x;
@@ -518,7 +577,11 @@ namespace dxvk {
             return inGame && !isPaused;
         }
 
-        static void VrMirrorEyeToDesktopBackBuffer(D3D9DeviceEx* device, VR* vr) {
+        static void VrMirrorEyeToDesktopBackBuffer(
+            D3D9DeviceEx* device,
+            VR* vr,
+            const RECT* presentDestRect,
+            HWND presentWindowOverride) {
             if (!device || !vr || !vr->m_DesktopMirrorEnabled)
                 return;
 
@@ -541,15 +604,24 @@ namespace dxvk {
             const bool haveSourceDesc = SUCCEEDED(source->GetDesc(&sourceDesc));
             const bool haveBackBufferDesc = SUCCEEDED(backBuffer->GetDesc(&backBufferDesc));
 
-            const RECT dstRect = (haveSourceDesc && haveBackBufferDesc)
-                ? VrComputeDesktopMirrorDestRect(sourceDesc, backBufferDesc, vr->m_DesktopMirrorKeepAspect)
-                : RECT{ 0, 0, 0, 0 };
+            UINT outputWidth = backBufferDesc.Width;
+            UINT outputHeight = backBufferDesc.Height;
+            if (haveBackBufferDesc)
+                VrGetDesktopMirrorOutputSize(device, presentDestRect, presentWindowOverride, backBufferDesc, outputWidth, outputHeight);
 
+            const RECT srcRect = (haveSourceDesc && haveBackBufferDesc)
+                ? VrComputeDesktopMirrorSourceRect(sourceDesc, outputWidth, outputHeight, vr->m_DesktopMirrorKeepAspect)
+                : RECT{ 0, 0, 0, 0 };
+            const RECT dstRect = haveBackBufferDesc
+                ? RECT{ 0, 0, static_cast<LONG>(backBufferDesc.Width), static_cast<LONG>(backBufferDesc.Height) }
+            : RECT{ 0, 0, 0, 0 };
+
+            const RECT* srcRectPtr = (srcRect.right > srcRect.left && srcRect.bottom > srcRect.top) ? &srcRect : nullptr;
             const RECT* dstRectPtr = (dstRect.right > dstRect.left && dstRect.bottom > dstRect.top) ? &dstRect : nullptr;
             const D3DTEXTUREFILTERTYPE filter = vr->m_DesktopMirrorLinearFilter ? D3DTEXF_LINEAR : D3DTEXF_NONE;
-            hr = device->StretchRect(source, nullptr, backBuffer, dstRectPtr, filter);
+            hr = device->StretchRect(source, srcRectPtr, backBuffer, dstRectPtr, filter);
             if (FAILED(hr) && filter != D3DTEXF_NONE)
-                hr = device->StretchRect(source, nullptr, backBuffer, dstRectPtr, D3DTEXF_NONE);
+                hr = device->StretchRect(source, srcRectPtr, backBuffer, dstRectPtr, D3DTEXF_NONE);
 
             if (FAILED(hr))
                 Logger::warn(str::format("VR desktop mirror StretchRect failed: 0x", std::hex, hr));
@@ -4763,7 +4835,7 @@ namespace dxvk {
             if (vr->m_D9RightEyeSubmitSurface)
                 VrResolveSurfaceToSubmit(this, vr->m_D9RightEyeSurface, vr->m_D9RightEyeSubmitSurface);
 
-            VrMirrorEyeToDesktopBackBuffer(this, vr);
+            VrMirrorEyeToDesktopBackBuffer(this, vr, pDestRect, hDestWindowOverride);
         }
 
         HRESULT result = m_implicitSwapchain->Present(
