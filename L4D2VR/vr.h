@@ -2018,7 +2018,7 @@ public:
 	bool m_SpecialInfectedWarningAttack2CmdOwned = false;
 	bool m_SpecialInfectedWarningJumpCmdOwned = false;
 	std::chrono::steady_clock::time_point m_SpecialInfectedWarningNextActionTime{};
-	bool m_ItemModelLabelEnabled = true;
+	bool m_ItemModelLabelEnabled = false;
 	bool m_ItemModelLabelShowWeapons = true;
 	bool m_ItemModelLabelShowThrowables = true;
 	bool m_ItemModelLabelShowMedical = true;

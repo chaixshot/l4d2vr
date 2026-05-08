@@ -221,10 +221,10 @@ void VR::UpdateAutoFlashlight(C_BasePlayer* localPlayer)
 {
     const auto now = std::chrono::steady_clock::now();
     auto debugLog = [this](const char* format, auto... args)
-    {
-        if (m_AutoFlashlightDebugLog && !ShouldThrottle(m_AutoFlashlightLastDebugLog, m_AutoFlashlightDebugLogHz))
-            Game::logMsg(format, args...);
-    };
+        {
+            if (m_AutoFlashlightDebugLog && !ShouldThrottle(m_AutoFlashlightLastDebugLog, m_AutoFlashlightDebugLogHz))
+                Game::logMsg(format, args...);
+        };
 
     if (!m_AutoFlashlightEnabled)
     {
@@ -331,78 +331,78 @@ void VR::UpdateAutoFlashlight(C_BasePlayer* localPlayer)
     const Vector ambientBackCenter = probeOrigin - forward * ambientBackDistance;
 
     auto sampleProbeSet = [this, localPlayer, probeOrigin](std::initializer_list<AutoFlashlightProbe> probes)
-    {
-        AutoFlashlightProbeSetResult result;
-        float weightedR = 0.0f;
-        float weightedG = 0.0f;
-        float weightedB = 0.0f;
-        float totalWeight = 0.0f;
-
-        for (const AutoFlashlightProbe& probe : probes)
         {
-            if (probe.weight <= 0.0f)
-                continue;
+            AutoFlashlightProbeSetResult result;
+            float weightedR = 0.0f;
+            float weightedG = 0.0f;
+            float weightedB = 0.0f;
+            float totalWeight = 0.0f;
 
-            Vector samplePoint = probe.point;
-            bool traced = false;
-            if (!TraceAutoFlashlightProbe(
-                m_Game ? m_Game->m_EngineTrace : nullptr,
-                reinterpret_cast<IHandleEntity*>(localPlayer),
-                probeOrigin,
-                probe.point,
-                samplePoint,
-                traced))
+            for (const AutoFlashlightProbe& probe : probes)
             {
-                continue;
-            }
-
-            float effectiveWeight = probe.weight;
-            bool lowConfidenceFallback = false;
-            if (!traced && m_Game && m_Game->m_EngineTrace)
-            {
-                effectiveWeight *= kAutoFlashlightFallbackWeightScale;
-                if (effectiveWeight <= 0.0f)
+                if (probe.weight <= 0.0f)
                     continue;
-                lowConfidenceFallback = true;
+
+                Vector samplePoint = probe.point;
+                bool traced = false;
+                if (!TraceAutoFlashlightProbe(
+                    m_Game ? m_Game->m_EngineTrace : nullptr,
+                    reinterpret_cast<IHandleEntity*>(localPlayer),
+                    probeOrigin,
+                    probe.point,
+                    samplePoint,
+                    traced))
+                {
+                    continue;
+                }
+
+                float effectiveWeight = probe.weight;
+                bool lowConfidenceFallback = false;
+                if (!traced && m_Game && m_Game->m_EngineTrace)
+                {
+                    effectiveWeight *= kAutoFlashlightFallbackWeightScale;
+                    if (effectiveWeight <= 0.0f)
+                        continue;
+                    lowConfidenceFallback = true;
+                }
+
+                int sampleR = 0;
+                int sampleG = 0;
+                int sampleB = 0;
+                if (!m_Game->SampleLightAtPoint(samplePoint, sampleR, sampleG, sampleB))
+                    continue;
+
+                if (traced)
+                {
+                    ++result.tracedSamples;
+                    result.tracedWeight += effectiveWeight;
+                }
+                else if (lowConfidenceFallback)
+                {
+                    ++result.fallbackSamples;
+                    result.fallbackWeight += effectiveWeight;
+                }
+
+                weightedR += static_cast<float>(sampleR) * effectiveWeight;
+                weightedG += static_cast<float>(sampleG) * effectiveWeight;
+                weightedB += static_cast<float>(sampleB) * effectiveWeight;
+                totalWeight += effectiveWeight;
+                ++result.successfulSamples;
             }
 
-            int sampleR = 0;
-            int sampleG = 0;
-            int sampleB = 0;
-            if (!m_Game->SampleLightAtPoint(samplePoint, sampleR, sampleG, sampleB))
-                continue;
+            if (result.successfulSamples == 0 || totalWeight <= 0.0f)
+                return result;
 
-            if (traced)
-            {
-                ++result.tracedSamples;
-                result.tracedWeight += effectiveWeight;
-            }
-            else if (lowConfidenceFallback)
-            {
-                ++result.fallbackSamples;
-                result.fallbackWeight += effectiveWeight;
-            }
-
-            weightedR += static_cast<float>(sampleR) * effectiveWeight;
-            weightedG += static_cast<float>(sampleG) * effectiveWeight;
-            weightedB += static_cast<float>(sampleB) * effectiveWeight;
-            totalWeight += effectiveWeight;
-            ++result.successfulSamples;
-        }
-
-        if (result.successfulSamples == 0 || totalWeight <= 0.0f)
+            const float averageR = weightedR / totalWeight;
+            const float averageG = weightedG / totalWeight;
+            const float averageB = weightedB / totalWeight;
+            result.valid = true;
+            result.averageR = static_cast<int>(std::lround(averageR));
+            result.averageG = static_cast<int>(std::lround(averageG));
+            result.averageB = static_cast<int>(std::lround(averageB));
+            result.rawLuma = ComputePerceivedLuma(averageR, averageG, averageB);
             return result;
-
-        const float averageR = weightedR / totalWeight;
-        const float averageG = weightedG / totalWeight;
-        const float averageB = weightedB / totalWeight;
-        result.valid = true;
-        result.averageR = static_cast<int>(std::lround(averageR));
-        result.averageG = static_cast<int>(std::lround(averageG));
-        result.averageB = static_cast<int>(std::lround(averageB));
-        result.rawLuma = ComputePerceivedLuma(averageR, averageG, averageB);
-        return result;
-    };
+        };
 
     const AutoFlashlightProbeSetResult forwardSample = sampleProbeSet({
         { probeOrigin, 0.3f },
@@ -412,7 +412,7 @@ void VR::UpdateAutoFlashlight(C_BasePlayer* localPlayer)
         { nearCenter - right * sideOffset, 1.0f },
         { farCenter + right * farSideOffset, 0.8f },
         { farCenter - right * farSideOffset, 0.8f },
-    });
+        });
 
     const AutoFlashlightProbeSetResult ambientSample = sampleProbeSet({
         { probeOrigin, 1.5f },
@@ -421,7 +421,7 @@ void VR::UpdateAutoFlashlight(C_BasePlayer* localPlayer)
         { ambientBackCenter, 1.2f },
         { ambientBackCenter + right * ambientSideOffset, 0.9f },
         { ambientBackCenter - right * ambientSideOffset, 0.9f },
-    });
+        });
 
     if (!forwardSample.valid || !ambientSample.valid)
     {
@@ -1085,6 +1085,10 @@ void VR::SubmitVRTextures()
     if (renderedNewFrame || inGame)
         m_MenuBlankSubmitted = false;
 
+    const bool inGamePaused = inGame && m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsPaused();
+    const bool inGameCursorVisible = inGame && m_Game && m_Game->m_VguiSurface && m_Game->m_VguiSurface->IsCursorVisible();
+    const bool inGameVguiOverlayActive = inGamePaused || inGameCursorVisible;
+
     const bool queued = (m_Game && (m_Game->GetMatQueueMode() != 0));
     if (m_RenderPipelineDebugLog && !ShouldThrottle(m_RenderPipelineLastSubmitLog, m_RenderPipelineDebugLogHz))
     {
@@ -1150,7 +1154,7 @@ void VR::SubmitVRTextures()
 
         poseToken = m_SubmitPoseToken.load(std::memory_order_acquire);
         const uint32_t lastSubmittedToken = m_LastSubmittedPoseToken.load(std::memory_order_acquire);
-        if (poseToken == 0 || poseToken == lastSubmittedToken)
+        if ((poseToken == 0 || poseToken == lastSubmittedToken) && !inGameVguiOverlayActive)
             return;
 
         auto queryCompositorFrameIndex = [&]() -> uint32_t
@@ -1166,9 +1170,11 @@ void VR::SubmitVRTextures()
         const uint32_t lastSubmittedCompositorFrameIndex = m_LastSubmittedCompositorFrameIndex.load(std::memory_order_acquire);
         if (compositorFrameIndex != 0 && compositorFrameIndex == lastSubmittedCompositorFrameIndex)
         {
-            // Same compositor frame index: treat as already handled for this submit token.
+            // Same compositor frame index: treat as already handled for this submit token,
+            // but still allow menu-style VGUI overlays to refresh below.
             m_LastSubmittedPoseToken.store(poseToken, std::memory_order_release);
-            return;
+            if (!inGameVguiOverlayActive)
+                return;
         }
     }
 
@@ -1228,7 +1234,7 @@ void VR::SubmitVRTextures()
         };
 
     auto submitStereoPair = [&](vr::Texture_t* leftTexture, const vr::VRTextureBounds_t* leftBounds,
-                                vr::Texture_t* rightTexture, const vr::VRTextureBounds_t* rightBounds) -> bool
+        vr::Texture_t* rightTexture, const vr::VRTextureBounds_t* rightBounds) -> bool
         {
             if (queued)
             {
@@ -1307,6 +1313,25 @@ void VR::SubmitVRTextures()
                     CreateVRTextures();
                 submitStereoPair(&m_VKBlankTexture.m_VRTexture, nullptr,
                     &m_VKBlankTexture.m_VRTexture, nullptr);
+            }
+
+            if (inGameVguiOverlayActive)
+            {
+                // Menu-style in-game VGUI (pause menu, MOTD/daily message, chat, etc.) may update
+                // without producing a new 3D RenderView frame. Keep the HUD overlay visible and
+                // refresh its texture anyway, otherwise VR laser clicks have no visible target while
+                // the same panel is still usable on the desktop mirror.
+                if (!vr::VROverlay()->IsOverlayVisible(m_HUDTopHandle))
+                    RepositionOverlays();
+
+                applyHudTexture(m_HUDTopHandle, topBounds);
+                vr::VROverlay()->ShowOverlay(m_HUDTopHandle);
+                for (vr::VROverlayHandle_t& overlay : m_HUDBottomHandles)
+                    vr::VROverlay()->HideOverlay(overlay);
+            }
+            else
+            {
+                hideHudOverlays();
             }
 
             if (successfulSubmit && m_CompositorExplicitTiming)
