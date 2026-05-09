@@ -176,6 +176,55 @@ void VR::ProcessMenuInput()
     const bool inGame = m_Game->m_EngineClient->IsInGame();
     vr::VROverlayHandle_t currentOverlay = inGame ? m_HUDTopHandle : m_MainMenuHandle;
 
+    vr::IVROverlay* overlayApi = vr::VROverlay();
+    if (!overlayApi)
+        return;
+
+    int windowWidth = 0;
+    int windowHeight = 0;
+    if (m_Game && m_Game->m_MaterialSystem && m_Game->m_MaterialSystem->GetRenderContext())
+        m_Game->m_MaterialSystem->GetRenderContext()->GetWindowSize(windowWidth, windowHeight);
+    if (windowWidth <= 0)
+        windowWidth = static_cast<int>(m_RenderWidth);
+    if (windowHeight <= 0)
+        windowHeight = static_cast<int>(m_RenderHeight);
+
+    // Mouse scale can change after resolution switches. Keep the SteamVR overlay
+    // coordinate system matched to the live VGUI/backbuffer size.
+    const vr::HmdVector2_t mouseScaleHUD = {
+        static_cast<float>((std::max)(1, windowWidth)),
+        static_cast<float>((std::max)(1, windowHeight))
+    };
+    overlayApi->SetOverlayMouseScale(m_HUDTopHandle, &mouseScaleHUD);
+    for (vr::VROverlayHandle_t& overlay : m_HUDBottomHandles)
+        overlayApi->SetOverlayMouseScale(overlay, &mouseScaleHUD);
+
+    if (inGame)
+    {
+        // Keep in-game pause/menu/MOTD panels visible and interactive from the
+        // input path. Do not manage this from SubmitVRTextures(), because the
+        // queued stale-frame submit path runs far more often than HUD paint.
+        RepositionOverlays();
+        static const vr::VRTextureBounds_t fullHudBounds{ 0.0f, 0.0f, 1.0f, 1.0f };
+        overlayApi->SetOverlayTextureBounds(m_HUDTopHandle, &fullHudBounds);
+        {
+            std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
+            overlayApi->SetOverlayTexture(m_HUDTopHandle, &m_VKHUD.m_VRTexture);
+        }
+        overlayApi->HideOverlay(m_MainMenuHandle);
+        overlayApi->ShowOverlay(m_HUDTopHandle);
+        for (vr::VROverlayHandle_t& overlay : m_HUDBottomHandles)
+            overlayApi->HideOverlay(overlay);
+    }
+    else
+    {
+        const vr::HmdVector2_t mouseScaleMenu = {
+            static_cast<float>((std::max)(1u, m_RenderWidth)),
+            static_cast<float>((std::max)(1u, m_RenderHeight))
+        };
+        overlayApi->SetOverlayMouseScale(m_MainMenuHandle, &mouseScaleMenu);
+    }
+
     const auto controllerHoveringOverlay = [&](vr::VROverlayHandle_t overlay)
         {
             return CheckOverlayIntersectionForController(overlay, vr::TrackedControllerRole_LeftHand) ||
@@ -221,9 +270,6 @@ void VR::ProcessMenuInput()
     {
         vr::VROverlay()->SetOverlayFlag(currentOverlay, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);
 
-        int windowWidth, windowHeight;
-        m_Game->m_MaterialSystem->GetRenderContext()->GetWindowSize(windowWidth, windowHeight);
-
         vr::VREvent_t vrEvent;
         while (vr::VROverlay()->PollNextOverlayEvent(currentOverlay, &vrEvent, sizeof(vrEvent)))
         {
@@ -249,16 +295,25 @@ void VR::ProcessMenuInput()
             }
 
             case vr::VREvent_MouseButtonDown:
-                // Don't allow holding down the mouse down in the pause menu. The resume button can be clicked before
-                // the MouseButtonUp event is polled, which causes issues with the overlay.
-                if (currentOverlay == m_MainMenuHandle)
+                if (isHudOverlay)
+                {
                     m_Game->m_VguiInput->InternalMousePressed(ButtonCode_t::MOUSE_LEFT);
+                    m_InGameVguiMouseDown = true;
+                }
+                else if (currentOverlay == m_MainMenuHandle)
+                {
+                    // Main-menu resume can hide the overlay before MouseButtonUp is delivered,
+                    // so keep the legacy click-on-down behavior there.
+                    m_Game->m_VguiInput->InternalMousePressed(ButtonCode_t::MOUSE_LEFT);
+                }
                 break;
 
             case vr::VREvent_MouseButtonUp:
-                if (isHudOverlay)
+                if (isHudOverlay && !m_InGameVguiMouseDown)
                     m_Game->m_VguiInput->InternalMousePressed(ButtonCode_t::MOUSE_LEFT);
                 m_Game->m_VguiInput->InternalMouseReleased(ButtonCode_t::MOUSE_LEFT);
+                if (isHudOverlay)
+                    m_InGameVguiMouseDown = false;
                 break;
 
             case vr::VREvent_ScrollDiscrete:

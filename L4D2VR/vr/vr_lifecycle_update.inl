@@ -728,7 +728,11 @@ void VR::Update()
         return;
     }
 
-    if (m_Game->m_VguiSurface->IsCursorVisible())
+    const bool menuInputActive =
+        (m_Game->m_EngineClient && m_Game->m_EngineClient->IsPaused()) ||
+        m_Game->m_VguiSurface->IsCursorVisible();
+
+    if (menuInputActive)
         ProcessMenuInput();
     else
         ProcessInput();
@@ -1085,10 +1089,6 @@ void VR::SubmitVRTextures()
     if (renderedNewFrame || inGame)
         m_MenuBlankSubmitted = false;
 
-    const bool inGamePaused = inGame && m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsPaused();
-    const bool inGameCursorVisible = inGame && m_Game && m_Game->m_VguiSurface && m_Game->m_VguiSurface->IsCursorVisible();
-    const bool inGameVguiOverlayActive = inGamePaused || inGameCursorVisible;
-
     const bool queued = (m_Game && (m_Game->GetMatQueueMode() != 0));
     if (m_RenderPipelineDebugLog && !ShouldThrottle(m_RenderPipelineLastSubmitLog, m_RenderPipelineDebugLogHz))
     {
@@ -1154,7 +1154,7 @@ void VR::SubmitVRTextures()
 
         poseToken = m_SubmitPoseToken.load(std::memory_order_acquire);
         const uint32_t lastSubmittedToken = m_LastSubmittedPoseToken.load(std::memory_order_acquire);
-        if ((poseToken == 0 || poseToken == lastSubmittedToken) && !inGameVguiOverlayActive)
+        if (poseToken == 0 || poseToken == lastSubmittedToken)
             return;
 
         auto queryCompositorFrameIndex = [&]() -> uint32_t
@@ -1170,11 +1170,9 @@ void VR::SubmitVRTextures()
         const uint32_t lastSubmittedCompositorFrameIndex = m_LastSubmittedCompositorFrameIndex.load(std::memory_order_acquire);
         if (compositorFrameIndex != 0 && compositorFrameIndex == lastSubmittedCompositorFrameIndex)
         {
-            // Same compositor frame index: treat as already handled for this submit token,
-            // but still allow menu-style VGUI overlays to refresh below.
+            // Same compositor frame index: treat as already handled for this submit token.
             m_LastSubmittedPoseToken.store(poseToken, std::memory_order_release);
-            if (!inGameVguiOverlayActive)
-                return;
+            return;
         }
     }
 
@@ -1313,25 +1311,6 @@ void VR::SubmitVRTextures()
                     CreateVRTextures();
                 submitStereoPair(&m_VKBlankTexture.m_VRTexture, nullptr,
                     &m_VKBlankTexture.m_VRTexture, nullptr);
-            }
-
-            if (inGameVguiOverlayActive)
-            {
-                // Menu-style in-game VGUI (pause menu, MOTD/daily message, chat, etc.) may update
-                // without producing a new 3D RenderView frame. Keep the HUD overlay visible and
-                // refresh its texture anyway, otherwise VR laser clicks have no visible target while
-                // the same panel is still usable on the desktop mirror.
-                if (!vr::VROverlay()->IsOverlayVisible(m_HUDTopHandle))
-                    RepositionOverlays();
-
-                applyHudTexture(m_HUDTopHandle, topBounds);
-                vr::VROverlay()->ShowOverlay(m_HUDTopHandle);
-                for (vr::VROverlayHandle_t& overlay : m_HUDBottomHandles)
-                    vr::VROverlay()->HideOverlay(overlay);
-            }
-            else
-            {
-                hideHudOverlays();
             }
 
             if (successfulSubmit && m_CompositorExplicitTiming)

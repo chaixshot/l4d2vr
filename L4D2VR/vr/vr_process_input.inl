@@ -3,6 +3,12 @@ void VR::ProcessInput()
     if (!m_IsVREnabled)
         return;
 
+    if (m_InGameVguiMouseDown && m_Game && m_Game->m_VguiInput)
+    {
+        m_Game->m_VguiInput->InternalMouseReleased(ButtonCode_t::MOUSE_LEFT);
+        m_InGameVguiMouseDown = false;
+    }
+
     // Recomputed every frame from CustomAction bindings.
     m_CustomWalkHeld = false;
 

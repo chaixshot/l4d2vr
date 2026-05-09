@@ -714,6 +714,9 @@ public:
 	// changes state, and only release if we were the one who pressed.
 	bool m_PrimaryAttackCmdOwned = false;
 	bool m_SecondaryAttackCmdOwned = false;
+	// True while a VR overlay click is held on an in-game VGUI panel.
+	// If the panel closes before SteamVR sends MouseButtonUp, ProcessInput releases it.
+	bool m_InGameVguiMouseDown = false;
 	bool m_JumpCmdOwned = false;
 	bool m_UseCmdOwned = false;
 	bool m_ReloadCmdOwned = false;
