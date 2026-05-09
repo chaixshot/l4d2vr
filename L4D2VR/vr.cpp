@@ -7976,7 +7976,10 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
         if (!m_Game || !m_Game->m_DebugOverlay)
             return;
 
-        const float durationSec = std::clamp((std::max)(m_LastFrameDuration, 0.03f), 0.01f, 0.08f);
+        // DebugOverlay primitives are global and survive across RenderView passes.
+        // Keep queued label glyphs single-pass so they do not leak into the clean
+        // desktop mirror RTT on the next frame.
+        const float durationSec = 0.001f;
         const Vector glyphRight = right;
         const Vector glyphUp = up;
 

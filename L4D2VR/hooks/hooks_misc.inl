@@ -737,14 +737,13 @@ if (m_VR->m_IsVREnabled && queueMode == 2 && (m_VR->m_QueuedViewmodelStabilize |
 			}
 		}
 
-		#if 0
-		if (isAlive && infectedType != VR::SpecialInfectedType::None)
+		if (!suppressDesktopMirrorPluginOverlays && entity && entityInfectedType != VR::SpecialInfectedType::None)
 		{
-			if (!isRagdoll)
+			if (m_VR->IsEntityAlive(entity))
 			{
 				// 1) 高优先级：自瞄/目标刷新不要被 Overlay 节流影响（否则锁定会飘）
 				// RefreshSpecialInfectedPreWarning 内部会用到 Trace 缓存（TraceMaxHz），所以这里高频调用不会把 CPU 打爆。
-				m_VR->RefreshSpecialInfectedPreWarning(info.origin, infectedType, info.entity_index, isPlayerClass);
+				m_VR->RefreshSpecialInfectedPreWarning(info.origin, entityInfectedType, info.entity_index, isPlayerClass);
 
 				// Rear mirror pop-up: if enabled, show the mirror briefly when a special infected is behind you
 				// within the configured warning distance. This detection runs on the main render pass so the
@@ -797,17 +796,16 @@ if (m_VR->m_IsVREnabled && queueMode == 2 && (m_VR->m_QueuedViewmodelStabilize |
 						if (!to.IsZero() && to.LengthSqr() <= (maxD * maxD))
 							m_VR->m_RearMirrorSawSpecialThisPass = true;
 					}
-					if (infectedType != VR::SpecialInfectedType::Tank
-						&& infectedType != VR::SpecialInfectedType::Witch
-						&& infectedType != VR::SpecialInfectedType::Charger)
+					if (entityInfectedType != VR::SpecialInfectedType::Tank
+						&& entityInfectedType != VR::SpecialInfectedType::Witch
+						&& entityInfectedType != VR::SpecialInfectedType::Charger)
 					{
 						m_VR->RefreshSpecialInfectedBlindSpotWarning(info.origin);
 					}
-					m_VR->DrawSpecialInfectedArrow(info.origin, infectedType);
+					m_VR->DrawSpecialInfectedArrow(info.origin, entityInfectedType);
 				}
 			}
 		}
-		#endif
 	}
 
 	if (info.pModel && hideArms && !m_Game->m_CachedArmsModel)
