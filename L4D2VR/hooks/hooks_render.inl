@@ -1375,17 +1375,33 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	CViewSetup leftEyeView = setup;
 	CViewSetup rightEyeView = setup;
 
-	// Left eye CViewSetup
-	leftEyeView.x = 0;
-	leftEyeView.width = m_VR->m_RenderWidth;
-	leftEyeView.height = m_VR->m_RenderHeight;
-	leftEyeView.fov = m_VR->m_Fov;
-	leftEyeView.y = 0;
-	leftEyeView.m_nUnscaledY = 0;
-	leftEyeView.fovViewmodel = m_VR->m_Fov;
-	leftEyeView.m_flAspectRatio = m_VR->m_Aspect;
-	leftEyeView.zNear = 6;
-	leftEyeView.zNearViewmodel = 6;
+	auto NormalizeViewSetupForVREye = [&](CViewSetup& view)
+		{
+			const int eyeWidth = static_cast<int>(m_VR->m_RenderWidth);
+			const int eyeHeight = static_cast<int>(m_VR->m_RenderHeight);
+
+			// Source keeps both scaled and unscaled viewport fields in CViewSetup.
+			// If the unscaled fields are left at the desktop/backbuffer size,
+			// queued rendering can intermittently render an eye RT through a desktop-sized
+			// viewport after VGUI/HUD capture or a resolution switch. That shows up as
+			// flicker/misalignment once the desktop mirror is larger than 1080p.
+			view.x = 0;
+			view.y = 0;
+			view.m_nUnscaledX = 0;
+			view.m_nUnscaledY = 0;
+			view.width = eyeWidth;
+			view.height = eyeHeight;
+			view.m_nUnscaledWidth = eyeWidth;
+			view.m_nUnscaledHeight = eyeHeight;
+			view.fov = m_VR->m_Fov;
+			view.fovViewmodel = m_VR->m_Fov;
+			view.m_flAspectRatio = m_VR->m_Aspect;
+			view.zNear = 6;
+			view.zNearViewmodel = 6;
+		};
+
+	NormalizeViewSetupForVREye(leftEyeView);
+	NormalizeViewSetupForVREye(rightEyeView);
 	// Keep VR tracking base tied to the real player eye, NOT the shoulder camera.
 	// IMPORTANT (VR compatibility):
 	// Some VScript mods (e.g. slide mods) temporarily enable point_viewcontrol_survivor via
@@ -1642,11 +1658,14 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	// Align HUD view to the same origin/angles; otherwise you can get a second layer that
 	// appears to "follow the controller / stick" (classic double-image artifact).
 	CViewSetup hudLeft = hudViewSetup;
+	NormalizeViewSetupForVREye(hudLeft);
 	hudLeft.origin = leftEyeView.origin;
 	hudLeft.angles = renderViewAngles;
 	if (m_VR->m_IsVREnabled && queueMode != 0)
 		m_VR->DrawProjectedItemLabels(rndrContext, leftEyeView);
 	rndrContext->SetRenderTarget(m_VR->m_LeftEyeTexture);
+	if (hkViewport.fOriginal)
+		hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
 	if (m_VR->m_IsVREnabled)
 		m_VR->RenderDrawGameLaserSight(localPlayer);
 	hkRenderView.fOriginal(ecx, leftEyeView, hudLeft, nClearFlags, whatToDraw);
@@ -1665,23 +1684,16 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	m_PushedHud = false;
 
 	// Right eye CViewSetup
-	rightEyeView.x = 0;
-	rightEyeView.width = m_VR->m_RenderWidth;
-	rightEyeView.height = m_VR->m_RenderHeight;
-	rightEyeView.fov = m_VR->m_Fov;
-	rightEyeView.y = 0;
-	rightEyeView.m_nUnscaledY = 0;
-	rightEyeView.fovViewmodel = m_VR->m_Fov;
-	rightEyeView.m_flAspectRatio = m_VR->m_Aspect;
-	rightEyeView.zNear = 6;
-	rightEyeView.zNearViewmodel = 6;
 	rightEyeView.origin = rightOrigin;
 	rightEyeView.angles = renderViewAngles;
 	CViewSetup hudRight = hudViewSetup;
+	NormalizeViewSetupForVREye(hudRight);
 	hudRight.origin = rightEyeView.origin;
 	hudRight.angles = renderViewAngles;
 
 	rndrContext->SetRenderTarget(m_VR->m_RightEyeTexture);
+	if (hkViewport.fOriginal)
+		hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
 	hkRenderView.fOriginal(ecx, rightEyeView, hudRight, nClearFlags, whatToDraw);
 	if (m_VR->m_IsVREnabled && queueMode == 0)
 	{

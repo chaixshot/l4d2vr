@@ -200,7 +200,7 @@ namespace
         bool bigFronEnabled = false;
         for (int i = 0; i < nArgs; ++i)
         {
-            if (IsLaunchArgName(szArglist[i], L"-bigfron"))
+            if (IsLaunchArgName(szArglist[i], L"-bigfonts"))
             {
                 bigFronEnabled = true;
                 break;

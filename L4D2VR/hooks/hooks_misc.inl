@@ -1166,7 +1166,20 @@ void Hooks::dVGui_Paint(void* ecx, void* edx, int mode)
             DebugClientRectSize(clientW, clientH);
             DebugTextureFullSize(prevTarget, prevMapW, prevMapH, prevActualW, prevActualH);
             DebugTextureFullSize(hudTexture, hudMapW, hudMapH, hudActualW, hudActualH);
-            DebugGetViewport(ctx, vpBeforeX, vpBeforeY, vpBeforeW, vpBeforeH);
+            const bool canRestoreViewport = hkGetViewport.fOriginal && hkViewport.fOriginal &&
+                DebugGetViewport(ctx, vpBeforeX, vpBeforeY, vpBeforeW, vpBeforeH);
+
+            auto SetHudCaptureViewport = [&]()
+                {
+                    if (canRestoreViewport)
+                        hkViewport.fOriginal(ctx, 0, 0, (std::max)(1, hudMapW), (std::max)(1, hudMapH));
+                };
+
+            auto RestoreCapturedViewport = [&]()
+                {
+                    if (canRestoreViewport)
+                        hkViewport.fOriginal(ctx, vpBeforeX, vpBeforeY, vpBeforeW, vpBeforeH);
+                };
 
             if (logCapture)
             {
@@ -1182,6 +1195,7 @@ void Hooks::dVGui_Paint(void* ecx, void* edx, int mode)
             if (prevTarget != hudTexture)
             {
                 ctx->SetRenderTarget(hudTexture);
+                SetHudCaptureViewport();
 
                 if (logCapture)
                 {
@@ -1214,6 +1228,7 @@ void Hooks::dVGui_Paint(void* ecx, void* edx, int mode)
 
                 ctx->OverrideAlphaWriteEnable(false, true);
                 ctx->SetRenderTarget(prevTarget);
+                RestoreCapturedViewport();
 
                 if (logCapture)
                 {
@@ -1236,8 +1251,10 @@ void Hooks::dVGui_Paint(void* ecx, void* edx, int mode)
             else
             {
                 // Already on the HUD RT (single-threaded PushRT hijack).
+                SetHudCaptureViewport();
                 hkVgui_Paint.fOriginal(ecx, paintMode);
                 m_VR->DrawKillIndicators(ctx, hudTexture);
+                RestoreCapturedViewport();
 
                 if (logCapture)
                 {
