@@ -7,6 +7,8 @@
 #include <vector>
 #include <sstream>
 #include <cwctype>
+#include <cctype>
+#include <cstdlib>
 #include <system_error>
 #include <shellapi.h>
 #include "game.h"
@@ -17,6 +19,7 @@
 namespace
 {
     constexpr wchar_t kDesiredVrWindowTitle[] = L"Left 4 Dead 2 VR - Vulkan";
+    constexpr wchar_t kUiFontFixFileName[] = L"UI Font Fix.vpk";
 
     struct WindowSearchContext
     {
@@ -187,6 +190,27 @@ namespace
         return _wcsnicmp(value, expected, expectedLen) == 0 && value[expectedLen] == L'=';
     }
 
+    bool IsBigFronLaunchArgPresent()
+    {
+        int nArgs = 0;
+        LPWSTR* szArglist = CommandLineToArgvW(GetCommandLineW(), &nArgs);
+        if (!szArglist)
+            return false;
+
+        bool bigFronEnabled = false;
+        for (int i = 0; i < nArgs; ++i)
+        {
+            if (IsLaunchArgName(szArglist[i], L"-bigfron"))
+            {
+                bigFronEnabled = true;
+                break;
+            }
+        }
+
+        LocalFree(szArglist);
+        return bigFronEnabled;
+    }
+
     LaunchArgumentState ReadLaunchArgumentState()
     {
         LaunchArgumentState state;
@@ -210,14 +234,22 @@ namespace
         return state;
     }
 
-    std::filesystem::path GetLaunchArgumentNoticePath()
+    std::filesystem::path GetGameRootPath()
     {
         wchar_t exePath[MAX_PATH] = {};
         if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) == 0)
             return {};
 
-        std::filesystem::path noticePath(exePath);
-        return noticePath.parent_path() / L"left4dead2" / L"cfg" / L"l4d2vr_launch_argument_notice.txt";
+        return std::filesystem::path(exePath).parent_path();
+    }
+
+    std::filesystem::path GetLaunchArgumentNoticePath()
+    {
+        const std::filesystem::path gameRootPath = GetGameRootPath();
+        if (gameRootPath.empty())
+            return {};
+
+        return gameRootPath / L"left4dead2" / L"cfg" / L"l4d2vr_launch_argument_notice.txt";
     }
 
     bool FileExistsNoThrow(const std::filesystem::path& path)
@@ -229,14 +261,27 @@ namespace
         return std::filesystem::exists(path, ec);
     }
 
+    bool DeleteFileNoThrow(const std::filesystem::path& path)
+    {
+        if (!FileExistsNoThrow(path))
+            return false;
+
+        // A readonly VPK can make std::filesystem::remove silently fail through error_code.
+        // Clear attributes first so the cleanup path is deterministic.
+        SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_NORMAL);
+
+        std::error_code ec;
+        const bool removed = std::filesystem::remove(path, ec);
+        return removed && !FileExistsNoThrow(path);
+    }
+
     std::filesystem::path GetLeft4NekoDllPath()
     {
-        wchar_t exePath[MAX_PATH] = {};
-        if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) == 0)
+        const std::filesystem::path gameRootPath = GetGameRootPath();
+        if (gameRootPath.empty())
             return {};
 
-        std::filesystem::path gameRootPath(exePath);
-        return gameRootPath.parent_path() / L"bin" / L"left4neko.dll";
+        return gameRootPath / L"bin" / L"left4neko.dll";
     }
 
     bool ShouldUseChineseLaunchArgumentPrompt()
@@ -358,6 +403,31 @@ namespace
         return true;
     }
 
+    bool ExtractConfigValueFromLine(const std::wstring& line, const wchar_t* key, std::wstring& outValue)
+    {
+        if (line.find(key) == std::wstring::npos)
+            return false;
+
+        const size_t firstQuote = line.find(L'"');
+        if (firstQuote == std::wstring::npos)
+            return false;
+
+        const size_t secondQuote = line.find(L'"', firstQuote + 1);
+        if (secondQuote == std::wstring::npos)
+            return false;
+
+        const size_t valueStartQuote = line.find(L'"', secondQuote + 1);
+        if (valueStartQuote == std::wstring::npos)
+            return false;
+
+        const size_t valueEndQuote = line.find(L'"', valueStartQuote + 1);
+        if (valueEndQuote == std::wstring::npos)
+            return false;
+
+        outValue = line.substr(valueStartQuote + 1, valueEndQuote - valueStartQuote - 1);
+        return true;
+    }
+
     std::wstring TrimWhitespace(const std::wstring& value)
     {
         size_t start = 0;
@@ -371,43 +441,109 @@ namespace
         return value.substr(start, end - start);
     }
 
-    void EnsureVideoCfgSettings()
+    std::string TrimAsciiWhitespace(const std::string& value)
     {
-        wchar_t exePath[MAX_PATH] = {};
-        if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) == 0)
-            return;
+        size_t start = 0;
+        while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start])))
+            ++start;
 
-        std::filesystem::path videoCfgPath(exePath);
-        videoCfgPath = videoCfgPath.parent_path() / L"left4dead2" / L"cfg" / L"video.txt";
+        size_t end = value.size();
+        while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1])))
+            --end;
+
+        return value.substr(start, end - start);
+    }
+
+    struct VideoCfgDesiredSetting
+    {
+        const wchar_t* key;
+        const wchar_t* value;
+    };
+
+    constexpr VideoCfgDesiredSetting kDesiredVideoCfgSettings[] =
+    {
+        { L"\"setting.mat_antialias\"", L"1" },
+        { L"\"setting.mat_vsync\"", L"0" },
+        { L"\"setting.mat_queue_mode\"", L"0" },
+        { L"\"setting.fullscreen\"", L"0" },
+        { L"\"setting.nowindowborder\"", L"1" },
+    };
+
+    void InsertVideoCfgLineBeforeClosingBrace(std::vector<std::wstring>& lines, const wchar_t* key, const wchar_t* value)
+    {
+        std::wstring text = L"\t";
+        text += key;
+        text += L"\t\t\"";
+        text += value;
+        text += L"\"";
+
+        for (auto it = lines.begin(); it != lines.end(); ++it)
+        {
+            if (TrimWhitespace(*it) == L"}")
+            {
+                lines.insert(it, text);
+                return;
+            }
+        }
+
+        lines.push_back(text);
+    }
+
+    bool EnsureVideoCfgSettings()
+    {
+        const std::filesystem::path gameRootPath = GetGameRootPath();
+        if (gameRootPath.empty())
+            return false;
+
+        const std::filesystem::path videoCfgPath = gameRootPath / L"left4dead2" / L"cfg" / L"video.txt";
         if (!std::filesystem::exists(videoCfgPath))
-            return;
+            return false;
 
         std::wifstream input(videoCfgPath);
         if (!input.is_open())
-            return;
+            return false;
 
         std::vector<std::wstring> lines;
         lines.reserve(64);
 
+        bool found[_countof(kDesiredVideoCfgSettings)] = {};
         std::wstring line;
         bool changed = false;
         while (std::getline(input, line))
         {
-            changed |= ReplaceConfigValueInLine(line, L"\"setting.mat_antialias\"", L"1");
-            changed |= ReplaceConfigValueInLine(line, L"\"setting.mat_vsync\"", L"0");
-            changed |= ReplaceConfigValueInLine(line, L"\"setting.mat_queue_mode\"", L"0");
-            changed |= ReplaceConfigValueInLine(line, L"\"setting.fullscreen\"", L"0");
-            changed |= ReplaceConfigValueInLine(line, L"\"setting.nowindowborder\"", L"1");
+            for (size_t i = 0; i < _countof(kDesiredVideoCfgSettings); ++i)
+            {
+                const VideoCfgDesiredSetting& desired = kDesiredVideoCfgSettings[i];
+                if (line.find(desired.key) != std::wstring::npos)
+                {
+                    found[i] = true;
+                    changed |= ReplaceConfigValueInLine(line, desired.key, desired.value);
+                    break;
+                }
+            }
+
             lines.push_back(line);
         }
         input.close();
 
+        for (size_t i = 0; i < _countof(kDesiredVideoCfgSettings); ++i)
+        {
+            if (!found[i])
+            {
+                InsertVideoCfgLineBeforeClosingBrace(
+                    lines,
+                    kDesiredVideoCfgSettings[i].key,
+                    kDesiredVideoCfgSettings[i].value);
+                changed = true;
+            }
+        }
+
         if (!changed)
-            return;
+            return false;
 
         std::wofstream output(videoCfgPath, std::ios::trunc);
         if (!output.is_open())
-            return;
+            return false;
 
         for (size_t i = 0; i < lines.size(); ++i)
         {
@@ -415,6 +551,37 @@ namespace
             if (i + 1 < lines.size())
                 output << L'\n';
         }
+
+        return true;
+    }
+
+    void ApplyRuntimeVideoSettings()
+    {
+        if (!g_Game || !g_Game->m_Initialized)
+            return;
+
+        // The engine can rewrite video.txt after our early startup pass, especially after
+        // display-mode changes. Apply the runtime ConVars as well so the current session
+        // stays clamped while the worker keeps the persisted file corrected for next launch.
+        g_Game->SetConVarInt("mat_antialias", 1);
+        g_Game->SetConVarInt("mat_vsync", 0);
+    }
+
+    DWORD WINAPI MaintainVideoCfgSettingsWorker(LPVOID)
+    {
+        // Source may load defaults, change display mode, then save video.txt again after
+        // DllMain's early pass. Keep checking briefly during startup instead of relying on
+        // one file write at DLL load time.
+        constexpr int kAttempts = 120;
+        for (int i = 0; i < kAttempts; ++i)
+        {
+            ApplyRuntimeVideoSettings();
+            EnsureVideoCfgSettings();
+
+            Sleep(i < 20 ? 500 : 1000);
+        }
+
+        return 0;
     }
 
     std::string StripQuotes(std::string value)
@@ -454,15 +621,17 @@ namespace
 
     void EnsureNoHmdAutoexecCrosshair()
     {
-        wchar_t exePath[MAX_PATH] = {};
-        if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) == 0)
+        const std::filesystem::path gameRootPath = GetGameRootPath();
+        if (gameRootPath.empty())
             return;
 
-        std::filesystem::path autoexecPath(exePath);
-        autoexecPath = autoexecPath.parent_path() / L"left4dead2" / L"cfg" / L"autoexec.cfg";
+        const std::filesystem::path autoexecPath = gameRootPath / L"left4dead2" / L"cfg" / L"autoexec.cfg";
 
         if (!std::filesystem::exists(autoexecPath))
         {
+            std::error_code ec;
+            std::filesystem::create_directories(autoexecPath.parent_path(), ec);
+
             std::ofstream createFile(autoexecPath, std::ios::trunc);
             if (createFile.is_open())
                 createFile << "crosshair 1\n";
@@ -575,6 +744,416 @@ namespace
                 output << L'\n';
         }
     }
+
+    bool TryGetCurrentDisplayResolution(int& width, int& height)
+    {
+        width = 0;
+        height = 0;
+
+        DEVMODEW dm = {};
+        dm.dmSize = sizeof(dm);
+        if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm))
+        {
+            width = static_cast<int>(dm.dmPelsWidth);
+            height = static_cast<int>(dm.dmPelsHeight);
+        }
+        else
+        {
+            width = GetSystemMetrics(SM_CXSCREEN);
+            height = GetSystemMetrics(SM_CYSCREEN);
+        }
+
+        return width > 0 && height > 0;
+    }
+
+    bool TryExtractFirstQuotedString(const std::wstring& line, std::wstring& outValue)
+    {
+        const size_t start = line.find(L'"');
+        if (start == std::wstring::npos)
+            return false;
+
+        const size_t end = line.find(L'"', start + 1);
+        if (end == std::wstring::npos)
+            return false;
+
+        outValue = line.substr(start + 1, end - start - 1);
+        return true;
+    }
+
+    bool TryExtractSecondQuotedString(const std::wstring& line, std::wstring& outValue)
+    {
+        size_t pos = line.find(L'"');
+        if (pos == std::wstring::npos)
+            return false;
+        pos = line.find(L'"', pos + 1);
+        if (pos == std::wstring::npos)
+            return false;
+        pos = line.find(L'"', pos + 1);
+        if (pos == std::wstring::npos)
+            return false;
+
+        const size_t end = line.find(L'"', pos + 1);
+        if (end == std::wstring::npos)
+            return false;
+
+        outValue = line.substr(pos + 1, end - pos - 1);
+        return true;
+    }
+
+    bool IsUiFontFixAddonEntryLine(const std::wstring& line)
+    {
+        std::wstring firstQuoted;
+        if (!TryExtractFirstQuotedString(line, firstQuoted))
+            return false;
+
+        for (wchar_t& ch : firstQuoted)
+        {
+            if (ch == L'/')
+                ch = L'\\';
+        }
+
+        const wchar_t* suffix = kUiFontFixFileName;
+        const size_t suffixLen = wcslen(suffix);
+        if (firstQuoted.size() < suffixLen)
+            return false;
+
+        return _wcsicmp(firstQuoted.c_str() + firstQuoted.size() - suffixLen, suffix) == 0;
+    }
+
+    bool IsAddonListEntryLine(const std::wstring& line)
+    {
+        std::wstring firstQuoted;
+        std::wstring secondQuoted;
+        return TryExtractFirstQuotedString(line, firstQuoted) && TryExtractSecondQuotedString(line, secondQuoted);
+    }
+
+    void WriteAddonListLines(const std::filesystem::path& addonListPath, const std::vector<std::wstring>& lines)
+    {
+        std::error_code ec;
+        std::filesystem::create_directories(addonListPath.parent_path(), ec);
+
+        std::wofstream output(addonListPath, std::ios::trunc);
+        if (!output.is_open())
+            return;
+
+        for (size_t i = 0; i < lines.size(); ++i)
+        {
+            output << lines[i];
+            if (i + 1 < lines.size())
+                output << L'\n';
+        }
+    }
+
+    void EnsureUiFontFixAddonListFirst(const std::filesystem::path& addonListPath)
+    {
+        constexpr wchar_t kUiFontFixEntry[] = L"\t\"UI Font Fix.vpk\"\t\t\"1\"";
+
+        if (!FileExistsNoThrow(addonListPath))
+        {
+            WriteAddonListLines(addonListPath, {
+                L"\"AddonList\"",
+                L"{",
+                kUiFontFixEntry,
+                L"}"
+                });
+            return;
+        }
+
+        std::wifstream input(addonListPath);
+        if (!input.is_open())
+            return;
+
+        std::vector<std::wstring> lines;
+        lines.reserve(128);
+
+        std::wstring line;
+        while (std::getline(input, line))
+            lines.push_back(line);
+        input.close();
+
+        int openBraceIndex = -1;
+        for (size_t i = 0; i < lines.size(); ++i)
+        {
+            if (TrimWhitespace(lines[i]) == L"{")
+            {
+                openBraceIndex = static_cast<int>(i);
+                break;
+            }
+        }
+
+        if (openBraceIndex < 0)
+        {
+            WriteAddonListLines(addonListPath, {
+                L"\"AddonList\"",
+                L"{",
+                kUiFontFixEntry,
+                L"}"
+                });
+            return;
+        }
+
+        int firstEntryIndex = -1;
+        int existingUiFontFixIndex = -1;
+        std::vector<std::wstring> filteredLines;
+        filteredLines.reserve(lines.size() + 1);
+
+        for (size_t i = 0; i < lines.size(); ++i)
+        {
+            const bool isAddonEntry = static_cast<int>(i) > openBraceIndex && IsAddonListEntryLine(lines[i]);
+            if (isAddonEntry && firstEntryIndex < 0)
+                firstEntryIndex = static_cast<int>(i);
+
+            if (IsUiFontFixAddonEntryLine(lines[i]))
+            {
+                if (existingUiFontFixIndex < 0)
+                    existingUiFontFixIndex = static_cast<int>(i);
+                continue;
+            }
+
+            filteredLines.push_back(lines[i]);
+        }
+
+        const bool alreadyFirst = (existingUiFontFixIndex >= 0) &&
+            (firstEntryIndex < 0 || existingUiFontFixIndex == firstEntryIndex);
+        if (alreadyFirst)
+        {
+            std::wstring firstValue;
+            const bool enabled = TryExtractSecondQuotedString(lines[existingUiFontFixIndex], firstValue) && firstValue == L"1";
+            if (enabled)
+                return;
+        }
+
+        int filteredOpenBraceIndex = -1;
+        for (size_t i = 0; i < filteredLines.size(); ++i)
+        {
+            if (TrimWhitespace(filteredLines[i]) == L"{")
+            {
+                filteredOpenBraceIndex = static_cast<int>(i);
+                break;
+            }
+        }
+
+        if (filteredOpenBraceIndex < 0)
+        {
+            WriteAddonListLines(addonListPath, {
+                L"\"AddonList\"",
+                L"{",
+                kUiFontFixEntry,
+                L"}"
+                });
+            return;
+        }
+
+        filteredLines.insert(filteredLines.begin() + filteredOpenBraceIndex + 1, kUiFontFixEntry);
+        WriteAddonListLines(addonListPath, filteredLines);
+    }
+
+    void RemoveUiFontFixAddonListEntry(const std::filesystem::path& addonListPath)
+    {
+        if (!FileExistsNoThrow(addonListPath))
+            return;
+
+        std::wifstream input(addonListPath);
+        if (!input.is_open())
+            return;
+
+        std::vector<std::wstring> lines;
+        lines.reserve(128);
+
+        std::wstring line;
+        bool changed = false;
+        while (std::getline(input, line))
+        {
+            if (IsUiFontFixAddonEntryLine(line))
+            {
+                changed = true;
+                continue;
+            }
+
+            lines.push_back(line);
+        }
+        input.close();
+
+        if (!changed)
+            return;
+
+        WriteAddonListLines(addonListPath, lines);
+    }
+
+    bool IsMatSetVideoModeLine(const std::string& line)
+    {
+        std::string activePart = line;
+        const size_t commentPos = activePart.find("//");
+        if (commentPos != std::string::npos)
+            activePart = activePart.substr(0, commentPos);
+
+        activePart = TrimAsciiWhitespace(activePart);
+        if (activePart.empty())
+            return false;
+
+        std::istringstream iss(activePart);
+        std::string cmd;
+        if (!(iss >> cmd))
+            return false;
+
+        cmd = StripQuotes(cmd);
+        return _stricmp(cmd.c_str(), "mat_setvideomode") == 0;
+    }
+
+    void EnsureAutoexecMatSetVideoMode(const std::filesystem::path& autoexecPath, int width, int height)
+    {
+        if (width <= 0 || height <= 0)
+            return;
+
+        const std::string line0 = "mat_setvideomode " + std::to_string(width) + " " + std::to_string(height) + " 0";
+        const std::string line1 = "mat_setvideomode " + std::to_string(width) + " " + std::to_string(height) + " 1";
+
+        std::vector<std::string> lines;
+        bool foundLine0 = false;
+        bool foundLine1 = false;
+        int matSetVideoModeLineCount = 0;
+
+        if (FileExistsNoThrow(autoexecPath))
+        {
+            std::ifstream input(autoexecPath);
+            if (input.is_open())
+            {
+                std::string line;
+                while (std::getline(input, line))
+                {
+                    const std::string trimmed = TrimAsciiWhitespace(line);
+                    if (IsMatSetVideoModeLine(line))
+                    {
+                        ++matSetVideoModeLineCount;
+                        if (_stricmp(trimmed.c_str(), line0.c_str()) == 0)
+                            foundLine0 = true;
+                        else if (_stricmp(trimmed.c_str(), line1.c_str()) == 0)
+                            foundLine1 = true;
+                        continue;
+                    }
+
+                    lines.push_back(line);
+                }
+            }
+        }
+
+        if (foundLine0 && foundLine1 && matSetVideoModeLineCount == 2)
+            return;
+
+        if (!lines.empty() && !TrimAsciiWhitespace(lines.back()).empty())
+            lines.push_back(std::string());
+
+        lines.push_back(line0);
+        lines.push_back(line1);
+
+        std::error_code ec;
+        std::filesystem::create_directories(autoexecPath.parent_path(), ec);
+
+        std::ofstream output(autoexecPath, std::ios::trunc);
+        if (!output.is_open())
+            return;
+
+        for (size_t i = 0; i < lines.size(); ++i)
+        {
+            output << lines[i];
+            if (i + 1 < lines.size())
+                output << '\n';
+        }
+    }
+
+    void RemoveAutoexecMatSetVideoMode(const std::filesystem::path& autoexecPath)
+    {
+        if (!FileExistsNoThrow(autoexecPath))
+            return;
+
+        std::ifstream input(autoexecPath);
+        if (!input.is_open())
+            return;
+
+        std::vector<std::string> lines;
+        lines.reserve(128);
+
+        std::string line;
+        bool changed = false;
+        while (std::getline(input, line))
+        {
+            if (IsMatSetVideoModeLine(line))
+            {
+                changed = true;
+                continue;
+            }
+
+            lines.push_back(line);
+        }
+        input.close();
+
+        if (!changed)
+            return;
+
+        std::ofstream output(autoexecPath, std::ios::trunc);
+        if (!output.is_open())
+            return;
+
+        for (size_t i = 0; i < lines.size(); ++i)
+        {
+            output << lines[i];
+            if (i + 1 < lines.size())
+                output << '\n';
+        }
+    }
+
+    void RemoveUiFontFixVpkAndConfig(const std::filesystem::path& gameRootPath)
+    {
+        if (gameRootPath.empty())
+            return;
+
+        const std::filesystem::path left4dead2Path = gameRootPath / L"left4dead2";
+        const std::filesystem::path targetVpkPath = left4dead2Path / L"addons" / kUiFontFixFileName;
+
+        DeleteFileNoThrow(targetVpkPath);
+        RemoveUiFontFixAddonListEntry(left4dead2Path / L"addonlist.txt");
+        RemoveAutoexecMatSetVideoMode(left4dead2Path / L"cfg" / L"autoexec.cfg");
+    }
+
+    void EnsureUiFontFixVpkAndConfig()
+    {
+        const std::filesystem::path gameRootPath = GetGameRootPath();
+        if (gameRootPath.empty())
+            return;
+
+        const bool bigFronEnabled = IsBigFronLaunchArgPresent();
+        if (!bigFronEnabled)
+        {
+            RemoveUiFontFixVpkAndConfig(gameRootPath);
+            return;
+        }
+
+        const std::filesystem::path sourceVpkPath = gameRootPath / L"vr" / kUiFontFixFileName;
+        if (!FileExistsNoThrow(sourceVpkPath))
+            return;
+
+        const std::filesystem::path left4dead2Path = gameRootPath / L"left4dead2";
+        const std::filesystem::path addonsPath = left4dead2Path / L"addons";
+        const std::filesystem::path targetVpkPath = addonsPath / kUiFontFixFileName;
+
+        if (!FileExistsNoThrow(targetVpkPath))
+        {
+            std::error_code ec;
+            std::filesystem::create_directories(addonsPath, ec);
+            std::filesystem::copy_file(sourceVpkPath, targetVpkPath, std::filesystem::copy_options::none, ec);
+            if (!FileExistsNoThrow(targetVpkPath))
+                return;
+        }
+
+        EnsureUiFontFixAddonListFirst(left4dead2Path / L"addonlist.txt");
+
+        int width = 0;
+        int height = 0;
+        if (!TryGetCurrentDisplayResolution(width, height))
+            return;
+
+        EnsureAutoexecMatSetVideoMode(left4dead2Path / L"cfg" / L"autoexec.cfg", width, height);
+    }
 }
 
 DWORD WINAPI InitL4D2VR(HMODULE hModule)
@@ -597,6 +1176,8 @@ DWORD WINAPI InitL4D2VR(HMODULE hModule)
     }
     LocalFree(szArglist);
 
+    EnsureUiFontFixVpkAndConfig();
+
     if (IsNoHmdLaunchArgPresent())
     {
         EnsureNoHmdVideoCfgDesktopResolution();
@@ -608,9 +1189,15 @@ DWORD WINAPI InitL4D2VR(HMODULE hModule)
 
     CreateThread(nullptr, 0, FocusGameWindowWorker, nullptr, 0, nullptr);
     CreateThread(nullptr, 0, MaintainWindowTitleWorker, nullptr, 0, nullptr);
+
+    // First pass before engine interfaces are ready. A later worker repeats this because
+    // the Source material system can save video.txt again after a display-mode change.
     EnsureVideoCfgSettings();
 
     g_Game = new Game();
+
+    ApplyRuntimeVideoSettings();
+    CreateThread(nullptr, 0, MaintainVideoCfgSettingsWorker, nullptr, 0, nullptr);
 
     return 0;
 }
