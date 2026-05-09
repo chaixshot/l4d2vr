@@ -22,7 +22,7 @@
 1. Download [L4D2VR.zip](https://github.com/liu547161153/l4d2vr/releases) and extract the files to your Left 4 Dead 2 directory (steamapps\common\Left 4 Dead 2)
 2. Launch SteamVR, then launch Left 4 Dead 2 with these launch options:
    
-   ``-heapsize 524288 -processheap -high -novid```
+   ``-heapsize 524288 -processheap -high -novid -bigfonts```
 
 3. Join or create your campaign and enjoy the game.
 4. To recenter the camera height, press down on the left stick. To see the HUD, aim the left controller up or down.
