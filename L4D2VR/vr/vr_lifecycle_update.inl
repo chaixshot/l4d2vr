@@ -827,6 +827,7 @@ void VR::ReleaseVRRenderTargetsForDeviceReset()
     SafeReleaseD3D(m_D9HUDSurface);
     SafeReleaseD3D(m_D9ScopeSurface);
     SafeReleaseD3D(m_D9RearMirrorSurface);
+    SafeReleaseD3D(m_D9DesktopMirrorSurface);
     SafeReleaseD3D(m_D9BlankSurface);
 
     SafeReleaseSourceTexture(m_LeftEyeTexture);
@@ -836,6 +837,7 @@ void VR::ReleaseVRRenderTargetsForDeviceReset()
     SafeReleaseSourceTexture(m_HUDTexture);
     SafeReleaseSourceTexture(m_ScopeTexture);
     SafeReleaseSourceTexture(m_RearMirrorTexture);
+    SafeReleaseSourceTexture(m_DesktopMirrorTexture);
     SafeReleaseSourceTexture(m_BlankTexture);
 
     std::memset(&m_VKLeftEye, 0, sizeof(m_VKLeftEye));
@@ -924,6 +926,21 @@ void VR::CreateVRTextures()
         m_RightEyeSubmitTexture = nullptr;
         m_D9LeftEyeSubmitSurface = nullptr;
         m_D9RightEyeSubmitSurface = nullptr;
+    }
+
+    if (m_DesktopMirrorHidePluginOverlays)
+    {
+        // Full-size clean eye RTT for desktop mirroring. This is intentionally not
+        // submitted to SteamVR; DXVK only uses the D3D surface for the window mirror.
+        m_CreatingTextureID = Texture_DesktopMirror;
+        m_DesktopMirrorTexture = m_Game->m_MaterialSystem->CreateNamedRenderTargetTextureEx(
+            "desktopMirrorClean0",
+            static_cast<int>(m_RenderWidth),
+            static_cast<int>(m_RenderHeight),
+            RT_SIZE_NO_CHANGE,
+            eyeFormat,
+            MATERIAL_RT_DEPTH_SEPARATE,
+            TEXTUREFLAGS_NOMIP);
     }
 
     m_CreatingTextureID = Texture_HUD;

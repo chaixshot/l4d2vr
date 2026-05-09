@@ -625,6 +625,7 @@ public:
 		Texture_HUD,
 		Texture_Scope,
 		Texture_RearMirror,
+		Texture_DesktopMirror,
 		Texture_Blank
 	};
 
@@ -635,6 +636,7 @@ public:
 	ITexture* m_HUDTexture = nullptr;
 	ITexture* m_ScopeTexture = nullptr;
 	ITexture* m_RearMirrorTexture = nullptr;
+	ITexture* m_DesktopMirrorTexture = nullptr;
 	ITexture* m_BlankTexture = nullptr;
 
 	IDirect3DSurface9* m_D9LeftEyeSurface = nullptr;
@@ -644,6 +646,7 @@ public:
 	IDirect3DSurface9* m_D9HUDSurface = nullptr;
 	IDirect3DSurface9* m_D9ScopeSurface = nullptr;
 	IDirect3DSurface9* m_D9RearMirrorSurface = nullptr;
+	IDirect3DSurface9* m_D9DesktopMirrorSurface = nullptr;
 	IDirect3DSurface9* m_D9BlankSurface = nullptr;
 
 	SharedTextureHolder m_VKLeftEye;
@@ -1244,10 +1247,15 @@ public:
 	//   DesktopMirrorEye=right/left or 1/0
 	//   DesktopMirrorKeepAspect=true/false
 	//   DesktopMirrorLinearFilter=true/false
+	//   DesktopMirrorHidePluginOverlays=true/false
+	// When hiding plugin overlays, the selected eye is rendered once into a clean mirror RT
+	// before normal VR-only world overlays (ItemModelLabel / special-infected arrows) are drawn.
 	bool m_DesktopMirrorEnabled = true;
 	int  m_DesktopMirrorEye = 1; // 0 = left eye, 1 = right eye
 	bool m_DesktopMirrorKeepAspect = true;
 	bool m_DesktopMirrorLinearFilter = true;
+	bool m_DesktopMirrorHidePluginOverlays = true;
+	bool m_DesktopMirrorCleanRenderingPass = false;
 
 
 	bool m_FlashlightEnhancementEnabled = false;

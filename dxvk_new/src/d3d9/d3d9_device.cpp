@@ -617,7 +617,9 @@ namespace dxvk {
                 return;
 
             IDirect3DSurface9* source = nullptr;
-            if (vr->m_DesktopMirrorEye == 0)
+            if (vr->m_DesktopMirrorHidePluginOverlays && vr->m_D9DesktopMirrorSurface)
+                source = vr->m_D9DesktopMirrorSurface;
+            else if (vr->m_DesktopMirrorEye == 0)
                 source = vr->m_D9LeftEyeSubmitSurface ? vr->m_D9LeftEyeSubmitSurface : vr->m_D9LeftEyeSurface;
             else
                 source = vr->m_D9RightEyeSubmitSurface ? vr->m_D9RightEyeSubmitSurface : vr->m_D9RightEyeSurface;
@@ -1371,6 +1373,9 @@ namespace dxvk {
                     textureTarget = &g_Game->m_VR->m_VKRearMirror;
                     texture.ref()->GetSurfaceLevel(0, &g_Game->m_VR->m_D9RearMirrorSurface);
                     vrDescResult = g_D3DVR9->GetVRDesc(g_Game->m_VR->m_D9RearMirrorSurface, &texDesc);
+                }
+                else if (texID == VR::Texture_DesktopMirror) {
+                    texture.ref()->GetSurfaceLevel(0, &g_Game->m_VR->m_D9DesktopMirrorSurface);
                 }
                 else if (texID == VR::Texture_Blank) {
                     textureTarget = &g_Game->m_VR->m_VKBlankTexture;

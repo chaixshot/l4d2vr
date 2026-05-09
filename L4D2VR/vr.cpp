@@ -7822,6 +7822,9 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
     if (!renderContext)
         return;
 
+    if (m_DesktopMirrorCleanRenderingPass && m_DesktopMirrorHidePluginOverlays)
+        return;
+
     const auto now = std::chrono::steady_clock::now();
     if (!m_ItemModelLabelEnabled || !m_Game || !m_Game->m_EngineClient || !m_Game->m_EngineClient->IsInGame())
     {

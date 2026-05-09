@@ -1661,6 +1661,53 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	NormalizeViewSetupForVREye(hudLeft);
 	hudLeft.origin = leftEyeView.origin;
 	hudLeft.angles = renderViewAngles;
+
+	// Right eye CViewSetup is also needed by the optional clean desktop mirror pass.
+	rightEyeView.origin = rightOrigin;
+	rightEyeView.angles = renderViewAngles;
+	CViewSetup hudRight = hudViewSetup;
+	NormalizeViewSetupForVREye(hudRight);
+	hudRight.origin = rightEyeView.origin;
+	hudRight.angles = renderViewAngles;
+
+	auto renderCleanDesktopMirrorEye = [&](CViewSetup& mirrorView, CViewSetup& mirrorHud)
+		{
+			if (!m_VR->m_IsVREnabled || !m_VR->m_DesktopMirrorEnabled ||
+				!m_VR->m_DesktopMirrorHidePluginOverlays || !m_VR->m_DesktopMirrorTexture)
+			{
+				return;
+			}
+
+			const bool prevCleanPass = m_VR->m_DesktopMirrorCleanRenderingPass;
+			const bool prevSuppressHudCapture = m_VR->m_SuppressHudCapture;
+			int oldX = 0, oldY = 0, oldW = 0, oldH = 0;
+			const bool canRestoreViewport = hkGetViewport.fOriginal && hkViewport.fOriginal;
+			if (canRestoreViewport)
+				hkGetViewport.fOriginal(rndrContext, oldX, oldY, oldW, oldH);
+			ITexture* oldRT = rndrContext->GetRenderTarget();
+
+			m_VR->m_DesktopMirrorCleanRenderingPass = true;
+			m_VR->m_SuppressHudCapture = true;
+			rndrContext->SetRenderTarget(m_VR->m_DesktopMirrorTexture);
+			if (hkViewport.fOriginal)
+				hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
+			rndrContext->ClearColor4ub(0, 0, 0, 255);
+			rndrContext->ClearBuffers(true, true, true);
+
+			hkRenderView.fOriginal(ecx, mirrorView, mirrorHud, nClearFlags, whatToDraw);
+
+			rndrContext->SetRenderTarget(oldRT);
+			if (canRestoreViewport)
+				hkViewport.fOriginal(rndrContext, oldX, oldY, oldW, oldH);
+			m_VR->m_SuppressHudCapture = prevSuppressHudCapture;
+			m_VR->m_DesktopMirrorCleanRenderingPass = prevCleanPass;
+		};
+
+	if (m_VR->m_DesktopMirrorEye == 0)
+		renderCleanDesktopMirrorEye(leftEyeView, hudLeft);
+	else
+		renderCleanDesktopMirrorEye(rightEyeView, hudRight);
+
 	if (m_VR->m_IsVREnabled && queueMode != 0)
 		m_VR->DrawProjectedItemLabels(rndrContext, leftEyeView);
 	rndrContext->SetRenderTarget(m_VR->m_LeftEyeTexture);
@@ -1682,14 +1729,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	if (m_VR->m_IsVREnabled)
 		m_VR->UpdateD3DAimLineOverlayForView(localPlayer, leftEyeView, 0);
 	m_PushedHud = false;
-
-	// Right eye CViewSetup
-	rightEyeView.origin = rightOrigin;
-	rightEyeView.angles = renderViewAngles;
-	CViewSetup hudRight = hudViewSetup;
-	NormalizeViewSetupForVREye(hudRight);
-	hudRight.origin = rightEyeView.origin;
-	hudRight.angles = renderViewAngles;
 
 	rndrContext->SetRenderTarget(m_VR->m_RightEyeTexture);
 	if (hkViewport.fOriginal)

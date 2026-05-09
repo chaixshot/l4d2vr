@@ -1499,6 +1499,7 @@ void VR::ParseConfigFile()
     }
     m_DesktopMirrorKeepAspect = getBool("DesktopMirrorKeepAspect", m_DesktopMirrorKeepAspect);
     m_DesktopMirrorLinearFilter = getBool("DesktopMirrorLinearFilter", m_DesktopMirrorLinearFilter);
+    m_DesktopMirrorHidePluginOverlays = getBool("DesktopMirrorHidePluginOverlays", m_DesktopMirrorHidePluginOverlays);
     m_ItemModelLabelQueuedMaxVisiblePerEye = std::clamp(getInt("ItemModelLabelQueuedMaxVisiblePerEye", m_ItemModelLabelQueuedMaxVisiblePerEye), 1, 16);
     m_ItemModelLabelQueuedMaxChars = std::clamp(getInt("ItemModelLabelQueuedMaxChars", m_ItemModelLabelQueuedMaxChars), 4, 32);
     m_ItemModelLabelPlayerSuppressRadius = std::max(0.0f, getFloat("ItemModelLabelPlayerSuppressRadius", m_ItemModelLabelPlayerSuppressRadius));

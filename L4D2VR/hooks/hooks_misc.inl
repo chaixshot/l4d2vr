@@ -402,8 +402,13 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 			className = HooksSafeGetNetworkClassName(m_Game, const_cast<C_BaseEntity*>(entity));
 			isPlayerClass = className && (std::strcmp(className, "CTerrorPlayer") == 0 || std::strcmp(className, "C_TerrorPlayer") == 0);
 		}
-		if (info.entity_index == -1 || (info.entity_index > 0 && info.entity_index <= 2048))
+		const bool suppressDesktopMirrorPluginOverlays =
+			m_VR->m_DesktopMirrorCleanRenderingPass && m_VR->m_DesktopMirrorHidePluginOverlays;
+		if (!suppressDesktopMirrorPluginOverlays &&
+			(info.entity_index == -1 || (info.entity_index > 0 && info.entity_index <= 2048)))
+		{
 			m_VR->DrawItemModelLabel(info.entity_index, modelName, info.origin, entity, className);
+		}
 		// Scope RTT pass: optionally hide the local player model so scoped view isn't blocked by your own head/body.
 		if (m_VR->m_ScopeRenderingPass && m_VR->m_ScopeHideLocalPlayerModelInScope && isPlayerClass && m_Game->m_EngineClient)
 		{
@@ -658,7 +663,7 @@ if (m_VR->m_IsVREnabled && queueMode == 2 && (m_VR->m_QueuedViewmodelStabilize |
 			modelInfectedType == VR::SpecialInfectedType::Witch &&
 			entityInfectedType == VR::SpecialInfectedType::None;
 
-		if (useWitchModelFallback)
+		if (!suppressDesktopMirrorPluginOverlays && useWitchModelFallback)
 		{
 			if (m_VR->m_SpecialInfectedArrowDebugLog && m_VR->m_SpecialInfectedArrowDebugLogHz > 0.0f)
 			{
