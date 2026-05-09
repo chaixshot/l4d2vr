@@ -6,6 +6,27 @@ ITexture* __fastcall Hooks::dGetRenderTarget(void* ecx, void* edx)
 
 void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CViewSetup& hudViewSetup, int nClearFlags, int whatToDraw)
 {
+	// Source can call RenderView recursively while rendering the world, most visibly for water
+	// reflection/refraction render targets. The VR hook may only hijack the outer scene call.
+	// Nested calls must go straight through, otherwise water RTs can be filled with the VR eye
+	// scene/HUD and appear as a second full scene on the water surface in mat_queue_mode 2.
+	static thread_local int s_originalRenderViewDepth = 0;
+	if (s_originalRenderViewDepth > 0)
+		return hkRenderView.fOriginal(ecx, setup, hudViewSetup, nClearFlags, whatToDraw);
+
+	auto callOriginalRenderView = [&](CViewSetup& view, CViewSetup& hud, int clearFlags, int drawFlags)
+		{
+			struct OriginalRenderViewScope
+			{
+				int& depth;
+				explicit OriginalRenderViewScope(int& d) : depth(d) { ++depth; }
+				~OriginalRenderViewScope() { --depth; }
+			};
+
+			OriginalRenderViewScope scope(s_originalRenderViewDepth);
+			hkRenderView.fOriginal(ecx, view, hud, clearFlags, drawFlags);
+		};
+
 	static EngineThirdPersonCamSmoother s_engineTpCam;
 
 	if (!m_VR->m_CreatedVRTextures.load(std::memory_order_acquire))
@@ -19,7 +40,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	if (!rndrContext)
 	{
 		m_VR->HandleMissingRenderContext("Hooks::dRenderView");
-		return hkRenderView.fOriginal(ecx, setup, hudViewSetup, nClearFlags, whatToDraw);
+		callOriginalRenderView(setup, hudViewSetup, nClearFlags, whatToDraw);
+		return;
 	}
 	struct RenderContextStateGuard
 	{
@@ -52,6 +74,57 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		}
 	};
 	RenderContextStateGuard renderContextStateGuard(rndrContext);
+
+	auto rtNameContainsI = [](const char* haystack, const char* needle) -> bool
+		{
+			if (!haystack || !needle || !*needle)
+				return false;
+
+			const size_t needleLen = std::strlen(needle);
+			for (const char* p = haystack; *p; ++p)
+			{
+				if (_strnicmp(p, needle, needleLen) == 0)
+					return true;
+			}
+			return false;
+		};
+
+	auto isWaterReflectionRenderTarget = [&](ITexture* texture) -> bool
+		{
+			if (!texture)
+				return false;
+
+			const char* name = DebugTextureName(texture);
+			if (!name || !*name || name[0] == '<')
+				return false;
+
+			// L4D2/Source water uses offscreen reflection/refraction RTs. In queued mode these
+			// can enter RenderView as separate calls, not only recursive calls. Do not treat
+			// them as the outer VR scene.
+			return rtNameContainsI(name, "water") ||
+				rtNameContainsI(name, "reflect") ||
+				rtNameContainsI(name, "refract");
+		};
+
+	if (isWaterReflectionRenderTarget(renderContextStateGuard.rt))
+	{
+		if (m_VR->m_RenderPipelineDebugLog)
+		{
+			static thread_local std::chrono::steady_clock::time_point s_lastWaterPassLog{};
+			if (!ShouldThrottleLog(s_lastWaterPassLog, m_VR->m_RenderPipelineDebugLogHz))
+			{
+				int rtMapW = 0, rtMapH = 0, rtActualW = 0, rtActualH = 0;
+				DebugTextureFullSize(renderContextStateGuard.rt, rtMapW, rtMapH, rtActualW, rtActualH);
+				Game::logMsg("[VR][RenderView][PassThrough] reason=water-reflection tid=%lu rt=%s(map=%dx%d actual=%dx%d) setup=%dx%d hud=%dx%d clear=0x%X draw=0x%X",
+					GetCurrentThreadId(), DebugTextureName(renderContextStateGuard.rt), rtMapW, rtMapH, rtActualW, rtActualH,
+					setup.width, setup.height, hudViewSetup.width, hudViewSetup.height, nClearFlags, whatToDraw);
+			}
+		}
+
+		callOriginalRenderView(setup, hudViewSetup, nClearFlags, whatToDraw);
+		return;
+	}
+
 	// Reset "HUD painted" flag once per VR frame (prevents double HUD captures across eyes).
 	m_VR->m_HudPaintedThisFrame.store(false, std::memory_order_release);
 
@@ -1694,7 +1767,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			rndrContext->ClearColor4ub(0, 0, 0, 255);
 			rndrContext->ClearBuffers(true, true, true);
 
-			hkRenderView.fOriginal(ecx, mirrorView, mirrorHud, nClearFlags, whatToDraw);
+			callOriginalRenderView(mirrorView, mirrorHud, nClearFlags, whatToDraw);
 
 			rndrContext->SetRenderTarget(oldRT);
 			if (canRestoreViewport)
@@ -1715,7 +1788,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
 	if (m_VR->m_IsVREnabled)
 		m_VR->RenderDrawGameLaserSight(localPlayer);
-	hkRenderView.fOriginal(ecx, leftEyeView, hudLeft, nClearFlags, whatToDraw);
+	callOriginalRenderView(leftEyeView, hudLeft, nClearFlags, whatToDraw);
 	if (m_VR->m_IsVREnabled)
 	{
 		if (queueMode == 0)
@@ -1733,7 +1806,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	rndrContext->SetRenderTarget(m_VR->m_RightEyeTexture);
 	if (hkViewport.fOriginal)
 		hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
-	hkRenderView.fOriginal(ecx, rightEyeView, hudRight, nClearFlags, whatToDraw);
+	callOriginalRenderView(rightEyeView, hudRight, nClearFlags, whatToDraw);
 	if (m_VR->m_IsVREnabled && queueMode == 0)
 	{
 		rndrContext->SetRenderTarget(m_VR->m_RightEyeTexture);
@@ -1768,7 +1841,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 					touchedAngles = true;
 				}
 
-				hkRenderView.fOriginal(ecx, view, hud, nClearFlags, whatToDraw);
+				callOriginalRenderView(view, hud, nClearFlags, whatToDraw);
 
 				if (touchedAngles && m_Game && m_Game->m_EngineClient)
 					m_Game->m_EngineClient->SetViewAngles(oldEngineAngles);
@@ -1798,7 +1871,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				touchedAngles = true;
 			}
 
-			hkRenderView.fOriginal(ecx, view, hud, nClearFlags, whatToDraw);
+			callOriginalRenderView(view, hud, nClearFlags, whatToDraw);
 
 			if (touchedAngles && m_Game && m_Game->m_EngineClient)
 				m_Game->m_EngineClient->SetViewAngles(oldEngineAngles);
