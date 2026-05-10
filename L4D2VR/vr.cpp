@@ -3652,6 +3652,24 @@ static bool ShouldSuppressProjectedItemLabelForMotion(const VR::ProjectedItemLab
 #endif
     }
 
+    static const char* SafeGetProjectedItemLabelNetworkClassName(const VR* vr, const C_BaseEntity* entity)
+    {
+        if (!vr || !vr->m_Game || !entity)
+            return nullptr;
+#ifdef _MSC_VER
+        __try
+        {
+            return vr->m_Game->GetNetworkClassName(reinterpret_cast<uintptr_t*>(const_cast<C_BaseEntity*>(entity)));
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return nullptr;
+        }
+#else
+        return vr->m_Game->GetNetworkClassName(reinterpret_cast<uintptr_t*>(const_cast<C_BaseEntity*>(entity)));
+#endif
+    }
+
     static bool SafeGetProjectedItemLabelAbsOrigin(const C_BaseEntity* entity, Vector& out)
     {
         out = Vector();
@@ -3674,13 +3692,88 @@ static bool ShouldSuppressProjectedItemLabelForMotion(const VR::ProjectedItemLab
 #endif
     }
 
+    static bool SafeGetProjectedItemLabelInt32(const C_BaseEntity* entity, int offset, int& out)
+    {
+        out = 0;
+        if (!entity || offset < 0)
+            return false;
+        const auto* base = reinterpret_cast<const unsigned char*>(entity);
+        return SafeReadInt(base, offset, out);
+    }
+
+    class IClientRenderableProjectedItemLabelProbe
+    {
+    public:
+        virtual void* GetIClientUnknown() = 0;
+        virtual const Vector& GetRenderOrigin() = 0;
+        virtual const QAngle& GetRenderAngles() = 0;
+        virtual bool ShouldDraw() = 0;
+        virtual int GetRenderFlags() = 0;
+        virtual void Unused() const = 0;
+        virtual void* GetShadowHandle() const = 0;
+        virtual void* RenderHandle() = 0;
+        virtual void* GetModel() const = 0;
+    };
+
+    static bool SafeGetProjectedItemLabelRenderableOriginAndShouldDraw(
+        VR* vr,
+        const C_BaseEntity* entity,
+        Vector& outOrigin,
+        bool& outShouldDraw)
+    {
+        outOrigin = Vector();
+        outShouldDraw = false;
+        if (!vr || !vr->m_Game || !entity)
+            return false;
+
+        // DT_BaseEntity::m_fEffects. EF_NODRAW means the renderable should not be used as a label anchor.
+        static constexpr int kProjectedItemLabelBaseEntityEffectsOffset = 0x0E0;
+        static constexpr int kProjectedItemLabelEffectNoDraw = 0x020;
+        int effects = 0;
+        if (SafeGetProjectedItemLabelInt32(entity, kProjectedItemLabelBaseEntityEffectsOffset, effects) &&
+            (effects & kProjectedItemLabelEffectNoDraw) != 0)
+        {
+            return false;
+        }
+
+#ifdef _MSC_VER
+        __try
+        {
+            void* renderableVoid = const_cast<C_BaseEntity*>(entity)->GetClientRenderable();
+            if (!renderableVoid)
+                return false;
+
+            auto* renderable = reinterpret_cast<IClientRenderableProjectedItemLabelProbe*>(renderableVoid);
+            outShouldDraw = renderable->ShouldDraw();
+            const Vector& renderOrigin = renderable->GetRenderOrigin();
+            outOrigin = renderOrigin;
+            return std::isfinite(outOrigin.x) && std::isfinite(outOrigin.y) && std::isfinite(outOrigin.z);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            outOrigin = Vector();
+            outShouldDraw = false;
+            return false;
+        }
+#else
+        void* renderableVoid = const_cast<C_BaseEntity*>(entity)->GetClientRenderable();
+        if (!renderableVoid)
+            return false;
+
+        auto* renderable = reinterpret_cast<IClientRenderableProjectedItemLabelProbe*>(renderableVoid);
+        outShouldDraw = renderable->ShouldDraw();
+        const Vector& renderOrigin = renderable->GetRenderOrigin();
+        outOrigin = renderOrigin;
+        return std::isfinite(outOrigin.x) && std::isfinite(outOrigin.y) && std::isfinite(outOrigin.z);
+#endif
+    }
+
     static bool IsProjectedItemLabelAlivePlayer(VR* vr, const C_BaseEntity* entity)
     {
         if (!vr || !vr->m_Game || !entity)
             return false;
 
-        const char* playerClass =
-            vr->m_Game->GetNetworkClassName(reinterpret_cast<uintptr_t*>(const_cast<C_BaseEntity*>(entity)));
+        const char* playerClass = SafeGetProjectedItemLabelNetworkClassName(vr, entity);
         if (!playerClass)
             return false;
 
@@ -3724,7 +3817,7 @@ static bool ShouldSuppressProjectedItemLabelForMotion(const VR::ProjectedItemLab
             Vector playerOrigin{};
             bool playerShouldDraw = false;
             const bool hasRenderableOrigin =
-                SafeGetRenderableOriginAndShouldDraw(vr, player, playerOrigin, playerShouldDraw);
+                SafeGetProjectedItemLabelRenderableOriginAndShouldDraw(vr, player, playerOrigin, playerShouldDraw);
             if (!hasRenderableOrigin && !SafeGetProjectedItemLabelAbsOrigin(player, playerOrigin))
                 continue;
 
@@ -4482,7 +4575,7 @@ void VR::HandleDamageFeedbackGameEvent(IGameEvent* event)
     if (!eventIsForLocalPlayer)
         return;
 
-    C_BasePlayer* localPlayer = (C_BasePlayer*)m_Game->GetClientEntity(localPlayerIndex);
+    C_BasePlayer* localPlayer = reinterpret_cast<C_BasePlayer*>(SafeGetProjectedItemLabelClientEntity(this, localPlayerIndex));
     if (!localPlayer)
         return;
 
@@ -4518,25 +4611,29 @@ void VR::HandleDamageFeedbackGameEvent(IGameEvent* event)
             if (attackerIndex <= 0)
                 attackerIndex = event->GetInt("attackerentid", 0);
             if (attackerIndex > 0)
-                directionSource = m_Game->GetClientEntity(attackerIndex);
+                directionSource = SafeGetProjectedItemLabelClientEntity(this, attackerIndex);
         }
 
         if (directionSource)
         {
-            Vector localPos = localPlayer->GetAbsOrigin();
-            Vector attackerPos = directionSource->GetAbsOrigin();
-            Vector toAttacker = attackerPos - localPos;
-            toAttacker.z = 0.0f;
-
-            Vector right = m_HmdRight;
-            right.z = 0.0f;
-
-            if (!toAttacker.IsZero() && !right.IsZero())
+            Vector localPos{};
+            Vector attackerPos{};
+            if (SafeGetProjectedItemLabelAbsOrigin(localPlayer, localPos) &&
+                SafeGetProjectedItemLabelAbsOrigin(directionSource, attackerPos))
             {
-                VectorNormalize(toAttacker);
-                VectorNormalize(right);
-                directionalBias = std::clamp(DotProduct(toAttacker, right), -1.0f, 1.0f);
-                hasDirectionalBias = true;
+                Vector toAttacker = attackerPos - localPos;
+                toAttacker.z = 0.0f;
+
+                Vector right = m_HmdRight;
+                right.z = 0.0f;
+
+                if (!toAttacker.IsZero() && !right.IsZero())
+                {
+                    VectorNormalize(toAttacker);
+                    VectorNormalize(right);
+                    directionalBias = std::clamp(DotProduct(toAttacker, right), -1.0f, 1.0f);
+                    hasDirectionalBias = true;
+                }
             }
         }
     }
@@ -4602,7 +4699,7 @@ void VR::UpdateDamageFeedback()
     EnsureDamageFeedbackEventListener();
 
     const int localPlayerIndex = m_Game->m_EngineClient->GetLocalPlayer();
-    C_BasePlayer* localPlayer = (C_BasePlayer*)m_Game->GetClientEntity(localPlayerIndex);
+    C_BasePlayer* localPlayer = reinterpret_cast<C_BasePlayer*>(SafeGetProjectedItemLabelClientEntity(this, localPlayerIndex));
     if (!localPlayer)
     {
         m_LastObservedDamageHealth = -1;
@@ -4611,7 +4708,14 @@ void VR::UpdateDamageFeedback()
 
     const auto now = std::chrono::steady_clock::now();
 
-    const int currentHealth = (std::max)(0, *reinterpret_cast<int*>(reinterpret_cast<std::uintptr_t>(localPlayer) + kHealthOffset));
+    int currentHealthRaw = 0;
+    if (!SafeReadInt(reinterpret_cast<const unsigned char*>(localPlayer), kHealthOffset, currentHealthRaw))
+    {
+        m_LastObservedDamageHealth = -1;
+        return;
+    }
+
+    const int currentHealth = (std::max)(0, currentHealthRaw);
     if (m_LastObservedDamageHealth < 0)
     {
         m_LastObservedDamageHealth = currentHealth;
@@ -5103,7 +5207,7 @@ bool VR::IsKillSoundTargetEntity(const C_BaseEntity* entity) const
 
     const SpecialInfectedType specialType = GetSpecialInfectedType(entity);
 
-    const char* className = m_Game->GetNetworkClassName(reinterpret_cast<uintptr_t*>(const_cast<C_BaseEntity*>(entity)));
+    const char* className = SafeGetProjectedItemLabelNetworkClassName(this, entity);
     if (className && *className)
     {
         const std::string lowered = ToLowerCopy(className);
@@ -5141,7 +5245,7 @@ void VR::RegisterPotentialKillSoundHit(const Vector& start, const QAngle& angles
         return;
 
     const int localPlayerIndex = m_Game->m_EngineClient->GetLocalPlayer();
-    C_BasePlayer* localPlayer = reinterpret_cast<C_BasePlayer*>(m_Game->GetClientEntity(localPlayerIndex));
+    C_BasePlayer* localPlayer = reinterpret_cast<C_BasePlayer*>(SafeGetProjectedItemLabelClientEntity(this, localPlayerIndex));
     if (!localPlayer)
         return;
 
@@ -5170,7 +5274,7 @@ void VR::RegisterPotentialKillSoundHit(const Vector& start, const QAngle& angles
     const bool hasLifeState = entity && VR_TryReadU8(base, kLifeStateOffset, lifeState);
     const bool hasTeam = entity && VR_TryReadI32(base, kTeamNumOffset, team);
     const bool hasZombieClass = entity && VR_TryReadI32(base, kZombieClassOffset, zombieClass);
-    const char* className = (entity && m_Game) ? m_Game->GetNetworkClassName(reinterpret_cast<uintptr_t*>(entity)) : nullptr;
+    const char* className = entity ? SafeGetProjectedItemLabelNetworkClassName(this, entity) : nullptr;
     if (!entity || !IsKillSoundTargetEntity(entity))
     {
         if (entity &&
@@ -8319,7 +8423,7 @@ void VR::UpdateKillSoundFeedback()
     }
 
     const int localPlayerIndex = m_Game->m_EngineClient->GetLocalPlayer();
-    C_BasePlayer* localPlayer = reinterpret_cast<C_BasePlayer*>(m_Game->GetClientEntity(localPlayerIndex));
+    C_BasePlayer* localPlayer = reinterpret_cast<C_BasePlayer*>(SafeGetProjectedItemLabelClientEntity(this, localPlayerIndex));
     if (!localPlayer)
     {
         resetState();
@@ -8401,3 +8505,4 @@ void VR::UpdateKillSoundFeedback()
     m_LastKillSoundCommonKills = commonKills;
     m_LastKillSoundSpecialKills = specialKills;
 }
+
