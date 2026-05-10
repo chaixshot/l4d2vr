@@ -894,7 +894,7 @@ void VR::CreateVRTextures()
 
     LogVAS("before CreateVRTextures");
 
-    int windowWidth, windowHeight;
+    int windowWidth = 0;
     m_Game->m_MaterialSystem->GetRenderContext()->GetWindowSize(windowWidth, windowHeight);
 
     int backBufferWidth = 0;
