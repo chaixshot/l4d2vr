@@ -41,6 +41,38 @@ static inline void NormalizeAndClampViewAngles(QAngle& a)
 	if (a.x < -89.f) a.x = -89.f;
 }
 
+static inline bool IsFiniteViewAngle(const QAngle& a)
+{
+	return std::isfinite(a.x) && std::isfinite(a.y) && std::isfinite(a.z);
+}
+
+static inline QAngle BuildVRAudioListenerAngles(VR* vr, const Vector& fallbackAngles)
+{
+	QAngle listenerAngles(fallbackAngles.x, fallbackAngles.y, fallbackAngles.z);
+
+	if (vr)
+	{
+		// Keep Source's audio listener tied to the direction the player regards as "front",
+		// not to the visual third-person camera. This is especially important for
+		// front-view third-person, where the render camera looks back at the player
+		// and would otherwise invert front/back spatial audio.
+		Vector vrView = vr->GetViewAngle();
+		QAngle vrAngles(vrView.x, vrView.y, vrView.z);
+		if (IsFiniteViewAngle(vrAngles))
+			listenerAngles = vrAngles;
+
+		if (vr->m_MouseModeEnabled && !vr->m_MouseModeAimFromHmd)
+		{
+			listenerAngles.x = vr->m_MouseAimInitialized ? vr->m_MouseAimPitchOffset : listenerAngles.x;
+			listenerAngles.y = vr->m_RotationOffset;
+			listenerAngles.z = 0.0f;
+		}
+	}
+
+	NormalizeAndClampViewAngles(listenerAngles);
+	return listenerAngles;
+}
+
 // ------------------------------------------------------------
 // Engine third-person camera smoothing
 //

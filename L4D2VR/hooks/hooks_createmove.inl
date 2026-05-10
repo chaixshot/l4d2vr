@@ -667,6 +667,17 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		}
 	}
 
+	// Keep Source's main-thread viewangles aligned with the VR audio listener while
+	// third-person rendering is active. The render thread avoids SetViewAngles in
+	// queued/multicore mode, so this main-thread update prevents stale visual-camera
+	// angles from driving front/back sound spatialization.
+	if (m_Game && m_Game->m_EngineClient && m_VR->m_IsThirdPersonCamera && !m_VR->m_AdjustingViewmodel)
+	{
+		Vector currentAudioFallback(cmd->viewangles.x, cmd->viewangles.y, cmd->viewangles.z);
+		QAngle listenerAngles = BuildVRAudioListenerAngles(m_VR, currentAudioFallback);
+		m_Game->m_EngineClient->SetViewAngles(listenerAngles);
+	}
+
 	// Auto-repeat for semi-auto / single-shot guns:
 	// Many L4D2 weapons require a fresh IN_ATTACK edge per shot (press/release).
 	// When enabled, we convert a held IN_ATTACK into short pulses for non-full-auto guns.

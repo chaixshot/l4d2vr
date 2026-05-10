@@ -1730,8 +1730,14 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	if (queueMode == 0 && m_Game && m_Game->m_EngineClient)
 	{
 		m_Game->m_EngineClient->GetViewAngles(prevEngineAngles);
-		QAngle renderAngles(renderViewAngles.x, renderViewAngles.y, renderViewAngles.z);
-		m_Game->m_EngineClient->SetViewAngles(renderAngles);
+
+		// The CViewSetup below controls what the player sees. Source's audio listener
+		// and other global view-angle consumers can still read IEngineClient viewangles.
+		// In front-view 3P the render camera intentionally looks back at the player,
+		// so using renderViewAngles here inverts front/back audio. Use a separate
+		// HMD/player-facing listener angle instead.
+		QAngle listenerAngles = BuildVRAudioListenerAngles(m_VR, viewAngles);
+		m_Game->m_EngineClient->SetViewAngles(listenerAngles);
 		touchedEngineAngles = true;
 	}
 
