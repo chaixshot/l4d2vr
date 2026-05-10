@@ -1819,6 +1819,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
 	if (m_VR->m_IsVREnabled)
 		m_VR->RenderDrawGameLaserSight(localPlayer);
+	if (m_VR->m_IsVREnabled && m_VR->m_DesktopMirrorEnabled && m_VR->m_DesktopMirrorHidePluginOverlays)
+		m_VR->ScanSpecialInfectedEntitiesFromClientList();
 	callOriginalRenderView(leftEyeView, hudLeft, nClearFlags, whatToDraw);
 	if (m_VR->m_IsVREnabled)
 	{
@@ -1837,6 +1839,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	rndrContext->SetRenderTarget(m_VR->m_RightEyeTexture);
 	if (hkViewport.fOriginal)
 		hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
+	if (m_VR->m_IsVREnabled && m_VR->m_DesktopMirrorEnabled && m_VR->m_DesktopMirrorHidePluginOverlays)
+		m_VR->ScanSpecialInfectedEntitiesFromClientList();
 	callOriginalRenderView(rightEyeView, hudRight, nClearFlags, whatToDraw);
 	if (m_VR->m_IsVREnabled && queueMode == 0)
 	{
