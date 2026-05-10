@@ -59,9 +59,12 @@ void VR::PoseWaiterThreadMain()
         if (result != vr::VRCompositorError_None)
             continue;
 
-        // Publish snapshot.
+        // Publish snapshot. Keep the timestamp inside the same seqlock window so
+        // RenderView can tell whether it is reusing an old pose during HMD motion.
+        const uint32_t publishTickMs = static_cast<uint32_t>(GetTickCount());
         m_PoseWaiterSeq.fetch_add(1, std::memory_order_acq_rel); // odd
         std::memcpy(m_PoseWaiterPoses.data(), poses.data(), sizeof(vr::TrackedDevicePose_t) * vr::k_unMaxTrackedDeviceCount);
+        m_PoseWaiterPublishTickMs.store(publishTickMs, std::memory_order_relaxed);
         m_PoseWaiterSeq.fetch_add(1, std::memory_order_release); // even
 		if (m_PoseWaiterEvent)
 			SetEvent(m_PoseWaiterEvent);

@@ -587,21 +587,47 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			uint32_t poseSeq = 0;
 			bool havePoses = m_VR->ReadPoseWaiterSnapshot(renderPoses.data(), &poseSeq);
 
-			// Heuristic: treat fast HMD rotation as "active" (helps decide whether to nudge pose waiting).
+			// Heuristic: treat real HMD motion as "active". The previous code only looked at
+			// angular velocity, so physically translating the headset could keep reusing an old
+			// WaitGetPoses snapshot and show visible double images in queued rendering.
 			bool headTurningNow = false;
-			if (havePoses && renderPoses[vr::k_unTrackedDeviceIndex_Hmd].bPoseIsValid)
-			{
-				const auto& av = renderPoses[vr::k_unTrackedDeviceIndex_Hmd].vAngularVelocity;
-				const double ax = (double)av.v[0];
-				const double ay = (double)av.v[1];
-				const double az = (double)av.v[2];
-				if (std::isfinite(ax) && std::isfinite(ay) && std::isfinite(az))
+			bool headTranslatingNow = false;
+			double headLinearSpeedMps = 0.0;
+			double headAngularSpeedDegPerSec = 0.0;
+			auto RefreshHmdMotionFlags = [&]()
 				{
-					const double radPerSec = std::sqrt(ax * ax + ay * ay + az * az);
-					const double degPerSec = radPerSec * (180.0 / 3.14159265358979323846);
-					headTurningNow = (degPerSec > 50.0);
-				}
-			}
+					headTurningNow = false;
+					headTranslatingNow = false;
+					headLinearSpeedMps = 0.0;
+					headAngularSpeedDegPerSec = 0.0;
+
+					if (!havePoses || !renderPoses[vr::k_unTrackedDeviceIndex_Hmd].bPoseIsValid)
+						return;
+
+					const auto& hmd = renderPoses[vr::k_unTrackedDeviceIndex_Hmd];
+					const auto& av = hmd.vAngularVelocity;
+					const double ax = (double)av.v[0];
+					const double ay = (double)av.v[1];
+					const double az = (double)av.v[2];
+					if (std::isfinite(ax) && std::isfinite(ay) && std::isfinite(az))
+					{
+						const double radPerSec = std::sqrt(ax * ax + ay * ay + az * az);
+						headAngularSpeedDegPerSec = radPerSec * (180.0 / 3.14159265358979323846);
+						headTurningNow = (headAngularSpeedDegPerSec > 50.0);
+					}
+
+					const auto& lv = hmd.vVelocity;
+					const double vx = (double)lv.v[0];
+					const double vy = (double)lv.v[1];
+					const double vz = (double)lv.v[2];
+					if (std::isfinite(vx) && std::isfinite(vy) && std::isfinite(vz))
+					{
+						headLinearSpeedMps = std::sqrt(vx * vx + vy * vy + vz * vz);
+						// 3.5 cm/s is below normal deliberate head translation, but above tiny tracking noise.
+						headTranslatingNow = (headLinearSpeedMps > 0.035);
+					}
+				};
+			RefreshHmdMotionFlags();
 
 			// Optional pacing knob: in queued mode the render thread can outrun VR pose updates.
 			// Waiting a bit for a fresh WaitGetPoses() snapshot trades throughput for stability.
@@ -615,7 +641,9 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			static thread_local uint32_t s_lastWaitAttemptSeq = 0;
 			static thread_local int s_poseReuseCount = 0;
 
-			const bool motionNow = (locomotionNow || headTurningNow);
+			const bool headMotionNow = (headTurningNow || headTranslatingNow);
+			const bool motionNow = (locomotionNow || headMotionNow);
+			bool exceededAhead = false;
 
 			// Update pose snapshot reuse count early (before optional waiting), so smart pacing can react
 			// even when QueuedRenderPoseWaitMs==0 and MaxFramesAhead is disabled.
@@ -679,7 +707,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				}
 
 
-				const bool exceededAhead =
+				exceededAhead =
 					(maxAheadCfg >= 0) &&
 					havePoses && poseSeq != 0 &&
 					poseSeq == s_lastPoseSeq &&
@@ -734,6 +762,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 								poseSeq = poseSeq2;
 								// New pose -> reset reuse counter.
 								s_poseReuseCount = 0;
+								exceededAhead = false;
 								break;
 							}
 
@@ -745,10 +774,41 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 					}
 				}
 
-				if (havePoses)
-					s_lastPoseSeq = poseSeq;
 			}
-			// Update last poseSeq even when we didn't enter the wait block.
+
+			// If the waiter snapshot is still reused while the HMD is physically moving, take a
+			// fresh non-blocking tracking prediction for this render pass. This avoids the worst
+			// queued-render ghosting case without putting WaitGetPoses back on the render thread.
+			const uint32_t posePublishTickMs = m_VR->m_PoseWaiterPublishTickMs.load(std::memory_order_relaxed);
+			const DWORD nowPoseTickMs = GetTickCount();
+			const DWORD poseAgeMs = (posePublishTickMs != 0)
+				? (nowPoseTickMs - static_cast<DWORD>(posePublishTickMs))
+				: 0u;
+			const bool reusedPoseAfterWait = havePoses && poseSeq != 0 && poseSeq == s_lastPoseSeq;
+			const bool movingWithReusedPose = headMotionNow && reusedPoseAfterWait;
+			const bool movingWithOldPose = headMotionNow && havePoses && poseAgeMs >= 4u;
+			if ((movingWithReusedPose || movingWithOldPose || (headMotionNow && exceededAhead)) && m_VR->m_System && vr::VRCompositor())
+			{
+				std::array<vr::TrackedDevicePose_t, vr::k_unMaxTrackedDeviceCount> predictedPoses{};
+				const vr::ETrackingUniverseOrigin trackingOrigin = vr::VRCompositor()->GetTrackingSpace();
+				float predicted = vr::VRCompositor()->GetFrameTimeRemaining();
+				if (!(predicted >= 0.0f && predicted <= 0.5f))
+					predicted = 0.0f;
+				m_VR->m_System->GetDeviceToAbsoluteTrackingPose(
+					trackingOrigin, predicted, predictedPoses.data(), vr::k_unMaxTrackedDeviceCount);
+				if (predictedPoses[vr::k_unTrackedDeviceIndex_Hmd].bPoseIsValid)
+				{
+					renderPoses = predictedPoses;
+					havePoses = true;
+					// Mark this as a render-local prediction; do not overwrite the last waiter seq.
+					poseSeq = 0;
+					s_poseReuseCount = 0;
+					RefreshHmdMotionFlags();
+				}
+			}
+
+			// Update last poseSeq even when we didn't enter the wait block. Synthetic render-local
+			// predictions use poseSeq=0 and intentionally do not advance this waiter token.
 			if (havePoses && poseSeq != 0)
 				s_lastPoseSeq = poseSeq;
 

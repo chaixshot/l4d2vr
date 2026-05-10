@@ -349,13 +349,14 @@ public:
 	std::atomic<bool> m_PoseWaiterEnabled{ false };
 	std::atomic<uint32_t> m_PoseWaiterSeq{ 0 };
 	std::array<vr::TrackedDevicePose_t, vr::k_unMaxTrackedDeviceCount> m_PoseWaiterPoses{};
+	std::atomic<uint32_t> m_PoseWaiterPublishTickMs{ 0 };
 
 	HANDLE m_PoseWaiterEvent = NULL;
 	// In queued (mat_queue_mode!=0) rendering, this is the explicit minimum wait budget for a fresher pose
 	// snapshot on the render thread. 0 disables fixed waiting, but the render hook may still do a small
 	// adaptive wait during real HMD motion to avoid reusing the same pose sample. -1 = strong sync
 	// (wait up to ~50ms).
-	int m_QueuedRenderPoseWaitMs = 1;
+	int m_QueuedRenderPoseWaitMs = 2;
 
 	// Queued rendering: optional render-thread FPS cap, expressed as a percentage of the HMD refresh rate.
 	// 0 = unlimited, 100 = match HMD refresh, 80 = 80% of HMD refresh, etc.
@@ -411,7 +412,7 @@ public:
 	bool m_QueuedRenderMaxFpsSmart = true;
 	// Queued rendering: limit how many extra render frames may reuse the same WaitGetPoses() snapshot.
 	// -1 = disabled, 0 = never reuse (most stable), 1 = allow 1 reuse (2 frames per pose), etc.
-	int m_QueuedRenderMaxFramesAhead = -1;
+	int m_QueuedRenderMaxFramesAhead = 0;
 
 	// Queued rendering: render-thread smoothing time constant (ms) for cameraAnchor/rotationOffset.
 	// 0 = off (follow snapshot exactly), 20~80 = typical. Higher = smoother but more latency.
@@ -688,7 +689,7 @@ public:
 	HANDLE m_RenderFrameReadyEvent = NULL;
 	// Present-side wait budget (ms) for a fresh rendered frame in mat_queue_mode!=0.
 	// 0 disables waiting. Used as an upper bound by adaptive submit-wait logic.
-	int m_QueuedSubmitWaitMs = 2;
+	int m_QueuedSubmitWaitMs = 3;
 	// Count of consecutive presents where submit thread observes no newer rendered frame.
 	// Used to apply submit wait adaptively only when stale-frame pressure persists.
 	std::atomic<uint32_t> m_QueuedSubmitStaleStreak{ 0 };
