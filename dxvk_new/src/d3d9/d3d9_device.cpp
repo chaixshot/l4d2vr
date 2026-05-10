@@ -2791,7 +2791,11 @@ namespace dxvk {
                 effectiveViewport.Width = vr->m_RenderWidth;
                 effectiveViewport.Height = vr->m_RenderHeight;
             }
-            else if (m_state.renderTargets[0] != nullptr) {
+            // Only apply the in-game full-RT viewport clamp in queued/multicore mode.
+            // In single-threaded rendering, Source's native HUD can intentionally use
+            // a desktop/logical viewport on the VR HUD surface; forcing it to the RT
+            // extent makes the right/bottom HUD area disappear.
+            else if (m_state.renderTargets[0] != nullptr && g_Game->GetMatQueueMode() != 0) {
                 IDirect3DSurface9* currentRt = static_cast<IDirect3DSurface9*>(m_state.renderTargets[0].ptr());
                 const bool forceVrViewport =
                     currentRt == vr->m_D9HUDSurface ||

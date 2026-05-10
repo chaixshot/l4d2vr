@@ -7,6 +7,7 @@
 * Singleplayer and multiplayer (see below)
 * 6DoF VR view
 * Motion controls for guns and melee weapons
+* Desktop mirror
 * Workshop content
 * Multi-core rendering support(Set it in L4D2VRConfigTool.exe, not in-game.When enabled, moving the HMD causes ghosting, so only seated play is supported.)
 * AntiAliasing support(Set it in L4D2VRConfigTool.exe, not in-game.)
