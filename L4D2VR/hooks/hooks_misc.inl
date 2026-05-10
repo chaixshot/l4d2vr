@@ -388,10 +388,9 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 	if (info.pModel)
 	{
 		modelName = m_Game->m_ModelInfo->GetModelName(info.pModel);
-		// In clean-desktop-mirror mode, special-infected arrows must be submitted
-		// from the render hook immediately before each VR eye RenderView. Calling
-		// the scanner from DrawModelExecute is too late and causes DebugOverlay
-		// arrows to appear intermittently.
+		// In desktop-mirror overlay hide mode, special-infected arrows are collected
+		// once from the render hook and drawn later by the post-mirror D3D path.
+		// Avoid scanning from DrawModelExecute, which can run many times per frame.
 		if (!(m_VR->m_DesktopMirrorHidePluginOverlays && m_VR->m_DesktopMirrorEnabled))
 			m_VR->ScanSpecialInfectedEntitiesFromClientList();
 

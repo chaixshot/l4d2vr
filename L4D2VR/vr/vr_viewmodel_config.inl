@@ -25,15 +25,15 @@ void VR::GetAimLineColor(int& r, int& g, int& b, int& a) const
         b = m_AimLineColorB;
     }
 
-    a = m_AimLineColorA;
-    const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
-    if (m_ScopeAimLineOnlyInScope
-        && m_ThirdPersonFrontViewEnabled
-        && m_IsThirdPersonCamera
-        && m_ScopeWeaponIsFirearm
-        && queueMode == 0
-        && !m_ScopeRenderingPass)
-        a = 0;
+	a = m_AimLineColorA;
+	const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
+	if (m_ScopeAimLineOnlyInScope
+		&& m_ThirdPersonFrontViewEnabled
+		&& m_IsThirdPersonCamera
+		&& m_ScopeWeaponIsFirearm
+		&& queueMode == 0
+		&& !m_ScopeRenderingPass)
+		a = 0;
 }
 
 
@@ -1942,7 +1942,7 @@ void VR::ApplyShadowEntityOverrides(bool forceRefresh)
     }
 }
 
-void VR::ApplyShadowSettingsIfNeeded()
+void VR::ApplyShadowSettingsIfNeeded(bool forceApply, bool forceEnable)
 {
     const bool dirty = m_ShadowSettingsDirty.exchange(false, std::memory_order_acq_rel);
     const bool wantsEntityRefresh = false;
@@ -1952,19 +1952,22 @@ void VR::ApplyShadowSettingsIfNeeded()
             m_ShadowEntityLastRefreshTime == std::chrono::steady_clock::time_point{} ||
             (std::chrono::steady_clock::now() - m_ShadowEntityLastRefreshTime) >= std::chrono::milliseconds(250));
 
-    if (!dirty && !needsEntityRefresh)
+    if (!dirty && !forceApply && !needsEntityRefresh)
         return;
 
     if (!m_Game || !m_Game->m_Initialized)
     {
-        m_ShadowSettingsDirty.store(true, std::memory_order_release);
+        if (dirty || forceApply)
+            m_ShadowSettingsDirty.store(true, std::memory_order_release);
         return;
     }
 
-    if (!dirty)
+    if (!dirty && !forceApply)
         return;
 
-    if (!m_ShadowTweaksEnabled)
+    const bool shadowTweaksActive = m_ShadowTweaksEnabled || forceEnable;
+
+    if (!shadowTweaksActive)
     {
         if (m_ShadowTweaksApplied)
         {
@@ -2170,19 +2173,19 @@ namespace
     inline void TrimLocalVScriptValue(std::string& value)
     {
         auto ltrim = [](std::string& s)
-            {
-                s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch)
-                    {
-                        return !std::isspace(ch);
-                    }));
-            };
+        {
+            s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch)
+                {
+                    return !std::isspace(ch);
+                }));
+        };
         auto rtrim = [](std::string& s)
-            {
-                s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch)
-                    {
-                        return !std::isspace(ch);
-                    }).base(), s.end());
-            };
+        {
+            s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch)
+                {
+                    return !std::isspace(ch);
+                }).base(), s.end());
+        };
 
         ltrim(value);
         rtrim(value);

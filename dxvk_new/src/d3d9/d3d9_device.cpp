@@ -2780,23 +2780,20 @@ namespace dxvk {
 
         D3D9DeviceLock lock = LockDevice();
 
-        // L4D2VR: Source/VGUI can push the desktop/backbuffer viewport while the
-        // active render target is one of our VR-sized render targets. In multicore
-        // rendering this can survive for an arbitrary number of queued frames, so the
-        // captured native HUD only fills the center part of m_HUDTexture until a later
-        // RT/viewport reset happens to correct it. Only force full-size viewport on
-        // known VR render targets; do not globally override in-game viewports because
-        // shadow and auxiliary render targets rely on their own viewport sizes.
+        // L4D2VR: keep the old menu behaviour. The main menu/native VGUI pass can
+        // render through normal backbuffer/temporary surfaces before the gameplay HUD
+        // surfaces are active. If we derive the menu viewport from the current RT extent
+        // or reset X/Y there, the desktop menu and the SteamVR main-menu panel can be
+        // clipped or scaled to only part of the texture.
         if (g_Game && g_Game->m_VR) {
             VR* vr = g_Game->m_VR;
-            bool forceVrViewport = false;
-
             if (g_Game->m_EngineClient && !g_Game->m_EngineClient->IsInGame()) {
-                forceVrViewport = true;
+                effectiveViewport.Width = vr->m_RenderWidth;
+                effectiveViewport.Height = vr->m_RenderHeight;
             }
             else if (m_state.renderTargets[0] != nullptr) {
                 IDirect3DSurface9* currentRt = static_cast<IDirect3DSurface9*>(m_state.renderTargets[0].ptr());
-                forceVrViewport =
+                const bool forceVrViewport =
                     currentRt == vr->m_D9HUDSurface ||
                     currentRt == vr->m_D9LeftEyeSurface ||
                     currentRt == vr->m_D9RightEyeSurface ||
@@ -2804,24 +2801,22 @@ namespace dxvk {
                     currentRt == vr->m_D9RightEyeSubmitSurface ||
                     currentRt == vr->m_D9DesktopMirrorSurface ||
                     currentRt == vr->m_D9BlankSurface;
-            }
 
-            if (forceVrViewport) {
-                uint32_t width = vr->m_RenderWidth;
-                uint32_t height = vr->m_RenderHeight;
+                if (forceVrViewport) {
+                    uint32_t width = vr->m_RenderWidth;
+                    uint32_t height = vr->m_RenderHeight;
 
-                if (m_state.renderTargets[0] != nullptr) {
                     const VkExtent2D rtSize = m_state.renderTargets[0]->GetSurfaceExtent();
                     if (rtSize.width != 0 && rtSize.height != 0) {
                         width = rtSize.width;
                         height = rtSize.height;
                     }
-                }
 
-                effectiveViewport.X = 0;
-                effectiveViewport.Y = 0;
-                effectiveViewport.Width = width;
-                effectiveViewport.Height = height;
+                    effectiveViewport.X = 0;
+                    effectiveViewport.Y = 0;
+                    effectiveViewport.Width = width;
+                    effectiveViewport.Height = height;
+                }
             }
         }
 

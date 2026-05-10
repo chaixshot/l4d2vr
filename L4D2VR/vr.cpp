@@ -8271,6 +8271,398 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
     device->Release();
 }
 
+
+namespace
+{
+    struct PostMirrorOverlayVertex
+    {
+        float x;
+        float y;
+        float z;
+        float rhw;
+        D3DCOLOR color;
+    };
+
+    static constexpr DWORD kPostMirrorOverlayFvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE;
+
+    static void DrawPostMirrorLine2D(
+        IDirect3DDevice9* device,
+        float x0,
+        float y0,
+        float x1,
+        float y1,
+        D3DCOLOR color,
+        float thicknessPixels)
+    {
+        if (!device)
+            return;
+
+        if (!std::isfinite(x0) || !std::isfinite(y0) || !std::isfinite(x1) || !std::isfinite(y1))
+            return;
+
+        const float dx = x1 - x0;
+        const float dy = y1 - y0;
+        const float len = std::sqrt(dx * dx + dy * dy);
+        if (len <= 0.01f)
+            return;
+
+        const int passes = std::clamp(static_cast<int>(std::ceil(std::max(1.0f, thicknessPixels))), 1, 9);
+        const float nx = -dy / len;
+        const float ny = dx / len;
+        const float center = (static_cast<float>(passes) - 1.0f) * 0.5f;
+
+        for (int i = 0; i < passes; ++i)
+        {
+            const float offset = static_cast<float>(i) - center;
+            const PostMirrorOverlayVertex verts[2] =
+            {
+                { x0 + nx * offset - 0.5f, y0 + ny * offset - 0.5f, 0.0f, 1.0f, color },
+                { x1 + nx * offset - 0.5f, y1 + ny * offset - 0.5f, 0.0f, 1.0f, color }
+            };
+            device->DrawPrimitiveUP(D3DPT_LINELIST, 1, verts, sizeof(PostMirrorOverlayVertex));
+        }
+    }
+
+    static bool ProjectPostMirrorSegment(
+        const CViewSetup& view,
+        const Vector& forward,
+        const Vector& right,
+        const Vector& up,
+        float tanHalfFovX,
+        float tanHalfFovY,
+        Vector start,
+        Vector end,
+        float& x0,
+        float& y0,
+        float& x1,
+        float& y1)
+    {
+        const float nearDepth = std::max(view.zNear, 1.0f);
+        const float startDepth = DotProduct(start - view.origin, forward);
+        const float endDepth = DotProduct(end - view.origin, forward);
+        if (startDepth <= nearDepth && endDepth <= nearDepth)
+            return false;
+
+        if (startDepth <= nearDepth || endDepth <= nearDepth)
+        {
+            const float denom = endDepth - startDepth;
+            if (std::fabs(denom) <= 0.0001f)
+                return false;
+
+            const float t = std::clamp((nearDepth - startDepth) / denom, 0.0f, 1.0f);
+            const Vector clipped = start + (end - start) * t;
+            if (startDepth <= nearDepth)
+                start = clipped;
+            else
+                end = clipped;
+        }
+
+        float d0 = 0.0f;
+        float d1 = 0.0f;
+        if (!VR_ProjectAimLinePointToView(view, forward, right, up, start, tanHalfFovX, tanHalfFovY, x0, y0, d0))
+            return false;
+        if (!VR_ProjectAimLinePointToView(view, forward, right, up, end, tanHalfFovX, tanHalfFovY, x1, y1, d1))
+            return false;
+
+        const float guardX = static_cast<float>(std::max(view.width, 1)) * 0.35f;
+        const float guardY = static_cast<float>(std::max(view.height, 1)) * 0.35f;
+        if ((x0 < -guardX && x1 < -guardX) || (x0 > view.width + guardX && x1 > view.width + guardX) ||
+            (y0 < -guardY && y1 < -guardY) || (y0 > view.height + guardY && y1 > view.height + guardY))
+        {
+            return false;
+        }
+        return true;
+    }
+
+    static void BeginPostMirrorOverlayD3DState(IDirect3DDevice9* device, IDirect3DStateBlock9*& stateBlock)
+    {
+        stateBlock = nullptr;
+        if (!device)
+            return;
+
+        if (SUCCEEDED(device->CreateStateBlock(D3DSBT_ALL, &stateBlock)) && stateBlock)
+            stateBlock->Capture();
+
+        device->SetVertexShader(nullptr);
+        device->SetPixelShader(nullptr);
+        device->SetTexture(0, nullptr);
+        device->SetFVF(kPostMirrorOverlayFvf);
+        device->SetRenderState(D3DRS_ZENABLE, FALSE);
+        device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+        device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+        device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+        device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+        device->SetRenderState(D3DRS_LIGHTING, FALSE);
+        device->SetRenderState(D3DRS_FOGENABLE, FALSE);
+        device->SetRenderState(D3DRS_COLORWRITEENABLE,
+            D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE | D3DCOLORWRITEENABLE_ALPHA);
+    }
+
+    static void EndPostMirrorOverlayD3DState(IDirect3DStateBlock9* stateBlock)
+    {
+        if (stateBlock)
+        {
+            stateBlock->Apply();
+            stateBlock->Release();
+        }
+    }
+}
+
+void VR::RecordProjectedSpecialInfectedArrow(int entityIndex, const Vector& origin, SpecialInfectedType type)
+{
+    if (!m_DesktopMirrorHidePluginOverlays || !m_DesktopMirrorEnabled || type == SpecialInfectedType::None)
+        return;
+    if (!m_SpecialInfectedArrowEnabled || m_SpecialInfectedArrowSize <= 0.0f)
+        return;
+
+    int key = entityIndex;
+    if (key <= 0)
+    {
+        const int ix = static_cast<int>(std::lround(origin.x * 4.0f));
+        const int iy = static_cast<int>(std::lround(origin.y * 4.0f));
+        const int iz = static_cast<int>(std::lround(origin.z * 4.0f));
+        const uint32_t hash = 0x40000000u
+            ^ (static_cast<uint32_t>(ix) * 73856093u)
+            ^ (static_cast<uint32_t>(iy) * 19349663u)
+            ^ (static_cast<uint32_t>(iz) * 83492791u)
+            ^ (static_cast<uint32_t>(type) * 2654435761u);
+        key = static_cast<int>(hash & 0x7FFFFFFFu);
+        if (key <= 0)
+            key = 0x40000000;
+    }
+
+    std::lock_guard<std::mutex> lock(m_ProjectedSpecialInfectedArrowMutex);
+    auto& arrow = m_ProjectedSpecialInfectedArrows[key];
+    arrow.origin = origin;
+    arrow.type = type;
+    arrow.sourceEntityIndex = entityIndex;
+    arrow.lastSeen = std::chrono::steady_clock::now();
+}
+
+void VR::DrawProjectedSpecialInfectedArrows(IMatRenderContext* renderContext, const CViewSetup& view)
+{
+    if (!renderContext)
+        return;
+    if (!m_DesktopMirrorHidePluginOverlays || !m_DesktopMirrorEnabled)
+        return;
+    if (!m_SpecialInfectedArrowEnabled || m_SpecialInfectedArrowSize <= 0.0f)
+    {
+        std::lock_guard<std::mutex> lock(m_ProjectedSpecialInfectedArrowMutex);
+        m_ProjectedSpecialInfectedArrows.clear();
+        return;
+    }
+    if (view.width <= 0 || view.height <= 0 || view.fov <= 1.0f)
+        return;
+
+    const auto now = std::chrono::steady_clock::now();
+    std::vector<ProjectedSpecialInfectedArrow> arrows;
+    {
+        std::lock_guard<std::mutex> lock(m_ProjectedSpecialInfectedArrowMutex);
+        const float holdSeconds = std::clamp(6.0f / std::max(1.0f, m_SpecialInfectedOverlayMaxHz), 0.12f, 0.45f);
+        for (auto it = m_ProjectedSpecialInfectedArrows.begin(); it != m_ProjectedSpecialInfectedArrows.end();)
+        {
+            const float ageSeconds = std::chrono::duration<float>(now - it->second.lastSeen).count();
+            if (ageSeconds < 0.0f || ageSeconds > holdSeconds)
+                it = m_ProjectedSpecialInfectedArrows.erase(it);
+            else
+            {
+                arrows.push_back(it->second);
+                ++it;
+            }
+        }
+    }
+    if (arrows.empty())
+        return;
+
+    QAngle viewAngles(view.angles.x, view.angles.y, view.angles.z);
+    Vector forward{}, right{}, up{};
+    QAngle::AngleVectors(viewAngles, &forward, &right, &up);
+    if (forward.IsZero() || right.IsZero() || up.IsZero())
+        return;
+    VectorNormalize(forward);
+    VectorNormalize(right);
+    VectorNormalize(up);
+
+    const float aspect = (view.m_flAspectRatio > 0.01f)
+        ? view.m_flAspectRatio
+        : (static_cast<float>(view.width) / static_cast<float>(std::max(view.height, 1)));
+    const float tanHalfFovX = std::tan(DEG2RAD(view.fov * 0.5f));
+    const float tanHalfFovY = tanHalfFovX / std::max(aspect, 0.01f);
+    if (tanHalfFovX <= 0.0001f || tanHalfFovY <= 0.0001f)
+        return;
+
+    IDirect3DDevice9* device = GetKillIndicatorD3DDevice(this);
+    if (!device)
+        return;
+
+    IDirect3DStateBlock9* stateBlock = nullptr;
+    BeginPostMirrorOverlayD3DState(device, stateBlock);
+
+    const float height = m_SpecialInfectedArrowHeight;
+    const float wing = m_SpecialInfectedArrowSize;
+    const float thickness = std::max(1.0f, m_SpecialInfectedArrowThickness <= 0.0f ? 1.0f : m_SpecialInfectedArrowThickness);
+
+    auto drawWorldLine = [&](const Vector& a, const Vector& b, D3DCOLOR color)
+        {
+            float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
+            if (!ProjectPostMirrorSegment(view, forward, right, up, tanHalfFovX, tanHalfFovY, a, b, x0, y0, x1, y1))
+                return;
+            DrawPostMirrorLine2D(device, x0, y0, x1, y1, color, thickness);
+        };
+
+    for (const ProjectedSpecialInfectedArrow& arrow : arrows)
+    {
+        if (arrow.type == SpecialInfectedType::None)
+            continue;
+
+        const size_t typeIndex = static_cast<size_t>(arrow.type);
+        const RgbColor& color = typeIndex < m_SpecialInfectedArrowColors.size()
+            ? m_SpecialInfectedArrowColors[typeIndex]
+            : m_SpecialInfectedArrowDefaultColor;
+        const D3DCOLOR d3dColor = D3DCOLOR_ARGB(255,
+            std::clamp(color.r, 0, 255),
+            std::clamp(color.g, 0, 255),
+            std::clamp(color.b, 0, 255));
+
+        const Vector base = arrow.origin + Vector(0.0f, 0.0f, height);
+        const Vector tip = base + Vector(0.0f, 0.0f, -wing);
+        drawWorldLine(base, tip, d3dColor);
+        drawWorldLine(base + Vector(wing, 0.0f, 0.0f), tip, d3dColor);
+        drawWorldLine(base + Vector(-wing, 0.0f, 0.0f), tip, d3dColor);
+        drawWorldLine(base + Vector(0.0f, wing, 0.0f), tip, d3dColor);
+        drawWorldLine(base + Vector(0.0f, -wing, 0.0f), tip, d3dColor);
+    }
+
+    EndPostMirrorOverlayD3DState(stateBlock);
+    device->Release();
+}
+
+void VR::DrawPostMirrorPluginOverlays(IMatRenderContext* renderContext, C_BasePlayer* localPlayer, const CViewSetup& view)
+{
+    if (!renderContext)
+        return;
+
+    DrawProjectedItemLabels(renderContext, view);
+    DrawProjectedSpecialInfectedArrows(renderContext, view);
+
+    if (!m_DesktopMirrorHidePluginOverlays || !m_DesktopMirrorEnabled)
+        return;
+    if (!localPlayer || !m_AimLineEnabled || !m_IsVREnabled)
+        return;
+    if (view.width <= 0 || view.height <= 0 || view.fov <= 1.0f)
+        return;
+
+    QAngle viewAngles(view.angles.x, view.angles.y, view.angles.z);
+    Vector forward{}, right{}, up{};
+    QAngle::AngleVectors(viewAngles, &forward, &right, &up);
+    if (forward.IsZero() || right.IsZero() || up.IsZero())
+        return;
+    VectorNormalize(forward);
+    VectorNormalize(right);
+    VectorNormalize(up);
+
+    const float aspect = (view.m_flAspectRatio > 0.01f)
+        ? view.m_flAspectRatio
+        : (static_cast<float>(view.width) / static_cast<float>(std::max(view.height, 1)));
+    const float tanHalfFovX = std::tan(DEG2RAD(view.fov * 0.5f));
+    const float tanHalfFovY = tanHalfFovX / std::max(aspect, 0.01f);
+    if (tanHalfFovX <= 0.0001f || tanHalfFovY <= 0.0001f)
+        return;
+
+    IDirect3DDevice9* device = GetKillIndicatorD3DDevice(this);
+    if (!device)
+        return;
+
+    IDirect3DStateBlock9* stateBlock = nullptr;
+    BeginPostMirrorOverlayD3DState(device, stateBlock);
+
+    int colorR = 0, colorG = 0, colorB = 0, colorA = 0;
+    GetAimLineColor(colorR, colorG, colorB, colorA);
+    const D3DCOLOR aimColor = D3DCOLOR_ARGB(std::clamp(colorA, 0, 255), std::clamp(colorR, 0, 255), std::clamp(colorG, 0, 255), std::clamp(colorB, 0, 255));
+
+    if (colorA > 0)
+    {
+        auto drawWorldLine = [&](const Vector& a, const Vector& b)
+            {
+                float x0 = 0.0f, y0 = 0.0f, x1 = 0.0f, y1 = 0.0f;
+                if (!ProjectPostMirrorSegment(view, forward, right, up, tanHalfFovX, tanHalfFovY, a, b, x0, y0, x1, y1))
+                    return;
+                DrawPostMirrorLine2D(device, x0, y0, x1, y1, aimColor, std::max(1.0f, m_AimLineThickness));
+            };
+
+        if (m_HasThrowArc)
+        {
+            for (int i = 0; i < THROW_ARC_SEGMENTS; ++i)
+                drawWorldLine(m_LastThrowArcPoints[i], m_LastThrowArcPoints[i + 1]);
+        }
+        else
+        {
+            Vector start{};
+            Vector end{};
+            if (BuildRenderAimLineSegment(localPlayer, start, end))
+                drawWorldLine(start, end);
+        }
+    }
+
+    EndPostMirrorOverlayD3DState(stateBlock);
+    device->Release();
+}
+
+bool VR::CopyEyeToDesktopMirrorTexture(int eyeIndex)
+{
+    if (!m_IsVREnabled || !m_DesktopMirrorEnabled || !m_DesktopMirrorHidePluginOverlays)
+        return false;
+    if (eyeIndex < 0 || eyeIndex > 1)
+        return false;
+
+    IDirect3DSurface9* src = (eyeIndex == 0) ? m_D9LeftEyeSurface : m_D9RightEyeSurface;
+    IDirect3DSurface9* dst = m_D9DesktopMirrorSurface;
+    if (!src || !dst || src == dst)
+        return false;
+
+    IDirect3DDevice9* device = nullptr;
+    HRESULT hr = src->GetDevice(&device);
+    if (FAILED(hr) || !device)
+    {
+        hr = dst->GetDevice(&device);
+        if (FAILED(hr) || !device)
+            return false;
+    }
+
+    D3DSURFACE_DESC srcDesc{};
+    D3DSURFACE_DESC dstDesc{};
+    const bool haveSrcDesc = SUCCEEDED(src->GetDesc(&srcDesc));
+    const bool haveDstDesc = SUCCEEDED(dst->GetDesc(&dstDesc));
+
+    RECT srcRect{};
+    RECT dstRect{};
+    RECT* pSrcRect = nullptr;
+    RECT* pDstRect = nullptr;
+    if (haveSrcDesc && haveDstDesc && (srcDesc.Width != dstDesc.Width || srcDesc.Height != dstDesc.Height))
+    {
+        srcRect.left = 0;
+        srcRect.top = 0;
+        srcRect.right = static_cast<LONG>(srcDesc.Width);
+        srcRect.bottom = static_cast<LONG>(srcDesc.Height);
+        dstRect.left = 0;
+        dstRect.top = 0;
+        dstRect.right = static_cast<LONG>(dstDesc.Width);
+        dstRect.bottom = static_cast<LONG>(dstDesc.Height);
+        pSrcRect = &srcRect;
+        pDstRect = &dstRect;
+    }
+
+    hr = device->StretchRect(src, pSrcRect, dst, pDstRect, D3DTEXF_NONE);
+    if (FAILED(hr) && m_RenderPipelineDebugLog)
+    {
+        Game::logMsg("[VR][DesktopMirror] StretchRect eye=%d failed hr=0x%08X", eyeIndex, static_cast<unsigned int>(hr));
+    }
+
+    device->Release();
+    return SUCCEEDED(hr);
+}
+
 void VR::DrawKillIndicators(IMatRenderContext* renderContext, ITexture* hudTexture)
 {
     if (!renderContext)

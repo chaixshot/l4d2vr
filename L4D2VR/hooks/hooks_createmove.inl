@@ -316,6 +316,16 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 
 		// ② ★ 非 VR 服务器：把“右手手柄朝向”塞给服务器用的视角
 		if (treatServerAsNonVR) {
+			// Freshly solve on the input tick. The server consumes this cmd immediately,
+			// so using an older render/aim-line solution can miss at close range.
+			if (m_Game && m_Game->m_EngineClient)
+			{
+				const int lpIdxForAim = m_Game->m_EngineClient->GetLocalPlayer();
+				C_BasePlayer* lpForAim = (lpIdxForAim > 0) ? (C_BasePlayer*)m_Game->GetClientEntity(lpIdxForAim) : nullptr;
+				if (lpForAim)
+					m_VR->UpdateNonVRAimSolution(lpForAim, true);
+			}
+
 			QAngle aim = m_VR->GetRightControllerAbsAngle();
 			if (m_VR->m_MouseModeEnabled)
 			{

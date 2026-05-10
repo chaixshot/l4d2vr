@@ -1706,14 +1706,14 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 	// Queued render: draw aim line from the render-thread snapshot so it stays glued to the hand/gun.
 	// IMPORTANT: must run after we compute m_SetupOrigin / m_ThirdPersonRenderCenter for this frame.
-	// When clean desktop mirror capture is active, defer DebugOverlay aim primitives until
-	// after the clean mirror pass, otherwise the global DebugOverlay queue leaks into the mirror RT.
-	const bool deferDebugAimOverlayForCleanMirror =
+	// When desktop mirror overlay hiding is active, do not use Source DebugOverlay for VR-only
+	// plugin overlays. DebugOverlay is global and can leak into the mirror copy. Those overlays
+	// are drawn as D3D post-overlays after the selected eye has been copied to the desktop mirror RT.
+	const bool desktopMirrorHidePluginOverlaysActive =
 		m_VR->m_IsVREnabled &&
 		m_VR->m_DesktopMirrorEnabled &&
-		m_VR->m_DesktopMirrorHidePluginOverlays &&
-		m_VR->m_DesktopMirrorTexture;
-	if (m_VR->m_IsVREnabled && queueMode != 0 && !deferDebugAimOverlayForCleanMirror)
+		m_VR->m_DesktopMirrorHidePluginOverlays;
+	if (m_VR->m_IsVREnabled && queueMode != 0 && !desktopMirrorHidePluginOverlaysActive)
 	{
 		m_VR->RenderDrawAimLineQueued(localPlayer);
 	}
@@ -1748,7 +1748,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	hudLeft.origin = leftEyeView.origin;
 	hudLeft.angles = renderViewAngles;
 
-	// Right eye CViewSetup is also needed by the optional clean desktop mirror pass.
 	rightEyeView.origin = rightOrigin;
 	rightEyeView.angles = renderViewAngles;
 	CViewSetup hudRight = hudViewSetup;
@@ -1756,87 +1755,26 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	hudRight.origin = rightEyeView.origin;
 	hudRight.angles = renderViewAngles;
 
-	auto renderCleanDesktopMirrorEye = [&](CViewSetup& mirrorView, CViewSetup& mirrorHud)
-		{
-			if (!m_VR->m_IsVREnabled || !m_VR->m_DesktopMirrorEnabled ||
-				!m_VR->m_DesktopMirrorHidePluginOverlays || !m_VR->m_DesktopMirrorTexture)
-			{
-				return;
-			}
+	// Populate the persistent D3D arrow cache once per stereo frame. This replaces the
+	// old clean-mirror path that scanned before each eye and submitted short-lived
+	// DebugOverlay lines.
+	if (desktopMirrorHidePluginOverlaysActive)
+		m_VR->ScanSpecialInfectedEntitiesFromClientList();
 
-			const bool prevCleanPass = m_VR->m_DesktopMirrorCleanRenderingPass;
-			const bool prevSuppressHudCapture = m_VR->m_SuppressHudCapture;
-			int oldX = 0, oldY = 0, oldW = 0, oldH = 0;
-			const bool canRestoreViewport = hkGetViewport.fOriginal && hkViewport.fOriginal;
-			if (canRestoreViewport)
-				hkGetViewport.fOriginal(rndrContext, oldX, oldY, oldW, oldH);
-			ITexture* oldRT = rndrContext->GetRenderTarget();
-
-			m_VR->m_DesktopMirrorCleanRenderingPass = true;
-			m_VR->m_SuppressHudCapture = true;
-			rndrContext->SetRenderTarget(m_VR->m_DesktopMirrorTexture);
-			if (hkViewport.fOriginal)
-				hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
-			rndrContext->ClearColor4ub(0, 0, 0, 255);
-			rndrContext->ClearBuffers(true, true, true);
-
-			callOriginalRenderView(mirrorView, mirrorHud, nClearFlags, whatToDraw);
-
-			rndrContext->SetRenderTarget(oldRT);
-			if (canRestoreViewport)
-				hkViewport.fOriginal(rndrContext, oldX, oldY, oldW, oldH);
-			m_VR->m_SuppressHudCapture = prevSuppressHudCapture;
-			m_VR->m_DesktopMirrorCleanRenderingPass = prevCleanPass;
-		};
-
-	if (m_VR->m_DesktopMirrorEye == 0)
-		renderCleanDesktopMirrorEye(leftEyeView, hudLeft);
-	else
-		renderCleanDesktopMirrorEye(rightEyeView, hudRight);
-
-	if (deferDebugAimOverlayForCleanMirror)
-	{
-		const float aimOverlayDuration = std::max(m_VR->m_AimLinePersistence,
-			m_VR->m_LastFrameDuration * m_VR->m_AimLineFrameDurationMultiplier);
-		const bool scopeOnlyAimLine =
-			m_VR->m_ScopeAimLineOnlyInScope &&
-			m_VR->m_ThirdPersonFrontViewEnabled &&
-			m_VR->m_IsThirdPersonCamera &&
-			m_VR->m_ScopeWeaponIsFirearm;
-
-		if (m_VR->m_HasThrowArc)
-		{
-			m_VR->DrawThrowArcFromCache(aimOverlayDuration);
-		}
-		else if (!scopeOnlyAimLine && queueMode != 0)
-		{
-			m_VR->RenderDrawAimLineQueued(localPlayer);
-		}
-		else if (!scopeOnlyAimLine && m_VR->m_HasAimLine)
-		{
-			m_VR->DrawAimLine(m_VR->m_AimLineStart, m_VR->m_AimLineEnd);
-		}
-	}
-
-	if (m_VR->m_IsVREnabled && queueMode != 0)
-		m_VR->DrawProjectedItemLabels(rndrContext, leftEyeView);
 	rndrContext->SetRenderTarget(m_VR->m_LeftEyeTexture);
 	if (hkViewport.fOriginal)
 		hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
 	if (m_VR->m_IsVREnabled)
 		m_VR->RenderDrawGameLaserSight(localPlayer);
-	if (m_VR->m_IsVREnabled && m_VR->m_DesktopMirrorEnabled && m_VR->m_DesktopMirrorHidePluginOverlays)
-		m_VR->ScanSpecialInfectedEntitiesFromClientList();
 	callOriginalRenderView(leftEyeView, hudLeft, nClearFlags, whatToDraw);
+	if (desktopMirrorHidePluginOverlaysActive && m_VR->m_DesktopMirrorEye == 0)
+		m_VR->CopyEyeToDesktopMirrorTexture(0);
 	if (m_VR->m_IsVREnabled)
 	{
-		if (queueMode == 0)
-		{
-			rndrContext->SetRenderTarget(m_VR->m_LeftEyeTexture);
-			if (hkViewport.fOriginal)
-				hkViewport.fOriginal(rndrContext, 0, 0, m_VR->m_RenderWidth, m_VR->m_RenderHeight);
-			m_VR->DrawProjectedItemLabels(rndrContext, leftEyeView);
-		}
+		rndrContext->SetRenderTarget(m_VR->m_LeftEyeTexture);
+		if (hkViewport.fOriginal)
+			hkViewport.fOriginal(rndrContext, 0, 0, m_VR->m_RenderWidth, m_VR->m_RenderHeight);
+		m_VR->DrawPostMirrorPluginOverlays(rndrContext, localPlayer, leftEyeView);
 	}
 	if (m_VR->m_IsVREnabled)
 		m_VR->UpdateD3DAimLineOverlayForView(localPlayer, leftEyeView, 0);
@@ -1845,15 +1783,15 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	rndrContext->SetRenderTarget(m_VR->m_RightEyeTexture);
 	if (hkViewport.fOriginal)
 		hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
-	if (m_VR->m_IsVREnabled && m_VR->m_DesktopMirrorEnabled && m_VR->m_DesktopMirrorHidePluginOverlays)
-		m_VR->ScanSpecialInfectedEntitiesFromClientList();
 	callOriginalRenderView(rightEyeView, hudRight, nClearFlags, whatToDraw);
-	if (m_VR->m_IsVREnabled && queueMode == 0)
+	if (desktopMirrorHidePluginOverlaysActive && m_VR->m_DesktopMirrorEye != 0)
+		m_VR->CopyEyeToDesktopMirrorTexture(1);
+	if (m_VR->m_IsVREnabled)
 	{
 		rndrContext->SetRenderTarget(m_VR->m_RightEyeTexture);
 		if (hkViewport.fOriginal)
 			hkViewport.fOriginal(rndrContext, 0, 0, m_VR->m_RenderWidth, m_VR->m_RenderHeight);
-		m_VR->DrawProjectedItemLabels(rndrContext, rightEyeView);
+		m_VR->DrawPostMirrorPluginOverlays(rndrContext, localPlayer, rightEyeView);
 	}
 	if (m_VR->m_IsVREnabled)
 		m_VR->UpdateD3DAimLineOverlayForView(localPlayer, rightEyeView, 1);

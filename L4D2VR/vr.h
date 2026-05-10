@@ -1208,6 +1208,10 @@ public:
 	float m_ShadowCvarNbShadowCullDist = 0.0f;
 	int m_ShadowCvarFlashlightInfectedShadows = 0;
 	bool m_ShadowTweaksApplied = false;
+	// In queued/multicore rendering, force one aggressive shadow pass after map entry.
+	// Source can recreate/reset shadow cvars during level load, which makes queued shadows unstable.
+	bool m_ShadowTweaksQueuedMapForceApplied = false;
+	bool m_ShadowTweaksQueuedMapHadLocalPlayer = false;
 	bool m_ShadowOriginalsCaptured = false;
 	int m_ShadowOrigShadows = 1;
 	int m_ShadowOrigRenderToTexture = 1;
@@ -1248,8 +1252,9 @@ public:
 	//   DesktopMirrorKeepAspect=true/false
 	//   DesktopMirrorLinearFilter=true/false
 	//   DesktopMirrorHidePluginOverlays=true/false
-	// When hiding plugin overlays, the selected eye is rendered once into a clean mirror RT
-	// before normal VR-only world overlays (ItemModelLabel / special-infected arrows) are drawn.
+	// When hiding plugin overlays, the selected eye is copied to a clean mirror RT
+	// immediately after the normal eye RenderView and before VR-only post overlays are drawn.
+	// This avoids the old extra clean RenderView pass.
 	bool m_DesktopMirrorEnabled = true;
 	int  m_DesktopMirrorEye = 1; // 0 = left eye, 1 = right eye
 	bool m_DesktopMirrorKeepAspect = true;
@@ -1371,7 +1376,7 @@ public:
 
 	// Non-VR server movement: client-side melee gesture -> IN_ATTACK tuning (ForceNonVRServerMovement=true only)
 	// These are intentionally separate from generic MotionGesture* knobs.
-	float m_NonVRMeleeSwingThreshold = 1.1f;     // controller linear speed threshold (m/s-ish in tracking space)
+	float m_NonVRMeleeSwingThreshold = 999.0f;     // controller linear speed threshold (m/s-ish in tracking space)
 	float m_NonVRMeleeSwingCooldown = 0.30f;     // seconds between synthetic swings
 	float m_NonVRMeleeHoldTime = 0.06f;          // seconds to hold IN_ATTACK after trigger (reduces "dropped swings")
 	float m_NonVRMeleeAttackDelay = 0.04f;     // seconds to wait after gesture before starting IN_ATTACK (adds "wind-up")
@@ -1444,6 +1449,14 @@ public:
 		int sourceEntityIndex = 0;
 		std::chrono::steady_clock::time_point lastSeen{};
 		std::chrono::steady_clock::time_point stableSince{};
+	};
+
+	struct ProjectedSpecialInfectedArrow
+	{
+		Vector origin = { 0,0,0 };
+		SpecialInfectedType type = SpecialInfectedType::None;
+		int sourceEntityIndex = 0;
+		std::chrono::steady_clock::time_point lastSeen{};
 	};
 
 
@@ -2051,6 +2064,8 @@ public:
 	mutable std::unordered_map<int, std::chrono::steady_clock::time_point> m_LastItemModelLabelTime{};
 	std::unordered_map<int, ProjectedItemLabel> m_ProjectedItemLabels{};
 	std::unordered_map<std::string, CachedProjectedItemLabelTexture> m_ItemLabelTextureCache{};
+	mutable std::mutex m_ProjectedSpecialInfectedArrowMutex;
+	std::unordered_map<int, ProjectedSpecialInfectedArrow> m_ProjectedSpecialInfectedArrows{};
 	int m_AimLineWarningColorR = 255;
 	int m_AimLineWarningColorG = 255;
 	int m_AimLineWarningColorB = 0;
@@ -2204,7 +2219,7 @@ public:
 	int SetActionManifest(const char* fileName);
 	void InstallApplicationManifest(const char* fileName);
 	void Update();
-	void ApplyShadowSettingsIfNeeded();
+	void ApplyShadowSettingsIfNeeded(bool forceApply = false, bool forceEnable = false);
 	void ApplyFlashlightEnhancementIfNeeded();
 	void ApplyLocalVScriptConvarsIfNeeded();
 	void AuditLocalVScriptConvarsCurrentValues(const char* reason);
@@ -2304,7 +2319,7 @@ public:
 	std::string GetMeleeWeaponName(C_WeaponCSBase* weapon) const;
 	void WaitForConfigUpdate();
 	bool GetWalkAxis(float& x, float& y);
-	void UpdateNonVRAimSolution(C_BasePlayer* localPlayer);
+	void UpdateNonVRAimSolution(C_BasePlayer* localPlayer, bool forceFresh = false);
 	// Friendly-fire aim guard:
 	// - m_AimLineHitsFriendly is computed from a ray trace and may flicker at hitbox edges.
 	// - While the attack button is held, flicker can effectively create press/release edges.
@@ -2371,6 +2386,10 @@ public:
 	void SpawnKillIndicator(bool headshot, const Vector& worldPos);
 	void DrawKillIndicators(IMatRenderContext* renderContext, ITexture* hudTexture);
 	void DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSetup& view);
+	void RecordProjectedSpecialInfectedArrow(int entityIndex, const Vector& origin, SpecialInfectedType type);
+	void DrawProjectedSpecialInfectedArrows(IMatRenderContext* renderContext, const CViewSetup& view);
+	void DrawPostMirrorPluginOverlays(IMatRenderContext* renderContext, C_BasePlayer* localPlayer, const CViewSetup& view);
+	bool CopyEyeToDesktopMirrorTexture(int eyeIndex);
 	IDirect3DTexture9* GetOrCreateProjectedItemLabelTexture(
 		IDirect3DDevice9* device,
 		const std::string& text,

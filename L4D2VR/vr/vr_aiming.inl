@@ -838,8 +838,25 @@ C_BaseEntity* VR::GetMountedGunUseEntity(C_BasePlayer* localPlayer) const
     return reinterpret_cast<C_BaseEntity*>(m_Game->m_ClientEntityList->GetClientEntityFromHandle(hUse));
 }
 
-void VR::UpdateNonVRAimSolution(C_BasePlayer* localPlayer)
+void VR::UpdateNonVRAimSolution(C_BasePlayer* localPlayer, bool forceFresh)
 {
+    // This solution is authoritative for non-VR servers because CreateMove sends
+    // m_NonVRAimAngles through cmd->viewangles. Never let render-thread snapshots
+    // overwrite it: queued rendering may intentionally use a different visual pose.
+    struct MainThreadPoseGuard
+    {
+        bool prev = false;
+        MainThreadPoseGuard()
+        {
+            prev = VR::t_UseRenderFrameSnapshot;
+            VR::t_UseRenderFrameSnapshot = false;
+        }
+        ~MainThreadPoseGuard()
+        {
+            VR::t_UseRenderFrameSnapshot = prev;
+        }
+    } mainThreadPoseGuard;
+
     // Keep the previous solution alive if we throttle this frame.
     if (!m_ForceNonVRServerMovement)
     {
@@ -857,8 +874,10 @@ void VR::UpdateNonVRAimSolution(C_BasePlayer* localPlayer)
     // optional header fields across branches/patches.
     static std::chrono::steady_clock::time_point s_lastSolve{};
     const float kSolveMaxHz = 90.0f; // 0 disables throttling
-    if (ShouldThrottle(s_lastSolve, kSolveMaxHz))
+    if (!forceFresh && ShouldThrottle(s_lastSolve, kSolveMaxHz))
         return;
+    if (forceFresh)
+        s_lastSolve = std::chrono::steady_clock::now();
 
     C_BaseEntity* mountedUseEnt = GetMountedGunUseEntity(localPlayer);
     IClientEntityList* entityList = m_Game ? m_Game->m_ClientEntityList : nullptr;
@@ -1478,13 +1497,14 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
             if (enabled)
                 VR::t_UseRenderFrameSnapshot = prev;
         }
-    } tlsGuard(queueMode != 0);
+    } tlsGuard(queueMode != 0 && !m_ForceNonVRServerMovement);
 
     const bool queued = (queueMode != 0);
     const bool scopeOverlayNeedsDebugAimLine = ShouldRenderScope();
     const bool d3dAimLineEffective = m_D3DAimLineOverlayEnabled && !queued && !scopeOverlayNeedsDebugAimLine;
-    // Source DebugOverlay primitives are global. When we render a clean desktop mirror,
-    // defer debug-overlay aim primitives until after that mirror pass has finished.
+    // Source DebugOverlay primitives are global. When desktop mirror overlay hiding is
+    // active, skip DebugOverlay aim primitives and draw the VR-only line through the
+    // post-mirror D3D path instead.
     const bool deferDebugAimOverlayForCleanMirror =
         m_DesktopMirrorHidePluginOverlays && m_DesktopMirrorEnabled && !m_ScopeRenderingPass;
 
@@ -3294,8 +3314,8 @@ void VR::DrawThrowArc(const Vector& origin, const Vector& forward, const Vector&
     m_HasThrowArc = true;
     m_HasAimLine = false;
 
-    // When clean desktop mirror capture is active, only update the cached arc here.
-    // The render hook emits the DebugOverlay arc after the clean mirror pass.
+    // When desktop mirror overlay hiding is active, only update the cached arc here.
+    // The render hook draws it later through the post-mirror D3D path.
     if (!(m_DesktopMirrorHidePluginOverlays && m_DesktopMirrorEnabled && !m_ScopeRenderingPass))
         DrawThrowArcFromCache(duration);
 }
@@ -3320,7 +3340,7 @@ void VR::DrawLineWithThickness(const Vector& start, const Vector& end, float dur
     if (!m_Game || !m_Game->m_DebugOverlay)
         return;
 
-    // Do not enqueue DebugOverlay geometry while the clean desktop mirror is rendering.
+    // Do not enqueue DebugOverlay geometry while a legacy clean mirror pass is active.
     // DebugOverlay is global, so anything queued here can be captured by the mirror RT.
     if (m_DesktopMirrorCleanRenderingPass && m_DesktopMirrorHidePluginOverlays)
         return;

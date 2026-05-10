@@ -620,6 +620,11 @@ void VR::Update()
             m_AutoResetHadLocalPlayerPrev = false;
             m_LocalVScriptConvarsMapAuditPending = false;
             m_LocalVScriptConvarsHadLocalPlayerPrev = false;
+
+            if (m_ShadowTweaksQueuedMapForceApplied && !m_ShadowTweaksEnabled)
+                m_ShadowSettingsDirty.store(true, std::memory_order_release);
+            m_ShadowTweaksQueuedMapForceApplied = false;
+            m_ShadowTweaksQueuedMapHadLocalPlayer = false;
         }
         else
         {
@@ -633,6 +638,26 @@ void VR::Update()
                 m_AutoResetPositionPending = true;
                 const int ms = (int)(std::max)(0.0f, m_AutoResetPositionAfterLoadSeconds * 1000.0f);
                 m_AutoResetPositionDueTime = now + std::chrono::milliseconds(ms);
+            }
+
+            if (!hasLocalPlayer)
+            {
+                m_ShadowTweaksQueuedMapHadLocalPlayer = false;
+            }
+            else
+            {
+                const bool queuedRenderingNow = (m_Game->GetMatQueueMode() != 0);
+                if (!m_ShadowTweaksQueuedMapHadLocalPlayer)
+                {
+                    m_ShadowTweaksQueuedMapHadLocalPlayer = true;
+                    m_ShadowTweaksQueuedMapForceApplied = false;
+                }
+
+                if (queuedRenderingNow && !m_ShadowTweaksQueuedMapForceApplied)
+                {
+                    ApplyShadowSettingsIfNeeded(true, true);
+                    m_ShadowTweaksQueuedMapForceApplied = true;
+                }
             }
 
             m_AutoResetHadLocalPlayerPrev = hasLocalPlayer;
@@ -931,7 +956,9 @@ void VR::CreateVRTextures()
     if (m_DesktopMirrorHidePluginOverlays)
     {
         // Full-size clean eye RTT for desktop mirroring. This is intentionally not
-        // submitted to SteamVR; DXVK only uses the D3D surface for the window mirror.
+        // submitted to SteamVR. The selected eye is copied here after its normal
+        // RenderView and before VR-only plugin overlays are drawn, avoiding an
+        // extra scene RenderView.
         m_CreatingTextureID = Texture_DesktopMirror;
         m_DesktopMirrorTexture = m_Game->m_MaterialSystem->CreateNamedRenderTargetTextureEx(
             "desktopMirrorClean0",
