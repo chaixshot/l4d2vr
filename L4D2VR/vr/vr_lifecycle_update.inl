@@ -1078,13 +1078,10 @@ void VR::SubmitVRTextures()
     const bool inGame = (m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame());
     const bool queued = (m_Game && (m_Game->GetMatQueueMode() != 0));
     bool renderedNewFrame = m_RenderedNewFrame.load(std::memory_order_acquire);
-    bool skipStaleQueuedSubmit = false;
 
     // In queued/multicore mode the submit path can run before dRenderView has finished
     // writing a new stereo pair. Submitting old eye textures while the HMD moved is
     // the most visible form of multicore ghosting, so wait briefly for render-thread handoff.
-    // If no fresh stereo frame arrives, default to *not* re-submitting the old app frame;
-    // SteamVR can reproject the last submitted frame more cleanly than a duplicate old-pose submit.
     if (queued && inGame)
     {
         auto hasFreshRenderedFrame = [&]() -> bool
@@ -1109,9 +1106,7 @@ void VR::SubmitVRTextures()
         }
         else
         {
-            const uint32_t staleStreak = m_QueuedSubmitStaleStreak.fetch_add(1, std::memory_order_acq_rel) + 1u;
-            const uint32_t lastSubmitted = m_LastSubmittedFrameId.load(std::memory_order_acquire);
-            skipStaleQueuedSubmit = m_QueuedSubmitSkipStaleFrames && lastSubmitted != 0 && staleStreak >= 1u;
+            m_QueuedSubmitStaleStreak.fetch_add(1, std::memory_order_acq_rel);
         }
     }
 
@@ -1142,28 +1137,6 @@ void VR::SubmitVRTextures()
 
     if (renderedNewFrame || inGame)
         m_MenuBlankSubmitted = false;
-
-    // Heavy scenes can temporarily produce no new dRenderView stereo pair before the next
-    // UpdatePosesAndActions/Submit call. Re-submitting the previous eye textures here makes
-    // SteamVR consume an app frame whose view was built for an older HMD pose, which appears
-    // as HMD-motion ghosting. If at least one real frame has already been submitted, skip this
-    // scene submit and let the compositor keep/reproject the previous frame.
-    if (skipStaleQueuedSubmit)
-    {
-        if (vr::VROverlay()->IsOverlayVisible(m_MainMenuHandle))
-            vr::VROverlay()->HideOverlay(m_MainMenuHandle);
-
-        if (m_RenderPipelineDebugLog && !ShouldThrottle(m_RenderPipelineLastSubmitLog, m_RenderPipelineDebugLogHz))
-        {
-            Game::logMsg("[VR][Queued][Submit] skip stale stereo submit q=1 completed=%u submitted=%u stale=%u waitMs=%d",
-                m_RenderCompletedFrameId.load(std::memory_order_acquire),
-                m_LastSubmittedFrameId.load(std::memory_order_acquire),
-                m_QueuedSubmitStaleStreak.load(std::memory_order_acquire),
-                m_QueuedSubmitWaitMs);
-        }
-
-        return;
-    }
 
     if (m_RenderPipelineDebugLog && !ShouldThrottle(m_RenderPipelineLastSubmitLog, m_RenderPipelineDebugLogHz))
     {

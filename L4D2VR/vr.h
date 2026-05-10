@@ -690,11 +690,6 @@ public:
 	// Present-side wait budget (ms) for a fresh rendered frame in mat_queue_mode!=0.
 	// 0 disables waiting. Used as an upper bound by adaptive submit-wait logic.
 	int m_QueuedSubmitWaitMs = 3;
-	// In queued/multicore mode, if the submit path wakes up but dRenderView has not
-	// produced a newer stereo pair yet, do not re-submit the previous eye textures.
-	// Let SteamVR keep/reproject the previous submitted frame instead. This avoids
-	// turning a temporary render backlog in complex scenes into a visible old-pose ghost.
-	bool m_QueuedSubmitSkipStaleFrames = true;
 	// Count of consecutive presents where submit thread observes no newer rendered frame.
 	// Used to apply submit wait adaptively only when stale-frame pressure persists.
 	std::atomic<uint32_t> m_QueuedSubmitStaleStreak{ 0 };

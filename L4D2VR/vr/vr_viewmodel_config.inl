@@ -1176,10 +1176,6 @@ void VR::ParseConfigFile()
     // Multicore rendering: present-side wait budget (ms) for a fresh dRenderView frame before submit.
     // 0 = no wait (max FPS, can increase stale-frame submits), 1~3 = usually best balance.
     m_QueuedSubmitWaitMs = std::clamp(getInt("QueuedSubmitWaitMs", m_QueuedSubmitWaitMs), 0, 20);
-    // Multicore rendering: when no newer stereo frame is available, skip submitting stale eye textures.
-    // SteamVR will keep/reproject the previous submitted frame; this is usually cleaner than app-side
-    // duplicate submits during heavy scenes.
-    m_QueuedSubmitSkipStaleFrames = getBool("QueuedSubmitSkipStaleFrames", m_QueuedSubmitSkipStaleFrames);
 
     // Queued rendering: optional render-thread FPS cap as % of HMD refresh.
     // 0 = unlimited, 100 = match HMD refresh.
