@@ -2430,19 +2430,18 @@ public:
 	bool IsItemModelLabelBlacklisted(const std::string& label) const;
 	bool IsEntityAlive(const C_BaseEntity* entity) const;
 	void DrawSpecialInfectedArrow(const Vector& origin, SpecialInfectedType type);
-	// Safe no-op fallbacks for builds that exclude special_infected_features.cpp.
-	// If the full optional feature file is re-enabled later, restore these members
-	// to declarations only, otherwise the full out-of-class definitions will collide.
-	inline void DrawItemModelLabel(int entityIndex, const std::string& modelName, const Vector& modelOrigin, const C_BaseEntity* entity, const char* className)
-	{
-		(void)entityIndex;
-		(void)modelName;
-		(void)modelOrigin;
-		(void)entity;
-		(void)className;
-	}
-	inline void ScanSpecialInfectedEntitiesFromClientList() {}
-	inline void ScanItemModelLabelEntitiesFromClientList() {}
+	// Stable wrappers used by core rendering/hooks. They are always defined in vr.cpp.
+	// If special_infected_features.cpp is linked, it registers the real implementations;
+	// otherwise these wrappers safely no-op so stripped builds still link.
+	void DrawItemModelLabel(int entityIndex, const std::string& modelName, const Vector& modelOrigin, const C_BaseEntity* entity, const char* className);
+	void ScanSpecialInfectedEntitiesFromClientList();
+	void ScanItemModelLabelEntitiesFromClientList();
+
+	// Optional implementations supplied by special_infected_features.cpp. Do not call these
+	// directly from core code because stripped builds intentionally omit their definitions.
+	void DrawItemModelLabelImpl(int entityIndex, const std::string& modelName, const Vector& modelOrigin, const C_BaseEntity* entity, const char* className);
+	void ScanSpecialInfectedEntitiesFromClientListImpl();
+	void ScanItemModelLabelEntitiesFromClientListImpl();
 	void RefreshSpecialInfectedPreWarning(const Vector& infectedOrigin, SpecialInfectedType type, int entityIndex, bool isPlayerClass);
 	void RefreshSpecialInfectedBlindSpotWarning(const Vector& infectedOrigin);
 	bool HasLineOfSightToSpecialInfected(const Vector& infectedOrigin, int entityIndex) const;

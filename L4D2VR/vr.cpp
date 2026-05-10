@@ -8506,3 +8506,62 @@ void VR::UpdateKillSoundFeedback()
     m_LastKillSoundSpecialKills = specialKills;
 }
 
+// -----------------------------------------------------------------------------
+// Optional special-infected / item-label feature bridge
+// -----------------------------------------------------------------------------
+// These three VR methods are called from core code and hooks even when the
+// optional special_infected_features.cpp translation unit is removed from the
+// project. Keep stable wrappers here so stripped builds link cleanly. When the
+// optional file is linked, it registers the real implementation callbacks during
+// static initialization and the wrappers forward to them.
+namespace
+{
+    using L4D2VROptionalDrawItemModelLabelFn = void(__cdecl*)(VR*, int, const std::string&, const Vector&, const C_BaseEntity*, const char*);
+    using L4D2VROptionalScanFn = void(__cdecl*)(VR*);
+
+    struct L4D2VROptionalSpecialInfectedCallbacks
+    {
+        L4D2VROptionalDrawItemModelLabelFn drawItemModelLabel = nullptr;
+        L4D2VROptionalScanFn scanSpecialInfectedEntities = nullptr;
+        L4D2VROptionalScanFn scanItemModelLabelEntities = nullptr;
+    };
+
+    L4D2VROptionalSpecialInfectedCallbacks& GetOptionalSpecialInfectedCallbacks()
+    {
+        static L4D2VROptionalSpecialInfectedCallbacks callbacks;
+        return callbacks;
+    }
+}
+
+extern "C" void __cdecl L4D2VR_RegisterSpecialInfectedFeatureCallbacks(
+    L4D2VROptionalDrawItemModelLabelFn drawItemModelLabel,
+    L4D2VROptionalScanFn scanSpecialInfectedEntities,
+    L4D2VROptionalScanFn scanItemModelLabelEntities)
+{
+    auto& callbacks = GetOptionalSpecialInfectedCallbacks();
+    callbacks.drawItemModelLabel = drawItemModelLabel;
+    callbacks.scanSpecialInfectedEntities = scanSpecialInfectedEntities;
+    callbacks.scanItemModelLabelEntities = scanItemModelLabelEntities;
+}
+
+void VR::DrawItemModelLabel(int entityIndex, const std::string& modelName, const Vector& modelOrigin, const C_BaseEntity* entity, const char* className)
+{
+    auto* callback = GetOptionalSpecialInfectedCallbacks().drawItemModelLabel;
+    if (callback)
+        callback(this, entityIndex, modelName, modelOrigin, entity, className);
+}
+
+void VR::ScanSpecialInfectedEntitiesFromClientList()
+{
+    auto* callback = GetOptionalSpecialInfectedCallbacks().scanSpecialInfectedEntities;
+    if (callback)
+        callback(this);
+}
+
+void VR::ScanItemModelLabelEntitiesFromClientList()
+{
+    auto* callback = GetOptionalSpecialInfectedCallbacks().scanItemModelLabelEntities;
+    if (callback)
+        callback(this);
+}
+

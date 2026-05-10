@@ -1170,8 +1170,8 @@ Option g_Options[] =
         { u8"Multi-core rendering", u8"多核渲染" },
         { u8"Turns on multi-core rendering for the mod. Do not enable the in-game multi-core rendering option.",
           u8"用于开启工具内的多核渲染功能，不要去开启游戏里的多核渲染选项。" },
-        { u8"May cause ghosting. Not recommended for standing play.",
-          u8"开启后可能出现重影，不建议站姿游玩时使用。" },
+        { u8"May cause ghosting. Not recommended for standing play.Under current multi-core rendering, shadows may appear incorrectly. If you enable this option, also enable Optimized Shadows.",
+          u8"开启后可能出现重影，不建议站姿游玩时使用。目前多核渲染下阴影会出现异常，请打开此选项的同时也打开优化阴影。" },
         0.0f, 0.0f,
         "false"
     },
