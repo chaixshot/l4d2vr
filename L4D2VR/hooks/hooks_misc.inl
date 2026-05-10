@@ -130,7 +130,8 @@ namespace vr_vm_stabilize
         }
 
         Mat3x4* p = nullptr;
-        try { p = new Mat3x4[(size_t)numBones]; } catch (...) { p = nullptr; }
+        try { p = new Mat3x4[(size_t)numBones]; }
+        catch (...) { p = nullptr; }
         if (!p)
             return nullptr;
 
@@ -305,529 +306,532 @@ namespace
 
 void Hooks::dAdjustEngineViewport(int& x, int& y, int& width, int& height)
 {
-	hkAdjustEngineViewport.fOriginal(x, y, width, height);
+    hkAdjustEngineViewport.fOriginal(x, y, width, height);
 }
 
 void Hooks::dViewport(void* ecx, void* edx, int x, int y, int width, int height)
 {
-	hkViewport.fOriginal(ecx, x, y, width, height);
+    hkViewport.fOriginal(ecx, x, y, width, height);
 }
 
 void Hooks::dGetViewport(void* ecx, void* edx, int& x, int& y, int& width, int& height)
 {
-	hkGetViewport.fOriginal(ecx, x, y, width, height);
+    hkGetViewport.fOriginal(ecx, x, y, width, height);
 }
 
 int Hooks::dTestMeleeSwingCollisionClient(void* ecx, void* edx, Vector const& vec)
 {
-	return hkTestMeleeSwingCollisionClient.fOriginal(ecx, vec);
+    return hkTestMeleeSwingCollisionClient.fOriginal(ecx, vec);
 }
 
 int Hooks::dTestMeleeSwingCollisionServer(void* ecx, void* edx, Vector const& vec)
 {
-	return hkTestMeleeSwingCollisionServer.fOriginal(ecx, vec);
+    return hkTestMeleeSwingCollisionServer.fOriginal(ecx, vec);
 }
 
 void Hooks::dDoMeleeSwingServer(void* ecx, void* edx)
 {
-	return hkDoMeleeSwingServer.fOriginal(ecx);
+    return hkDoMeleeSwingServer.fOriginal(ecx);
 }
 
 void Hooks::dStartMeleeSwingServer(void* ecx, void* edx, void* player, bool a3)
 {
-	return hkStartMeleeSwingServer.fOriginal(ecx, player, a3);
+    return hkStartMeleeSwingServer.fOriginal(ecx, player, a3);
 }
 
 int Hooks::dPrimaryAttackServer(void* ecx, void* edx)
 {
-	return hkPrimaryAttackServer.fOriginal(ecx);
+    return hkPrimaryAttackServer.fOriginal(ecx);
 }
 
 void Hooks::dItemPostFrameServer(void* ecx, void* edx)
 {
-	hkItemPostFrameServer.fOriginal(ecx);
+    hkItemPostFrameServer.fOriginal(ecx);
 }
 
 int Hooks::dGetPrimaryAttackActivity(void* ecx, void* edx, void* meleeInfo)
 {
-	return hkGetPrimaryAttackActivity.fOriginal(ecx, meleeInfo);
+    return hkGetPrimaryAttackActivity.fOriginal(ecx, meleeInfo);
 }
 
 Vector* Hooks::dEyePosition(void* ecx, void* edx, Vector* eyePos)
 {
-	Vector* result = hkEyePosition.fOriginal(ecx, eyePos);
+    Vector* result = hkEyePosition.fOriginal(ecx, eyePos);
 
-	if (m_Game->m_PerformingMelee)
-	{
-		int i = m_Game->m_CurrentUsercmdID;
-		if (m_Game->IsValidPlayerIndex(i))
-		{
-			*result = m_Game->m_PlayersVRInfo[i].controllerPos;
-		}
-	}
+    if (m_Game->m_PerformingMelee)
+    {
+        int i = m_Game->m_CurrentUsercmdID;
+        if (m_Game->IsValidPlayerIndex(i))
+        {
+            *result = m_Game->m_PlayersVRInfo[i].controllerPos;
+        }
+    }
 
-	return result;
+    return result;
 }
 
 void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld)
 {
-	if (m_Game->m_SwitchedWeapons)
-		m_Game->m_CachedArmsModel = false;
+    if (m_Game->m_SwitchedWeapons)
+        m_Game->m_CachedArmsModel = false;
 
-	bool hideArms = m_Game->m_IsMeleeWeaponActive || m_VR->m_HideArms;
+    bool hideArms = m_Game->m_IsMeleeWeaponActive || m_VR->m_HideArms;
 
-	void* pBonesToWorldFinal = pCustomBoneToWorld;
+    void* pBonesToWorldFinal = pCustomBoneToWorld;
 
-	// Per-draw origin/angles override (used for multicore viewmodel stabilization).
-	// We never write into shared entity state here; we only override the ModelRenderInfo_t
-	// passed down to the renderer for this draw call (frame-stable, avoids queued-thread tearing).
-	ModelRenderInfo_t drawInfo = info;
-	const ModelRenderInfo_t* pDrawInfo = &info;
+    // Per-draw origin/angles override (used for multicore viewmodel stabilization).
+    // We never write into shared entity state here; we only override the ModelRenderInfo_t
+    // passed down to the renderer for this draw call (frame-stable, avoids queued-thread tearing).
+    ModelRenderInfo_t drawInfo = info;
+    const ModelRenderInfo_t* pDrawInfo = &info;
 
-	std::string modelName;
-	if (info.pModel)
-	{
-		modelName = m_Game->m_ModelInfo->GetModelName(info.pModel);
-		m_VR->ScanSpecialInfectedEntitiesFromClientList();
+    std::string modelName;
+    if (info.pModel)
+    {
+        modelName = m_Game->m_ModelInfo->GetModelName(info.pModel);
+        m_VR->ScanSpecialInfectedEntitiesFromClientList();
 
-		const C_BaseEntity* entity = nullptr;
-		if (m_Game->m_ClientEntityList && info.entity_index > 0 && info.entity_index <= 2048)
-		{
-			entity = HooksSafeGetClientEntity(m_Game, info.entity_index);
-		}
-		bool isPlayerClass = false;
-		const char* className = nullptr;
-		if (entity)
-		{
-			className = HooksSafeGetNetworkClassName(m_Game, const_cast<C_BaseEntity*>(entity));
-			isPlayerClass = className && (std::strcmp(className, "CTerrorPlayer") == 0 || std::strcmp(className, "C_TerrorPlayer") == 0);
-		}
-		const bool suppressDesktopMirrorPluginOverlays =
-			m_VR->m_DesktopMirrorCleanRenderingPass && m_VR->m_DesktopMirrorHidePluginOverlays;
-		if (!suppressDesktopMirrorPluginOverlays &&
-			(info.entity_index == -1 || (info.entity_index > 0 && info.entity_index <= 2048)))
-		{
-			m_VR->DrawItemModelLabel(info.entity_index, modelName, info.origin, entity, className);
-		}
-		// Scope RTT pass: optionally hide the local player model so scoped view isn't blocked by your own head/body.
-		if (m_VR->m_ScopeRenderingPass && m_VR->m_ScopeHideLocalPlayerModelInScope && isPlayerClass && m_Game->m_EngineClient)
-		{
-			const int localPlayerIndex = m_Game->m_EngineClient->GetLocalPlayer();
-			if (info.entity_index == localPlayerIndex)
-				return;
-		}
-
-
-// --- Multicore viewmodel stabilization (first-person viewmodel ghosting fix) ---
-// In queued rendering (mat_queue_mode!=0), viewmodels are frequently submitted with custom bone matrices.
-// In that case, overriding ModelRenderInfo_t.origin/angles does NOT move the model (it stays "head-locked").
-// So we apply a rigid delta to the bone matrices for this draw call, based on our controller-anchored target.
-const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
-if (m_VR->m_IsVREnabled && queueMode == 2 && (m_VR->m_QueuedViewmodelStabilize || m_VR->m_ViewmodelDisableMoveBob))
-{
-	const bool isViewmodelClass = className &&
-		(std::strcmp(className, "CBaseViewModel") == 0 || std::strcmp(className, "C_BaseViewModel") == 0);
-	const bool isArmsOrHandsModel =
-		(modelName.find("models/weapons/arms/") != std::string::npos) ||
-		(modelName.find("/arms/") != std::string::npos) ||
-		(modelName.find("v_arms") != std::string::npos) ||
-		(modelName.find("models/weapons/hands/") != std::string::npos) ||
-		(modelName.find("/hands/") != std::string::npos) ||
-		(modelName.find("v_hands") != std::string::npos);
-	const bool isViewmodelModel =
-		(modelName.find("models/weapons/v_") != std::string::npos) ||
-		(modelName.find("/v_models/") != std::string::npos) ||
-		(modelName.find("models/v_models/") != std::string::npos) ||
-
-		// L4D2 melee viewmodels often live under models/weapons/melee/...
-		(modelName.find("models/weapons/melee/v_") != std::string::npos) ||
-		(modelName.find("models/weapons/melee/") != std::string::npos && modelName.find("/v_") != std::string::npos) ||
-		(modelName.find("/melee/v_") != std::string::npos) ||
-
-		// Arms/hands are frequently separate models from the gun.
-		isArmsOrHandsModel;
+        const C_BaseEntity* entity = nullptr;
+        if (m_Game->m_ClientEntityList && info.entity_index > 0 && info.entity_index <= 2048)
+        {
+            entity = HooksSafeGetClientEntity(m_Game, info.entity_index);
+        }
+        bool isPlayerClass = false;
+        const char* className = nullptr;
+        if (entity)
+        {
+            className = HooksSafeGetNetworkClassName(m_Game, const_cast<C_BaseEntity*>(entity));
+            isPlayerClass = className && (std::strcmp(className, "CTerrorPlayer") == 0 || std::strcmp(className, "C_TerrorPlayer") == 0);
+        }
+        const bool suppressDesktopMirrorPluginOverlays =
+            m_VR->m_DesktopMirrorCleanRenderingPass && m_VR->m_DesktopMirrorHidePluginOverlays;
+        const bool desktopMirrorOverlayHideActive =
+            m_VR->m_DesktopMirrorHidePluginOverlays && m_VR->m_DesktopMirrorEnabled;
+        const bool singlePassDesktopMirrorPluginOverlays = false;
+        if (!suppressDesktopMirrorPluginOverlays &&
+            (info.entity_index == -1 || (info.entity_index > 0 && info.entity_index <= 2048)))
+        {
+            m_VR->DrawItemModelLabel(info.entity_index, modelName, info.origin, entity, className);
+        }
+        // Scope RTT pass: optionally hide the local player model so scoped view isn't blocked by your own head/body.
+        if (m_VR->m_ScopeRenderingPass && m_VR->m_ScopeHideLocalPlayerModelInScope && isPlayerClass && m_Game->m_EngineClient)
+        {
+            const int localPlayerIndex = m_Game->m_EngineClient->GetLocalPlayer();
+            if (info.entity_index == localPlayerIndex)
+                return;
+        }
 
 
-	if (isViewmodelClass || isViewmodelModel)
-	{
-		struct RenderSnapshotTLSGuard
-		{
-			bool prev = false;
-			RenderSnapshotTLSGuard()
-			{
-				prev = VR::t_UseRenderFrameSnapshot;
-				VR::t_UseRenderFrameSnapshot = true;
-			}
-			~RenderSnapshotTLSGuard()
-			{
-				VR::t_UseRenderFrameSnapshot = prev;
-			}
-		} tlsGuard;
+        // --- Multicore viewmodel stabilization (first-person viewmodel ghosting fix) ---
+        // In queued rendering (mat_queue_mode!=0), viewmodels are frequently submitted with custom bone matrices.
+        // In that case, overriding ModelRenderInfo_t.origin/angles does NOT move the model (it stays "head-locked").
+        // So we apply a rigid delta to the bone matrices for this draw call, based on our controller-anchored target.
+        const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
+        if (m_VR->m_IsVREnabled && queueMode == 2 && (m_VR->m_QueuedViewmodelStabilize || m_VR->m_ViewmodelDisableMoveBob))
+        {
+            const bool isViewmodelClass = className &&
+                (std::strcmp(className, "CBaseViewModel") == 0 || std::strcmp(className, "C_BaseViewModel") == 0);
+            const bool isArmsOrHandsModel =
+                (modelName.find("models/weapons/arms/") != std::string::npos) ||
+                (modelName.find("/arms/") != std::string::npos) ||
+                (modelName.find("v_arms") != std::string::npos) ||
+                (modelName.find("models/weapons/hands/") != std::string::npos) ||
+                (modelName.find("/hands/") != std::string::npos) ||
+                (modelName.find("v_hands") != std::string::npos);
+            const bool isViewmodelModel =
+                (modelName.find("models/weapons/v_") != std::string::npos) ||
+                (modelName.find("/v_models/") != std::string::npos) ||
+                (modelName.find("models/v_models/") != std::string::npos) ||
 
-		const Vector targetOrigin = m_VR->GetRecommendedViewmodelAbsPos();
-		const QAngle targetAngles = m_VR->GetRecommendedViewmodelAbsAngle();
+                // L4D2 melee viewmodels often live under models/weapons/melee/...
+                (modelName.find("models/weapons/melee/v_") != std::string::npos) ||
+                (modelName.find("models/weapons/melee/") != std::string::npos && modelName.find("/v_") != std::string::npos) ||
+                (modelName.find("/melee/v_") != std::string::npos) ||
 
-		// Always override origin/angles for lighting/etc (even if bones are used).
-		drawInfo = info;
-		drawInfo.origin = targetOrigin;
-		drawInfo.angles = targetAngles;
-		pDrawInfo = &drawInfo;
+                // Arms/hands are frequently separate models from the gun.
+                isArmsOrHandsModel;
 
-		bool appliedBoneDelta = false;
-		int numBones = 0;
 
-		if (pCustomBoneToWorld)
-		{
-			if (vr_vm_stabilize::TryGetNumBonesFromDrawState(state, numBones) && numBones > 0)
-			{
-				uint32_t seqEven = m_VR->m_RenderFrameSeq.load(std::memory_order_acquire);
-				seqEven &= ~1u;
-				if (seqEven == 0)
-					seqEven = 2;
+            if (isViewmodelClass || isViewmodelModel)
+            {
+                struct RenderSnapshotTLSGuard
+                {
+                    bool prev = false;
+                    RenderSnapshotTLSGuard()
+                    {
+                        prev = VR::t_UseRenderFrameSnapshot;
+                        VR::t_UseRenderFrameSnapshot = true;
+                    }
+                    ~RenderSnapshotTLSGuard()
+                    {
+                        VR::t_UseRenderFrameSnapshot = prev;
+                    }
+                } tlsGuard;
 
-				vr_vm_stabilize::Mat3x4* bonesCopy = vr_vm_stabilize::AllocStableBones(numBones, seqEven);
-				if (bonesCopy)
-				{
-					memcpy(bonesCopy, pCustomBoneToWorld, (size_t)numBones * sizeof(vr_vm_stabilize::Mat3x4));
+                const Vector targetOrigin = m_VR->GetRecommendedViewmodelAbsPos();
+                const QAngle targetAngles = m_VR->GetRecommendedViewmodelAbsAngle();
 
-					// NOTE:
-					// pCustomBoneToWorld is already in WORLD space. However, bone[0] is NOT guaranteed
-					// to be at the entity origin (studio root can have a built-in offset). Using bone[0]
-					// as the reference will mis-anchor the whole model (often looks like it's still HMD-bound).
-					//
-					// Correct approach: treat the bones as (EntityToWorld * BoneLocal). Recover BoneLocal
-					// via inverse(EntityToWorld), then re-apply with TargetEntityToWorld.
-					vr_vm_stabilize::Mat3x4 origEntity{};
-					vr_vm_stabilize::BuildFromOrgAngles(info.origin, info.angles, origEntity);
-					vr_vm_stabilize::Mat3x4 origInv{};
-					vr_vm_stabilize::InvertTR(origEntity, origInv);
-					vr_vm_stabilize::Mat3x4 targetEntity{};
-					vr_vm_stabilize::BuildFromOrgAngles(targetOrigin, targetAngles, targetEntity);
-					vr_vm_stabilize::Mat3x4 delta{};
-					vr_vm_stabilize::Mul(targetEntity, origInv, delta);
+                // Always override origin/angles for lighting/etc (even if bones are used).
+                drawInfo = info;
+                drawInfo.origin = targetOrigin;
+                drawInfo.angles = targetAngles;
+                pDrawInfo = &drawInfo;
 
-					bool splitApplied = false;
-					if (m_VR->m_SplitArmsToControllers && isArmsOrHandsModel && numBones > 8 && !m_VR->m_MouseModeEnabled)
-					{
-						const Vector leftCtrlPos = m_VR->GetLeftControllerAbsPos();
-						const QAngle leftCtrlAng = m_VR->GetLeftControllerAbsAngle();
+                bool appliedBoneDelta = false;
+                int numBones = 0;
 
-						Vector leftForward{}, leftRight{}, leftUp{};
-						QAngle::AngleVectors(leftCtrlAng, &leftForward, &leftRight, &leftUp);
+                if (pCustomBoneToWorld)
+                {
+                    if (vr_vm_stabilize::TryGetNumBonesFromDrawState(state, numBones) && numBones > 0)
+                    {
+                        uint32_t seqEven = m_VR->m_RenderFrameSeq.load(std::memory_order_acquire);
+                        seqEven &= ~1u;
+                        if (seqEven == 0)
+                            seqEven = 2;
 
-						leftForward = VectorRotate(leftForward, leftRight, -45.0f);
-						leftUp = VectorRotate(leftUp, leftRight, -45.0f);
+                        vr_vm_stabilize::Mat3x4* bonesCopy = vr_vm_stabilize::AllocStableBones(numBones, seqEven);
+                        if (bonesCopy)
+                        {
+                            memcpy(bonesCopy, pCustomBoneToWorld, (size_t)numBones * sizeof(vr_vm_stabilize::Mat3x4));
 
-						leftForward = VectorRotate(leftForward, leftUp, m_VR->m_ViewmodelAngOffset.y);
-						leftRight = VectorRotate(leftRight, leftUp, m_VR->m_ViewmodelAngOffset.y);
-						leftForward = VectorRotate(leftForward, leftRight, m_VR->m_ViewmodelAngOffset.x);
-						leftUp = VectorRotate(leftUp, leftRight, m_VR->m_ViewmodelAngOffset.x);
-						leftRight = VectorRotate(leftRight, leftForward, m_VR->m_ViewmodelAngOffset.z);
-						leftUp = VectorRotate(leftUp, leftForward, m_VR->m_ViewmodelAngOffset.z);
+                            // NOTE:
+                            // pCustomBoneToWorld is already in WORLD space. However, bone[0] is NOT guaranteed
+                            // to be at the entity origin (studio root can have a built-in offset). Using bone[0]
+                            // as the reference will mis-anchor the whole model (often looks like it's still HMD-bound).
+                            //
+                            // Correct approach: treat the bones as (EntityToWorld * BoneLocal). Recover BoneLocal
+                            // via inverse(EntityToWorld), then re-apply with TargetEntityToWorld.
+                            vr_vm_stabilize::Mat3x4 origEntity{};
+                            vr_vm_stabilize::BuildFromOrgAngles(info.origin, info.angles, origEntity);
+                            vr_vm_stabilize::Mat3x4 origInv{};
+                            vr_vm_stabilize::InvertTR(origEntity, origInv);
+                            vr_vm_stabilize::Mat3x4 targetEntity{};
+                            vr_vm_stabilize::BuildFromOrgAngles(targetOrigin, targetAngles, targetEntity);
+                            vr_vm_stabilize::Mat3x4 delta{};
+                            vr_vm_stabilize::Mul(targetEntity, origInv, delta);
 
-						Vector leftVmPos = leftCtrlPos
-							- (leftForward * m_VR->m_ViewmodelPosOffset.x)
-							- (leftRight * m_VR->m_ViewmodelPosOffset.y)
-							- (leftUp * m_VR->m_ViewmodelPosOffset.z);
+                            bool splitApplied = false;
+                            if (m_VR->m_SplitArmsToControllers && isArmsOrHandsModel && numBones > 8 && !m_VR->m_MouseModeEnabled)
+                            {
+                                const Vector leftCtrlPos = m_VR->GetLeftControllerAbsPos();
+                                const QAngle leftCtrlAng = m_VR->GetLeftControllerAbsAngle();
 
-						QAngle leftVmAng{};
-						QAngle::VectorAngles(leftForward, leftUp, leftVmAng);
+                                Vector leftForward{}, leftRight{}, leftUp{};
+                                QAngle::AngleVectors(leftCtrlAng, &leftForward, &leftRight, &leftUp);
 
-						vr_vm_stabilize::Mat3x4 leftTargetEntity{};
-						vr_vm_stabilize::BuildFromOrgAngles(leftVmPos, leftVmAng, leftTargetEntity);
+                                leftForward = VectorRotate(leftForward, leftRight, -45.0f);
+                                leftUp = VectorRotate(leftUp, leftRight, -45.0f);
 
-						vr_vm_stabilize::Mat3x4 leftDelta{};
-						vr_vm_stabilize::Mul(leftTargetEntity, origInv, leftDelta);
+                                leftForward = VectorRotate(leftForward, leftUp, m_VR->m_ViewmodelAngOffset.y);
+                                leftRight = VectorRotate(leftRight, leftUp, m_VR->m_ViewmodelAngOffset.y);
+                                leftForward = VectorRotate(leftForward, leftRight, m_VR->m_ViewmodelAngOffset.x);
+                                leftUp = VectorRotate(leftUp, leftRight, m_VR->m_ViewmodelAngOffset.x);
+                                leftRight = VectorRotate(leftRight, leftForward, m_VR->m_ViewmodelAngOffset.z);
+                                leftUp = VectorRotate(leftUp, leftForward, m_VR->m_ViewmodelAngOffset.z);
 
-						std::vector<float> localY((size_t)numBones, 0.0f);
-						Vector posSum{ 0.0f, 0.0f, 0.0f };
-						Vector negSum{ 0.0f, 0.0f, 0.0f };
-						int posCount = 0;
-						int negCount = 0;
-						float minY = 1e9f;
-						float maxY = -1e9f;
+                                Vector leftVmPos = leftCtrlPos
+                                    - (leftForward * m_VR->m_ViewmodelPosOffset.x)
+                                    - (leftRight * m_VR->m_ViewmodelPosOffset.y)
+                                    - (leftUp * m_VR->m_ViewmodelPosOffset.z);
 
-						const auto* srcBones = reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pCustomBoneToWorld);
-						for (int i = 0; i < numBones; ++i)
-						{
-							vr_vm_stabilize::Mat3x4 localBone{};
-							vr_vm_stabilize::Mul(origInv, srcBones[i], localBone);
-							const float y = localBone.m[1][3];
-							localY[(size_t)i] = y;
-							minY = std::min(minY, y);
-							maxY = std::max(maxY, y);
+                                QAngle leftVmAng{};
+                                QAngle::VectorAngles(leftForward, leftUp, leftVmAng);
 
-							const Vector worldPos = vr_vm_stabilize::GetOrigin(srcBones[i]);
-							if (y > 1.0f)
-							{
-								posSum += worldPos;
-								++posCount;
-							}
-							else if (y < -1.0f)
-							{
-								negSum += worldPos;
-								++negCount;
-							}
-						}
+                                vr_vm_stabilize::Mat3x4 leftTargetEntity{};
+                                vr_vm_stabilize::BuildFromOrgAngles(leftVmPos, leftVmAng, leftTargetEntity);
 
-						if (posCount > 0 && negCount > 0 && (maxY - minY) > 4.0f)
-						{
-							const Vector rightCtrlPos = m_VR->GetRightControllerAbsPos();
-							const Vector posAvg = posSum / (float)posCount;
-							const Vector negAvg = negSum / (float)negCount;
-							const bool positiveYIsRight = (posAvg - rightCtrlPos).LengthSqr() <= (negAvg - rightCtrlPos).LengthSqr();
-							const float deadZone = std::max(1.0f, (maxY - minY) * 0.08f);
+                                vr_vm_stabilize::Mat3x4 leftDelta{};
+                                vr_vm_stabilize::Mul(leftTargetEntity, origInv, leftDelta);
 
-							for (int i = 0; i < numBones; ++i)
-							{
-								const float y = localY[(size_t)i];
-								const bool isCenter = std::fabs(y) <= deadZone;
-								const bool useRightDelta = isCenter || ((y > 0.0f) == positiveYIsRight);
-								vr_vm_stabilize::Mat3x4 tmp{};
-								vr_vm_stabilize::Mul(useRightDelta ? delta : leftDelta, bonesCopy[i], tmp);
-								bonesCopy[i] = tmp;
-							}
-							splitApplied = true;
-						}
-					}
+                                std::vector<float> localY((size_t)numBones, 0.0f);
+                                Vector posSum{ 0.0f, 0.0f, 0.0f };
+                                Vector negSum{ 0.0f, 0.0f, 0.0f };
+                                int posCount = 0;
+                                int negCount = 0;
+                                float minY = 1e9f;
+                                float maxY = -1e9f;
 
-					if (!splitApplied)
-						vr_vm_stabilize::ApplyDelta(delta, bonesCopy, numBones);
+                                const auto* srcBones = reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pCustomBoneToWorld);
+                                for (int i = 0; i < numBones; ++i)
+                                {
+                                    vr_vm_stabilize::Mat3x4 localBone{};
+                                    vr_vm_stabilize::Mul(origInv, srcBones[i], localBone);
+                                    const float y = localBone.m[1][3];
+                                    localY[(size_t)i] = y;
+                                    minY = std::min(minY, y);
+                                    maxY = std::max(maxY, y);
 
-					pBonesToWorldFinal = bonesCopy;
-					appliedBoneDelta = true;
-				}
-			}
-		}
+                                    const Vector worldPos = vr_vm_stabilize::GetOrigin(srcBones[i]);
+                                    if (y > 1.0f)
+                                    {
+                                        posSum += worldPos;
+                                        ++posCount;
+                                    }
+                                    else if (y < -1.0f)
+                                    {
+                                        negSum += worldPos;
+                                        ++negCount;
+                                    }
+                                }
 
-		if (m_VR->m_QueuedViewmodelStabilizeDebugLog)
-		{
-			static thread_local std::chrono::steady_clock::time_point s_last{};
-			if (!ShouldThrottleLog(s_last, m_VR->m_QueuedViewmodelStabilizeDebugLogHz))
-			{
-				const uint32_t seq = m_VR->m_RenderFrameSeq.load(std::memory_order_relaxed);
-				const uint32_t tid = (uint32_t)GetCurrentThreadId();
-										Vector root0 = info.origin;
-										Vector root1 = targetOrigin;
-										if (pCustomBoneToWorld)
-										{
-											vr_vm_stabilize::Mat3x4 r0{};
-											if (vr_vm_stabilize::SafeRead(pCustomBoneToWorld, r0))
-												root0 = vr_vm_stabilize::GetOrigin(r0);
-										}
-										if (appliedBoneDelta && pBonesToWorldFinal)
-										{
-											root1 = vr_vm_stabilize::GetOrigin(reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pBonesToWorldFinal)[0]);
-										}
+                                if (posCount > 0 && negCount > 0 && (maxY - minY) > 4.0f)
+                                {
+                                    const Vector rightCtrlPos = m_VR->GetRightControllerAbsPos();
+                                    const Vector posAvg = posSum / (float)posCount;
+                                    const Vector negAvg = negSum / (float)negCount;
+                                    const bool positiveYIsRight = (posAvg - rightCtrlPos).LengthSqr() <= (negAvg - rightCtrlPos).LengthSqr();
+                                    const float deadZone = std::max(1.0f, (maxY - minY) * 0.08f);
 
-										const Vector eyeO = m_VR->m_HmdPosAbs;
-										const Vector rcO = m_VR->GetRightControllerAbsPos();
-										const float dTgtRc = (targetOrigin - rcO).Length();
-                                        const Vector entDelta = targetOrigin - info.origin;
-                                        Vector bone0Off(0.0f, 0.0f, 0.0f);
-                                        if (pCustomBoneToWorld)
-                                        {
-                                            vr_vm_stabilize::Mat3x4 r0{};
-                                            if (vr_vm_stabilize::SafeRead(pCustomBoneToWorld, r0))
-                                                bone0Off = vr_vm_stabilize::GetOrigin(r0) - info.origin;
-                                        }
+                                    for (int i = 0; i < numBones; ++i)
+                                    {
+                                        const float y = localY[(size_t)i];
+                                        const bool isCenter = std::fabs(y) <= deadZone;
+                                        const bool useRightDelta = isCenter || ((y > 0.0f) == positiveYIsRight);
+                                        vr_vm_stabilize::Mat3x4 tmp{};
+                                        vr_vm_stabilize::Mul(useRightDelta ? delta : leftDelta, bonesCopy[i], tmp);
+                                        bonesCopy[i] = tmp;
+                                    }
+                                    splitApplied = true;
+                                }
+                            }
 
-										Game::logMsg(
-										"[VR][VM][draw] tid=%u qmode=%d seq=%u ent=%d model=\"%s\" customBones=%d bones=%d applied=%d slot=%u root0=(%.2f %.2f %.2f) root1=(%.2f %.2f %.2f) eyeO=(%.2f %.2f %.2f) rcO=(%.2f %.2f %.2f) dTgtRc=%.2f entD=(%.2f %.2f %.2f) bone0Off=(%.2f %.2f %.2f) origO=(%.2f %.2f %.2f) origA=(%.2f %.2f %.2f) tgtO=(%.2f %.2f %.2f) tgtA=(%.2f %.2f %.2f)"
-										,
-										tid, queueMode, seq, info.entity_index, modelName.c_str(),
-										(pCustomBoneToWorld != nullptr) ? 1 : 0,
-										numBones,
-										appliedBoneDelta ? 1 : 0,
-										(uint32_t)((seq >> 1) % 64),
-										root0.x, root0.y, root0.z,
-										root1.x, root1.y, root1.z,
-										eyeO.x, eyeO.y, eyeO.z,
-										rcO.x, rcO.y, rcO.z,
-										dTgtRc,
-                                        entDelta.x, entDelta.y, entDelta.z,
-                                        bone0Off.x, bone0Off.y, bone0Off.z,
-										info.origin.x, info.origin.y, info.origin.z,
-										info.angles.x, info.angles.y, info.angles.z,
-										targetOrigin.x, targetOrigin.y, targetOrigin.z,
-										targetAngles.x, targetAngles.y, targetAngles.z);
-			}
-		}
-	}
-}
+                            if (!splitApplied)
+                                vr_vm_stabilize::ApplyDelta(delta, bonesCopy, numBones);
 
-		const VR::SpecialInfectedType entityInfectedType =
-			entity ? m_VR->GetSpecialInfectedType(entity) : VR::SpecialInfectedType::None;
-		const VR::SpecialInfectedType modelInfectedType = m_VR->GetSpecialInfectedTypeFromModel(modelName);
-		const bool useWitchModelFallback =
-			modelInfectedType == VR::SpecialInfectedType::Witch &&
-			entityInfectedType == VR::SpecialInfectedType::None;
+                            pBonesToWorldFinal = bonesCopy;
+                            appliedBoneDelta = true;
+                        }
+                    }
+                }
 
-		if (!suppressDesktopMirrorPluginOverlays && useWitchModelFallback)
-		{
-			if (m_VR->m_SpecialInfectedArrowDebugLog && m_VR->m_SpecialInfectedArrowDebugLogHz > 0.0f)
-			{
-				static std::unordered_map<int, std::chrono::steady_clock::time_point> s_lastWitchModelDebugLog;
-				const int debugKey = info.entity_index > 0 ? info.entity_index : -1;
-				bool doDebugLog = true;
-				auto& last = s_lastWitchModelDebugLog[debugKey];
-				const auto now = std::chrono::steady_clock::now();
-				if (last.time_since_epoch().count() != 0)
-				{
-					const float minInterval = 1.0f / std::max(1.0f, m_VR->m_SpecialInfectedArrowDebugLogHz);
-					const float elapsed = std::chrono::duration<float>(now - last).count();
-					if (elapsed >= 0.0f && elapsed < minInterval)
-						doDebugLog = false;
-				}
-				if (doDebugLog)
-				{
-					last = now;
-					Game::logMsg(
-						"[VR][SIArrow][model] idx=%d class=%s model=\"%s\" type=%d origin=(%.1f %.1f %.1f)",
-						info.entity_index,
-						(className && *className) ? className : "<null>",
-						modelName.c_str(),
-						static_cast<int>(modelInfectedType),
-						info.origin.x,
-						info.origin.y,
-						info.origin.z);
-				}
-			}
+                if (m_VR->m_QueuedViewmodelStabilizeDebugLog)
+                {
+                    static thread_local std::chrono::steady_clock::time_point s_last{};
+                    if (!ShouldThrottleLog(s_last, m_VR->m_QueuedViewmodelStabilizeDebugLogHz))
+                    {
+                        const uint32_t seq = m_VR->m_RenderFrameSeq.load(std::memory_order_relaxed);
+                        const uint32_t tid = (uint32_t)GetCurrentThreadId();
+                        Vector root0 = info.origin;
+                        Vector root1 = targetOrigin;
+                        if (pCustomBoneToWorld)
+                        {
+                            vr_vm_stabilize::Mat3x4 r0{};
+                            if (vr_vm_stabilize::SafeRead(pCustomBoneToWorld, r0))
+                                root0 = vr_vm_stabilize::GetOrigin(r0);
+                        }
+                        if (appliedBoneDelta && pBonesToWorldFinal)
+                        {
+                            root1 = vr_vm_stabilize::GetOrigin(reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pBonesToWorldFinal)[0]);
+                        }
 
-			m_VR->RefreshSpecialInfectedPreWarning(info.origin, modelInfectedType, info.entity_index, false);
+                        const Vector eyeO = m_VR->m_HmdPosAbs;
+                        const Vector rcO = m_VR->GetRightControllerAbsPos();
+                        const float dTgtRc = (targetOrigin - rcO).Length();
+                        const Vector entDelta = targetOrigin - info.origin;
+                        Vector bone0Off(0.0f, 0.0f, 0.0f);
+                        if (pCustomBoneToWorld)
+                        {
+                            vr_vm_stabilize::Mat3x4 r0{};
+                            if (vr_vm_stabilize::SafeRead(pCustomBoneToWorld, r0))
+                                bone0Off = vr_vm_stabilize::GetOrigin(r0) - info.origin;
+                        }
 
-			bool doOverlay = true;
-			if (info.entity_index > 0 && m_VR->m_SpecialInfectedOverlayMaxHz > 0.0f)
-			{
-				auto& last = m_VR->m_LastSpecialInfectedOverlayTime[info.entity_index];
-				const auto now = std::chrono::steady_clock::now();
-				if (last.time_since_epoch().count() != 0)
-				{
-					const float minInterval = 1.0f / std::max(1.0f, m_VR->m_SpecialInfectedOverlayMaxHz);
-					const float elapsed = std::chrono::duration<float>(now - last).count();
-					if (elapsed >= 0.0f && elapsed < minInterval)
-						doOverlay = false;
-				}
-				if (doOverlay)
-					last = now;
-			}
+                        Game::logMsg(
+                            "[VR][VM][draw] tid=%u qmode=%d seq=%u ent=%d model=\"%s\" customBones=%d bones=%d applied=%d slot=%u root0=(%.2f %.2f %.2f) root1=(%.2f %.2f %.2f) eyeO=(%.2f %.2f %.2f) rcO=(%.2f %.2f %.2f) dTgtRc=%.2f entD=(%.2f %.2f %.2f) bone0Off=(%.2f %.2f %.2f) origO=(%.2f %.2f %.2f) origA=(%.2f %.2f %.2f) tgtO=(%.2f %.2f %.2f) tgtA=(%.2f %.2f %.2f)"
+                            ,
+                            tid, queueMode, seq, info.entity_index, modelName.c_str(),
+                            (pCustomBoneToWorld != nullptr) ? 1 : 0,
+                            numBones,
+                            appliedBoneDelta ? 1 : 0,
+                            (uint32_t)((seq >> 1) % 64),
+                            root0.x, root0.y, root0.z,
+                            root1.x, root1.y, root1.z,
+                            eyeO.x, eyeO.y, eyeO.z,
+                            rcO.x, rcO.y, rcO.z,
+                            dTgtRc,
+                            entDelta.x, entDelta.y, entDelta.z,
+                            bone0Off.x, bone0Off.y, bone0Off.z,
+                            info.origin.x, info.origin.y, info.origin.z,
+                            info.angles.x, info.angles.y, info.angles.z,
+                            targetOrigin.x, targetOrigin.y, targetOrigin.z,
+                            targetAngles.x, targetAngles.y, targetAngles.z);
+                    }
+                }
+            }
+        }
 
-			if (doOverlay)
-			{
-				if (m_VR->m_RearMirrorEnabled && m_VR->m_RearMirrorShowOnlyOnSpecialWarning
-					&& m_VR->m_RearMirrorSpecialShowHoldSeconds > 0.0f && m_VR->m_RearMirrorSpecialWarningDistance > 0.0f)
-				{
-					Vector to = info.origin - m_VR->m_HmdPosAbs;
-					to.z = 0.0f;
-					const float maxD = m_VR->m_RearMirrorSpecialWarningDistance;
-					if (!to.IsZero() && to.LengthSqr() <= (maxD * maxD))
-					{
-						Vector fwd = m_VR->m_HmdForward;
-						fwd.z = 0.0f;
-						if (VectorNormalize(fwd) == 0.0f)
-							fwd = { 1.0f, 0.0f, 0.0f };
-						VectorNormalize(to);
-						if (DotProduct(to, fwd) < 0.0f)
-							m_VR->NotifyRearMirrorSpecialWarning();
-						m_VR->m_RearMirrorSawSpecialThisPass = true;
-					}
-				}
+        const VR::SpecialInfectedType entityInfectedType =
+            entity ? m_VR->GetSpecialInfectedType(entity) : VR::SpecialInfectedType::None;
+        const VR::SpecialInfectedType modelInfectedType = m_VR->GetSpecialInfectedTypeFromModel(modelName);
+        const bool useWitchModelFallback =
+            modelInfectedType == VR::SpecialInfectedType::Witch &&
+            entityInfectedType == VR::SpecialInfectedType::None;
 
-				m_VR->DrawSpecialInfectedArrow(info.origin, modelInfectedType);
-			}
-		}
+        if (!suppressDesktopMirrorPluginOverlays && !desktopMirrorOverlayHideActive && useWitchModelFallback)
+        {
+            if (m_VR->m_SpecialInfectedArrowDebugLog && m_VR->m_SpecialInfectedArrowDebugLogHz > 0.0f)
+            {
+                static std::unordered_map<int, std::chrono::steady_clock::time_point> s_lastWitchModelDebugLog;
+                const int debugKey = info.entity_index > 0 ? info.entity_index : -1;
+                bool doDebugLog = true;
+                auto& last = s_lastWitchModelDebugLog[debugKey];
+                const auto now = std::chrono::steady_clock::now();
+                if (last.time_since_epoch().count() != 0)
+                {
+                    const float minInterval = 1.0f / std::max(1.0f, m_VR->m_SpecialInfectedArrowDebugLogHz);
+                    const float elapsed = std::chrono::duration<float>(now - last).count();
+                    if (elapsed >= 0.0f && elapsed < minInterval)
+                        doDebugLog = false;
+                }
+                if (doDebugLog)
+                {
+                    last = now;
+                    Game::logMsg(
+                        "[VR][SIArrow][model] idx=%d class=%s model=\"%s\" type=%d origin=(%.1f %.1f %.1f)",
+                        info.entity_index,
+                        (className && *className) ? className : "<null>",
+                        modelName.c_str(),
+                        static_cast<int>(modelInfectedType),
+                        info.origin.x,
+                        info.origin.y,
+                        info.origin.z);
+                }
+            }
 
-		if (!suppressDesktopMirrorPluginOverlays && entity && entityInfectedType != VR::SpecialInfectedType::None)
-		{
-			if (m_VR->IsEntityAlive(entity))
-			{
-				// 1) 高优先级：自瞄/目标刷新不要被 Overlay 节流影响（否则锁定会飘）
-				// RefreshSpecialInfectedPreWarning 内部会用到 Trace 缓存（TraceMaxHz），所以这里高频调用不会把 CPU 打爆。
-				m_VR->RefreshSpecialInfectedPreWarning(info.origin, entityInfectedType, info.entity_index, isPlayerClass);
+            m_VR->RefreshSpecialInfectedPreWarning(info.origin, modelInfectedType, info.entity_index, false);
 
-				// Rear mirror pop-up: if enabled, show the mirror briefly when a special infected is behind you
-				// within the configured warning distance. This detection runs on the main render pass so the
-				// mirror can wake up without relying on the mirror RTT pass.
-				if (m_VR->m_RearMirrorEnabled && m_VR->m_RearMirrorShowOnlyOnSpecialWarning
-					&& m_VR->m_RearMirrorSpecialShowHoldSeconds > 0.0f && m_VR->m_RearMirrorSpecialWarningDistance > 0.0f)
-				{
-					Vector to = info.origin - m_VR->m_HmdPosAbs;
-					to.z = 0.0f;
-					const float maxD = m_VR->m_RearMirrorSpecialWarningDistance;
-					if (!to.IsZero() && to.LengthSqr() <= (maxD * maxD))
-					{
-						Vector fwd = m_VR->m_HmdForward;
-						fwd.z = 0.0f;
-						if (VectorNormalize(fwd) == 0.0f)
-							fwd = { 1.0f, 0.0f, 0.0f };
-						VectorNormalize(to);
-						// Behind = more likely you want the rear mirror.
-						if (DotProduct(to, fwd) < 0.0f)
-							m_VR->NotifyRearMirrorSpecialWarning();
-					}
-				}
+            bool doOverlay = true;
+            if (!singlePassDesktopMirrorPluginOverlays && info.entity_index > 0 && m_VR->m_SpecialInfectedOverlayMaxHz > 0.0f)
+            {
+                auto& last = m_VR->m_LastSpecialInfectedOverlayTime[info.entity_index];
+                const auto now = std::chrono::steady_clock::now();
+                if (last.time_since_epoch().count() != 0)
+                {
+                    const float minInterval = 1.0f / std::max(1.0f, m_VR->m_SpecialInfectedOverlayMaxHz);
+                    const float elapsed = std::chrono::duration<float>(now - last).count();
+                    if (elapsed >= 0.0f && elapsed < minInterval)
+                        doOverlay = false;
+                }
+                if (doOverlay)
+                    last = now;
+            }
 
-				// 2) 低优先级：视觉 Overlay（箭头/盲区提示）继续按实体节流，避免 dDrawModelExecute 多次调用导致尖峰
-				bool doOverlay = true;
-				if (info.entity_index > 0 && m_VR->m_SpecialInfectedOverlayMaxHz > 0.0f)
-				{
-					auto& last = m_VR->m_LastSpecialInfectedOverlayTime[info.entity_index];
-					const auto now = std::chrono::steady_clock::now();
-					if (last.time_since_epoch().count() != 0)
-					{
-						const float minInterval = 1.0f / std::max(1.0f, m_VR->m_SpecialInfectedOverlayMaxHz);
-						const float elapsed = std::chrono::duration<float>(now - last).count();
-						if (elapsed < minInterval)
-							doOverlay = false;
-					}
-					if (doOverlay)
-						last = now;
-				}
+            if (doOverlay)
+            {
+                if (m_VR->m_RearMirrorEnabled && m_VR->m_RearMirrorShowOnlyOnSpecialWarning
+                    && m_VR->m_RearMirrorSpecialShowHoldSeconds > 0.0f && m_VR->m_RearMirrorSpecialWarningDistance > 0.0f)
+                {
+                    Vector to = info.origin - m_VR->m_HmdPosAbs;
+                    to.z = 0.0f;
+                    const float maxD = m_VR->m_RearMirrorSpecialWarningDistance;
+                    if (!to.IsZero() && to.LengthSqr() <= (maxD * maxD))
+                    {
+                        Vector fwd = m_VR->m_HmdForward;
+                        fwd.z = 0.0f;
+                        if (VectorNormalize(fwd) == 0.0f)
+                            fwd = { 1.0f, 0.0f, 0.0f };
+                        VectorNormalize(to);
+                        if (DotProduct(to, fwd) < 0.0f)
+                            m_VR->NotifyRearMirrorSpecialWarning();
+                        m_VR->m_RearMirrorSawSpecialThisPass = true;
+                    }
+                }
 
-				if (doOverlay)
-				{
-					// Rear-mirror hint: if this special-infected arrow is being rendered during the rear-mirror RTT pass
-					// and within the configured distance, enlarge the mirror overlay.
-					if (m_VR->m_RearMirrorRenderingPass && m_VR->m_RearMirrorSpecialWarningDistance > 0.0f)
-					{
-						Vector to = info.origin - m_VR->m_HmdPosAbs;
-						to.z = 0.0f;
-						const float maxD = m_VR->m_RearMirrorSpecialWarningDistance;
-						if (!to.IsZero() && to.LengthSqr() <= (maxD * maxD))
-							m_VR->m_RearMirrorSawSpecialThisPass = true;
-					}
-					if (entityInfectedType != VR::SpecialInfectedType::Tank
-						&& entityInfectedType != VR::SpecialInfectedType::Witch
-						&& entityInfectedType != VR::SpecialInfectedType::Charger)
-					{
-						m_VR->RefreshSpecialInfectedBlindSpotWarning(info.origin);
-					}
-					m_VR->DrawSpecialInfectedArrow(info.origin, entityInfectedType);
-				}
-			}
-		}
-	}
+                m_VR->DrawSpecialInfectedArrow(info.origin, modelInfectedType);
+            }
+        }
 
-	if (info.pModel && hideArms && !m_Game->m_CachedArmsModel)
-	{
-		if (modelName.find("/arms/") != std::string::npos)
-		{
-			m_Game->m_ArmsMaterial = m_Game->m_MaterialSystem->FindMaterial(modelName.c_str(), "Model textures");
-			m_Game->m_ArmsModel = info.pModel;
-			m_Game->m_CachedArmsModel = true;
-		}
-	}
+        if (!suppressDesktopMirrorPluginOverlays && !desktopMirrorOverlayHideActive && entity && entityInfectedType != VR::SpecialInfectedType::None)
+        {
+            if (m_VR->IsEntityAlive(entity))
+            {
+                // 1) 高优先级：自瞄/目标刷新不要被 Overlay 节流影响（否则锁定会飘）
+                // RefreshSpecialInfectedPreWarning 内部会用到 Trace 缓存（TraceMaxHz），所以这里高频调用不会把 CPU 打爆。
+                m_VR->RefreshSpecialInfectedPreWarning(info.origin, entityInfectedType, info.entity_index, isPlayerClass);
 
-	if (info.pModel && info.pModel == m_Game->m_ArmsModel && hideArms)
-	{
-		m_Game->m_ArmsMaterial->SetMaterialVarFlag(MATERIAL_VAR_NO_DRAW, true);
-		m_Game->m_ModelRender->ForcedMaterialOverride(m_Game->m_ArmsMaterial);
-		hkDrawModelExecute.fOriginal(ecx, state, *pDrawInfo, pBonesToWorldFinal);
-		m_Game->m_ModelRender->ForcedMaterialOverride(NULL);
-		return;
-	}
+                // Rear mirror pop-up: if enabled, show the mirror briefly when a special infected is behind you
+                // within the configured warning distance. This detection runs on the main render pass so the
+                // mirror can wake up without relying on the mirror RTT pass.
+                if (m_VR->m_RearMirrorEnabled && m_VR->m_RearMirrorShowOnlyOnSpecialWarning
+                    && m_VR->m_RearMirrorSpecialShowHoldSeconds > 0.0f && m_VR->m_RearMirrorSpecialWarningDistance > 0.0f)
+                {
+                    Vector to = info.origin - m_VR->m_HmdPosAbs;
+                    to.z = 0.0f;
+                    const float maxD = m_VR->m_RearMirrorSpecialWarningDistance;
+                    if (!to.IsZero() && to.LengthSqr() <= (maxD * maxD))
+                    {
+                        Vector fwd = m_VR->m_HmdForward;
+                        fwd.z = 0.0f;
+                        if (VectorNormalize(fwd) == 0.0f)
+                            fwd = { 1.0f, 0.0f, 0.0f };
+                        VectorNormalize(to);
+                        // Behind = more likely you want the rear mirror.
+                        if (DotProduct(to, fwd) < 0.0f)
+                            m_VR->NotifyRearMirrorSpecialWarning();
+                    }
+                }
 
-	hkDrawModelExecute.fOriginal(ecx, state, *pDrawInfo, pBonesToWorldFinal);
+                // 2) 低优先级：视觉 Overlay（箭头/盲区提示）继续按实体节流，避免 dDrawModelExecute 多次调用导致尖峰
+                bool doOverlay = true;
+                if (!singlePassDesktopMirrorPluginOverlays && info.entity_index > 0 && m_VR->m_SpecialInfectedOverlayMaxHz > 0.0f)
+                {
+                    auto& last = m_VR->m_LastSpecialInfectedOverlayTime[info.entity_index];
+                    const auto now = std::chrono::steady_clock::now();
+                    if (last.time_since_epoch().count() != 0)
+                    {
+                        const float minInterval = 1.0f / std::max(1.0f, m_VR->m_SpecialInfectedOverlayMaxHz);
+                        const float elapsed = std::chrono::duration<float>(now - last).count();
+                        if (elapsed < minInterval)
+                            doOverlay = false;
+                    }
+                    if (doOverlay)
+                        last = now;
+                }
+
+                if (doOverlay)
+                {
+                    // Rear-mirror hint: if this special-infected arrow is being rendered during the rear-mirror RTT pass
+                    // and within the configured distance, enlarge the mirror overlay.
+                    if (m_VR->m_RearMirrorRenderingPass && m_VR->m_RearMirrorSpecialWarningDistance > 0.0f)
+                    {
+                        Vector to = info.origin - m_VR->m_HmdPosAbs;
+                        to.z = 0.0f;
+                        const float maxD = m_VR->m_RearMirrorSpecialWarningDistance;
+                        if (!to.IsZero() && to.LengthSqr() <= (maxD * maxD))
+                            m_VR->m_RearMirrorSawSpecialThisPass = true;
+                    }
+                    if (entityInfectedType != VR::SpecialInfectedType::Tank
+                        && entityInfectedType != VR::SpecialInfectedType::Witch
+                        && entityInfectedType != VR::SpecialInfectedType::Charger)
+                    {
+                        m_VR->RefreshSpecialInfectedBlindSpotWarning(info.origin);
+                    }
+                    m_VR->DrawSpecialInfectedArrow(info.origin, entityInfectedType);
+                }
+            }
+        }
+    }
+
+    if (info.pModel && hideArms && !m_Game->m_CachedArmsModel)
+    {
+        if (modelName.find("/arms/") != std::string::npos)
+        {
+            m_Game->m_ArmsMaterial = m_Game->m_MaterialSystem->FindMaterial(modelName.c_str(), "Model textures");
+            m_Game->m_ArmsModel = info.pModel;
+            m_Game->m_CachedArmsModel = true;
+        }
+    }
+
+    if (info.pModel && info.pModel == m_Game->m_ArmsModel && hideArms)
+    {
+        m_Game->m_ArmsMaterial->SetMaterialVarFlag(MATERIAL_VAR_NO_DRAW, true);
+        m_Game->m_ModelRender->ForcedMaterialOverride(m_Game->m_ArmsMaterial);
+        hkDrawModelExecute.fOriginal(ecx, state, *pDrawInfo, pBonesToWorldFinal);
+        m_Game->m_ModelRender->ForcedMaterialOverride(NULL);
+        return;
+    }
+
+    hkDrawModelExecute.fOriginal(ecx, state, *pDrawInfo, pBonesToWorldFinal);
 }
 
 // Returns true if the engine RT being pushed looks like the HUD/VGUI render target.
@@ -1332,20 +1336,20 @@ DWORD* Hooks::dPrePushRenderTarget(void* ecx, void* edx, int a2)
 
 void Hooks::dSayText(void* msgData)
 {
-	TryLogHudUserMessagePayload("SayText", msgData);
-	hkSayText.fOriginal(msgData);
+    TryLogHudUserMessagePayload("SayText", msgData);
+    hkSayText.fOriginal(msgData);
 }
 
 void Hooks::dSayText2(void* msgData)
 {
-	TryLogHudUserMessagePayload("SayText2", msgData);
-	hkSayText2.fOriginal(msgData);
+    TryLogHudUserMessagePayload("SayText2", msgData);
+    hkSayText2.fOriginal(msgData);
 }
 
 void Hooks::dTextMsg(void* msgData)
 {
-	TryLogHudUserMessagePayload("TextMsg", msgData);
-	hkTextMsg.fOriginal(msgData);
+    TryLogHudUserMessagePayload("TextMsg", msgData);
+    hkTextMsg.fOriginal(msgData);
 }
 
 void Hooks::dConVarSetValueString(void* ecx, void* edx, const char* value)

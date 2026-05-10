@@ -1706,7 +1706,14 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 	// Queued render: draw aim line from the render-thread snapshot so it stays glued to the hand/gun.
 	// IMPORTANT: must run after we compute m_SetupOrigin / m_ThirdPersonRenderCenter for this frame.
-	if (m_VR->m_IsVREnabled && queueMode != 0)
+	// When clean desktop mirror capture is active, defer DebugOverlay aim primitives until
+	// after the clean mirror pass, otherwise the global DebugOverlay queue leaks into the mirror RT.
+	const bool deferDebugAimOverlayForCleanMirror =
+		m_VR->m_IsVREnabled &&
+		m_VR->m_DesktopMirrorEnabled &&
+		m_VR->m_DesktopMirrorHidePluginOverlays &&
+		m_VR->m_DesktopMirrorTexture;
+	if (m_VR->m_IsVREnabled && queueMode != 0 && !deferDebugAimOverlayForCleanMirror)
 	{
 		m_VR->RenderDrawAimLineQueued(localPlayer);
 	}
@@ -1780,6 +1787,30 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		renderCleanDesktopMirrorEye(leftEyeView, hudLeft);
 	else
 		renderCleanDesktopMirrorEye(rightEyeView, hudRight);
+
+	if (deferDebugAimOverlayForCleanMirror)
+	{
+		const float aimOverlayDuration = std::max(m_VR->m_AimLinePersistence,
+			m_VR->m_LastFrameDuration * m_VR->m_AimLineFrameDurationMultiplier);
+		const bool scopeOnlyAimLine =
+			m_VR->m_ScopeAimLineOnlyInScope &&
+			m_VR->m_ThirdPersonFrontViewEnabled &&
+			m_VR->m_IsThirdPersonCamera &&
+			m_VR->m_ScopeWeaponIsFirearm;
+
+		if (m_VR->m_HasThrowArc)
+		{
+			m_VR->DrawThrowArcFromCache(aimOverlayDuration);
+		}
+		else if (!scopeOnlyAimLine && queueMode != 0)
+		{
+			m_VR->RenderDrawAimLineQueued(localPlayer);
+		}
+		else if (!scopeOnlyAimLine && m_VR->m_HasAimLine)
+		{
+			m_VR->DrawAimLine(m_VR->m_AimLineStart, m_VR->m_AimLineEnd);
+		}
+	}
 
 	if (m_VR->m_IsVREnabled && queueMode != 0)
 		m_VR->DrawProjectedItemLabels(rndrContext, leftEyeView);

@@ -1483,6 +1483,10 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
     const bool queued = (queueMode != 0);
     const bool scopeOverlayNeedsDebugAimLine = ShouldRenderScope();
     const bool d3dAimLineEffective = m_D3DAimLineOverlayEnabled && !queued && !scopeOverlayNeedsDebugAimLine;
+    // Source DebugOverlay primitives are global. When we render a clean desktop mirror,
+    // defer debug-overlay aim primitives until after that mirror pass has finished.
+    const bool deferDebugAimOverlayForCleanMirror =
+        m_DesktopMirrorHidePluginOverlays && m_DesktopMirrorEnabled && !m_ScopeRenderingPass;
 
 
     C_WeaponCSBase* activeWeapon = nullptr;
@@ -1582,7 +1586,8 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
 
             if (m_LastAimWasThrowable && m_HasThrowArc)
             {
-                DrawThrowArcFromCache(duration);
+                if (!deferDebugAimOverlayForCleanMirror)
+                    DrawThrowArcFromCache(duration);
                 m_AimLineHitsFriendly = false;
                 m_AimLineEffectiveAttackRangeActive = false;
                 m_AimLineEffectiveAttackRangeHoldUntil = {};
@@ -1600,7 +1605,7 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
             }
 
 
-            if (!queued && allowAimLineDraw && !scopeOnlyAimLine)
+            if (!queued && allowAimLineDraw && !scopeOnlyAimLine && !deferDebugAimOverlayForCleanMirror)
                 DrawAimLine(m_AimLineStart, m_AimLineEnd);
             return;
         }
@@ -1744,7 +1749,7 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
         m_HasD3DAimLineWorldSegment = !((target - origin).IsZero());
     }
 
-    if (!queued && allowAimLineDraw && !scopeOnlyAimLine)
+    if (!queued && allowAimLineDraw && !scopeOnlyAimLine && !deferDebugAimOverlayForCleanMirror)
         DrawAimLine(origin, target);
 }
 
@@ -3199,6 +3204,8 @@ void VR::RenderDrawAimLineQueued(C_BasePlayer* localPlayer)
         && m_ThirdPersonFrontViewEnabled
         && m_IsThirdPersonCamera
         && m_ScopeWeaponIsFirearm;
+    if (scopeOnlyAimLine && !m_ScopeRenderingPass)
+        return;
 
     Vector start{};
     Vector end{};
@@ -3287,12 +3294,15 @@ void VR::DrawThrowArc(const Vector& origin, const Vector& forward, const Vector&
     m_HasThrowArc = true;
     m_HasAimLine = false;
 
-    DrawThrowArcFromCache(duration);
+    // When clean desktop mirror capture is active, only update the cached arc here.
+    // The render hook emits the DebugOverlay arc after the clean mirror pass.
+    if (!(m_DesktopMirrorHidePluginOverlays && m_DesktopMirrorEnabled && !m_ScopeRenderingPass))
+        DrawThrowArcFromCache(duration);
 }
 
 void VR::DrawThrowArcFromCache(float duration)
 {
-    if (!m_Game->m_DebugOverlay || !m_HasThrowArc)
+    if (!m_Game || !m_Game->m_DebugOverlay || !m_HasThrowArc)
         return;
 
     // Throttle throw arc drawing; it's a lot of overlay primitives.
@@ -3307,6 +3317,19 @@ void VR::DrawThrowArcFromCache(float duration)
 
 void VR::DrawLineWithThickness(const Vector& start, const Vector& end, float duration)
 {
+    if (!m_Game || !m_Game->m_DebugOverlay)
+        return;
+
+    // Do not enqueue DebugOverlay geometry while the clean desktop mirror is rendering.
+    // DebugOverlay is global, so anything queued here can be captured by the mirror RT.
+    if (m_DesktopMirrorCleanRenderingPass && m_DesktopMirrorHidePluginOverlays)
+        return;
+
+    const float overlayDuration =
+        (m_DesktopMirrorHidePluginOverlays && m_DesktopMirrorEnabled && !m_ScopeRenderingPass)
+            ? 0.001f
+            : duration;
+
     int colorR = 0;
     int colorG = 0;
     int colorB = 0;
@@ -3315,7 +3338,7 @@ void VR::DrawLineWithThickness(const Vector& start, const Vector& end, float dur
     if (colorA <= 0)
         return;
 
-    m_Game->m_DebugOverlay->AddLineOverlay(start, end, colorR, colorG, colorB, false, duration);
+    m_Game->m_DebugOverlay->AddLineOverlay(start, end, colorR, colorG, colorB, false, overlayDuration);
 
     const float thickness = std::max(m_AimLineThickness, 0.0f);
     if (thickness <= 0.0f)
@@ -3367,8 +3390,8 @@ void VR::DrawLineWithThickness(const Vector& start, const Vector& end, float dur
         Vector end0 = end + offset0;
         Vector end1 = end + offset1;
 
-        m_Game->m_DebugOverlay->AddTriangleOverlay(start0, start1, end1, colorR, colorG, colorB, colorA, false, duration);
-        m_Game->m_DebugOverlay->AddTriangleOverlay(start0, end1, end0, colorR, colorG, colorB, colorA, false, duration);
+        m_Game->m_DebugOverlay->AddTriangleOverlay(start0, start1, end1, colorR, colorG, colorB, colorA, false, overlayDuration);
+        m_Game->m_DebugOverlay->AddTriangleOverlay(start0, end1, end0, colorR, colorG, colorB, colorA, false, overlayDuration);
     }
 }
 
