@@ -25,15 +25,15 @@ void VR::GetAimLineColor(int& r, int& g, int& b, int& a) const
         b = m_AimLineColorB;
     }
 
-	a = m_AimLineColorA;
-	const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
-	if (m_ScopeAimLineOnlyInScope
-		&& m_ThirdPersonFrontViewEnabled
-		&& m_IsThirdPersonCamera
-		&& m_ScopeWeaponIsFirearm
-		&& queueMode == 0
-		&& !m_ScopeRenderingPass)
-		a = 0;
+    a = m_AimLineColorA;
+    const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
+    if (m_ScopeAimLineOnlyInScope
+        && m_ThirdPersonFrontViewEnabled
+        && m_IsThirdPersonCamera
+        && m_ScopeWeaponIsFirearm
+        && queueMode == 0
+        && !m_ScopeRenderingPass)
+        a = 0;
 }
 
 
@@ -2170,19 +2170,19 @@ namespace
     inline void TrimLocalVScriptValue(std::string& value)
     {
         auto ltrim = [](std::string& s)
-        {
-            s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch)
-                {
-                    return !std::isspace(ch);
-                }));
-        };
+            {
+                s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch)
+                    {
+                        return !std::isspace(ch);
+                    }));
+            };
         auto rtrim = [](std::string& s)
-        {
-            s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch)
-                {
-                    return !std::isspace(ch);
-                }).base(), s.end());
-        };
+            {
+                s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch)
+                    {
+                        return !std::isspace(ch);
+                    }).base(), s.end());
+            };
 
         ltrim(value);
         rtrim(value);

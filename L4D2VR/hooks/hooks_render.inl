@@ -418,30 +418,30 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				vp.viewmodelAngOffset.x = m_VR->m_RenderViewmodelAngOffsetX.load(std::memory_order_relaxed);
 				vp.viewmodelAngOffset.y = m_VR->m_RenderViewmodelAngOffsetY.load(std::memory_order_relaxed);
 				vp.viewmodelAngOffset.z = m_VR->m_RenderViewmodelAngOffsetZ.load(std::memory_order_relaxed);
-			vp.hasLocalPlayer = (m_VR->m_RenderHasLocalPlayer.load(std::memory_order_relaxed) != 0);
-			vp.localEyePos.x = m_VR->m_RenderLocalEyePosX.load(std::memory_order_relaxed);
-			vp.localEyePos.y = m_VR->m_RenderLocalEyePosY.load(std::memory_order_relaxed);
-			vp.localEyePos.z = m_VR->m_RenderLocalEyePosZ.load(std::memory_order_relaxed);
-			vp.hasViewEntityOverride = (m_VR->m_RenderHasViewEntityOverride.load(std::memory_order_relaxed) != 0);
-			vp.viewEntityHandle = m_VR->m_RenderViewEntityHandle.load(std::memory_order_relaxed);
-			vp.beingRevived = (m_VR->m_RenderBeingRevived.load(std::memory_order_relaxed) != 0);
-			vp.revivingOther = (m_VR->m_RenderRevivingOther.load(std::memory_order_relaxed) != 0);
-			vp.usingMountedGun = (m_VR->m_RenderUsingMountedGun.load(std::memory_order_relaxed) != 0);
-			vp.playerIncap = (m_VR->m_RenderPlayerIncap.load(std::memory_order_relaxed) != 0);
-			vp.playerControlledBySI = (m_VR->m_RenderPlayerControlledBySI.load(std::memory_order_relaxed) != 0);
-			vp.inThirdPersonMapLoadCooldown = (m_VR->m_RenderInThirdPersonMapLoadCooldown.load(std::memory_order_relaxed) != 0);
+				vp.hasLocalPlayer = (m_VR->m_RenderHasLocalPlayer.load(std::memory_order_relaxed) != 0);
+				vp.localEyePos.x = m_VR->m_RenderLocalEyePosX.load(std::memory_order_relaxed);
+				vp.localEyePos.y = m_VR->m_RenderLocalEyePosY.load(std::memory_order_relaxed);
+				vp.localEyePos.z = m_VR->m_RenderLocalEyePosZ.load(std::memory_order_relaxed);
+				vp.hasViewEntityOverride = (m_VR->m_RenderHasViewEntityOverride.load(std::memory_order_relaxed) != 0);
+				vp.viewEntityHandle = m_VR->m_RenderViewEntityHandle.load(std::memory_order_relaxed);
+				vp.beingRevived = (m_VR->m_RenderBeingRevived.load(std::memory_order_relaxed) != 0);
+				vp.revivingOther = (m_VR->m_RenderRevivingOther.load(std::memory_order_relaxed) != 0);
+				vp.usingMountedGun = (m_VR->m_RenderUsingMountedGun.load(std::memory_order_relaxed) != 0);
+				vp.playerIncap = (m_VR->m_RenderPlayerIncap.load(std::memory_order_relaxed) != 0);
+				vp.playerControlledBySI = (m_VR->m_RenderPlayerControlledBySI.load(std::memory_order_relaxed) != 0);
+				vp.inThirdPersonMapLoadCooldown = (m_VR->m_RenderInThirdPersonMapLoadCooldown.load(std::memory_order_relaxed) != 0);
 
-			vp.tpWantsThirdPerson = (m_VR->m_RenderTpWantsThirdPerson.load(std::memory_order_relaxed) != 0);
-			vp.tpObserver = (m_VR->m_RenderTpObserver.load(std::memory_order_relaxed) != 0);
-			vp.tpDead = (m_VR->m_RenderTpDead.load(std::memory_order_relaxed) != 0);
-			vp.tpLifeState = m_VR->m_RenderTpLifeState.load(std::memory_order_relaxed);
-			vp.tpObserverMode = m_VR->m_RenderTpObserverMode.load(std::memory_order_relaxed);
-			vp.tpObserverTarget = m_VR->m_RenderTpObserverTarget.load(std::memory_order_relaxed);
-			vp.tpIncap = (m_VR->m_RenderTpIncap.load(std::memory_order_relaxed) != 0);
-			vp.tpLedge = (m_VR->m_RenderTpLedge.load(std::memory_order_relaxed) != 0);
-			vp.tpTongue = (m_VR->m_RenderTpTongue.load(std::memory_order_relaxed) != 0);
-			vp.tpPinned = (m_VR->m_RenderTpPinned.load(std::memory_order_relaxed) != 0);
-			vp.tpSelfMedkit = (m_VR->m_RenderTpSelfMedkit.load(std::memory_order_relaxed) != 0);
+				vp.tpWantsThirdPerson = (m_VR->m_RenderTpWantsThirdPerson.load(std::memory_order_relaxed) != 0);
+				vp.tpObserver = (m_VR->m_RenderTpObserver.load(std::memory_order_relaxed) != 0);
+				vp.tpDead = (m_VR->m_RenderTpDead.load(std::memory_order_relaxed) != 0);
+				vp.tpLifeState = m_VR->m_RenderTpLifeState.load(std::memory_order_relaxed);
+				vp.tpObserverMode = m_VR->m_RenderTpObserverMode.load(std::memory_order_relaxed);
+				vp.tpObserverTarget = m_VR->m_RenderTpObserverTarget.load(std::memory_order_relaxed);
+				vp.tpIncap = (m_VR->m_RenderTpIncap.load(std::memory_order_relaxed) != 0);
+				vp.tpLedge = (m_VR->m_RenderTpLedge.load(std::memory_order_relaxed) != 0);
+				vp.tpTongue = (m_VR->m_RenderTpTongue.load(std::memory_order_relaxed) != 0);
+				vp.tpPinned = (m_VR->m_RenderTpPinned.load(std::memory_order_relaxed) != 0);
+				vp.tpSelfMedkit = (m_VR->m_RenderTpSelfMedkit.load(std::memory_order_relaxed) != 0);
 			};
 
 		if (vpOk)
@@ -587,47 +587,21 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			uint32_t poseSeq = 0;
 			bool havePoses = m_VR->ReadPoseWaiterSnapshot(renderPoses.data(), &poseSeq);
 
-			// Heuristic: treat real HMD motion as "active". The previous code only looked at
-			// angular velocity, so physically translating the headset could keep reusing an old
-			// WaitGetPoses snapshot and show visible double images in queued rendering.
+			// Heuristic: treat fast HMD rotation as "active" (helps decide whether to nudge pose waiting).
 			bool headTurningNow = false;
-			bool headTranslatingNow = false;
-			double headLinearSpeedMps = 0.0;
-			double headAngularSpeedDegPerSec = 0.0;
-			auto RefreshHmdMotionFlags = [&]()
+			if (havePoses && renderPoses[vr::k_unTrackedDeviceIndex_Hmd].bPoseIsValid)
+			{
+				const auto& av = renderPoses[vr::k_unTrackedDeviceIndex_Hmd].vAngularVelocity;
+				const double ax = (double)av.v[0];
+				const double ay = (double)av.v[1];
+				const double az = (double)av.v[2];
+				if (std::isfinite(ax) && std::isfinite(ay) && std::isfinite(az))
 				{
-					headTurningNow = false;
-					headTranslatingNow = false;
-					headLinearSpeedMps = 0.0;
-					headAngularSpeedDegPerSec = 0.0;
-
-					if (!havePoses || !renderPoses[vr::k_unTrackedDeviceIndex_Hmd].bPoseIsValid)
-						return;
-
-					const auto& hmd = renderPoses[vr::k_unTrackedDeviceIndex_Hmd];
-					const auto& av = hmd.vAngularVelocity;
-					const double ax = (double)av.v[0];
-					const double ay = (double)av.v[1];
-					const double az = (double)av.v[2];
-					if (std::isfinite(ax) && std::isfinite(ay) && std::isfinite(az))
-					{
-						const double radPerSec = std::sqrt(ax * ax + ay * ay + az * az);
-						headAngularSpeedDegPerSec = radPerSec * (180.0 / 3.14159265358979323846);
-						headTurningNow = (headAngularSpeedDegPerSec > 50.0);
-					}
-
-					const auto& lv = hmd.vVelocity;
-					const double vx = (double)lv.v[0];
-					const double vy = (double)lv.v[1];
-					const double vz = (double)lv.v[2];
-					if (std::isfinite(vx) && std::isfinite(vy) && std::isfinite(vz))
-					{
-						headLinearSpeedMps = std::sqrt(vx * vx + vy * vy + vz * vz);
-						// 3.5 cm/s is below normal deliberate head translation, but above tiny tracking noise.
-						headTranslatingNow = (headLinearSpeedMps > 0.035);
-					}
-				};
-			RefreshHmdMotionFlags();
+					const double radPerSec = std::sqrt(ax * ax + ay * ay + az * az);
+					const double degPerSec = radPerSec * (180.0 / 3.14159265358979323846);
+					headTurningNow = (degPerSec > 50.0);
+				}
+			}
 
 			// Optional pacing knob: in queued mode the render thread can outrun VR pose updates.
 			// Waiting a bit for a fresh WaitGetPoses() snapshot trades throughput for stability.
@@ -641,9 +615,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			static thread_local uint32_t s_lastWaitAttemptSeq = 0;
 			static thread_local int s_poseReuseCount = 0;
 
-			const bool headMotionNow = (headTurningNow || headTranslatingNow);
-			const bool motionNow = (locomotionNow || headMotionNow);
-			bool exceededAhead = false;
+			const bool motionNow = (locomotionNow || headTurningNow);
 
 			// Update pose snapshot reuse count early (before optional waiting), so smart pacing can react
 			// even when QueuedRenderPoseWaitMs==0 and MaxFramesAhead is disabled.
@@ -707,7 +679,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				}
 
 
-				exceededAhead =
+				const bool exceededAhead =
 					(maxAheadCfg >= 0) &&
 					havePoses && poseSeq != 0 &&
 					poseSeq == s_lastPoseSeq &&
@@ -762,7 +734,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 								poseSeq = poseSeq2;
 								// New pose -> reset reuse counter.
 								s_poseReuseCount = 0;
-								exceededAhead = false;
 								break;
 							}
 
@@ -774,41 +745,10 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 					}
 				}
 
+				if (havePoses)
+					s_lastPoseSeq = poseSeq;
 			}
-
-			// If the waiter snapshot is still reused while the HMD is physically moving, take a
-			// fresh non-blocking tracking prediction for this render pass. This avoids the worst
-			// queued-render ghosting case without putting WaitGetPoses back on the render thread.
-			const uint32_t posePublishTickMs = m_VR->m_PoseWaiterPublishTickMs.load(std::memory_order_relaxed);
-			const DWORD nowPoseTickMs = GetTickCount();
-			const DWORD poseAgeMs = (posePublishTickMs != 0)
-				? (nowPoseTickMs - static_cast<DWORD>(posePublishTickMs))
-				: 0u;
-			const bool reusedPoseAfterWait = havePoses && poseSeq != 0 && poseSeq == s_lastPoseSeq;
-			const bool movingWithReusedPose = headMotionNow && reusedPoseAfterWait;
-			const bool movingWithOldPose = headMotionNow && havePoses && poseAgeMs >= 4u;
-			if ((movingWithReusedPose || movingWithOldPose || (headMotionNow && exceededAhead)) && m_VR->m_System && vr::VRCompositor())
-			{
-				std::array<vr::TrackedDevicePose_t, vr::k_unMaxTrackedDeviceCount> predictedPoses{};
-				const vr::ETrackingUniverseOrigin trackingOrigin = vr::VRCompositor()->GetTrackingSpace();
-				float predicted = vr::VRCompositor()->GetFrameTimeRemaining();
-				if (!(predicted >= 0.0f && predicted <= 0.5f))
-					predicted = 0.0f;
-				m_VR->m_System->GetDeviceToAbsoluteTrackingPose(
-					trackingOrigin, predicted, predictedPoses.data(), vr::k_unMaxTrackedDeviceCount);
-				if (predictedPoses[vr::k_unTrackedDeviceIndex_Hmd].bPoseIsValid)
-				{
-					renderPoses = predictedPoses;
-					havePoses = true;
-					// Mark this as a render-local prediction; do not overwrite the last waiter seq.
-					poseSeq = 0;
-					s_poseReuseCount = 0;
-					RefreshHmdMotionFlags();
-				}
-			}
-
-			// Update last poseSeq even when we didn't enter the wait block. Synthetic render-local
-			// predictions use poseSeq=0 and intentionally do not advance this waiter token.
+			// Update last poseSeq even when we didn't enter the wait block.
 			if (havePoses && poseSeq != 0)
 				s_lastPoseSeq = poseSeq;
 
@@ -1134,29 +1074,29 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		// Render thread (queued rendering): consume update-thread snapshot only.
 			// NOTE: This scope is outside the earlier "ViewParams vp" snapshot reader.
 			// Read the same atomic snapshot directly.
-			localPlayerValid = (m_VR->m_RenderHasLocalPlayer.load(std::memory_order_relaxed) != 0);
-			hasViewEntityOverride = (m_VR->m_RenderHasViewEntityOverride.load(std::memory_order_relaxed) != 0);
-			eyeOrigin.x = m_VR->m_RenderLocalEyePosX.load(std::memory_order_relaxed);
-			eyeOrigin.y = m_VR->m_RenderLocalEyePosY.load(std::memory_order_relaxed);
-			eyeOrigin.z = m_VR->m_RenderLocalEyePosZ.load(std::memory_order_relaxed);
-			beingRevived = (m_VR->m_RenderBeingRevived.load(std::memory_order_relaxed) != 0);
-			revivingOther = (m_VR->m_RenderRevivingOther.load(std::memory_order_relaxed) != 0);
-			usingMountedGun = (m_VR->m_RenderUsingMountedGun.load(std::memory_order_relaxed) != 0);
-			playerIncap = (m_VR->m_RenderPlayerIncap.load(std::memory_order_relaxed) != 0);
-			inMapLoadCooldown = (m_VR->m_RenderInThirdPersonMapLoadCooldown.load(std::memory_order_relaxed) != 0);
+		localPlayerValid = (m_VR->m_RenderHasLocalPlayer.load(std::memory_order_relaxed) != 0);
+		hasViewEntityOverride = (m_VR->m_RenderHasViewEntityOverride.load(std::memory_order_relaxed) != 0);
+		eyeOrigin.x = m_VR->m_RenderLocalEyePosX.load(std::memory_order_relaxed);
+		eyeOrigin.y = m_VR->m_RenderLocalEyePosY.load(std::memory_order_relaxed);
+		eyeOrigin.z = m_VR->m_RenderLocalEyePosZ.load(std::memory_order_relaxed);
+		beingRevived = (m_VR->m_RenderBeingRevived.load(std::memory_order_relaxed) != 0);
+		revivingOther = (m_VR->m_RenderRevivingOther.load(std::memory_order_relaxed) != 0);
+		usingMountedGun = (m_VR->m_RenderUsingMountedGun.load(std::memory_order_relaxed) != 0);
+		playerIncap = (m_VR->m_RenderPlayerIncap.load(std::memory_order_relaxed) != 0);
+		inMapLoadCooldown = (m_VR->m_RenderInThirdPersonMapLoadCooldown.load(std::memory_order_relaxed) != 0);
 
-			tpStateDbg.dead = (m_VR->m_RenderTpDead.load(std::memory_order_relaxed) != 0);
-			tpStateDbg.lifeState = m_VR->m_RenderTpLifeState.load(std::memory_order_relaxed);
-			tpStateDbg.observerMode = m_VR->m_RenderTpObserverMode.load(std::memory_order_relaxed);
-			tpStateDbg.observerTarget = m_VR->m_RenderTpObserverTarget.load(std::memory_order_relaxed);
-			tpStateDbg.incap = (m_VR->m_RenderTpIncap.load(std::memory_order_relaxed) != 0);
-			tpStateDbg.ledge = (m_VR->m_RenderTpLedge.load(std::memory_order_relaxed) != 0);
-			tpStateDbg.tongue = (m_VR->m_RenderTpTongue.load(std::memory_order_relaxed) != 0);
-			tpStateDbg.pinned = (m_VR->m_RenderTpPinned.load(std::memory_order_relaxed) != 0);
-			tpStateDbg.selfMedkit = (m_VR->m_RenderTpSelfMedkit.load(std::memory_order_relaxed) != 0);
+		tpStateDbg.dead = (m_VR->m_RenderTpDead.load(std::memory_order_relaxed) != 0);
+		tpStateDbg.lifeState = m_VR->m_RenderTpLifeState.load(std::memory_order_relaxed);
+		tpStateDbg.observerMode = m_VR->m_RenderTpObserverMode.load(std::memory_order_relaxed);
+		tpStateDbg.observerTarget = m_VR->m_RenderTpObserverTarget.load(std::memory_order_relaxed);
+		tpStateDbg.incap = (m_VR->m_RenderTpIncap.load(std::memory_order_relaxed) != 0);
+		tpStateDbg.ledge = (m_VR->m_RenderTpLedge.load(std::memory_order_relaxed) != 0);
+		tpStateDbg.tongue = (m_VR->m_RenderTpTongue.load(std::memory_order_relaxed) != 0);
+		tpStateDbg.pinned = (m_VR->m_RenderTpPinned.load(std::memory_order_relaxed) != 0);
+		tpStateDbg.selfMedkit = (m_VR->m_RenderTpSelfMedkit.load(std::memory_order_relaxed) != 0);
 
-			rawStateWantsThirdPerson = (m_VR->m_RenderTpWantsThirdPerson.load(std::memory_order_relaxed) != 0);
-			rawStateObserver = (m_VR->m_RenderTpObserver.load(std::memory_order_relaxed) != 0);
+		rawStateWantsThirdPerson = (m_VR->m_RenderTpWantsThirdPerson.load(std::memory_order_relaxed) != 0);
+		rawStateObserver = (m_VR->m_RenderTpObserver.load(std::memory_order_relaxed) != 0);
 	}
 
 	// Heuristic: in true third-person, the engine camera origin is noticeably away from eye position.
@@ -1692,7 +1632,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 				constexpr unsigned int kThirdPersonCamMask = (CONTENTS_SOLID | CONTENTS_MOVEABLE | CONTENTS_WINDOW | CONTENTS_GRATE | CONTENTS_PLAYERCLIP);
 				const Vector hullMins(-4.0f, -4.0f, -4.0f);
-				const Vector hullMaxs( 4.0f,  4.0f,  4.0f);
+				const Vector hullMaxs(4.0f, 4.0f, 4.0f);
 				Ray_t ray;
 				ray.Init(baseCenter, desiredCamCenter, hullMins, hullMaxs);
 				CTraceFilterSkipNPCsAndPlayers filter((IHandleEntity*)localPlayer, 0);

@@ -1076,39 +1076,7 @@ void VR::SubmitVRTextures()
         return;
 
     const bool inGame = (m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame());
-    const bool queued = (m_Game && (m_Game->GetMatQueueMode() != 0));
-    bool renderedNewFrame = m_RenderedNewFrame.load(std::memory_order_acquire);
-
-    // In queued/multicore mode the submit path can run before dRenderView has finished
-    // writing a new stereo pair. Submitting old eye textures while the HMD moved is
-    // the most visible form of multicore ghosting, so wait briefly for render-thread handoff.
-    if (queued && inGame)
-    {
-        auto hasFreshRenderedFrame = [&]() -> bool
-            {
-                const uint32_t completed = m_RenderCompletedFrameId.load(std::memory_order_acquire);
-                const uint32_t submitted = m_LastSubmittedFrameId.load(std::memory_order_acquire);
-                return completed != 0 && completed != submitted;
-            };
-
-        bool freshRenderedFrame = hasFreshRenderedFrame();
-        if (!freshRenderedFrame && m_RenderFrameReadyEvent && m_QueuedSubmitWaitMs > 0)
-        {
-            const DWORD waitMs = static_cast<DWORD>(std::clamp(m_QueuedSubmitWaitMs, 0, 20));
-            if (WaitForSingleObject(m_RenderFrameReadyEvent, waitMs) == WAIT_OBJECT_0)
-                freshRenderedFrame = hasFreshRenderedFrame();
-        }
-
-        if (freshRenderedFrame)
-        {
-            m_QueuedSubmitStaleStreak.store(0, std::memory_order_release);
-            renderedNewFrame = true;
-        }
-        else
-        {
-            m_QueuedSubmitStaleStreak.fetch_add(1, std::memory_order_acq_rel);
-        }
-    }
+    const bool renderedNewFrame = m_RenderedNewFrame.load(std::memory_order_acquire);
 
     // In the main menu, keep the scene side of the compositor static after the first
     // successful blank submit. Repeating blank Vulkan submits every frame is unnecessary
@@ -1138,6 +1106,7 @@ void VR::SubmitVRTextures()
     if (renderedNewFrame || inGame)
         m_MenuBlankSubmitted = false;
 
+    const bool queued = (m_Game && (m_Game->GetMatQueueMode() != 0));
     if (m_RenderPipelineDebugLog && !ShouldThrottle(m_RenderPipelineLastSubmitLog, m_RenderPipelineDebugLogHz))
     {
         const uint32_t renderCompletedFrameId = m_RenderCompletedFrameId.load(std::memory_order_acquire);

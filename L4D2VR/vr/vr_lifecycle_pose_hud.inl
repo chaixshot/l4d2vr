@@ -62,10 +62,9 @@ void VR::PoseWaiterThreadMain()
         // Publish snapshot.
         m_PoseWaiterSeq.fetch_add(1, std::memory_order_acq_rel); // odd
         std::memcpy(m_PoseWaiterPoses.data(), poses.data(), sizeof(vr::TrackedDevicePose_t) * vr::k_unMaxTrackedDeviceCount);
-        m_PoseWaiterPublishTickMs.store(static_cast<uint32_t>(::GetTickCount()), std::memory_order_relaxed);
         m_PoseWaiterSeq.fetch_add(1, std::memory_order_release); // even
-		if (m_PoseWaiterEvent)
-			SetEvent(m_PoseWaiterEvent);
+        if (m_PoseWaiterEvent)
+            SetEvent(m_PoseWaiterEvent);
     }
 }
 
@@ -77,10 +76,10 @@ bool VR::UpdatePosesAndActions()
     uint32_t submitToken = 0;
     static std::atomic<uint32_t> s_fallbackSubmitToken{ 0 };
 
-	// Pose waiter publishes WaitGetPoses() snapshots on a dedicated thread in queued mode.
-	// Optional render-thread pacing uses this event to wait for a fresh snapshot.
-	if (queued && !m_PoseWaiterEvent)
-		m_PoseWaiterEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
+    // Pose waiter publishes WaitGetPoses() snapshots on a dedicated thread in queued mode.
+    // Optional render-thread pacing uses this event to wait for a fresh snapshot.
+    if (queued && !m_PoseWaiterEvent)
+        m_PoseWaiterEvent = CreateEventA(nullptr, FALSE, FALSE, nullptr);
 
     // Start pose waiter once; enable it only in queued mode.
     if (queued && !m_PoseWaiterStarted.exchange(true, std::memory_order_acq_rel))
@@ -390,196 +389,196 @@ void VR::UpdateHandHudOverlays()
     }
 
     auto secsSince = [&](const std::chrono::steady_clock::time_point& tp) -> float
-    {
-        if (tp.time_since_epoch().count() == 0)
-            return -1.0f;
-        return std::chrono::duration<float>(dbgNow - tp).count();
-    };
+        {
+            if (tp.time_since_epoch().count() == 0)
+                return -1.0f;
+            return std::chrono::duration<float>(dbgNow - tp).count();
+        };
 
     auto resetHandHudCache = [&]()
-    {
-        m_LastHudHealth = -9999;
-        m_LastHudTempHealth = -9999;
-        m_LastHudThrowable = -1;
-        m_LastHudMedItem = -1;
-        m_LastHudPillItem = -1;
-        m_LastHudCommonKills = -9999;
-        m_LastHudSpecialKills = -9999;
-        m_LastHudIncap = false;
-        m_LastHudLedge = false;
-        m_LastHudThirdStrike = false;
-        m_LastHudAimTargetVisible = false;
-        m_LastHudAimTargetIndex = -1;
-        m_LastHudAimTargetPct = -1;
-        m_LastHudAimTargetNameHash = 0;
-        m_LastHudTeammatesHash = 0;
-        m_LastHudClip = -9999;
-        m_LastHudReserve = -9999;
-        m_LastHudUpg = -9999;
-        m_LastHudUpgBits = 0;
-    };
+        {
+            m_LastHudHealth = -9999;
+            m_LastHudTempHealth = -9999;
+            m_LastHudThrowable = -1;
+            m_LastHudMedItem = -1;
+            m_LastHudPillItem = -1;
+            m_LastHudCommonKills = -9999;
+            m_LastHudSpecialKills = -9999;
+            m_LastHudIncap = false;
+            m_LastHudLedge = false;
+            m_LastHudThirdStrike = false;
+            m_LastHudAimTargetVisible = false;
+            m_LastHudAimTargetIndex = -1;
+            m_LastHudAimTargetPct = -1;
+            m_LastHudAimTargetNameHash = 0;
+            m_LastHudTeammatesHash = 0;
+            m_LastHudClip = -9999;
+            m_LastHudReserve = -9999;
+            m_LastHudUpg = -9999;
+            m_LastHudUpgBits = 0;
+        };
 
     const bool worldQuad = m_HandHudWorldQuadEnabled;
     const bool worldQuadAttachControllers = worldQuad && m_HandHudWorldQuadAttachToControllers && !m_MouseModeEnabled;
 
     auto SafeReleaseD3D = [](auto*& p)
-    {
-        if (p)
         {
-            p->Release();
-            p = nullptr;
-        }
-    };
+            if (p)
+            {
+                p->Release();
+                p = nullptr;
+            }
+        };
 
     auto DestroyWorldQuadTextures = [&]()
-    {
-        DestroyHandHudWorldQuadTextures();
-    };
+        {
+            DestroyHandHudWorldQuadTextures();
+        };
 
     // If world-quad mode was used previously but is now off, free the backing textures.
     if (!worldQuad && (m_D9LeftWristHudDynTex || m_D9RightAmmoHudDynTex))
         DestroyWorldQuadTextures();
 
     auto GetD3DDeviceForHud = [&]() -> IDirect3DDevice9*
-    {
-        IDirect3DDevice9* dev = nullptr;
-        if (m_D9HUDSurface)
-            m_D9HUDSurface->GetDevice(&dev);
-        else if (m_D9LeftEyeSurface)
-            m_D9LeftEyeSurface->GetDevice(&dev);
-        else if (m_D9RightEyeSurface)
-            m_D9RightEyeSurface->GetDevice(&dev);
-        return dev;
-    };
+        {
+            IDirect3DDevice9* dev = nullptr;
+            if (m_D9HUDSurface)
+                m_D9HUDSurface->GetDevice(&dev);
+            else if (m_D9LeftEyeSurface)
+                m_D9LeftEyeSurface->GetDevice(&dev);
+            else if (m_D9RightEyeSurface)
+                m_D9RightEyeSurface->GetDevice(&dev);
+            return dev;
+        };
 
     auto EnsureWorldQuadTexture = [&](bool isLeft) -> bool
-    {
-        if (!worldQuad)
-            return false;
-
-        const int wantW = isLeft ? m_LeftWristHudTexW : m_RightAmmoHudTexW;
-        const int wantH = isLeft ? m_LeftWristHudTexH : m_RightAmmoHudTexH;
-        if (wantW <= 0 || wantH <= 0)
-            return false;
-
-        IDirect3DTexture9*& tex = isLeft ? m_D9LeftWristHudDynTex : m_D9RightAmmoHudDynTex;
-        IDirect3DSurface9*& surf = isLeft ? m_D9LeftWristHudDynSurface : m_D9RightAmmoHudDynSurface;
-        SharedTextureHolder& vk = isLeft ? m_VKLeftWristHudDyn : m_VKRightAmmoHudDyn;
-        int& curW = isLeft ? m_D9LeftWristHudDynW : m_D9RightAmmoHudDynW;
-        int& curH = isLeft ? m_D9LeftWristHudDynH : m_D9RightAmmoHudDynH;
-
-        if (tex && (curW != wantW || curH != wantH))
         {
-            SafeReleaseD3D(surf);
-            SafeReleaseD3D(tex);
-            curW = curH = 0;
-            std::memset(&vk, 0, sizeof(vk));
-        }
+            if (!worldQuad)
+                return false;
 
-        if (tex)
-            return true;
+            const int wantW = isLeft ? m_LeftWristHudTexW : m_RightAmmoHudTexW;
+            const int wantH = isLeft ? m_LeftWristHudTexH : m_RightAmmoHudTexH;
+            if (wantW <= 0 || wantH <= 0)
+                return false;
 
-        if (!g_D3DVR9)
-            return false;
+            IDirect3DTexture9*& tex = isLeft ? m_D9LeftWristHudDynTex : m_D9RightAmmoHudDynTex;
+            IDirect3DSurface9*& surf = isLeft ? m_D9LeftWristHudDynSurface : m_D9RightAmmoHudDynSurface;
+            SharedTextureHolder& vk = isLeft ? m_VKLeftWristHudDyn : m_VKRightAmmoHudDyn;
+            int& curW = isLeft ? m_D9LeftWristHudDynW : m_D9RightAmmoHudDynW;
+            int& curH = isLeft ? m_D9LeftWristHudDynH : m_D9RightAmmoHudDynH;
 
-        IDirect3DDevice9* dev = GetD3DDeviceForHud();
-        if (!dev)
-            return false;
-
-        // dxvk D3D9 is not generally thread-safe: lock the device while we create/describe resources.
-        g_D3DVR9->LockDevice();
-
-        HRESULT hr = dev->CreateTexture(
-            (UINT)wantW,
-            (UINT)wantH,
-            1,
-            D3DUSAGE_DYNAMIC,
-            D3DFMT_A8R8G8B8,
-            D3DPOOL_DEFAULT,
-            &tex,
-            nullptr);
-
-        if (SUCCEEDED(hr) && tex)
-        {
-            tex->GetSurfaceLevel(0, &surf);
-            if (surf)
+            if (tex && (curW != wantW || curH != wantH))
             {
-                D3D9_TEXTURE_VR_DESC desc{};
-                if (SUCCEEDED(g_D3DVR9->GetVRDesc(surf, &desc)))
+                SafeReleaseD3D(surf);
+                SafeReleaseD3D(tex);
+                curW = curH = 0;
+                std::memset(&vk, 0, sizeof(vk));
+            }
+
+            if (tex)
+                return true;
+
+            if (!g_D3DVR9)
+                return false;
+
+            IDirect3DDevice9* dev = GetD3DDeviceForHud();
+            if (!dev)
+                return false;
+
+            // dxvk D3D9 is not generally thread-safe: lock the device while we create/describe resources.
+            g_D3DVR9->LockDevice();
+
+            HRESULT hr = dev->CreateTexture(
+                (UINT)wantW,
+                (UINT)wantH,
+                1,
+                D3DUSAGE_DYNAMIC,
+                D3DFMT_A8R8G8B8,
+                D3DPOOL_DEFAULT,
+                &tex,
+                nullptr);
+
+            if (SUCCEEDED(hr) && tex)
+            {
+                tex->GetSurfaceLevel(0, &surf);
+                if (surf)
                 {
-                    std::memcpy(&vk.m_VulkanData, &desc, sizeof(vr::VRVulkanTextureData_t));
-                    vk.m_VRTexture.handle = &vk.m_VulkanData;
-                    vk.m_VRTexture.eColorSpace = vr::ColorSpace_Auto;
-                    vk.m_VRTexture.eType = vr::TextureType_Vulkan;
-                    curW = wantW;
-                    curH = wantH;
+                    D3D9_TEXTURE_VR_DESC desc{};
+                    if (SUCCEEDED(g_D3DVR9->GetVRDesc(surf, &desc)))
+                    {
+                        std::memcpy(&vk.m_VulkanData, &desc, sizeof(vr::VRVulkanTextureData_t));
+                        vk.m_VRTexture.handle = &vk.m_VulkanData;
+                        vk.m_VRTexture.eColorSpace = vr::ColorSpace_Auto;
+                        vk.m_VRTexture.eType = vr::TextureType_Vulkan;
+                        curW = wantW;
+                        curH = wantH;
+                    }
+                    else
+                    {
+                        SafeReleaseD3D(surf);
+                        SafeReleaseD3D(tex);
+                    }
                 }
                 else
                 {
-                    SafeReleaseD3D(surf);
                     SafeReleaseD3D(tex);
                 }
             }
-            else
-            {
-                SafeReleaseD3D(tex);
-            }
-        }
 
-        g_D3DVR9->UnlockDevice();
-        dev->Release();
+            g_D3DVR9->UnlockDevice();
+            dev->Release();
 
-        return tex != nullptr && surf != nullptr;
-    };
+            return tex != nullptr && surf != nullptr;
+        };
 
     auto UploadWorldQuadTextureRGBA = [&](bool isLeft, const uint8_t* rgba, int w, int h) -> bool
-    {
-        if (!worldQuad || !rgba || w <= 0 || h <= 0)
-            return false;
-        if (!EnsureWorldQuadTexture(isLeft))
-            return false;
-
-        IDirect3DTexture9* tex = isLeft ? m_D9LeftWristHudDynTex : m_D9RightAmmoHudDynTex;
-        IDirect3DSurface9* surf = isLeft ? m_D9LeftWristHudDynSurface : m_D9RightAmmoHudDynSurface;
-        if (!tex || !surf || !g_D3DVR9)
-            return false;
-
-        // Lock the device around LockRect to avoid dxvk multi-thread surprises.
-        g_D3DVR9->LockDevice();
-        D3DLOCKED_RECT lr{};
-        const HRESULT hr = tex->LockRect(0, &lr, nullptr, D3DLOCK_DISCARD);
-        if (FAILED(hr) || !lr.pBits)
         {
-            g_D3DVR9->UnlockDevice();
-            return false;
-        }
+            if (!worldQuad || !rgba || w <= 0 || h <= 0)
+                return false;
+            if (!EnsureWorldQuadTexture(isLeft))
+                return false;
 
-        // Our HUD pixels are RGBA; D3DFMT_A8R8G8B8 expects BGRA in memory.
-        const uint8_t* src = rgba;
-        uint8_t* dst0 = reinterpret_cast<uint8_t*>(lr.pBits);
-        for (int y = 0; y < h; ++y)
-        {
-            const uint8_t* srow = src + (size_t)y * (size_t)w * 4;
-            uint8_t* drow = dst0 + (size_t)y * (size_t)lr.Pitch;
-            for (int x = 0; x < w; ++x)
+            IDirect3DTexture9* tex = isLeft ? m_D9LeftWristHudDynTex : m_D9RightAmmoHudDynTex;
+            IDirect3DSurface9* surf = isLeft ? m_D9LeftWristHudDynSurface : m_D9RightAmmoHudDynSurface;
+            if (!tex || !surf || !g_D3DVR9)
+                return false;
+
+            // Lock the device around LockRect to avoid dxvk multi-thread surprises.
+            g_D3DVR9->LockDevice();
+            D3DLOCKED_RECT lr{};
+            const HRESULT hr = tex->LockRect(0, &lr, nullptr, D3DLOCK_DISCARD);
+            if (FAILED(hr) || !lr.pBits)
             {
-                const uint8_t r = srow[x * 4 + 0];
-                const uint8_t g = srow[x * 4 + 1];
-                const uint8_t b = srow[x * 4 + 2];
-                const uint8_t a = srow[x * 4 + 3];
-                drow[x * 4 + 0] = b;
-                drow[x * 4 + 1] = g;
-                drow[x * 4 + 2] = r;
-                drow[x * 4 + 3] = a;
+                g_D3DVR9->UnlockDevice();
+                return false;
             }
-        }
 
-        tex->UnlockRect(0);
-        // Ensure the Vulkan-side resource is updated for OpenVR sampling.
-        const HRESULT transferHr = g_D3DVR9->TransferSurface(surf, FALSE);
-        g_D3DVR9->UnlockDevice();
-        return SUCCEEDED(transferHr);
-    };
+            // Our HUD pixels are RGBA; D3DFMT_A8R8G8B8 expects BGRA in memory.
+            const uint8_t* src = rgba;
+            uint8_t* dst0 = reinterpret_cast<uint8_t*>(lr.pBits);
+            for (int y = 0; y < h; ++y)
+            {
+                const uint8_t* srow = src + (size_t)y * (size_t)w * 4;
+                uint8_t* drow = dst0 + (size_t)y * (size_t)lr.Pitch;
+                for (int x = 0; x < w; ++x)
+                {
+                    const uint8_t r = srow[x * 4 + 0];
+                    const uint8_t g = srow[x * 4 + 1];
+                    const uint8_t b = srow[x * 4 + 2];
+                    const uint8_t a = srow[x * 4 + 3];
+                    drow[x * 4 + 0] = b;
+                    drow[x * 4 + 1] = g;
+                    drow[x * 4 + 2] = r;
+                    drow[x * 4 + 3] = a;
+                }
+            }
+
+            tex->UnlockRect(0);
+            // Ensure the Vulkan-side resource is updated for OpenVR sampling.
+            const HRESULT transferHr = g_D3DVR9->TransferSurface(surf, FALSE);
+            g_D3DVR9->UnlockDevice();
+            return SUCCEEDED(transferHr);
+        };
 
 
     // If SetOverlayRaw starts returning RequestFailed persistently, the overlay system can end up
@@ -669,143 +668,143 @@ void VR::UpdateHandHudOverlays()
     // We don't have gpGlobals->curtime here, so we approximate with steady_clock since the
     // last observed (bufferTime/buffer) update.
     auto computeDecayedTempHP = [&](int entIndex, const unsigned char* entBase) -> int
-    {
-        if (!entBase)
-            return 0;
-
-        float hb = 0.0f;
-        float hbTime = 0.0f;
-
-        // Guard against freed/unmapped entity memory (common during level transitions).
-        if (!TryReadFloat(entBase, kHealthBufferOffset, hb) || !TryReadFloat(entBase, kHealthBufferTimeOffset, hbTime))
         {
-            if (!m_HandHudTempHealthStates.empty())
+            if (!entBase)
+                return 0;
+
+            float hb = 0.0f;
+            float hbTime = 0.0f;
+
+            // Guard against freed/unmapped entity memory (common during level transitions).
+            if (!TryReadFloat(entBase, kHealthBufferOffset, hb) || !TryReadFloat(entBase, kHealthBufferTimeOffset, hbTime))
             {
-                const int slot = (std::max)(0, (std::min)((int)m_HandHudTempHealthStates.size() - 1, entIndex));
-                m_HandHudTempHealthStates[(size_t)slot].initialized = false;
+                if (!m_HandHudTempHealthStates.empty())
+                {
+                    const int slot = (std::max)(0, (std::min)((int)m_HandHudTempHealthStates.size() - 1, entIndex));
+                    m_HandHudTempHealthStates[(size_t)slot].initialized = false;
+                }
+                return 0;
             }
-            return 0;
-        }
 
-        const float raw = (std::max)(0.0f, hb);
-        const float rawTime = hbTime;
-        if (raw <= 0.0f)
-            return 0;
+            const float raw = (std::max)(0.0f, hb);
+            const float rawTime = hbTime;
+            if (raw <= 0.0f)
+                return 0;
 
-        if (m_HandHudTempHealthStates.empty())
-            return (int)std::round(raw);
+            if (m_HandHudTempHealthStates.empty())
+                return (int)std::round(raw);
 
-        const int slot = (std::max)(0, (std::min)((int)m_HandHudTempHealthStates.size() - 1, entIndex));
-        TempHealthDecayState& st = m_HandHudTempHealthStates[(size_t)slot];
+            const int slot = (std::max)(0, (std::min)((int)m_HandHudTempHealthStates.size() - 1, entIndex));
+            TempHealthDecayState& st = m_HandHudTempHealthStates[(size_t)slot];
 
-        const auto now = std::chrono::steady_clock::now();
+            const auto now = std::chrono::steady_clock::now();
 
-        const bool newDoseOrReset = (!st.initialized)
-            || (std::fabs(rawTime - st.rawBufferTime) > 0.0001f)
-            || (raw > st.rawBuffer + 0.01f)
-            || (raw < st.rawBuffer - 0.01f);
+            const bool newDoseOrReset = (!st.initialized)
+                || (std::fabs(rawTime - st.rawBufferTime) > 0.0001f)
+                || (raw > st.rawBuffer + 0.01f)
+                || (raw < st.rawBuffer - 0.01f);
 
-        if (newDoseOrReset)
-        {
-            st.rawBuffer = raw;
-            st.rawBufferTime = rawTime;
-            st.wallStart = now;
-            st.lastRemaining = raw;
-            st.initialized = true;
-        }
+            if (newDoseOrReset)
+            {
+                st.rawBuffer = raw;
+                st.rawBufferTime = rawTime;
+                st.wallStart = now;
+                st.lastRemaining = raw;
+                st.initialized = true;
+            }
 
-        // Freeze decay while paused.
-        if (m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsPaused())
-        {
-            st.wallStart = now;
-            return (int)std::round((std::max)(0.0f, st.lastRemaining));
-        }
+            // Freeze decay while paused.
+            if (m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsPaused())
+            {
+                st.wallStart = now;
+                return (int)std::round((std::max)(0.0f, st.lastRemaining));
+            }
 
-        const float elapsed = std::chrono::duration<float>(now - st.wallStart).count();
-        const float decayRate = (std::max)(0.0f, m_HandHudTempHealthDecayRate);
-        const float remaining = (std::max)(0.0f, st.rawBuffer - decayRate * elapsed);
-        st.lastRemaining = remaining;
-        return (int)std::round(remaining);
-    };
+            const float elapsed = std::chrono::duration<float>(now - st.wallStart).count();
+            const float decayRate = (std::max)(0.0f, m_HandHudTempHealthDecayRate);
+            const float remaining = (std::max)(0.0f, st.rawBuffer - decayRate * elapsed);
+            st.lastRemaining = remaining;
+            return (int)std::round(remaining);
+        };
 
     auto survivorNameFromCharacter = [&](int survivorChar) -> const char*
-    {
-        // L4D2 SurvivorCharacter enum (common ordering).
-        switch (survivorChar)
         {
-        case 0: return "NICK";
-        case 1: return "ROCHELLE";
-        case 2: return "COACH";
-        case 3: return "ELLIS";
-        case 4: return "BILL";
-        case 5: return "ZOEY";
-        case 6: return "FRANCIS";
-        case 7: return "LOUIS";
-        default: return nullptr;
-        }
-    };
+            // L4D2 SurvivorCharacter enum (common ordering).
+            switch (survivorChar)
+            {
+            case 0: return "NICK";
+            case 1: return "ROCHELLE";
+            case 2: return "COACH";
+            case 3: return "ELLIS";
+            case 4: return "BILL";
+            case 5: return "ZOEY";
+            case 6: return "FRANCIS";
+            case 7: return "LOUIS";
+            default: return nullptr;
+            }
+        };
 
     auto healthColorFor = [&](int hp, unsigned char a = 255) -> Rgba
-    {
-        if (hp < 15) return Rgba{ 255, 60, 60, a };
-        if (hp < 40) return Rgba{ 255, 220, 60, a };
-        return Rgba{ 60, 220, 255, a };
-    };
+        {
+            if (hp < 15) return Rgba{ 255, 60, 60, a };
+            if (hp < 40) return Rgba{ 255, 220, 60, a };
+            return Rgba{ 60, 220, 255, a };
+        };
 
     // Incapacitated (倒地/挂边) health coloring: yellow by default, red when <=30%.
     // We treat "30%" as hp<=30 since this HUD uses a 0-100 style scale for survivor health.
     auto downHealthColorFor = [&](int hp, unsigned char a = 255) -> Rgba
-    {
-        if (hp <= 30) return Rgba{ 255, 60, 60, a };
-        return Rgba{ 255, 220, 60, a };
-    };
+        {
+            if (hp <= 30) return Rgba{ 255, 60, 60, a };
+            return Rgba{ 255, 220, 60, a };
+        };
 
     auto buildRel = [&](float xOff, float yOff, float zOff, const QAngle& ang) -> vr::HmdMatrix34_t
-    {
-        const float deg2rad = 3.14159265358979323846f / 180.0f;
-        const float pitch = ang.x * deg2rad;
-        const float yaw = ang.y * deg2rad;
-        const float roll = ang.z * deg2rad;
-
-        const float cp = cosf(pitch), sp = sinf(pitch);
-        const float cy = cosf(yaw), sy = sinf(yaw);
-        const float cr = cosf(roll), sr = sinf(roll);
-
-        const float Rx[3][3] = {
-            {1.0f, 0.0f, 0.0f},
-            {0.0f, cp,   -sp},
-            {0.0f, sp,   cp}
-        };
-        const float Ry[3][3] = {
-            {cy,   0.0f, sy},
-            {0.0f, 1.0f, 0.0f},
-            {-sy,  0.0f, cy}
-        };
-        const float Rz[3][3] = {
-            {cr,   -sr,  0.0f},
-            {sr,   cr,   0.0f},
-            {0.0f, 0.0f, 1.0f}
-        };
-
-        auto mul33 = [](const float a[3][3], const float b[3][3], float out[3][3])
         {
-            for (int r = 0; r < 3; ++r)
-                for (int c = 0; c < 3; ++c)
-                    out[r][c] = a[r][0] * b[0][c] + a[r][1] * b[1][c] + a[r][2] * b[2][c];
-        };
+            const float deg2rad = 3.14159265358979323846f / 180.0f;
+            const float pitch = ang.x * deg2rad;
+            const float yaw = ang.y * deg2rad;
+            const float roll = ang.z * deg2rad;
 
-        float RyRx[3][3];
-        float R[3][3];
-        mul33(Ry, Rx, RyRx);
-        mul33(Rz, RyRx, R);
+            const float cp = cosf(pitch), sp = sinf(pitch);
+            const float cy = cosf(yaw), sy = sinf(yaw);
+            const float cr = cosf(roll), sr = sinf(roll);
 
-        vr::HmdMatrix34_t rel = {
-            R[0][0], R[0][1], R[0][2], xOff,
-            R[1][0], R[1][1], R[1][2], yOff,
-            R[2][0], R[2][1], R[2][2], zOff
+            const float Rx[3][3] = {
+                {1.0f, 0.0f, 0.0f},
+                {0.0f, cp,   -sp},
+                {0.0f, sp,   cp}
+            };
+            const float Ry[3][3] = {
+                {cy,   0.0f, sy},
+                {0.0f, 1.0f, 0.0f},
+                {-sy,  0.0f, cy}
+            };
+            const float Rz[3][3] = {
+                {cr,   -sr,  0.0f},
+                {sr,   cr,   0.0f},
+                {0.0f, 0.0f, 1.0f}
+            };
+
+            auto mul33 = [](const float a[3][3], const float b[3][3], float out[3][3])
+                {
+                    for (int r = 0; r < 3; ++r)
+                        for (int c = 0; c < 3; ++c)
+                            out[r][c] = a[r][0] * b[0][c] + a[r][1] * b[1][c] + a[r][2] * b[2][c];
+                };
+
+            float RyRx[3][3];
+            float R[3][3];
+            mul33(Ry, Rx, RyRx);
+            mul33(Rz, RyRx, R);
+
+            vr::HmdMatrix34_t rel = {
+                R[0][0], R[0][1], R[0][2], xOff,
+                R[1][0], R[1][1], R[1][2], yOff,
+                R[2][0], R[2][1], R[2][2], zOff
+            };
+            return rel;
         };
-        return rel;
-    };
 
     const bool canShowLeft = m_LeftWristHudEnabled && m_LeftWristHudHandle != vr::k_ulOverlayHandleInvalid && (worldQuad || m_MouseModeEnabled || offHandIndex != vr::k_unTrackedDeviceIndexInvalid);
     if (canShowLeft)
@@ -841,26 +840,26 @@ void VR::UpdateHandHudOverlays()
         char aimTargetName[64] = { 0 };
         const bool hasAimTarget = GetAimTeammateHudInfo(aimTargetIdx, aimTargetPct, aimTargetName, sizeof(aimTargetName));
         auto getItemSlotWeaponId = [&](int slot) -> int
-        {
-            C_WeaponCSBase* w = (C_WeaponCSBase*)localPlayer->Weapon_GetSlot(slot);
-            if (!w)
-                return -1;
+            {
+                C_WeaponCSBase* w = (C_WeaponCSBase*)localPlayer->Weapon_GetSlot(slot);
+                if (!w)
+                    return -1;
 
-            const int wid = (int)w->GetWeaponID();
+                const int wid = (int)w->GetWeaponID();
 
-            // Fix: some item slots keep the weapon entity around with m_iClip1==0 after use.
-            // Treat clip==0 as empty so HUD updates immediately when you throw/consume an item.
-            const unsigned char* wb = reinterpret_cast<const unsigned char*>(w);
-            int clip1 = -1;
-            if (TryReadInt(wb, kClip1Offset, clip1) && clip1 == 0)
-                return -1;
+                // Fix: some item slots keep the weapon entity around with m_iClip1==0 after use.
+                // Treat clip==0 as empty so HUD updates immediately when you throw/consume an item.
+                const unsigned char* wb = reinterpret_cast<const unsigned char*>(w);
+                int clip1 = -1;
+                if (TryReadInt(wb, kClip1Offset, clip1) && clip1 == 0)
+                    return -1;
 
-            return wid;
-        };
+                return wid;
+            };
 
         const int throwable = getItemSlotWeaponId(2);
-        const int medItem   = getItemSlotWeaponId(3);
-        const int pillItem  = getItemSlotWeaponId(4);
+        const int medItem = getItemSlotWeaponId(3);
+        const int pillItem = getItemSlotWeaponId(4);
 
         // 本关击杀数（普通/特感）：统一走 ReadLocalKillCounters。
         // 这里会在 mission / checkpoint 两套统计之间做更稳妥的选择，避免 mission 在跨图后卡住旧值。
@@ -885,10 +884,10 @@ void VR::UpdateHandHudOverlays()
         };
 
         auto IsValidHandle = [](uint32_t h) -> bool
-        {
-            // EHANDLE / CBaseHandle is invalid when 0 or 0xFFFFFFFF (common patterns across Source builds).
-            return h != 0u && h != 0xFFFFFFFFu;
-        };
+            {
+                // EHANDLE / CBaseHandle is invalid when 0 or 0xFFFFFFFF (common patterns across Source builds).
+                return h != 0u && h != 0xFFFFFFFFu;
+            };
         TeammateRow mates[3]{};
         int mateCount = 0;
         uint32_t matesHash = 2166136261u;
@@ -989,169 +988,169 @@ void VR::UpdateHandHudOverlays()
                 hp, tempHP, incap ? 1 : 0, ledge ? 1 : 0, third ? 1 : 0, throwable, medItem, pillItem, commonKills, specialKills, killSrc, mateCount, matesHash,
                 changed ? 1 : 0, hasAimTarget ? 1 : 0, aimTargetIdx, aimTargetPct, aimChanged ? 1 : 0);
         }
-            m_LastHudHealth = hp;
-            m_LastHudTempHealth = tempHP;
-            m_LastHudThrowable = throwable;
-            m_LastHudMedItem = medItem;
-            m_LastHudPillItem = pillItem;
-            m_LastHudCommonKills = commonKills;
-            m_LastHudSpecialKills = specialKills;
-            m_LastHudIncap = incap;
-            m_LastHudLedge = ledge;
-            m_LastHudThirdStrike = third;
+        m_LastHudHealth = hp;
+        m_LastHudTempHealth = tempHP;
+        m_LastHudThrowable = throwable;
+        m_LastHudMedItem = medItem;
+        m_LastHudPillItem = pillItem;
+        m_LastHudCommonKills = commonKills;
+        m_LastHudSpecialKills = specialKills;
+        m_LastHudIncap = incap;
+        m_LastHudLedge = ledge;
+        m_LastHudThirdStrike = third;
 
-            m_LastHudAimTargetVisible = hasAimTarget;
-            m_LastHudAimTargetIndex = aimTargetIdx;
-            m_LastHudAimTargetPct = aimTargetPct;
-            m_LastHudAimTargetNameHash = aimNameHash;
-            m_LastHudTeammatesHash = matesHash;
+        m_LastHudAimTargetVisible = hasAimTarget;
+        m_LastHudAimTargetIndex = aimTargetIdx;
+        m_LastHudAimTargetPct = aimTargetPct;
+        m_LastHudAimTargetNameHash = aimNameHash;
+        m_LastHudTeammatesHash = matesHash;
 
-            const int w = m_LeftWristHudTexW;
-            const int h = m_LeftWristHudTexH;
-            const uint8_t backIdx = (uint8_t)(m_LeftWristHudPixelsFront ^ 1);
-            auto& pixels = m_LeftWristHudPixels[backIdx];
-            pixels.resize((size_t)w * (size_t)h * 4);
-            HudSurface s{ pixels.data(), w, h, w * 4 };
+        const int w = m_LeftWristHudTexW;
+        const int h = m_LeftWristHudTexH;
+        const uint8_t backIdx = (uint8_t)(m_LeftWristHudPixelsFront ^ 1);
+        auto& pixels = m_LeftWristHudPixels[backIdx];
+        pixels.resize((size_t)w * (size_t)h * 4);
+        HudSurface s{ pixels.data(), w, h, w * 4 };
 
-            // Static background cache (fix: background box blinking on updates)
-            if (m_LeftWristHudBgCacheW != w || m_LeftWristHudBgCacheH != h || m_LeftWristHudBgCacheA != bgA
-                || m_LeftWristHudBgCache.size() != (size_t)w * (size_t)h * 4)
+        // Static background cache (fix: background box blinking on updates)
+        if (m_LeftWristHudBgCacheW != w || m_LeftWristHudBgCacheH != h || m_LeftWristHudBgCacheA != bgA
+            || m_LeftWristHudBgCache.size() != (size_t)w * (size_t)h * 4)
+        {
+            m_LeftWristHudBgCacheW = w;
+            m_LeftWristHudBgCacheH = h;
+            m_LeftWristHudBgCacheA = bgA;
+            m_LeftWristHudBgCache.assign((size_t)w * (size_t)h * 4, 0);
+            HudSurface bg{ m_LeftWristHudBgCache.data(), w, h, w * 4 };
+            Clear(bg, { 8, 10, 14, bgA });
+            DrawCornerBrackets(bg, 2, 2, w - 4, h - 4, { 60, 220, 255, 220 });
+            DrawRect(bg, 8, 8, w - 16, h - 16, { 20, 60, 70, bgA }, 1);
+        }
+
+        // Start from cached background
+        memcpy(s.pixels, m_LeftWristHudBgCache.data(), m_LeftWristHudBgCache.size());
+
+        const bool down = (incap || ledge);
+        const Rgba hpCol = down ? downHealthColorFor(hp, 255) : healthColorFor(hp, 255);
+        const SevenSegStyle hpSt{ 12, 3, 2, 4 };
+        const int hpW = Draw7SegInt(s, 18, 18, (std::max)(0, hp), hpSt, hpCol);
+        if (tempHP > 0)
+        {
+            // Temp HP: keep it tight to the main HP number (readability + less eye travel).
+            char hpBuf[16];
+            std::snprintf(hpBuf, sizeof(hpBuf), "+%d", tempHP);
+            const int tempX = 18 + hpW + 8;
+            const int maxW = (std::max)(16, (std::min)(120, w - tempX - 12));
+            // Match the same GDI font style used by the aim-teammate HUD line (clearer than the 5x7 bitmap font).
+            DrawTextUtf8OutlinedGdiClippedEx(s, tempX, 20, maxW, hpBuf, 16, { 60, 255, 120, 255 }, false);
+        }
+        if (hasAimTarget)
+        {
+            // Name fitting policy: 12 ASCII chars or 6 CJK chars at full size.
+            // Beyond that: shrink 10% per +2 chars, cap at 40% shrink, then hard-truncate.
+            const int units = Utf8HudUnits(aimTargetName);
+            const float scale = HudNameScaleForUnits(units, 12);
+            const std::string nameFit = (units > 20) ? Utf8TruncateHudUnits(aimTargetName, 20) : std::string(aimTargetName);
+
+            char tgtBuf[128];
+            std::snprintf(tgtBuf, sizeof(tgtBuf), "%s:%d%%", nameFit.c_str(), aimTargetPct);
+
+            const int basePx = 16;
+            int fontPx = (int)std::round((float)basePx * scale);
+            fontPx = (std::max)(10, (std::min)(basePx, fontPx));
+
+            // Always use the GDI path here so ASCII and Unicode names both obey the shrink/truncate policy.
+            DrawTextUtf8OutlinedGdiClippedEx(s, 18, 64, 220, tgtBuf, fontPx, { 240, 240, 240, 255 }, false);
+        }
+
+        if (m_LeftWristHudShowTeammates && mateCount > 0)
+        {
+            for (int row = 0; row < mateCount; ++row)
             {
-                m_LeftWristHudBgCacheW = w;
-                m_LeftWristHudBgCacheH = h;
-                m_LeftWristHudBgCacheA = bgA;
-                m_LeftWristHudBgCache.assign((size_t)w * (size_t)h * 4, 0);
-                HudSurface bg{ m_LeftWristHudBgCache.data(), w, h, w * 4 };
-                Clear(bg, { 8, 10, 14, bgA });
-                DrawCornerBrackets(bg, 2, 2, w - 4, h - 4, { 60, 220, 255, 220 });
-                DrawRect(bg, 8, 8, w - 16, h - 16, { 20, 60, 70, bgA }, 1);
-            }
+                const TeammateRow& tr = mates[row];
 
-            // Start from cached background
-            memcpy(s.pixels, m_LeftWristHudBgCache.data(), m_LeftWristHudBgCache.size());
+                // Layout: name + bar on the same row (fix: name/bar looked misaligned).
+                const int rowStride = 24;
+                const int barY = 18 + row * rowStride;
 
-            const bool down = (incap || ledge);
-            const Rgba hpCol = down ? downHealthColorFor(hp, 255) : healthColorFor(hp, 255);
-            const SevenSegStyle hpSt{ 12, 3, 2, 4 };
-            const int hpW = Draw7SegInt(s, 18, 18, (std::max)(0, hp), hpSt, hpCol);
-            if (tempHP > 0)
-            {
-                // Temp HP: keep it tight to the main HP number (readability + less eye travel).
-                char hpBuf[16];
-                std::snprintf(hpBuf, sizeof(hpBuf), "+%d", tempHP);
-                const int tempX = 18 + hpW + 8;
-                const int maxW = (std::max)(16, (std::min)(120, w - tempX - 12));
-                // Match the same GDI font style used by the aim-teammate HUD line (clearer than the 5x7 bitmap font).
-                DrawTextUtf8OutlinedGdiClippedEx(s, tempX, 20, maxW, hpBuf, 16, { 60, 255, 120, 255 }, false);
-            }
-            if (hasAimTarget)
-            {
-                // Name fitting policy: 12 ASCII chars or 6 CJK chars at full size.
-                // Beyond that: shrink 10% per +2 chars, cap at 40% shrink, then hard-truncate.
-                const int units = Utf8HudUnits(aimTargetName);
-                const float scale = HudNameScaleForUnits(units, 12);
-                const std::string nameFit = (units > 20) ? Utf8TruncateHudUnits(aimTargetName, 20) : std::string(aimTargetName);
+                const int barW = 62;
+                const int barH = 10;
+                const int barX = w - 10 - barW;
 
-                char tgtBuf[128];
-                std::snprintf(tgtBuf, sizeof(tgtBuf), "%s:%d%%", nameFit.c_str(), aimTargetPct);
-
-                const int basePx = 16;
-                int fontPx = (int)std::round((float)basePx * scale);
-                fontPx = (std::max)(10, (std::min)(basePx, fontPx));
-
-                // Always use the GDI path here so ASCII and Unicode names both obey the shrink/truncate policy.
-                DrawTextUtf8OutlinedGdiClippedEx(s, 18, 64, 220, tgtBuf, fontPx, { 240, 240, 240, 255 }, false);
-            }
-
-            if (m_LeftWristHudShowTeammates && mateCount > 0)
-            {
-                for (int row = 0; row < mateCount; ++row)
+                const int nameX = 124;
+                const int nameW = (std::max)(16, barX - nameX - 6);
                 {
-                    const TeammateRow& tr = mates[row];
-
-                    // Layout: name + bar on the same row (fix: name/bar looked misaligned).
-                    const int rowStride = 24;
-                    const int barY = 18 + row * rowStride;
-
-                    const int barW = 62;
-                    const int barH = 10;
-                    const int barX = w - 10 - barW;
-
-                    const int nameX = 124;
-                    const int nameW = (std::max)(16, barX - nameX - 6);
-					{
-						// Teammate names: always use outlined GDI text (clearer than the 5x7 bitmap font).
-						// Policy: 12 ASCII chars or 6 CJK chars at full size; longer shrinks then truncates.
-						std::string asciiUpper;
-						const char* nameUtf8 = tr.name;
-						if (!tr.nonAscii)
-						{
-							asciiUpper.assign(tr.name);
-							for (char& ch : asciiUpper)
-								if (ch >= 'a' && ch <= 'z') ch = (char)(ch - 32);
-							nameUtf8 = asciiUpper.c_str();
-						}
-
-						const int units = Utf8HudUnits(nameUtf8);
-						const float scale = HudNameScaleForUnits(units, 12);
-						const std::string nameFit = (units > 20) ? Utf8TruncateHudUnits(nameUtf8, 20) : std::string(nameUtf8);
-
-						const int basePx = 12;
-						int fontPx = (int)std::round((float)basePx * scale);
-						fontPx = (std::max)(9, (std::min)(basePx, fontPx));
-
-						const int nameY = barY + (barH - fontPx) / 2;
-						DrawTextUtf8OutlinedGdiClipped(s, nameX, nameY, nameW, nameFit.c_str(), fontPx, { 240, 240, 240, 255 });
-					}
-
-                    DrawRect(s, barX, barY, barW, barH, { 60, 60, 60, 190 }, 1);
-
-                    const int innerW = barW - 2;
-                    const int innerH = barH - 2;
-
-                    const bool trDown = (tr.incap || tr.ledge);
-
-                    int permPct = 0;
-                    if (trDown)
+                    // Teammate names: always use outlined GDI text (clearer than the 5x7 bitmap font).
+                    // Policy: 12 ASCII chars or 6 CJK chars at full size; longer shrinks then truncates.
+                    std::string asciiUpper;
+                    const char* nameUtf8 = tr.name;
+                    if (!tr.nonAscii)
                     {
-                        const int maxDown = GetIncapMaxHealth();
-                        if (maxDown > 0)
-                            permPct = (int)((int64_t)tr.hp * 100 / maxDown);
+                        asciiUpper.assign(tr.name);
+                        for (char& ch : asciiUpper)
+                            if (ch >= 'a' && ch <= 'z') ch = (char)(ch - 32);
+                        nameUtf8 = asciiUpper.c_str();
                     }
-                    else
-                    {
-                        permPct = tr.hp;
-                    }
-                    permPct = (std::max)(0, (std::min)(100, permPct));
 
-                    const int permW = (innerW * permPct) / 100;
+                    const int units = Utf8HudUnits(nameUtf8);
+                    const float scale = HudNameScaleForUnits(units, 12);
+                    const std::string nameFit = (units > 20) ? Utf8TruncateHudUnits(nameUtf8, 20) : std::string(nameUtf8);
 
-                    // Status-driven teammate bar colors (no extra indicators):
-                    // - Incap (倒地): keep existing downHealthColorFor() (yellow -> red as it drains)
-                    // - Ledge hang (挂边): SandyBrown #F4A460
-                    // - Third strike / B&W (黑白): GhostWhite #F8F8FF
-                    // - Controlled (被控): Purple #A020F0
-                    Rgba permCol = trDown ? downHealthColorFor(permPct, 230) : healthColorFor(permPct, 230);
-                    if (tr.ledge)
-                        permCol = { 244, 164, 96, 230 };
-                    else if (tr.incap)
-                        permCol = downHealthColorFor(permPct, 230);
-                    else if (tr.controlled)
-                        permCol = { 160, 32, 240, 230 };
-                    else if (tr.third)
-                        permCol = { 248, 248, 255, 230 };
+                    const int basePx = 12;
+                    int fontPx = (int)std::round((float)basePx * scale);
+                    fontPx = (std::max)(9, (std::min)(basePx, fontPx));
 
-                    FillRect(s, barX + 1, barY + 1, permW, innerH, permCol);
-
-                    const int extra = trDown ? 0 : (std::max)(0, (std::min)(100, tr.temp));
-                    const int extraW = (innerW * extra) / 100;
-                    const int remW = (std::max)(0, innerW - permW);
-                    const int tempFillW = (std::max)(0, (std::min)(remW, extraW));
-                    FillRect(s, barX + 1 + permW, barY + 1, tempFillW, innerH, { 60, 255, 120, 210 });
+                    const int nameY = barY + (barH - fontPx) / 2;
+                    DrawTextUtf8OutlinedGdiClipped(s, nameX, nameY, nameW, nameFit.c_str(), fontPx, { 240, 240, 240, 255 });
                 }
-            }
 
-            auto itemAbbr = [](int wid) -> const char*
+                DrawRect(s, barX, barY, barW, barH, { 60, 60, 60, 190 }, 1);
+
+                const int innerW = barW - 2;
+                const int innerH = barH - 2;
+
+                const bool trDown = (tr.incap || tr.ledge);
+
+                int permPct = 0;
+                if (trDown)
+                {
+                    const int maxDown = GetIncapMaxHealth();
+                    if (maxDown > 0)
+                        permPct = (int)((int64_t)tr.hp * 100 / maxDown);
+                }
+                else
+                {
+                    permPct = tr.hp;
+                }
+                permPct = (std::max)(0, (std::min)(100, permPct));
+
+                const int permW = (innerW * permPct) / 100;
+
+                // Status-driven teammate bar colors (no extra indicators):
+                // - Incap (倒地): keep existing downHealthColorFor() (yellow -> red as it drains)
+                // - Ledge hang (挂边): SandyBrown #F4A460
+                // - Third strike / B&W (黑白): GhostWhite #F8F8FF
+                // - Controlled (被控): Purple #A020F0
+                Rgba permCol = trDown ? downHealthColorFor(permPct, 230) : healthColorFor(permPct, 230);
+                if (tr.ledge)
+                    permCol = { 244, 164, 96, 230 };
+                else if (tr.incap)
+                    permCol = downHealthColorFor(permPct, 230);
+                else if (tr.controlled)
+                    permCol = { 160, 32, 240, 230 };
+                else if (tr.third)
+                    permCol = { 248, 248, 255, 230 };
+
+                FillRect(s, barX + 1, barY + 1, permW, innerH, permCol);
+
+                const int extra = trDown ? 0 : (std::max)(0, (std::min)(100, tr.temp));
+                const int extraW = (innerW * extra) / 100;
+                const int remW = (std::max)(0, innerW - permW);
+                const int tempFillW = (std::max)(0, (std::min)(remW, extraW));
+                FillRect(s, barX + 1 + permW, barY + 1, tempFillW, innerH, { 60, 255, 120, 210 });
+            }
+        }
+
+        auto itemAbbr = [](int wid) -> const char*
             {
                 using W = C_WeaponCSBase::WeaponID;
                 switch ((W)wid)
@@ -1168,9 +1167,9 @@ void VR::UpdateHandHudOverlays()
                 }
             };
 
-            const int itemsY = 92;
-            int itemsX = 18;
-            const auto drawItem = [&](int wid)
+        const int itemsY = 92;
+        int itemsX = 18;
+        const auto drawItem = [&](int wid)
             {
                 const char* a = itemAbbr(wid);
                 if (a && a[0])
@@ -1179,79 +1178,79 @@ void VR::UpdateHandHudOverlays()
                     itemsX += 48;
                 }
             };
-            drawItem(throwable);
-            drawItem(medItem);
-            drawItem(pillItem);
-            // Bottom-right: chapter kill counts (common/special).
+        drawItem(throwable);
+        drawItem(medItem);
+        drawItem(pillItem);
+        // Bottom-right: chapter kill counts (common/special).
+        {
+            char killsBuf[32];
+            std::snprintf(killsBuf, sizeof(killsBuf), "%d/%d", (std::max)(0, commonKills), (std::max)(0, specialKills));
+            const int len = (int)std::strlen(killsBuf);
+            const int fontPx = 16;
+            // Right-align with a cheap width estimate (avoids adding a full GDI-measure pass).
+            const int estW = (int)std::round((float)len * (float)fontPx * 0.60f) + 6;
+            int x = w - 18 - estW;
+            x = (std::max)(x, itemsX + 10);
+            DrawTextUtf8OutlinedGdiClippedEx(s, x, itemsY - 4, w - x - 12, killsBuf, fontPx, { 240, 240, 240, 255 }, false);
+        }
+        // Upload every tick (no throttling/no CRC gating).
+        {
+            vr::EVROverlayError err = vr::VROverlayError_None;
             {
-                char killsBuf[32];
-                std::snprintf(killsBuf, sizeof(killsBuf), "%d/%d", (std::max)(0, commonKills), (std::max)(0, specialKills));
-                const int len = (int)std::strlen(killsBuf);
-                const int fontPx = 16;
-                // Right-align with a cheap width estimate (avoids adding a full GDI-measure pass).
-                const int estW = (int)std::round((float)len * (float)fontPx * 0.60f) + 6;
-                int x = w - 18 - estW;
-                x = (std::max)(x, itemsX + 10);
-                DrawTextUtf8OutlinedGdiClippedEx(s, x, itemsY - 4, w - x - 12, killsBuf, fontPx, { 240, 240, 240, 255 }, false);
-            }
-            // Upload every tick (no throttling/no CRC gating).
-            {
-                    vr::EVROverlayError err = vr::VROverlayError_None;
+                std::lock_guard<std::mutex> _lk(m_VROverlayMutex);
+                vr::IVROverlay* ov = vr::VROverlay();
+                if (!ov) ov = m_Overlay;
+                if (worldQuad)
+                {
+                    // Upload into a dynamic GPU texture and bind it as the overlay texture.
+                    const bool okUpload = UploadWorldQuadTextureRGBA(true, pixels.data(), w, h);
+                    if (okUpload)
                     {
-                        std::lock_guard<std::mutex> _lk(m_VROverlayMutex);
-                        vr::IVROverlay* ov = vr::VROverlay();
-                        if (!ov) ov = m_Overlay;
-                        if (worldQuad)
-                        {
-                            // Upload into a dynamic GPU texture and bind it as the overlay texture.
-                            const bool okUpload = UploadWorldQuadTextureRGBA(true, pixels.data(), w, h);
-                            if (okUpload)
-                            {
-                                static const vr::VRTextureBounds_t full{ 0.0f, 0.0f, 1.0f, 1.0f };
-                                err = ov ? ov->SetOverlayTextureBounds(m_LeftWristHudHandle, &full) : vr::VROverlayError_RequestFailed;
-                                if (err == vr::VROverlayError_None)
-                                    err = ov ? ov->SetOverlayTexture(m_LeftWristHudHandle, &m_VKLeftWristHudDyn.m_VRTexture) : vr::VROverlayError_RequestFailed;
-                            }
-                            else
-                            {
-                                // Fallback: if dxvk VR bridge isn't available, still try raw upload.
-                                err = ov ? ov->SetOverlayRaw(m_LeftWristHudHandle, pixels.data(), (uint32_t)w, (uint32_t)h, 4) : vr::VROverlayError_RequestFailed;
-                            }
-                        }
-                        else
-                        {
-                            err = ov ? ov->SetOverlayRaw(m_LeftWristHudHandle, pixels.data(), (uint32_t)w, (uint32_t)h, 4) : vr::VROverlayError_RequestFailed;
-                        }
-                    }
-                    m_HandHudDebugLastLeftSetRawErr = (int)err;
-                    if (err == vr::VROverlayError_None)
-                    {
-                        m_HandHudDebugLastLeftUpload = dbgNow;
-                        ++m_HandHudDebugLeftUploadCount;
-                        m_HandHudLeftConsecutiveRawFails = 0;
+                        static const vr::VRTextureBounds_t full{ 0.0f, 0.0f, 1.0f, 1.0f };
+                        err = ov ? ov->SetOverlayTextureBounds(m_LeftWristHudHandle, &full) : vr::VROverlayError_RequestFailed;
+                        if (err == vr::VROverlayError_None)
+                            err = ov ? ov->SetOverlayTexture(m_LeftWristHudHandle, &m_VKLeftWristHudDyn.m_VRTexture) : vr::VROverlayError_RequestFailed;
                     }
                     else
                     {
-                        if (worldQuad)
-                        {
-                            DestroyWorldQuadTextures();
-                            if (err == vr::VROverlayError_InvalidHandle || err == vr::VROverlayError_RequestFailed)
-                                needHandHudOverlayRecover = true;
-                        }
-                        else
-                        {
-                            ++m_HandHudLeftConsecutiveRawFails;
-                            if (err == vr::VROverlayError_InvalidHandle || (err == vr::VROverlayError_RequestFailed && m_HandHudLeftConsecutiveRawFails >= kHandHudRecoverFailThreshold))
-                                needHandHudOverlayRecover = true;
-                        }
-                        if (dbgTick)
-                            Game::logMsg("[VR][HandHUD] left upload failed err=%d mode=%s", (int)err, worldQuad ? "world" : "raw");
-                        // Important: raw upload failures (often transient when SteamVR is busy) must not
-                        // commit cached state, otherwise the hand HUD can freeze forever.
-                        resetHandHudCache();
+                        // Fallback: if dxvk VR bridge isn't available, still try raw upload.
+                        err = ov ? ov->SetOverlayRaw(m_LeftWristHudHandle, pixels.data(), (uint32_t)w, (uint32_t)h, 4) : vr::VROverlayError_RequestFailed;
                     }
                 }
-                m_LeftWristHudPixelsFront = backIdx;
+                else
+                {
+                    err = ov ? ov->SetOverlayRaw(m_LeftWristHudHandle, pixels.data(), (uint32_t)w, (uint32_t)h, 4) : vr::VROverlayError_RequestFailed;
+                }
+            }
+            m_HandHudDebugLastLeftSetRawErr = (int)err;
+            if (err == vr::VROverlayError_None)
+            {
+                m_HandHudDebugLastLeftUpload = dbgNow;
+                ++m_HandHudDebugLeftUploadCount;
+                m_HandHudLeftConsecutiveRawFails = 0;
+            }
+            else
+            {
+                if (worldQuad)
+                {
+                    DestroyWorldQuadTextures();
+                    if (err == vr::VROverlayError_InvalidHandle || err == vr::VROverlayError_RequestFailed)
+                        needHandHudOverlayRecover = true;
+                }
+                else
+                {
+                    ++m_HandHudLeftConsecutiveRawFails;
+                    if (err == vr::VROverlayError_InvalidHandle || (err == vr::VROverlayError_RequestFailed && m_HandHudLeftConsecutiveRawFails >= kHandHudRecoverFailThreshold))
+                        needHandHudOverlayRecover = true;
+                }
+                if (dbgTick)
+                    Game::logMsg("[VR][HandHUD] left upload failed err=%d mode=%s", (int)err, worldQuad ? "world" : "raw");
+                // Important: raw upload failures (often transient when SteamVR is busy) must not
+                // commit cached state, otherwise the hand HUD can freeze forever.
+                resetHandHudCache();
+            }
+        }
+        m_LeftWristHudPixelsFront = backIdx;
         {
             const vr::EVROverlayError err = vr::VROverlay()->ShowOverlay(m_LeftWristHudHandle);
             m_HandHudDebugLastLeftShowErr = (int)err;
@@ -1329,25 +1328,25 @@ void VR::UpdateHandHudOverlays()
         }
 
         auto isAmmoHudEligible = [&](int wid) -> bool
-        {
-            using W = C_WeaponCSBase::WeaponID;
-            switch ((W)wid)
             {
-            case W::MELEE:
-            case W::CHAINSAW:
-            case W::MOLOTOV:
-            case W::PIPE_BOMB:
-            case W::VOMITJAR:
-            case W::FIRST_AID_KIT:
-            case W::DEFIBRILLATOR:
-            case W::AMMO_PACK:
-            case W::PAIN_PILLS:
-            case W::ADRENALINE:
-                return false;
-            default:
-                return true;
-            }
-        };
+                using W = C_WeaponCSBase::WeaponID;
+                switch ((W)wid)
+                {
+                case W::MELEE:
+                case W::CHAINSAW:
+                case W::MOLOTOV:
+                case W::PIPE_BOMB:
+                case W::VOMITJAR:
+                case W::FIRST_AID_KIT:
+                case W::DEFIBRILLATOR:
+                case W::AMMO_PACK:
+                case W::PAIN_PILLS:
+                case W::ADRENALINE:
+                    return false;
+                default:
+                    return true;
+                }
+            };
 
         if (weaponId <= 0 || !isAmmoHudEligible(weaponId) || clip < 0)
         {
@@ -1385,18 +1384,18 @@ void VR::UpdateHandHudOverlays()
         const SevenSegStyle resStAuto{ 12, 3, 2, 4 };
 
         auto digitCountAuto = [](int v) -> int
-        {
-            if (v <= 0) return 1;
-            int n = 0;
-            while (v > 0) { v /= 10; ++n; }
-            return n;
-        };
+            {
+                if (v <= 0) return 1;
+                int n = 0;
+                while (v > 0) { v /= 10; ++n; }
+                return n;
+            };
         auto sevenSegWidthAuto = [&](int digits, const SevenSegStyle& st) -> int
-        {
-            const int digitW = SevenSegDigitW(st);
-            if (digits <= 1) return digitW;
-            return digits * digitW + (digits - 1) * st.digitGap;
-        };
+            {
+                const int digitW = SevenSegDigitW(st);
+                if (digits <= 1) return digitW;
+                return digits * digitW + (digits - 1) * st.digitGap;
+            };
 
         const int slashW = 16;
         const int clipWMax = sevenSegWidthAuto(digitCountAuto((std::max)(0, m_HudMaxClipObserved)), clipStAuto);
@@ -1429,169 +1428,169 @@ void VR::UpdateHandHudOverlays()
             Game::logMsg("[VR][HandHUD] right: wid=%d clip=%d res=%d upg=%d bits=0x%X pistolInf=%d changed=%d",
                 weaponId, clip, reserve, upg, upgBits, pistolInfinite ? 1 : 0, changed ? 1 : 0);
         }
-            m_LastHudClip = clip;
-            m_LastHudReserve = reserve;
-            m_LastHudUpg = upg;
-            m_LastHudUpgBits = upgBits;
+        m_LastHudClip = clip;
+        m_LastHudReserve = reserve;
+        m_LastHudUpg = upg;
+        m_LastHudUpgBits = upgBits;
 
-            const int w = texW;
-            const int h = texH;
-            const uint8_t backIdx = (uint8_t)(m_RightAmmoHudPixelsFront ^ 1);
-            auto& pixels = m_RightAmmoHudPixels[backIdx];
-            pixels.resize((size_t)w * (size_t)h * 4);
-            HudSurface s{ pixels.data(), w, h, w * 4 };
+        const int w = texW;
+        const int h = texH;
+        const uint8_t backIdx = (uint8_t)(m_RightAmmoHudPixelsFront ^ 1);
+        auto& pixels = m_RightAmmoHudPixels[backIdx];
+        pixels.resize((size_t)w * (size_t)h * 4);
+        HudSurface s{ pixels.data(), w, h, w * 4 };
 
-            // Static background cache (fix: background box blinking on updates)
-            if (m_RightAmmoHudBgCacheW != w || m_RightAmmoHudBgCacheH != h || m_RightAmmoHudBgCacheVisW != visW || m_RightAmmoHudBgCacheA != bgA
-                || m_RightAmmoHudBgCache.size() != (size_t)w * (size_t)h * 4)
-            {
-                m_RightAmmoHudBgCacheW = w;
-                m_RightAmmoHudBgCacheH = h;
-                m_RightAmmoHudBgCacheVisW = visW;
-                m_RightAmmoHudBgCacheA = bgA;
-                m_RightAmmoHudBgCache.assign((size_t)w * (size_t)h * 4, 0);
-                HudSurface bg{ m_RightAmmoHudBgCache.data(), w, h, w * 4 };
-                Clear(bg, { 0, 0, 0, 0 });
-                FillRect(bg, 0, 0, visW, h, { 6, 10, 14, bgA });
-                DrawCornerBrackets(bg, 2, 2, visW - 4, h - 4, { 120, 255, 220, 220 });
-                DrawRect(bg, 8, 18, visW - 16, h - 36, { 20, 80, 60, 220 }, 1);
-            }
+        // Static background cache (fix: background box blinking on updates)
+        if (m_RightAmmoHudBgCacheW != w || m_RightAmmoHudBgCacheH != h || m_RightAmmoHudBgCacheVisW != visW || m_RightAmmoHudBgCacheA != bgA
+            || m_RightAmmoHudBgCache.size() != (size_t)w * (size_t)h * 4)
+        {
+            m_RightAmmoHudBgCacheW = w;
+            m_RightAmmoHudBgCacheH = h;
+            m_RightAmmoHudBgCacheVisW = visW;
+            m_RightAmmoHudBgCacheA = bgA;
+            m_RightAmmoHudBgCache.assign((size_t)w * (size_t)h * 4, 0);
+            HudSurface bg{ m_RightAmmoHudBgCache.data(), w, h, w * 4 };
+            Clear(bg, { 0, 0, 0, 0 });
+            FillRect(bg, 0, 0, visW, h, { 6, 10, 14, bgA });
+            DrawCornerBrackets(bg, 2, 2, visW - 4, h - 4, { 120, 255, 220, 220 });
+            DrawRect(bg, 8, 18, visW - 16, h - 36, { 20, 80, 60, 220 }, 1);
+        }
 
-            // Start from cached background
-            memcpy(s.pixels, m_RightAmmoHudBgCache.data(), m_RightAmmoHudBgCache.size());
+        // Start from cached background
+        memcpy(s.pixels, m_RightAmmoHudBgCache.data(), m_RightAmmoHudBgCache.size());
 
-            const int clipLowTh = (std::max)(1, (m_HudMaxClipObserved + 2) / 3);
-            const int resLowTh = (std::max)(1, (m_HudMaxReserveObserved + 4) / 5);
-            const bool clipLow = (clip > 0 && clip <= clipLowTh);
-            const bool resLow = (!pistolInfinite && reserve >= 0 && reserve <= resLowTh);
+        const int clipLowTh = (std::max)(1, (m_HudMaxClipObserved + 2) / 3);
+        const int resLowTh = (std::max)(1, (m_HudMaxReserveObserved + 4) / 5);
+        const bool clipLow = (clip > 0 && clip <= clipLowTh);
+        const bool resLow = (!pistolInfinite && reserve >= 0 && reserve <= resLowTh);
 
-            const Rgba clipColor = clipLow ? Rgba{ 255, 80, 80, 255 } : Rgba{ 240, 240, 240, 255 };
-            const Rgba resColor = resLow ? Rgba{ 255, 80, 80, 230 } : Rgba{ 200, 200, 200, 230 };
+        const Rgba clipColor = clipLow ? Rgba{ 255, 80, 80, 255 } : Rgba{ 240, 240, 240, 255 };
+        const Rgba resColor = resLow ? Rgba{ 255, 80, 80, 230 } : Rgba{ 200, 200, 200, 230 };
 
-            const SevenSegStyle clipSt{ 12, 3, 2, 4 };
-            const SevenSegStyle resSt{ 12, 3, 2, 4 };
+        const SevenSegStyle clipSt{ 12, 3, 2, 4 };
+        const SevenSegStyle resSt{ 12, 3, 2, 4 };
 
-            auto digitCount = [](int v) -> int
+        auto digitCount = [](int v) -> int
             {
                 if (v <= 0) return 1;
                 int n = 0;
                 while (v > 0) { v /= 10; ++n; }
                 return n;
             };
-            auto sevenSegWidth = [&](int digits, const SevenSegStyle& st) -> int
+        auto sevenSegWidth = [&](int digits, const SevenSegStyle& st) -> int
             {
                 const int digitW = SevenSegDigitW(st);
                 if (digits <= 1) return digitW;
                 return digits * digitW + (digits - 1) * st.digitGap;
             };
 
-            const int clipW = sevenSegWidth(digitCount((std::max)(0, clip)), clipSt);
-            const int resW = pistolInfinite ? 24 : sevenSegWidth(digitCount((std::max)(0, reserve)), resSt);
-            const int totalW = clipW + slashW + resW;
-            const int yBase = 46;
-            int x = (std::max)(6, (visW - totalW) / 2);
+        const int clipW = sevenSegWidth(digitCount((std::max)(0, clip)), clipSt);
+        const int resW = pistolInfinite ? 24 : sevenSegWidth(digitCount((std::max)(0, reserve)), resSt);
+        const int totalW = clipW + slashW + resW;
+        const int yBase = 46;
+        int x = (std::max)(6, (visW - totalW) / 2);
 
-            Draw7SegInt(s, x, yBase, (std::max)(0, clip), clipSt, clipColor);
-            x += clipW + 2;
-            DrawText5x7(s, x, yBase + 4, "/", { 200, 200, 200, 220 }, 2);
-            x += slashW;
-            if (pistolInfinite)
-                DrawInfinity(s, x, yBase + 4, 24, 10, { 240, 240, 240, 230 });
-            else
-                Draw7SegInt(s, x, yBase, (std::max)(0, reserve), resSt, resColor);
+        Draw7SegInt(s, x, yBase, (std::max)(0, clip), clipSt, clipColor);
+        x += clipW + 2;
+        DrawText5x7(s, x, yBase + 4, "/", { 200, 200, 200, 220 }, 2);
+        x += slashW;
+        if (pistolInfinite)
+            DrawInfinity(s, x, yBase + 4, 24, 10, { 240, 240, 240, 230 });
+        else
+            Draw7SegInt(s, x, yBase, (std::max)(0, reserve), resSt, resColor);
 
-            const bool hasInc = (upgBits & 1) != 0;
-            const bool hasExp = (upgBits & 2) != 0;
-            if (upg > 0 && (hasInc || hasExp))
+        const bool hasInc = (upgBits & 1) != 0;
+        const bool hasExp = (upgBits & 2) != 0;
+        if (upg > 0 && (hasInc || hasExp))
+        {
+            DrawRect(s, visW - 84, 16, 76, 32, { 120, 255, 220, 200 }, 1);
+            if (hasInc) DrawIconFlame(s, visW - 78, 20, 20);
+            else DrawIconBomb(s, visW - 78, 20, 20);
+            char upgBuf[16];
+            std::snprintf(upgBuf, sizeof(upgBuf), "%d", upg);
+            DrawText5x7(s, visW - 52, 22, upgBuf, { 240, 240, 240, 255 }, 2);
+        }
+
+
+        // RightAmmoHUD: show HP%% for the *aimed* special infected (and Witch) (visual-only).
+        // Visible only while the aim ray is on the target.
+        {
+            const std::uintptr_t aimTag = (std::uintptr_t)m_HudAimTargetTag.load(std::memory_order_relaxed);
+            const int aimPct = (std::max)(0, (std::min)(100, m_HudAimTargetPct.load(std::memory_order_relaxed)));
+            if (aimTag != 0 && aimPct > 0)
             {
-                DrawRect(s, visW - 84, 16, 76, 32, { 120, 255, 220, 200 }, 1);
-                if (hasInc) DrawIconFlame(s, visW - 78, 20, 20);
-                else DrawIconBomb(s, visW - 78, 20, 20);
-                char upgBuf[16];
-                std::snprintf(upgBuf, sizeof(upgBuf), "%d", upg);
-                DrawText5x7(s, visW - 52, 22, upgBuf, { 240, 240, 240, 255 }, 2);
+                const int barX = 16;
+                const int barW = (std::max)(64, visW - 32);
+                const int barH = 10;
+                const int barY = 86;
+
+                DrawRect(s, barX, barY, barW, barH, { 60, 60, 60, 190 }, 1);
+
+                const int innerW = barW - 2;
+                const int fillW = (innerW * aimPct) / 100;
+                const Rgba fillCol = healthColorFor(aimPct, 230);
+                FillRect(s, barX + 1, barY + 1, fillW, barH - 2, fillCol);
+
+                char pctBuf[16];
+                std::snprintf(pctBuf, sizeof(pctBuf), "%d%%", aimPct);
+                const Rgba pctCol = healthColorFor(aimPct, 255);
+                DrawTextUtf8OutlinedGdiClippedEx(s, barX, barY + 12, barW, pctBuf, 16, pctCol, false);
             }
+        }
 
-
-            // RightAmmoHUD: show HP%% for the *aimed* special infected (and Witch) (visual-only).
-            // Visible only while the aim ray is on the target.
+        // Upload every tick (no throttling/no CRC gating).
+        {
+            vr::EVROverlayError err = vr::VROverlayError_None;
             {
-                const std::uintptr_t aimTag = (std::uintptr_t)m_HudAimTargetTag.load(std::memory_order_relaxed);
-                const int aimPct = (std::max)(0, (std::min)(100, m_HudAimTargetPct.load(std::memory_order_relaxed)));
-                if (aimTag != 0 && aimPct > 0)
+                std::lock_guard<std::mutex> _lk(m_VROverlayMutex);
+                vr::IVROverlay* ov = vr::VROverlay();
+                if (!ov) ov = m_Overlay;
+                if (worldQuad)
                 {
-                    const int barX = 16;
-                    const int barW = (std::max)(64, visW - 32);
-                    const int barH = 10;
-                    const int barY = 86;
-
-                    DrawRect(s, barX, barY, barW, barH, { 60, 60, 60, 190 }, 1);
-
-                    const int innerW = barW - 2;
-                    const int fillW = (innerW * aimPct) / 100;
-                    const Rgba fillCol = healthColorFor(aimPct, 230);
-                    FillRect(s, barX + 1, barY + 1, fillW, barH - 2, fillCol);
-
-                    char pctBuf[16];
-                    std::snprintf(pctBuf, sizeof(pctBuf), "%d%%", aimPct);
-                    const Rgba pctCol = healthColorFor(aimPct, 255);
-                    DrawTextUtf8OutlinedGdiClippedEx(s, barX, barY + 12, barW, pctBuf, 16, pctCol, false);
-                }
-            }
-
-            // Upload every tick (no throttling/no CRC gating).
-            {
-                    vr::EVROverlayError err = vr::VROverlayError_None;
+                    const bool okUpload = UploadWorldQuadTextureRGBA(false, pixels.data(), w, h);
+                    if (okUpload)
                     {
-                        std::lock_guard<std::mutex> _lk(m_VROverlayMutex);
-                        vr::IVROverlay* ov = vr::VROverlay();
-                        if (!ov) ov = m_Overlay;
-                        if (worldQuad)
-                        {
-                            const bool okUpload = UploadWorldQuadTextureRGBA(false, pixels.data(), w, h);
-                            if (okUpload)
-                            {
-                                err = ov ? ov->SetOverlayTexture(m_RightAmmoHudHandle, &m_VKRightAmmoHudDyn.m_VRTexture) : vr::VROverlayError_RequestFailed;
-                            }
-                            else
-                            {
-                                // Fallback: if dxvk VR bridge isn't available, still try raw upload.
-                                err = ov ? ov->SetOverlayRaw(m_RightAmmoHudHandle, pixels.data(), (uint32_t)w, (uint32_t)h, 4) : vr::VROverlayError_RequestFailed;
-                            }
-                        }
-                        else
-                        {
-                            err = ov ? ov->SetOverlayRaw(m_RightAmmoHudHandle, pixels.data(), (uint32_t)w, (uint32_t)h, 4) : vr::VROverlayError_RequestFailed;
-                        }
-                    }
-                    m_HandHudDebugLastRightSetRawErr = (int)err;
-                    if (err == vr::VROverlayError_None)
-                    {
-                        m_HandHudDebugLastRightUpload = dbgNow;
-                        ++m_HandHudDebugRightUploadCount;
-                        m_HandHudRightConsecutiveRawFails = 0;
+                        err = ov ? ov->SetOverlayTexture(m_RightAmmoHudHandle, &m_VKRightAmmoHudDyn.m_VRTexture) : vr::VROverlayError_RequestFailed;
                     }
                     else
                     {
-                        if (worldQuad)
-                        {
-                            DestroyWorldQuadTextures();
-                            if (err == vr::VROverlayError_InvalidHandle || err == vr::VROverlayError_RequestFailed)
-                                needHandHudOverlayRecover = true;
-                        }
-                        else
-                        {
-                            ++m_HandHudRightConsecutiveRawFails;
-                            if (err == vr::VROverlayError_InvalidHandle || (err == vr::VROverlayError_RequestFailed && m_HandHudRightConsecutiveRawFails >= kHandHudRecoverFailThreshold))
-                                needHandHudOverlayRecover = true;
-                        }
-                        if (dbgTick)
-                            Game::logMsg("[VR][HandHUD] right upload failed err=%d mode=%s", (int)err, worldQuad ? "world" : "raw");
-                        // Same as left: force retry next tick so it can't get stuck.
-                        resetHandHudCache();
+                        // Fallback: if dxvk VR bridge isn't available, still try raw upload.
+                        err = ov ? ov->SetOverlayRaw(m_RightAmmoHudHandle, pixels.data(), (uint32_t)w, (uint32_t)h, 4) : vr::VROverlayError_RequestFailed;
                     }
                 }
-                m_RightAmmoHudPixelsFront = backIdx;
+                else
+                {
+                    err = ov ? ov->SetOverlayRaw(m_RightAmmoHudHandle, pixels.data(), (uint32_t)w, (uint32_t)h, 4) : vr::VROverlayError_RequestFailed;
+                }
+            }
+            m_HandHudDebugLastRightSetRawErr = (int)err;
+            if (err == vr::VROverlayError_None)
+            {
+                m_HandHudDebugLastRightUpload = dbgNow;
+                ++m_HandHudDebugRightUploadCount;
+                m_HandHudRightConsecutiveRawFails = 0;
+            }
+            else
+            {
+                if (worldQuad)
+                {
+                    DestroyWorldQuadTextures();
+                    if (err == vr::VROverlayError_InvalidHandle || err == vr::VROverlayError_RequestFailed)
+                        needHandHudOverlayRecover = true;
+                }
+                else
+                {
+                    ++m_HandHudRightConsecutiveRawFails;
+                    if (err == vr::VROverlayError_InvalidHandle || (err == vr::VROverlayError_RequestFailed && m_HandHudRightConsecutiveRawFails >= kHandHudRecoverFailThreshold))
+                        needHandHudOverlayRecover = true;
+                }
+                if (dbgTick)
+                    Game::logMsg("[VR][HandHUD] right upload failed err=%d mode=%s", (int)err, worldQuad ? "world" : "raw");
+                // Same as left: force retry next tick so it can't get stuck.
+                resetHandHudCache();
+            }
+        }
+        m_RightAmmoHudPixelsFront = backIdx;
         {
             const vr::EVROverlayError err = vr::VROverlay()->ShowOverlay(m_RightAmmoHudHandle);
             m_HandHudDebugLastRightShowErr = (int)err;
@@ -1638,14 +1637,14 @@ after_right:
                 if (ov)
                 {
                     auto destroyIfValid = [&](vr::VROverlayHandle_t& h)
-                    {
-                        if (h != vr::k_ulOverlayHandleInvalid)
                         {
-                            ov->HideOverlay(h);
-                            ov->DestroyOverlay(h);
-                            h = vr::k_ulOverlayHandleInvalid;
-                        }
-                    };
+                            if (h != vr::k_ulOverlayHandleInvalid)
+                            {
+                                ov->HideOverlay(h);
+                                ov->DestroyOverlay(h);
+                                h = vr::k_ulOverlayHandleInvalid;
+                            }
+                        };
 
                     destroyIfValid(m_LeftWristHudHandle);
                     destroyIfValid(m_RightAmmoHudHandle);
@@ -1742,33 +1741,33 @@ after_right:
     if (m_MouseModeEnabled && (leftVisible || rightVisible) && m_RearMirrorHandle != vr::k_ulOverlayHandleInvalid)
     {
         auto mul34 = [](const vr::HmdMatrix34_t& a, const vr::HmdMatrix34_t& b) -> vr::HmdMatrix34_t
-        {
-            vr::HmdMatrix34_t out{};
-            for (int r = 0; r < 3; ++r)
             {
-                for (int c = 0; c < 3; ++c)
-                    out.m[r][c] = a.m[r][0] * b.m[0][c] + a.m[r][1] * b.m[1][c] + a.m[r][2] * b.m[2][c];
-                out.m[r][3] = a.m[r][0] * b.m[0][3] + a.m[r][1] * b.m[1][3] + a.m[r][2] * b.m[2][3] + a.m[r][3];
-            }
-            return out;
-        };
+                vr::HmdMatrix34_t out{};
+                for (int r = 0; r < 3; ++r)
+                {
+                    for (int c = 0; c < 3; ++c)
+                        out.m[r][c] = a.m[r][0] * b.m[0][c] + a.m[r][1] * b.m[1][c] + a.m[r][2] * b.m[2][c];
+                    out.m[r][3] = a.m[r][0] * b.m[0][3] + a.m[r][1] * b.m[1][3] + a.m[r][2] * b.m[2][3] + a.m[r][3];
+                }
+                return out;
+            };
 
         auto translate34 = [](float x, float y, float z) -> vr::HmdMatrix34_t
-        {
-            vr::HmdMatrix34_t t{};
-            t.m[0][0] = 1.0f; t.m[0][1] = 0.0f; t.m[0][2] = 0.0f; t.m[0][3] = x;
-            t.m[1][0] = 0.0f; t.m[1][1] = 1.0f; t.m[1][2] = 0.0f; t.m[1][3] = y;
-            t.m[2][0] = 0.0f; t.m[2][1] = 0.0f; t.m[2][2] = 1.0f; t.m[2][3] = z;
-            return t;
-        };
+            {
+                vr::HmdMatrix34_t t{};
+                t.m[0][0] = 1.0f; t.m[0][1] = 0.0f; t.m[0][2] = 0.0f; t.m[0][3] = x;
+                t.m[1][0] = 0.0f; t.m[1][1] = 1.0f; t.m[1][2] = 0.0f; t.m[1][3] = y;
+                t.m[2][0] = 0.0f; t.m[2][1] = 0.0f; t.m[2][2] = 1.0f; t.m[2][3] = z;
+                return t;
+            };
 
         auto getWidthMeters = [&](vr::VROverlayHandle_t h, float fallback) -> float
-        {
-            float w = 0.0f;
-            if (vr::VROverlay()->GetOverlayWidthInMeters(h, &w) == vr::VROverlayError_None && w > 0.001f)
-                return w;
-            return fallback;
-        };
+            {
+                float w = 0.0f;
+                if (vr::VROverlay()->GetOverlayWidthInMeters(h, &w) == vr::VROverlayError_None && w > 0.001f)
+                    return w;
+                return fallback;
+            };
 
         float mirrorW = 0.0f;
         if (vr::VROverlay()->GetOverlayWidthInMeters(m_RearMirrorHandle, &mirrorW) != vr::VROverlayError_None || mirrorW <= 0.001f)
