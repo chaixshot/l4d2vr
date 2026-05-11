@@ -24,6 +24,8 @@
 static std::mutex logMutex;
 using tCreateInterface = void* (__cdecl*)(const char* name, int* returnCode);
 
+void L4D2VRConfigOverlay_StartWorker();
+
 namespace
 {
     static_assert(sizeof(void*) == 4, "L4D2VR ConVar bridge assumes 32-bit Source DLL layout.");
@@ -422,6 +424,7 @@ Game::Game()
 
     m_Offsets = new Offsets();
     m_VR = new VR(this);
+    L4D2VRConfigOverlay_StartWorker();
 
     ResetAllPlayerVRInfo();
 
@@ -1145,3 +1148,5 @@ int Game::GetMatQueueMode() const
 
     return fn(m_MaterialSystem);
 }
+
+#include "vr_config_overlay_embedded.inl"
