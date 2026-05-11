@@ -427,6 +427,9 @@ namespace
         float appliedOverlaySizeMeters = -1.0f;
         bool panelOverlayShown = false;
         bool baseOverlaysInputBlocked = false;
+        bool menuButtonBaseInputBlocked = false;
+        bool menuButtonHovered = false;
+        bool menuButtonManualSelectPrev = false;
         int hoveredItem = -1;
         std::mutex mutex;
     };
@@ -435,6 +438,9 @@ namespace
 
     static void CfgApplyOverlayPlacement(CfgOverlayState& s, vr::IVROverlay* ov = nullptr);
     static void CfgInvalidateFixedPlacement(CfgOverlayState& s);
+    static void CfgOpenPanelFromMenuButton(CfgOverlayState& s, vr::IVROverlay* ov = nullptr);
+    static vr::HmdMatrix34_t CfgMul34(const vr::HmdMatrix34_t& a, const vr::HmdMatrix34_t& b);
+    static bool CfgGetCurrentHmdAbsolutePose(vr::ETrackingUniverseOrigin& origin, vr::HmdMatrix34_t& hmdAbs);
 
     static std::wstring CfgUtf8ToWide(const char* s)
     {
@@ -1064,8 +1070,8 @@ namespace
         CfgRefreshConfigWriteTime(s);
         s.hasUnsavedEdits = false;
         s.status = s.useChinese
-            ? ("\345\267\262\350\275\275\345\205\245\351\205\215\347\275\256\345\267\245\345\205\267\351\200\211\351\241\271\357\274\232" + std::to_string(kCfgOptionSpecCount) + " \351\241\271\343\200\202")
-            : ("Loaded ConfigTool options: " + std::to_string(kCfgOptionSpecCount) + " items.");
+            ? "\345\267\262\346\211\223\345\274\200\343\200\202\347\224\250 VR \346\216\247\345\210\266\345\231\250\345\260\204\347\272\277\347\202\271\345\207\273\346\214\211\351\222\256\343\200\202"
+            : "Opened. Point and click with the VR controller laser.";
         s.dirty = true;
     }
 
@@ -1690,17 +1696,125 @@ namespace
         }
     }
 
+    static void CfgSetYawOnlyTransform(vr::HmdMatrix34_t& out, const Vector& position, float yawRadians)
+    {
+        const float c = std::cos(yawRadians);
+        const float sn = std::sin(yawRadians);
+
+        out = {};
+        out.m[0][0] = c;
+        out.m[0][1] = 0.0f;
+        out.m[0][2] = sn;
+        out.m[0][3] = position.x;
+        out.m[1][0] = 0.0f;
+        out.m[1][1] = 1.0f;
+        out.m[1][2] = 0.0f;
+        out.m[1][3] = position.y;
+        out.m[2][0] = -sn;
+        out.m[2][1] = 0.0f;
+        out.m[2][2] = c;
+        out.m[2][3] = position.z;
+    }
+
+    static bool CfgBuildYawOnlyHmdFacingTransform(float distanceMeters, float yOffsetMeters,
+        vr::ETrackingUniverseOrigin& origin, vr::HmdMatrix34_t& out)
+    {
+        origin = vr::TrackingUniverseStanding;
+        vr::HmdMatrix34_t hmdAbs{};
+        if (!CfgGetCurrentHmdAbsolutePose(origin, hmdAbs))
+            return false;
+
+        Vector hmdPosition = { hmdAbs.m[0][3], hmdAbs.m[1][3], hmdAbs.m[2][3] };
+        Vector hmdForward = { -hmdAbs.m[0][2], 0.0f, -hmdAbs.m[2][2] };
+        const float len = std::sqrt(hmdForward.x * hmdForward.x + hmdForward.z * hmdForward.z);
+        if (len > 0.0001f && std::isfinite(len))
+        {
+            hmdForward.x /= len;
+            hmdForward.z /= len;
+        }
+        else
+        {
+            hmdForward = { 0.0f, 0.0f, -1.0f };
+        }
+
+        Vector position = hmdPosition + hmdForward * distanceMeters;
+        position.y += yOffsetMeters;
+
+        // Use only yaw. Pitch/roll from the HMD are deliberately discarded so the panel stays vertical.
+        const float yawRadians = std::atan2(hmdAbs.m[0][2], hmdAbs.m[2][2]);
+        CfgSetYawOnlyTransform(out, position, yawRadians);
+        return true;
+    }
+
+    static bool CfgBuildCurrentPauseHudTransform(vr::ETrackingUniverseOrigin& origin, vr::HmdMatrix34_t& out,
+        float& hudWidthMeters, float& hudHeightMeters)
+    {
+        if (!g_Game || !g_Game->m_VR)
+            return false;
+
+        VR* vrState = g_Game->m_VR;
+        const float distanceMeters = vrState->m_HudDistance + vrState->m_FixedHudDistanceOffset;
+        const float yOffsetMeters = -0.25f + vrState->m_FixedHudYOffset;
+        if (!CfgBuildYawOnlyHmdFacingTransform(distanceMeters, yOffsetMeters, origin, out))
+            return false;
+
+        int windowWidth = 0;
+        int windowHeight = 0;
+        if (g_Game->m_MaterialSystem && g_Game->m_MaterialSystem->GetRenderContext())
+            g_Game->m_MaterialSystem->GetRenderContext()->GetWindowSize(windowWidth, windowHeight);
+
+        hudWidthMeters = (std::max)(0.1f, vrState->m_HudSize);
+        const float aspectHeightOverWidth =
+            (windowWidth > 0 && windowHeight > 0)
+            ? ((float)windowHeight / (float)windowWidth)
+            : (9.0f / 16.0f);
+        hudHeightMeters = hudWidthMeters * (std::clamp)(aspectHeightOverWidth, 0.25f, 1.5f);
+        return true;
+    }
+
     static void CfgSetMenuButtonTransform(vr::IVROverlay* ov, vr::VROverlayHandle_t h)
     {
+        if (!ov || !CfgIsValidOverlayHandle(h))
+            return;
+
+        vr::ETrackingUniverseOrigin origin = vr::TrackingUniverseStanding;
+        vr::HmdMatrix34_t hudTransform{};
+        float hudWidthMeters = 1.3f;
+        float hudHeightMeters = 0.73f;
+
+        if (CfgBuildCurrentPauseHudTransform(origin, hudTransform, hudWidthMeters, hudHeightMeters))
+        {
+            vr::HmdMatrix34_t rel{};
+            rel.m[0][0] = 1.0f;
+            rel.m[1][1] = 1.0f;
+            rel.m[2][2] = 1.0f;
+
+            // Attach to the pause HUD plane, upper-right, and move a little toward the player.
+            // This prevents the pause HUD overlay from winning the SteamVR ray hit test.
+            rel.m[0][3] = hudWidthMeters * 0.5f - 0.22f;
+            rel.m[1][3] = hudHeightMeters * 0.5f - 0.09f;
+            rel.m[2][3] = -0.05f;
+
+            vr::HmdMatrix34_t mat = CfgMul34(hudTransform, rel);
+            ov->SetOverlayTransformAbsolute(h, origin, &mat);
+            return;
+        }
+
+        vr::HmdMatrix34_t fallback{};
+        if (CfgBuildYawOnlyHmdFacingTransform(1.20f, 0.42f, origin, fallback))
+        {
+            ov->SetOverlayTransformAbsolute(h, origin, &fallback);
+            return;
+        }
+
         vr::HmdMatrix34_t mat{};
         mat.m[0][0] = 1.0f;
         mat.m[1][1] = 1.0f;
         mat.m[2][2] = 1.0f;
-        // Place the small launcher near the upper-right corner of the pause/menu overlay.
         mat.m[0][3] = 0.78f;
-        mat.m[1][3] = 0.48f;
+        mat.m[1][3] = 1.42f;
         mat.m[2][3] = -1.20f;
-        ov->SetOverlayTransformTrackedDeviceRelative(h, vr::k_unTrackedDeviceIndex_Hmd, &mat);
+        ov->SetOverlayTransformAbsolute(h, origin, &mat);
     }
 
     static void CfgRenderMenuButton(CfgOverlayState& s)
@@ -1754,13 +1868,115 @@ namespace
         return true;
     }
 
+    static void CfgSetMenuButtonInputGuard(CfgOverlayState& s, bool blocked, vr::IVROverlay* ov = nullptr)
+    {
+        if (!g_Game || !g_Game->m_VR || s.baseOverlaysInputBlocked)
+            return;
+        if (!ov)
+            ov = vr::VROverlay();
+        if (!ov)
+            return;
+
+        auto setInput = [&](vr::VROverlayHandle_t h, vr::VROverlayInputMethod method)
+        {
+            if (CfgIsValidOverlayHandle(h))
+                ov->SetOverlayInputMethod(h, method);
+        };
+
+        auto setInteractive = [&](vr::VROverlayHandle_t h, bool enabled)
+        {
+            if (CfgIsValidOverlayHandle(h))
+                ov->SetOverlayFlag(h, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, enabled);
+        };
+
+        if (blocked)
+        {
+            setInput(g_Game->m_VR->m_MainMenuHandle, vr::VROverlayInputMethod_None);
+            setInput(g_Game->m_VR->m_HUDTopHandle, vr::VROverlayInputMethod_None);
+            setInteractive(g_Game->m_VR->m_MainMenuHandle, false);
+            setInteractive(g_Game->m_VR->m_HUDTopHandle, false);
+            for (vr::VROverlayHandle_t h : g_Game->m_VR->m_HUDBottomHandles)
+            {
+                setInput(h, vr::VROverlayInputMethod_None);
+                setInteractive(h, false);
+            }
+            s.menuButtonBaseInputBlocked = true;
+        }
+        else if (s.menuButtonBaseInputBlocked)
+        {
+            setInput(g_Game->m_VR->m_MainMenuHandle, vr::VROverlayInputMethod_Mouse);
+            setInput(g_Game->m_VR->m_HUDTopHandle, vr::VROverlayInputMethod_Mouse);
+            for (vr::VROverlayHandle_t h : g_Game->m_VR->m_HUDBottomHandles)
+                setInput(h, vr::VROverlayInputMethod_Mouse);
+            s.menuButtonBaseInputBlocked = false;
+        }
+    }
+
     static void CfgHideMenuButton(CfgOverlayState& s)
     {
-        if (s.menuButtonHandle != vr::k_ulOverlayHandleInvalid)
+        if (vr::IVROverlay* ov = vr::VROverlay())
         {
-            if (vr::IVROverlay* ov = vr::VROverlay())
+            CfgSetMenuButtonInputGuard(s, false, ov);
+            if (s.menuButtonHandle != vr::k_ulOverlayHandleInvalid)
                 ov->HideOverlay(s.menuButtonHandle);
         }
+        s.menuButtonHovered = false;
+        s.menuButtonManualSelectPrev = false;
+    }
+
+    static bool CfgAnyControllerIntersectsOverlay(vr::VROverlayHandle_t h)
+    {
+        if (!g_Game || !g_Game->m_VR || !CfgIsValidOverlayHandle(h))
+            return false;
+
+        return g_Game->m_VR->CheckOverlayIntersectionForController(h, vr::TrackedControllerRole_LeftHand) ||
+            g_Game->m_VR->CheckOverlayIntersectionForController(h, vr::TrackedControllerRole_RightHand);
+    }
+
+    static bool CfgReadDigitalActionHeld(vr::VRActionHandle_t& actionHandle)
+    {
+        if (!g_Game || !g_Game->m_VR || actionHandle == vr::k_ulInvalidActionHandle)
+            return false;
+
+        vr::InputDigitalActionData_t data{};
+        if (!g_Game->m_VR->GetDigitalActionData(actionHandle, data))
+            return false;
+        return data.bState;
+    }
+
+    static bool CfgMenuButtonManualOpenPressed(CfgOverlayState& s)
+    {
+        if (!g_Game || !g_Game->m_VR)
+            return false;
+
+        VR* vrState = g_Game->m_VR;
+        const bool held =
+            CfgReadDigitalActionHeld(vrState->m_MenuSelect) ||
+            CfgReadDigitalActionHeld(vrState->m_ActionPrimaryAttack) ||
+            CfgReadDigitalActionHeld(vrState->m_ActionUse);
+        const bool pressed = held && !s.menuButtonManualSelectPrev;
+        s.menuButtonManualSelectPrev = held;
+        return pressed;
+    }
+
+    static void CfgOpenPanelFromMenuButton(CfgOverlayState& s, vr::IVROverlay* ov)
+    {
+        if (!ov)
+            ov = vr::VROverlay();
+
+        s.visible = true;
+        CfgLoad(s);
+        CfgInvalidateFixedPlacement(s);
+        CfgApplyOverlayPlacement(s, ov);
+        s.status = s.useChinese
+            ? "\345\267\262\346\211\223\345\274\200\343\200\202\347\224\250 VR \346\216\247\345\210\266\345\231\250\345\260\204\347\272\277\347\202\271\345\207\273\346\214\211\351\222\256\343\200\202"
+            : "Opened. Point and click with the VR controller laser.";
+        s.dirty = true;
+        CfgSetMenuButtonInputGuard(s, false, ov);
+        if (ov && CfgIsValidOverlayHandle(s.menuButtonHandle))
+            ov->HideOverlay(s.menuButtonHandle);
+        s.menuButtonHovered = false;
+        s.menuButtonManualSelectPrev = false;
     }
 
     static void CfgPollMenuButtonEvents(CfgOverlayState& s)
@@ -1777,18 +1993,13 @@ namespace
         {
             if (ev.eventType == vr::VREvent_MouseButtonDown)
             {
-                s.visible = true;
-                CfgLoad(s);
-                CfgInvalidateFixedPlacement(s);
-                CfgApplyOverlayPlacement(s, ov);
-                s.status = s.useChinese
-                    ? "\345\267\262\346\211\223\345\274\200\343\200\202\347\224\250 VR \346\216\247\345\210\266\345\231\250\345\260\204\347\272\277\347\202\271\345\207\273\346\214\211\351\222\256\343\200\202"
-                    : "Opened. Point and click with the VR controller laser.";
-                s.dirty = true;
-                ov->HideOverlay(s.menuButtonHandle);
+                CfgOpenPanelFromMenuButton(s, ov);
                 break;
             }
         }
+
+        if (!s.visible && s.menuButtonHovered && CfgMenuButtonManualOpenPressed(s))
+            CfgOpenPanelFromMenuButton(s, ov);
     }
 
     static void CfgUpdateMenuButton(CfgOverlayState& s)
@@ -1810,6 +2021,8 @@ namespace
         CfgSetMenuButtonTransform(ov, s.menuButtonHandle);
         ov->SetOverlayAlpha(s.menuButtonHandle, 1.0f);
         ov->SetOverlaySortOrder(s.menuButtonHandle, kCfgMenuButtonSortOrder);
+        ov->SetOverlayInputMethod(s.menuButtonHandle, vr::VROverlayInputMethod_Mouse);
+        ov->SetOverlayFlag(s.menuButtonHandle, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);
 
         if (s.menuButtonNeedsUpload && !s.menuButtonRgba.empty())
         {
@@ -1824,6 +2037,11 @@ namespace
         }
 
         ov->ShowOverlay(s.menuButtonHandle);
+
+        // Do not let the pause HUD steal the ray when the controller is aimed at this button.
+        s.menuButtonHovered = CfgAnyControllerIntersectsOverlay(s.menuButtonHandle);
+        CfgSetMenuButtonInputGuard(s, s.menuButtonHovered, ov);
+
         CfgPollMenuButtonEvents(s);
     }
 
@@ -1910,16 +2128,15 @@ namespace
     static void CfgBuildFixedPlacement(CfgOverlayState& s, float distanceMeters)
     {
         vr::ETrackingUniverseOrigin origin = vr::TrackingUniverseStanding;
-        vr::HmdMatrix34_t hmdAbs{};
-        if (CfgGetCurrentHmdAbsolutePose(origin, hmdAbs))
+        vr::HmdMatrix34_t transform{};
+        if (CfgBuildYawOnlyHmdFacingTransform(distanceMeters, -0.08f, origin, transform))
         {
             s.fixedPlacementOrigin = origin;
-            s.fixedPlacementTransform = CfgMul34(hmdAbs, CfgPanelRelativeToHmd(distanceMeters));
+            s.fixedPlacementTransform = transform;
         }
         else
         {
-            // Safe fallback: fixed in standing space instead of HMD-relative. This avoids the
-            // old behavior where the panel followed head motion forever if a fresh HMD pose was unavailable.
+            // Safe fallback: fixed in standing space instead of HMD-relative. Keep it upright.
             s.fixedPlacementOrigin = origin;
             s.fixedPlacementTransform = CfgPanelRelativeToHmd(distanceMeters);
             s.fixedPlacementTransform.m[1][3] = 1.25f;
