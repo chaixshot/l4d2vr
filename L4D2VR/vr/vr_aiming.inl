@@ -1506,7 +1506,7 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
     // active, skip DebugOverlay aim primitives and draw the VR-only line through the
     // post-mirror D3D path instead.
     const bool deferDebugAimOverlayForCleanMirror =
-        m_DesktopMirrorHidePluginOverlays && m_DesktopMirrorEnabled && !m_ScopeRenderingPass;
+        !queued && m_DesktopMirrorHidePluginOverlays && m_DesktopMirrorEnabled && !m_ScopeRenderingPass;
 
 
     C_WeaponCSBase* activeWeapon = nullptr;
@@ -3316,7 +3316,8 @@ void VR::DrawThrowArc(const Vector& origin, const Vector& forward, const Vector&
 
     // When desktop mirror overlay hiding is active, only update the cached arc here.
     // The render hook draws it later through the post-mirror D3D path.
-    if (!(m_DesktopMirrorHidePluginOverlays && m_DesktopMirrorEnabled && !m_ScopeRenderingPass))
+    const int throwArcQueueMode = m_Game ? m_Game->GetMatQueueMode() : 0;
+    if (!((throwArcQueueMode == 0) && m_DesktopMirrorHidePluginOverlays && m_DesktopMirrorEnabled && !m_ScopeRenderingPass))
         DrawThrowArcFromCache(duration);
 }
 
@@ -3345,8 +3346,9 @@ void VR::DrawLineWithThickness(const Vector& start, const Vector& end, float dur
     if (m_DesktopMirrorCleanRenderingPass && m_DesktopMirrorHidePluginOverlays)
         return;
 
+    const int lineQueueMode = m_Game ? m_Game->GetMatQueueMode() : 0;
     const float overlayDuration =
-        (m_DesktopMirrorHidePluginOverlays && m_DesktopMirrorEnabled && !m_ScopeRenderingPass)
+        ((lineQueueMode == 0) && m_DesktopMirrorHidePluginOverlays && m_DesktopMirrorEnabled && !m_ScopeRenderingPass)
             ? 0.001f
             : duration;
 

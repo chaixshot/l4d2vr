@@ -1709,8 +1709,12 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	// When desktop mirror overlay hiding is active, do not use Source DebugOverlay for VR-only
 	// plugin overlays. DebugOverlay is global and can leak into the mirror copy. Those overlays
 	// are drawn as D3D post-overlays after the selected eye has been copied to the desktop mirror RT.
+	// Clean mirror hiding needs a post-RenderView D3D copy/overlay pass. That path is
+	// not safe with DXVK in mat_queue_mode!=0, so queued mode falls back to the normal
+	// mirror path instead of risking DxvkCsChunk::push crashes.
 	const bool desktopMirrorHidePluginOverlaysActive =
 		m_VR->m_IsVREnabled &&
+		(queueMode == 0) &&
 		m_VR->m_DesktopMirrorEnabled &&
 		m_VR->m_DesktopMirrorHidePluginOverlays;
 	if (m_VR->m_IsVREnabled && queueMode != 0 && !desktopMirrorHidePluginOverlaysActive)

@@ -7926,6 +7926,11 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
     if (!renderContext)
         return;
 
+    // In queued/multicore mode we cannot use the raw D3D9 post-overlay path,
+    // but the function still has a DebugOverlay glyph fallback below. Do not
+    // return here, otherwise ItemModelLabel only updates its cache and never
+    // produces any visible output.
+
     if (m_DesktopMirrorCleanRenderingPass && m_DesktopMirrorHidePluginOverlays)
         return;
 
@@ -8444,6 +8449,10 @@ void VR::DrawProjectedSpecialInfectedArrows(IMatRenderContext* renderContext, co
 {
     if (!renderContext)
         return;
+
+    // Avoid direct IDirect3DDevice9 drawing from the queued render path.
+    if (m_Game && m_Game->GetMatQueueMode() != 0)
+        return;
     if (!m_DesktopMirrorHidePluginOverlays || !m_DesktopMirrorEnabled)
         return;
     if (!m_SpecialInfectedArrowEnabled || m_SpecialInfectedArrowSize <= 0.0f)
@@ -8543,6 +8552,16 @@ void VR::DrawPostMirrorPluginOverlays(IMatRenderContext* renderContext, C_BasePl
     if (!renderContext)
         return;
 
+    // This function normally uses raw D3D9 draws after Source's RenderView. In queued/multicore
+    // mode those calls can race DXVK's command stream and crash inside DxvkCsChunk::push.
+    // Item labels have a DebugOverlay glyph fallback, so keep only that path alive here
+    // and skip the rest of the post-mirror D3D overlays.
+    if (m_Game && m_Game->GetMatQueueMode() != 0)
+    {
+        DrawProjectedItemLabels(renderContext, view);
+        return;
+    }
+
     DrawProjectedItemLabels(renderContext, view);
     DrawProjectedSpecialInfectedArrows(renderContext, view);
 
@@ -8609,6 +8628,18 @@ void VR::DrawPostMirrorPluginOverlays(IMatRenderContext* renderContext, C_BasePl
     device->Release();
 }
 
+namespace
+{
+    // Avoid referencing the external IID_IDirect3DTexture9 symbol.
+    // This project does not always link dxguid.lib, so using the SDK global IID
+    // can produce LNK2001. The value is the D3D9 IID for IDirect3DTexture9.
+    static const GUID kDesktopMirrorIID_IDirect3DTexture9 =
+    {
+        0x85c31227, 0x3de5, 0x4f00,
+        { 0x9b, 0x3a, 0xf1, 0x1a, 0xc3, 0x8c, 0x18, 0xb5 }
+    };
+}
+
 bool VR::CopyEyeToDesktopMirrorTexture(int eyeIndex)
 {
     if (!m_IsVREnabled || !m_DesktopMirrorEnabled || !m_DesktopMirrorHidePluginOverlays)
@@ -8616,10 +8647,48 @@ bool VR::CopyEyeToDesktopMirrorTexture(int eyeIndex)
     if (eyeIndex < 0 || eyeIndex > 1)
         return false;
 
-    IDirect3DSurface9* src = (eyeIndex == 0) ? m_D9LeftEyeSurface : m_D9RightEyeSurface;
-    IDirect3DSurface9* dst = m_D9DesktopMirrorSurface;
-    if (!src || !dst || src == dst)
+    // Queued/multicore rendering uses DXVK's command stream from Source's render path.
+    // Direct D3D9 copies/draws here can corrupt that stream (crash in DxvkCsChunk::push).
+    // Keep the low-cost clean mirror path only for single-threaded rendering.
+    if (m_Game && m_Game->GetMatQueueMode() != 0)
         return false;
+
+    if (!m_CreatedVRTextures.load(std::memory_order_acquire))
+        return false;
+
+    IDirect3DSurface9* src = nullptr;
+    IDirect3DSurface9* dst = nullptr;
+
+    // The backing D3D surfaces can be released during video mode changes / DXVK reset.
+    // Take strong references while holding the texture mutex, then do the actual GPU work
+    // outside the lock so we do not block the texture lifecycle on command submission.
+    {
+        std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
+        if (m_CreatingTextureID != Texture_None)
+            return false;
+
+        src = (eyeIndex == 0) ? m_D9LeftEyeSurface : m_D9RightEyeSurface;
+        dst = m_D9DesktopMirrorSurface;
+        if (!src || !dst || src == dst)
+            return false;
+
+        src->AddRef();
+        dst->AddRef();
+    }
+
+    auto releaseSurfaceRefs = [&]()
+        {
+            if (src)
+            {
+                src->Release();
+                src = nullptr;
+            }
+            if (dst)
+            {
+                dst->Release();
+                dst = nullptr;
+            }
+        };
 
     IDirect3DDevice9* device = nullptr;
     HRESULT hr = src->GetDevice(&device);
@@ -8627,40 +8696,146 @@ bool VR::CopyEyeToDesktopMirrorTexture(int eyeIndex)
     {
         hr = dst->GetDevice(&device);
         if (FAILED(hr) || !device)
+        {
+            releaseSurfaceRefs();
             return false;
+        }
+    }
+
+    const HRESULT cooperativeHr = device->TestCooperativeLevel();
+    if (cooperativeHr == D3DERR_DEVICELOST || cooperativeHr == D3DERR_DEVICENOTRESET || cooperativeHr == D3DERR_DRIVERINTERNALERROR)
+    {
+        if (m_RenderPipelineDebugLog)
+            Game::logMsg("[VR][DesktopMirror] skip clean copy during device transition hr=0x%08X", static_cast<unsigned int>(cooperativeHr));
+        device->Release();
+        releaseSurfaceRefs();
+        return false;
     }
 
     D3DSURFACE_DESC srcDesc{};
     D3DSURFACE_DESC dstDesc{};
-    const bool haveSrcDesc = SUCCEEDED(src->GetDesc(&srcDesc));
-    const bool haveDstDesc = SUCCEEDED(dst->GetDesc(&dstDesc));
-
-    RECT srcRect{};
-    RECT dstRect{};
-    RECT* pSrcRect = nullptr;
-    RECT* pDstRect = nullptr;
-    if (haveSrcDesc && haveDstDesc && (srcDesc.Width != dstDesc.Width || srcDesc.Height != dstDesc.Height))
+    if (FAILED(src->GetDesc(&srcDesc)) || FAILED(dst->GetDesc(&dstDesc)) || srcDesc.Width == 0 || srcDesc.Height == 0 || dstDesc.Width == 0 || dstDesc.Height == 0)
     {
-        srcRect.left = 0;
-        srcRect.top = 0;
-        srcRect.right = static_cast<LONG>(srcDesc.Width);
-        srcRect.bottom = static_cast<LONG>(srcDesc.Height);
-        dstRect.left = 0;
-        dstRect.top = 0;
-        dstRect.right = static_cast<LONG>(dstDesc.Width);
-        dstRect.bottom = static_cast<LONG>(dstDesc.Height);
-        pSrcRect = &srcRect;
-        pDstRect = &dstRect;
+        device->Release();
+        releaseSurfaceRefs();
+        return false;
     }
 
-    hr = device->StretchRect(src, pSrcRect, dst, pDstRect, D3DTEXF_NONE);
-    if (FAILED(hr) && m_RenderPipelineDebugLog)
+    // Do not use IDirect3DDevice9::StretchRect here. Under DXVK, the crash dump showed
+    // StretchRect entering dxvk::DxvkCsChunk::push with a null command chunk. A textured
+    // fullscreen quad stays on the same lightweight D3D draw path already used by our
+    // post-mirror overlays and avoids the extra full RenderView cost.
+    IDirect3DTexture9* srcTexture = nullptr;
+    hr = src->GetContainer(kDesktopMirrorIID_IDirect3DTexture9, reinterpret_cast<void**>(&srcTexture));
+    if (FAILED(hr) || !srcTexture)
     {
-        Game::logMsg("[VR][DesktopMirror] StretchRect eye=%d failed hr=0x%08X", eyeIndex, static_cast<unsigned int>(hr));
+        if (m_RenderPipelineDebugLog)
+            Game::logMsg("[VR][DesktopMirror] source eye surface has no texture container eye=%d hr=0x%08X", eyeIndex, static_cast<unsigned int>(hr));
+        device->Release();
+        releaseSurfaceRefs();
+        return false;
     }
 
+    IDirect3DSurface9* oldRenderTarget = nullptr;
+    const HRESULT oldRtHr = device->GetRenderTarget(0, &oldRenderTarget);
+    D3DVIEWPORT9 oldViewport{};
+    const bool haveOldViewport = SUCCEEDED(device->GetViewport(&oldViewport));
+
+    IDirect3DStateBlock9* stateBlock = nullptr;
+    if (SUCCEEDED(device->CreateStateBlock(D3DSBT_ALL, &stateBlock)) && stateBlock)
+        stateBlock->Capture();
+
+    D3DVIEWPORT9 viewport{};
+    viewport.X = 0;
+    viewport.Y = 0;
+    viewport.Width = dstDesc.Width;
+    viewport.Height = dstDesc.Height;
+    viewport.MinZ = 0.0f;
+    viewport.MaxZ = 1.0f;
+
+    struct DesktopMirrorCopyVertex
+    {
+        float x;
+        float y;
+        float z;
+        float rhw;
+        D3DCOLOR color;
+        float u;
+        float v;
+    };
+    static constexpr DWORD kDesktopMirrorCopyFvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1;
+
+    const float left = -0.5f;
+    const float top = -0.5f;
+    const float right = static_cast<float>(dstDesc.Width) - 0.5f;
+    const float bottom = static_cast<float>(dstDesc.Height) - 0.5f;
+    const DesktopMirrorCopyVertex quad[4] =
+    {
+        { left,  top,    0.0f, 1.0f, 0xFFFFFFFFu, 0.0f, 0.0f },
+        { right, top,    0.0f, 1.0f, 0xFFFFFFFFu, 1.0f, 0.0f },
+        { left,  bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0.0f, 1.0f },
+        { right, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 1.0f, 1.0f }
+    };
+
+    bool ok = true;
+    hr = device->SetRenderTarget(0, dst);
+    ok = ok && SUCCEEDED(hr);
+    if (ok)
+    {
+        device->SetViewport(&viewport);
+        device->SetVertexShader(nullptr);
+        device->SetPixelShader(nullptr);
+        device->SetFVF(kDesktopMirrorCopyFvf);
+        device->SetTexture(0, srcTexture);
+        device->SetRenderState(D3DRS_ZENABLE, FALSE);
+        device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+        device->SetRenderState(D3DRS_LIGHTING, FALSE);
+        device->SetRenderState(D3DRS_FOGENABLE, FALSE);
+        device->SetRenderState(D3DRS_COLORWRITEENABLE,
+            D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE | D3DCOLORWRITEENABLE_ALPHA);
+        device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+        device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        const DWORD filter = m_DesktopMirrorLinearFilter ? D3DTEXF_LINEAR : D3DTEXF_POINT;
+        device->SetSamplerState(0, D3DSAMP_MINFILTER, filter);
+        device->SetSamplerState(0, D3DSAMP_MAGFILTER, filter);
+        device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+
+        hr = device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(DesktopMirrorCopyVertex));
+        ok = SUCCEEDED(hr);
+    }
+
+    if (stateBlock)
+    {
+        stateBlock->Apply();
+        stateBlock->Release();
+    }
+    else
+    {
+        device->SetTexture(0, nullptr);
+    }
+    if (SUCCEEDED(oldRtHr) && oldRenderTarget)
+        device->SetRenderTarget(0, oldRenderTarget);
+    if (haveOldViewport)
+        device->SetViewport(&oldViewport);
+
+    if (!ok && m_RenderPipelineDebugLog)
+        Game::logMsg("[VR][DesktopMirror] quad clean copy eye=%d failed hr=0x%08X", eyeIndex, static_cast<unsigned int>(hr));
+
+    if (oldRenderTarget)
+        oldRenderTarget->Release();
+    srcTexture->Release();
     device->Release();
-    return SUCCEEDED(hr);
+    releaseSurfaceRefs();
+    return ok;
 }
 
 void VR::DrawKillIndicators(IMatRenderContext* renderContext, ITexture* hudTexture)

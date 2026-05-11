@@ -1262,6 +1262,10 @@ public:
 	int  m_DesktopMirrorEye = 1; // 0 = left eye, 1 = right eye
 	bool m_DesktopMirrorKeepAspect = true;
 	bool m_DesktopMirrorLinearFilter = true;
+	// Requested value from config.txt. The runtime effective flag below is forced off
+	// in mat_queue_mode != 0 because clean-mirror D3D9 copies are not DXVK queue-safe.
+	bool m_DesktopMirrorHidePluginOverlaysRequested = true;
+	// Runtime effective value. External mirror code can keep reading this field.
 	bool m_DesktopMirrorHidePluginOverlays = true;
 	bool m_DesktopMirrorCleanRenderingPass = false;
 

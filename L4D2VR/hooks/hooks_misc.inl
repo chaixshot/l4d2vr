@@ -391,7 +391,10 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 		// In desktop-mirror overlay hide mode, special-infected arrows are collected
 		// once from the render hook and drawn later by the post-mirror D3D path.
 		// Avoid scanning from DrawModelExecute, which can run many times per frame.
-		if (!(m_VR->m_DesktopMirrorHidePluginOverlays && m_VR->m_DesktopMirrorEnabled))
+		const int earlyQueueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
+		const bool cleanMirrorPostD3DActiveEarly =
+			(earlyQueueMode == 0) && m_VR->m_DesktopMirrorHidePluginOverlays && m_VR->m_DesktopMirrorEnabled;
+		if (!cleanMirrorPostD3DActiveEarly)
 			m_VR->ScanSpecialInfectedEntitiesFromClientList();
 
 		const C_BaseEntity* entity = nullptr;
@@ -408,7 +411,9 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 		}
 		const bool suppressDesktopMirrorPluginOverlays =
 			m_VR->m_DesktopMirrorCleanRenderingPass && m_VR->m_DesktopMirrorHidePluginOverlays;
+		const int queueModeForDesktopMirrorOverlays = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
 		const bool desktopMirrorOverlayHideActive =
+			(queueModeForDesktopMirrorOverlays == 0) &&
 			m_VR->m_DesktopMirrorHidePluginOverlays && m_VR->m_DesktopMirrorEnabled;
 		const bool singlePassDesktopMirrorPluginOverlays = false;
 		if (!suppressDesktopMirrorPluginOverlays &&

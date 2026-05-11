@@ -33,6 +33,10 @@ namespace
     constexpr int kCfgLangX = 914;
     constexpr int kCfgReloadX = 1008;
     constexpr int kCfgSaveX = 1100;
+    constexpr int kCfgPagePrevX = 610;
+    constexpr int kCfgPageNextX = 720;
+    constexpr int kCfgPageButtonW = 96;
+    constexpr int kCfgPageButtonH = 42;
     constexpr int kCfgCloseX = 1180;
     constexpr int kCfgTopButtonY = 24;
     constexpr int kCfgTopButtonH = 42;
@@ -55,6 +59,10 @@ namespace
 
     constexpr int kCfgMenuButtonW = 260;
     constexpr int kCfgMenuButtonH = 90;
+
+    constexpr uint32_t kCfgOverlaySortOrderBase = 0x7FFFFF00u;
+    constexpr uint32_t kCfgOverlaySortOrderActive = 0x7FFFFF10u;
+    constexpr uint32_t kCfgMenuButtonSortOrder = 0x7FFFFF20u;
 
     enum class CfgOptionType
     {
@@ -385,6 +393,7 @@ namespace
     {
         std::atomic<bool> workerStarted{ false };
         vr::VROverlayHandle_t handle = vr::k_ulOverlayHandleInvalid;
+        vr::VROverlayHandle_t backHandle = vr::k_ulOverlayHandleInvalid;
         vr::VROverlayHandle_t menuButtonHandle = vr::k_ulOverlayHandleInvalid;
         bool visible = false;
         bool prevF8 = false;
@@ -406,12 +415,26 @@ namespace
         bool configWriteTimeValid = false;
         std::filesystem::file_time_type configWriteTime{};
         uint32_t lastConfigStatMs = 0;
+
+        // The config editor is a world-fixed panel. When opened, capture the current HMD
+        // pose once, place the panel in front of it, then keep that absolute transform.
+        // Re-capture only when the panel is reopened or its distance is changed.
+        bool fixedPlacementValid = false;
+        bool fixedPlacementApplied = false;
+        vr::ETrackingUniverseOrigin fixedPlacementOrigin = vr::TrackingUniverseStanding;
+        vr::HmdMatrix34_t fixedPlacementTransform{};
+        float appliedOverlayDistanceMeters = -1.0f;
+        float appliedOverlaySizeMeters = -1.0f;
+        bool panelOverlayShown = false;
+        bool baseOverlaysInputBlocked = false;
+        int hoveredItem = -1;
         std::mutex mutex;
     };
 
     CfgOverlayState g_CfgOverlay;
 
     static void CfgApplyOverlayPlacement(CfgOverlayState& s, vr::IVROverlay* ov = nullptr);
+    static void CfgInvalidateFixedPlacement(CfgOverlayState& s);
 
     static std::wstring CfgUtf8ToWide(const char* s)
     {
@@ -949,6 +972,24 @@ namespace
         s.scroll = (std::clamp)(s.scroll, 0, (std::max)(0, (int)s.visibleSpecIndexes.size() - 1));
     }
 
+    static void CfgEnsureSelectedVisible(CfgOverlayState& s)
+    {
+        const int total = (int)s.visibleSpecIndexes.size();
+        if (total <= 0)
+        {
+            s.selected = 0;
+            s.scroll = 0;
+            return;
+        }
+
+        s.selected = (std::clamp)(s.selected, 0, total - 1);
+        if (s.selected < s.scroll)
+            s.scroll = s.selected;
+        if (s.selected >= s.scroll + kCfgOverlayRowsVisible)
+            s.scroll = s.selected - kCfgOverlayRowsVisible + 1;
+        s.scroll = (std::clamp)(s.scroll, 0, (std::max)(0, total - 1));
+    }
+
     static void CfgMoveSelection(CfgOverlayState& s, int delta)
     {
         const int total = (int)s.visibleSpecIndexes.size();
@@ -959,12 +1000,27 @@ namespace
             return;
         }
         s.selected = (std::clamp)(s.selected + delta, 0, total - 1);
-        if (s.selected < s.scroll)
-            s.scroll = s.selected;
-        if (s.selected >= s.scroll + kCfgOverlayRowsVisible)
-            s.scroll = s.selected - kCfgOverlayRowsVisible + 1;
-        s.scroll = (std::clamp)(s.scroll, 0, (std::max)(0, total - 1));
+        CfgEnsureSelectedVisible(s);
         s.dirty = true;
+    }
+
+    static void CfgPageSelection(CfgOverlayState& s, int dir)
+    {
+        const int total = (int)s.visibleSpecIndexes.size();
+        if (total <= 0)
+        {
+            s.selected = 0;
+            s.scroll = 0;
+            return;
+        }
+
+        const int step = (std::max)(1, kCfgOverlayRowsVisible - 1);
+        const int oldScroll = s.scroll;
+        s.scroll = (std::clamp)(s.scroll + dir * step, 0, (std::max)(0, total - 1));
+        s.selected = s.scroll;
+        CfgEnsureSelectedVisible(s);
+        if (s.scroll != oldScroll)
+            s.dirty = true;
     }
 
     static void CfgLoad(CfgOverlayState& s)
@@ -1343,6 +1399,8 @@ namespace
         CfgGdiFill(g, 0, 0, kCfgOverlayW, kCfgOverlayH, { 14, 16, 22 });
         CfgGdiFill(g, 0, 0, kCfgOverlayW, 82, { 30, 35, 48 });
         CfgGdiText(g, 26, 14, 520, 54, s.useChinese ? "L4D2VR \351\205\215\347\275\256" : "L4D2VR Config", g.titleFont, { 242, 246, 255 });
+        CfgGdiButton(g, kCfgPagePrevX, kCfgTopButtonY, kCfgPageButtonW, kCfgPageButtonH, s.useChinese ? "\344\270\212\344\270\200\351\241\265" : "Prev");
+        CfgGdiButton(g, kCfgPageNextX, kCfgTopButtonY, kCfgPageButtonW, kCfgPageButtonH, s.useChinese ? "\344\270\213\344\270\200\351\241\265" : "Next");
         CfgGdiButton(g, kCfgLangX, kCfgTopButtonY, kCfgLangW, kCfgTopButtonH, s.useChinese ? "\344\270\255\346\226\207" : "EN");
         CfgGdiButton(g, kCfgReloadX, kCfgTopButtonY, kCfgReloadW, kCfgTopButtonH, s.useChinese ? "\351\207\215\350\275\275" : "Reload");
         CfgGdiButton(g, kCfgSaveX, kCfgTopButtonY, kCfgSaveW, kCfgTopButtonH, s.useChinese ? "\344\277\235\345\255\230" : "Save");
@@ -1554,6 +1612,84 @@ namespace
 #endif
     }
 
+    static bool CfgIsValidOverlayHandle(vr::VROverlayHandle_t h)
+    {
+        return h != vr::k_ulOverlayHandleInvalid;
+    }
+
+    static void CfgConfigurePanelOverlay(CfgOverlayState& s, vr::IVROverlay* ov, vr::VROverlayHandle_t h, bool active)
+    {
+        (void)s;
+        if (!ov || !CfgIsValidOverlayHandle(h))
+            return;
+
+        ov->SetOverlayAlpha(h, 1.0f);
+        ov->SetOverlaySortOrder(h, active ? kCfgOverlaySortOrderActive : kCfgOverlaySortOrderBase);
+        ov->SetOverlayInputMethod(h, active ? vr::VROverlayInputMethod_Mouse : vr::VROverlayInputMethod_None);
+        ov->SetOverlayFlag(h, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);
+        ov->SetOverlayFlag(h, vr::VROverlayFlags_SendVRDiscreteScrollEvents, true);
+        vr::HmdVector2_t mouseScale{ (float)kCfgOverlayW, (float)kCfgOverlayH };
+        ov->SetOverlayMouseScale(h, &mouseScale);
+    }
+
+    static void CfgHidePanelOverlays(CfgOverlayState& s, vr::IVROverlay* ov)
+    {
+        if (!ov)
+            ov = vr::VROverlay();
+        if (!ov)
+            return;
+
+        if (CfgIsValidOverlayHandle(s.handle))
+            ov->HideOverlay(s.handle);
+        if (CfgIsValidOverlayHandle(s.backHandle))
+            ov->HideOverlay(s.backHandle);
+        s.panelOverlayShown = false;
+    }
+
+    static void CfgSetBaseOverlaysBlocked(CfgOverlayState& s, bool blocked, vr::IVROverlay* ov = nullptr)
+    {
+        if (!g_Game || !g_Game->m_VR)
+            return;
+        if (!ov)
+            ov = vr::VROverlay();
+        if (!ov)
+            return;
+
+        auto setInput = [&](vr::VROverlayHandle_t h, vr::VROverlayInputMethod method)
+        {
+            if (h != vr::k_ulOverlayHandleInvalid)
+                ov->SetOverlayInputMethod(h, method);
+        };
+
+        auto suppress = [&](vr::VROverlayHandle_t h)
+        {
+            if (h == vr::k_ulOverlayHandleInvalid)
+                return;
+            ov->SetOverlayInputMethod(h, vr::VROverlayInputMethod_None);
+            ov->SetOverlaySortOrder(h, 1u);
+            ov->HideOverlay(h);
+        };
+
+        if (blocked)
+        {
+            // Keep the config panel modal. The normal L4D2VR HUD overlays are interactive mouse
+            // overlays too, so they can visually cover the laser cursor and steal the hit test.
+            suppress(g_Game->m_VR->m_MainMenuHandle);
+            suppress(g_Game->m_VR->m_HUDTopHandle);
+            for (vr::VROverlayHandle_t h : g_Game->m_VR->m_HUDBottomHandles)
+                suppress(h);
+            s.baseOverlaysInputBlocked = true;
+        }
+        else if (s.baseOverlaysInputBlocked)
+        {
+            setInput(g_Game->m_VR->m_MainMenuHandle, vr::VROverlayInputMethod_Mouse);
+            setInput(g_Game->m_VR->m_HUDTopHandle, vr::VROverlayInputMethod_Mouse);
+            for (vr::VROverlayHandle_t h : g_Game->m_VR->m_HUDBottomHandles)
+                setInput(h, vr::VROverlayInputMethod_Mouse);
+            s.baseOverlaysInputBlocked = false;
+        }
+    }
+
     static void CfgSetMenuButtonTransform(vr::IVROverlay* ov, vr::VROverlayHandle_t h)
     {
         vr::HmdMatrix34_t mat{};
@@ -1603,7 +1739,7 @@ namespace
 
             ov->SetOverlayWidthInMeters(s.menuButtonHandle, 0.34f);
             ov->SetOverlayAlpha(s.menuButtonHandle, 0.6f);
-            ov->SetOverlaySortOrder(s.menuButtonHandle, 100001u);
+            ov->SetOverlaySortOrder(s.menuButtonHandle, kCfgMenuButtonSortOrder);
             ov->SetOverlayInputMethod(s.menuButtonHandle, vr::VROverlayInputMethod_Mouse);
             ov->SetOverlayFlag(s.menuButtonHandle, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);
             vr::HmdVector2_t mouseScale{ (float)kCfgMenuButtonW, (float)kCfgMenuButtonH };
@@ -1643,6 +1779,7 @@ namespace
             {
                 s.visible = true;
                 CfgLoad(s);
+                CfgInvalidateFixedPlacement(s);
                 CfgApplyOverlayPlacement(s, ov);
                 s.status = s.useChinese
                     ? "\345\267\262\346\211\223\345\274\200\343\200\202\347\224\250 VR \346\216\247\345\210\266\345\231\250\345\260\204\347\272\277\347\202\271\345\207\273\346\214\211\351\222\256\343\200\202"
@@ -1672,7 +1809,7 @@ namespace
 
         CfgSetMenuButtonTransform(ov, s.menuButtonHandle);
         ov->SetOverlayAlpha(s.menuButtonHandle, 1.0f);
-        ov->SetOverlaySortOrder(s.menuButtonHandle, 100001u);
+        ov->SetOverlaySortOrder(s.menuButtonHandle, kCfgMenuButtonSortOrder);
 
         if (s.menuButtonNeedsUpload && !s.menuButtonRgba.empty())
         {
@@ -1706,10 +1843,27 @@ namespace
         return (std::clamp)(CfgFloatValue(s, "ConfigOverlaySizeMeters", fallback), 0.8f, 4.0f);
     }
 
-    static void CfgSetHmdTransform(const CfgOverlayState& s, vr::IVROverlay* ov, vr::VROverlayHandle_t h)
+    static void CfgInvalidateFixedPlacement(CfgOverlayState& s)
     {
-        const float distanceMeters = CfgOverlayDistanceMeters(s);
+        s.fixedPlacementValid = false;
+        s.fixedPlacementApplied = false;
+        s.appliedOverlayDistanceMeters = -1.0f;
+    }
 
+    static vr::HmdMatrix34_t CfgMul34(const vr::HmdMatrix34_t& a, const vr::HmdMatrix34_t& b)
+    {
+        vr::HmdMatrix34_t out{};
+        for (int r = 0; r < 3; ++r)
+        {
+            for (int c = 0; c < 3; ++c)
+                out.m[r][c] = a.m[r][0] * b.m[0][c] + a.m[r][1] * b.m[1][c] + a.m[r][2] * b.m[2][c];
+            out.m[r][3] = a.m[r][0] * b.m[0][3] + a.m[r][1] * b.m[1][3] + a.m[r][2] * b.m[2][3] + a.m[r][3];
+        }
+        return out;
+    }
+
+    static vr::HmdMatrix34_t CfgPanelRelativeToHmd(float distanceMeters)
+    {
         vr::HmdMatrix34_t mat{};
         mat.m[0][0] = 1.0f;
         mat.m[1][1] = 1.0f;
@@ -1717,12 +1871,68 @@ namespace
         mat.m[0][3] = 0.0f;
         mat.m[1][3] = -0.08f;
         mat.m[2][3] = -distanceMeters;
-        ov->SetOverlayTransformTrackedDeviceRelative(h, vr::k_unTrackedDeviceIndex_Hmd, &mat);
+        return mat;
+    }
+
+    static bool CfgGetCurrentHmdAbsolutePose(vr::ETrackingUniverseOrigin& origin, vr::HmdMatrix34_t& hmdAbs)
+    {
+        origin = vr::TrackingUniverseStanding;
+        if (vr::IVRCompositor* comp = vr::VRCompositor())
+            origin = comp->GetTrackingSpace();
+        else if (g_Game && g_Game->m_VR && g_Game->m_VR->m_Compositor)
+            origin = g_Game->m_VR->m_Compositor->GetTrackingSpace();
+
+        vr::TrackedDevicePose_t poses[vr::k_unMaxTrackedDeviceCount]{};
+        if (vr::IVRSystem* sys = vr::VRSystem())
+        {
+            sys->GetDeviceToAbsoluteTrackingPose(origin, 0.0f, poses, vr::k_unMaxTrackedDeviceCount);
+            const vr::TrackedDevicePose_t& hmd = poses[vr::k_unTrackedDeviceIndex_Hmd];
+            if (hmd.bPoseIsValid)
+            {
+                hmdAbs = hmd.mDeviceToAbsoluteTracking;
+                return true;
+            }
+        }
+
+        if (g_Game && g_Game->m_VR)
+        {
+            const vr::TrackedDevicePose_t& hmd = g_Game->m_VR->m_Poses[vr::k_unTrackedDeviceIndex_Hmd];
+            if (hmd.bPoseIsValid)
+            {
+                hmdAbs = hmd.mDeviceToAbsoluteTracking;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    static void CfgBuildFixedPlacement(CfgOverlayState& s, float distanceMeters)
+    {
+        vr::ETrackingUniverseOrigin origin = vr::TrackingUniverseStanding;
+        vr::HmdMatrix34_t hmdAbs{};
+        if (CfgGetCurrentHmdAbsolutePose(origin, hmdAbs))
+        {
+            s.fixedPlacementOrigin = origin;
+            s.fixedPlacementTransform = CfgMul34(hmdAbs, CfgPanelRelativeToHmd(distanceMeters));
+        }
+        else
+        {
+            // Safe fallback: fixed in standing space instead of HMD-relative. This avoids the
+            // old behavior where the panel followed head motion forever if a fresh HMD pose was unavailable.
+            s.fixedPlacementOrigin = origin;
+            s.fixedPlacementTransform = CfgPanelRelativeToHmd(distanceMeters);
+            s.fixedPlacementTransform.m[1][3] = 1.25f;
+        }
+
+        s.fixedPlacementValid = true;
+        s.fixedPlacementApplied = false;
+        s.appliedOverlayDistanceMeters = distanceMeters;
     }
 
     static void CfgApplyOverlayPlacement(CfgOverlayState& s, vr::IVROverlay* ov)
     {
-        if (s.handle == vr::k_ulOverlayHandleInvalid)
+        if (!CfgIsValidOverlayHandle(s.handle) && !CfgIsValidOverlayHandle(s.backHandle))
             return;
 
         if (!ov)
@@ -1739,8 +1949,28 @@ namespace
             g_Game->m_VR->m_ConfigOverlaySizeMeters = sizeMeters;
         }
 
-        ov->SetOverlayWidthInMeters(s.handle, sizeMeters);
-        CfgSetHmdTransform(s, ov, s.handle);
+        if (std::fabs(s.appliedOverlaySizeMeters - sizeMeters) > 0.0001f)
+        {
+            if (CfgIsValidOverlayHandle(s.handle))
+                ov->SetOverlayWidthInMeters(s.handle, sizeMeters);
+            if (CfgIsValidOverlayHandle(s.backHandle))
+                ov->SetOverlayWidthInMeters(s.backHandle, sizeMeters);
+            s.appliedOverlaySizeMeters = sizeMeters;
+        }
+
+        if (!s.fixedPlacementValid || std::fabs(s.appliedOverlayDistanceMeters - distanceMeters) > 0.0001f)
+            CfgBuildFixedPlacement(s, distanceMeters);
+
+        if (!s.fixedPlacementApplied)
+        {
+            bool ok = true;
+            if (CfgIsValidOverlayHandle(s.handle))
+                ok = ov->SetOverlayTransformAbsolute(s.handle, s.fixedPlacementOrigin, &s.fixedPlacementTransform) == vr::VROverlayError_None && ok;
+            if (CfgIsValidOverlayHandle(s.backHandle))
+                ok = ov->SetOverlayTransformAbsolute(s.backHandle, s.fixedPlacementOrigin, &s.fixedPlacementTransform) == vr::VROverlayError_None && ok;
+            if (ok)
+                s.fixedPlacementApplied = true;
+        }
     }
 
     static bool CfgEnsureOverlay(CfgOverlayState& s)
@@ -1749,29 +1979,36 @@ namespace
         if (!ov)
             return false;
 
-        if (s.handle != vr::k_ulOverlayHandleInvalid)
+        if (CfgIsValidOverlayHandle(s.handle) && CfgIsValidOverlayHandle(s.backHandle))
         {
             CfgApplyOverlayPlacement(s, ov);
             return true;
         }
 
-        vr::EVROverlayError err = ov->CreateOverlay("l4d2vr.config.overlay", "L4D2VR Config", &s.handle);
-        if (err != vr::VROverlayError_None || s.handle == vr::k_ulOverlayHandleInvalid)
+        if (!CfgIsValidOverlayHandle(s.handle))
         {
-            s.status = "CreateOverlay failed: " + std::to_string((int)err);
-            return false;
+            vr::EVROverlayError err = ov->CreateOverlay("l4d2vr.config.overlay.front", "L4D2VR Config", &s.handle);
+            if (err != vr::VROverlayError_None || !CfgIsValidOverlayHandle(s.handle))
+            {
+                s.status = "CreateOverlay failed: " + std::to_string((int)err);
+                return false;
+            }
         }
 
+        if (!CfgIsValidOverlayHandle(s.backHandle))
+        {
+            vr::EVROverlayError err = ov->CreateOverlay("l4d2vr.config.overlay.back", "L4D2VR Config Back", &s.backHandle);
+            if (err != vr::VROverlayError_None || !CfgIsValidOverlayHandle(s.backHandle))
+            {
+                s.status = "CreateOverlay(back) failed: " + std::to_string((int)err);
+                return false;
+            }
+        }
+
+        CfgConfigurePanelOverlay(s, ov, s.handle, true);
+        CfgConfigurePanelOverlay(s, ov, s.backHandle, false);
         CfgLoad(s);
-        CfgApplyOverlayPlacement(s, ov);
-        ov->SetOverlayAlpha(s.handle, 1.0f);
-        // Keep the built-in config panel above L4D2VR HUD/scope/hand overlays.
-        // SteamVR renders higher sort-order overlays on top.
-        ov->SetOverlaySortOrder(s.handle, 100000u);
-        ov->SetOverlayInputMethod(s.handle, vr::VROverlayInputMethod_Mouse);
-        ov->SetOverlayFlag(s.handle, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);
-        vr::HmdVector2_t mouseScale{ (float)kCfgOverlayW, (float)kCfgOverlayH };
-        ov->SetOverlayMouseScale(s.handle, &mouseScale);
+        CfgInvalidateFixedPlacement(s);
         CfgApplyOverlayPlacement(s, ov);
         return true;
     }
@@ -1801,12 +2038,70 @@ namespace
         }
         CfgRebuildVisibleIndexes(s);
         CfgMarkEdited(s);
+        if (std::strcmp(spec.key, "ConfigOverlayDistanceMeters") == 0)
+            CfgInvalidateFixedPlacement(s);
+    }
+
+    static int CfgHitTestRowItem(const CfgOverlayState& s, int my)
+    {
+        const int total = (int)s.visibleSpecIndexes.size();
+        int y = kCfgRowsY;
+        for (int item = s.scroll; item < total && y < kCfgRowsBottom; ++item)
+        {
+            const CfgOptionSpec& spec = kCfgOptionSpecs[s.visibleSpecIndexes[item]];
+            const char* prevGroup = nullptr;
+            if (item > s.scroll)
+                prevGroup = CfgGroupText(s, kCfgOptionSpecs[s.visibleSpecIndexes[item - 1]]);
+            const char* curGroup = CfgGroupText(s, spec);
+            const bool groupChanged = (item == s.scroll) || !prevGroup || std::strcmp(prevGroup, curGroup) != 0;
+            if (groupChanged)
+            {
+                if (my >= y && my < y + kCfgOverlayGroupH)
+                    return -1;
+                y += kCfgOverlayGroupH;
+            }
+
+            if (my >= y && my < y + kCfgOverlayRowH)
+                return item;
+
+            y += kCfgOverlayRowH;
+        }
+        return -1;
+    }
+
+    static bool CfgSelectHoveredRow(CfgOverlayState& s, int my)
+    {
+        const int item = CfgHitTestRowItem(s, my);
+        if (!CfgIsSelectableRow(s, item))
+        {
+            s.hoveredItem = -1;
+            return false;
+        }
+
+        s.hoveredItem = item;
+        if (s.selected != item)
+        {
+            s.selected = item;
+            CfgEnsureSelectedVisible(s);
+            s.dirty = true;
+        }
+        return true;
     }
 
     static void CfgHandleClick(CfgOverlayState& s, int mx, int my)
     {
         if (my >= kCfgTopButtonY && my <= kCfgTopButtonY + kCfgTopButtonH)
         {
+            if (mx >= kCfgPagePrevX && mx <= kCfgPagePrevX + kCfgPageButtonW)
+            {
+                CfgPageSelection(s, -1);
+                return;
+            }
+            if (mx >= kCfgPageNextX && mx <= kCfgPageNextX + kCfgPageButtonW)
+            {
+                CfgPageSelection(s, +1);
+                return;
+            }
             if (mx >= kCfgLangX && mx <= kCfgLangX + kCfgLangW)
             {
                 s.useChinese = !s.useChinese;
@@ -1836,50 +2131,33 @@ namespace
             }
         }
 
-        const int total = (int)s.visibleSpecIndexes.size();
-        int y = kCfgRowsY;
-        for (int item = s.scroll; item < total && y < kCfgRowsBottom; ++item)
+        const int item = CfgHitTestRowItem(s, my);
+        if (!CfgIsSelectableRow(s, item))
+            return;
+
+        s.selected = item;
+        CfgEnsureSelectedVisible(s);
+
+        const CfgOptionSpec& spec = kCfgOptionSpecs[s.visibleSpecIndexes[item]];
+        if (spec.type == CfgOptionType::Bool)
         {
-            const CfgOptionSpec& spec = kCfgOptionSpecs[s.visibleSpecIndexes[item]];
-            const char* prevGroup = nullptr;
-            if (item > s.scroll)
-                prevGroup = CfgGroupText(s, kCfgOptionSpecs[s.visibleSpecIndexes[item - 1]]);
-            const char* curGroup = CfgGroupText(s, spec);
-            const bool groupChanged = (item == s.scroll) || !prevGroup || std::strcmp(prevGroup, curGroup) != 0;
-            if (groupChanged)
-            {
-                if (my >= y && my < y + kCfgOverlayGroupH)
-                    return;
-                y += kCfgOverlayGroupH;
-            }
-
-            if (my >= y && my < y + kCfgOverlayRowH)
-            {
-                s.selected = item;
-                if (spec.type == CfgOptionType::Bool)
-                {
-                    CfgAdjustSelected(s, +1);
-                }
-                else if ((spec.type == CfgOptionType::Float || spec.type == CfgOptionType::Int) &&
-                    mx >= kCfgSliderX && mx <= kCfgSliderX + kCfgSliderW)
-                {
-                    CfgSetNumericValueFromSlider(s, spec, mx);
-                }
-                else if (CfgIsAdjustable(spec))
-                {
-                    // Clicking the left/right side of a numeric row still gives coarse adjustment,
-                    // useful when a controller ray is too imprecise for the slider.
-                    CfgAdjustSelected(s, mx < kCfgSliderX ? -1 : +1);
-                }
-                else
-                {
-                    s.status = std::string(s.useChinese ? "\350\257\245\347\261\273\345\236\213\346\232\202\344\270\215\346\224\257\346\214\201\345\234\250 VR \351\235\242\346\235\277\344\270\255\347\274\226\350\276\221\357\274\232" : "This option is read-only in the VR panel: ") + spec.key;
-                    s.dirty = true;
-                }
-                return;
-            }
-
-            y += kCfgOverlayRowH;
+            CfgAdjustSelected(s, +1);
+        }
+        else if ((spec.type == CfgOptionType::Float || spec.type == CfgOptionType::Int) &&
+            mx >= kCfgSliderX && mx <= kCfgSliderX + kCfgSliderW)
+        {
+            CfgSetNumericValueFromSlider(s, spec, mx);
+        }
+        else if (CfgIsAdjustable(spec))
+        {
+            // Clicking the left/right side of a numeric row still gives coarse adjustment,
+            // useful when a controller ray is too imprecise for the slider.
+            CfgAdjustSelected(s, mx < kCfgSliderX ? -1 : +1);
+        }
+        else
+        {
+            s.status = std::string(s.useChinese ? "\350\257\245\347\261\273\345\236\213\346\232\202\344\270\215\346\224\257\346\214\201\345\234\250 VR \351\235\242\346\235\277\344\270\255\347\274\226\350\276\221\357\274\232" : "This option is read-only in the VR panel: ") + spec.key;
+            s.dirty = true;
         }
     }
 
@@ -1911,6 +2189,58 @@ namespace
         }
     }
 
+    static bool CfgUploadPanelTexture(CfgOverlayState& s, vr::IVROverlay* ov)
+    {
+        if (!ov)
+            ov = vr::VROverlay();
+        if (!ov || !CfgIsValidOverlayHandle(s.handle) || s.rgba.empty())
+            return false;
+
+        const bool hasBack = CfgIsValidOverlayHandle(s.backHandle);
+        vr::VROverlayHandle_t target = hasBack ? s.backHandle : s.handle;
+        vr::VROverlayHandle_t old = s.handle;
+
+        CfgApplyOverlayPlacement(s, ov);
+        CfgConfigurePanelOverlay(s, ov, target, true);
+        if (hasBack)
+            CfgConfigurePanelOverlay(s, ov, old, false);
+
+        vr::EVROverlayError err = ov->SetOverlayRaw(target, s.rgba.data(), kCfgOverlayW, kCfgOverlayH, 4);
+        if (err != vr::VROverlayError_None)
+        {
+            s.status = "SetOverlayRaw failed: " + std::to_string((int)err);
+            return false;
+        }
+
+        // Upload to the hidden/back overlay, show it above the old copy, then swap handles.
+        // Do not hide the old copy immediately; with an opaque panel it remains invisible under
+        // the new copy and prevents the one-frame blank seen when SetOverlayRaw hits a visible overlay.
+        ov->ShowOverlay(target);
+        if (hasBack)
+            std::swap(s.handle, s.backHandle);
+
+        s.panelOverlayShown = true;
+        s.needsUpload = false;
+        return true;
+    }
+
+    static void CfgShowPanelIfNeeded(CfgOverlayState& s, vr::IVROverlay* ov)
+    {
+        if (!ov)
+            ov = vr::VROverlay();
+        if (!ov || !CfgIsValidOverlayHandle(s.handle))
+            return;
+
+        CfgConfigurePanelOverlay(s, ov, s.handle, true);
+        if (CfgIsValidOverlayHandle(s.backHandle))
+            CfgConfigurePanelOverlay(s, ov, s.backHandle, false);
+        if (!s.panelOverlayShown)
+        {
+            ov->ShowOverlay(s.handle);
+            s.panelOverlayShown = true;
+        }
+    }
+
     static void CfgPollOverlayEvents(CfgOverlayState& s)
     {
         if (s.handle == vr::k_ulOverlayHandleInvalid)
@@ -1925,19 +2255,31 @@ namespace
         {
             switch (ev.eventType)
             {
+            case vr::VREvent_MouseMove:
+            {
+                int mx = (int)std::lround(ev.data.mouse.x);
+                int my = kCfgOverlayH - (int)std::lround(ev.data.mouse.y);
+                mx = (std::clamp)(mx, 0, kCfgOverlayW - 1);
+                my = (std::clamp)(my, 0, kCfgOverlayH - 1);
+                (void)mx;
+                CfgSelectHoveredRow(s, my);
+                break;
+            }
             case vr::VREvent_MouseButtonDown:
             {
                 int mx = (int)std::lround(ev.data.mouse.x);
                 int my = kCfgOverlayH - (int)std::lround(ev.data.mouse.y);
                 mx = (std::clamp)(mx, 0, kCfgOverlayW - 1);
                 my = (std::clamp)(my, 0, kCfgOverlayH - 1);
+                CfgSelectHoveredRow(s, my);
                 CfgHandleClick(s, mx, my);
                 break;
             }
             case vr::VREvent_ScrollDiscrete:
             {
-                const int delta = (ev.data.scroll.ydelta > 0.0f) ? -3 : 3;
-                CfgMoveSelection(s, delta);
+                const float ydelta = ev.data.scroll.ydelta;
+                if (std::fabs(ydelta) > 0.01f)
+                    CfgMoveSelection(s, (ydelta > 0.0f) ? -3 : 3);
                 break;
             }
             default:
@@ -1961,6 +2303,7 @@ namespace
                 if (s.visible)
                 {
                     CfgLoad(s);
+                    CfgInvalidateFixedPlacement(s);
                     CfgApplyOverlayPlacement(s);
                 }
                 s.status = s.visible
@@ -1982,31 +2325,24 @@ namespace
 
             if (!s.visible)
             {
-                ov->HideOverlay(s.handle);
+                CfgHidePanelOverlays(s, ov);
+                CfgSetBaseOverlaysBlocked(s, false, ov);
                 continue;
             }
 
             CfgHideMenuButton(s);
+            CfgSetBaseOverlaysBlocked(s, true, ov);
             CfgReloadIfConfigFileChanged(s);
             CfgApplyOverlayPlacement(s, ov);
-            // Re-assert alpha/sort every frame because some runtimes reset overlay state after recreation.
-            ov->SetOverlayAlpha(s.handle, 1.0f);
-            ov->SetOverlaySortOrder(s.handle, 100000u);
             CfgPollOverlayEvents(s);
 
             if (s.dirty)
                 CfgRender(s);
 
-            if (s.needsUpload && !s.rgba.empty())
-            {
-                vr::EVROverlayError err = ov->SetOverlayRaw(s.handle, s.rgba.data(), kCfgOverlayW, kCfgOverlayH, 4);
-                if (err == vr::VROverlayError_None)
-                    s.needsUpload = false;
-                else
-                    s.status = "SetOverlayRaw failed: " + std::to_string((int)err);
-            }
-
-            ov->ShowOverlay(s.handle);
+            if (s.needsUpload)
+                CfgUploadPanelTexture(s, ov);
+            else
+                CfgShowPanelIfNeeded(s, ov);
         }
     }
 }
