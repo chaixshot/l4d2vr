@@ -309,10 +309,15 @@ namespace
             return;
 
         // Clean desktop mirror hiding requires a post-eye D3D9 copy into desktopMirrorClean0.
-        // Under mat_queue_mode != 0, both StretchRect and quad-copy variants can enter
-        // DXVK's queued command stream from an unsafe state and crash in DxvkCsChunk::push.
-        // Treat the config value as a request and force the runtime flag off while queued
-        // rendering is active, so external mirror code falls back to the normal eye texture.
+        // Under mat_queue_mode != 0, that copy path can enter DXVK's queued command stream
+        // from an unsafe state. Keep the user-facing config as a request, but force the
+        // runtime flag off while queued rendering is active so the desktop mirror falls
+        // back to the normal eye texture.
+        //
+        // Do not rebuild all VR render targets here. Rebuilding while mat_queue_mode just
+        // switched on can create vrHUD from a transient render-context size/viewport, which
+        // makes the HUD look compressed. The clean mirror target is simply ignored while
+        // this flag is false.
         const bool requested = vr->m_DesktopMirrorHidePluginOverlaysRequested;
         const bool effective = requested && !queuedRendering;
         if (vr->m_DesktopMirrorHidePluginOverlays == effective)
@@ -320,30 +325,22 @@ namespace
 
         vr->m_DesktopMirrorHidePluginOverlays = effective;
 
+        // If textures were originally created while queued rendering was already active,
+        // desktopMirrorClean0 was not allocated. When returning to single-threaded rendering
+        // and the user still wants a clean desktop mirror, recreate then; that path has a
+        // stable HUD/backbuffer size and does not trigger the multicore HUD compression bug.
+        if (effective && !vr->m_DesktopMirrorTexture)
         {
             std::lock_guard<TextureStateMutex> textureLock(vr->m_TextureMutex);
-            if (vr->m_D9DesktopMirrorSurface)
-            {
-                vr->m_D9DesktopMirrorSurface->Release();
-                vr->m_D9DesktopMirrorSurface = nullptr;
-            }
-
-            if (vr->m_DesktopMirrorTexture)
-            {
-                vr->m_DesktopMirrorTexture->Release();
-                vr->m_DesktopMirrorTexture = nullptr;
-            }
-
-            // Force a render-target rebuild so desktopMirrorClean0 cannot remain selected
-            // as a stale/black desktop source after the effective mode changes.
             vr->m_CreatedVRTextures.store(false, std::memory_order_release);
             vr->m_CreatingTextureID = VR::Texture_None;
         }
 
         if (vr->m_RenderPipelineDebugLog)
         {
-            Game::logMsg("[VR][DesktopMirror] HidePluginOverlays requested=%d effective=%d queue=%d; clean RT invalidated",
-                requested ? 1 : 0, effective ? 1 : 0, queuedRendering ? 1 : 0);
+            Game::logMsg("[VR][DesktopMirror] HidePluginOverlays requested=%d effective=%d queue=%d; fullRecreate=%d",
+                requested ? 1 : 0, effective ? 1 : 0, queuedRendering ? 1 : 0,
+                (effective && !vr->m_DesktopMirrorTexture) ? 1 : 0);
         }
     }
 }
