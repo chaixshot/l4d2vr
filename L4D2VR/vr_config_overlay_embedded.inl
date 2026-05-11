@@ -128,38 +128,6 @@ namespace
         { "ViewmodelAdjustEnabled", CfgOptionType::Bool, "\xE4\xBA\xA4\xE4\xBA\x92 / \xE7\xBB\x84\xE5\x90\x88\xE9\x94\xAE", "\xE5\x90\xAF\xE7\x94\xA8\xE6\xAD\xA6\xE5\x99\xA8\xE4\xBD\x8D\xE7\xBD\xAE\xE8\xB0\x83\xE6\x95\xB4", 0.0f, 0.0f, "false" },
         { "ViewmodelAdjustCombo", CfgOptionType::String, "\xE4\xBA\xA4\xE4\xBA\x92 / \xE7\xBB\x84\xE5\x90\x88\xE9\x94\xAE", "\xE6\xAD\xA6\xE5\x99\xA8\xE4\xBD\x8D\xE7\xBD\xAE\xE8\xB0\x83\xE6\x95\xB4\xE7\xBB\x84\xE5\x90\x88\xE9\x94\xAE", 0.0f, 0.0f, "Reload+SecondaryAttack" },
         { "ViewmodelDisableMoveBob", CfgOptionType::Bool, "\xE4\xBA\xA4\xE4\xBA\x92 / \xE7\xBB\x84\xE5\x90\x88\xE9\x94\xAE", "\xE7\xA6\x81\xE7\x94\xA8\xE6\xAD\xA6\xE5\x99\xA8\xE7\xA7\xBB\xE5\x8A\xA8\xE6\x99\x83\xE5\x8A\xA8", 0.0f, 0.0f, "false" },
-        { "SpeechToTextEnabled", CfgOptionType::Bool, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE5\x90\xAF\xE7\x94\xA8\xE8\xAF\xAD\xE9\x9F\xB3\xE8\xBD\xAC\xE6\x96\x87\xE5\xAD\x97\xE8\x81\x8A\xE5\xA4\xA9", 0.0f, 0.0f, "false" },
-        { "SpeechToTextSendChatEnabled", CfgOptionType::Bool, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE8\xBD\xAC\xE5\x86\x99\xE5\x90\x8E\xE5\x8F\x91\xE9\x80\x81\xE5\x88\xB0\xE8\x81\x8A\xE5\xA4\xA9", 0.0f, 0.0f, "true" },
-        { "SpeechToTextSendVoiceEnabled", CfgOptionType::Bool, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE8\xBD\xAC\xE5\x86\x99\xE5\x90\x8E\xE5\x90\x88\xE6\x88\x90\xE5\xB9\xB6\xE5\x8F\x91\xE8\xAF\xAD\xE9\x9F\xB3", 0.0f, 0.0f, "false" },
-        { "SpeechToTextSendVoiceLoopbackEnabled", CfgOptionType::Bool, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE8\xAF\xAD\xE9\x9F\xB3\xE5\x8F\x91\xE9\x80\x81\xE6\x9C\xAC\xE5\x9C\xB0\xE5\x9B\x9E\xE5\x90\xAC", 0.0f, 0.0f, "false" },
-        { "SpeechToTextSendVoiceCommandPrefix", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE8\xAF\xAD\xE9\x9F\xB3\xE5\x8F\x91\xE9\x80\x81\xE6\x9C\x8D\xE5\x8A\xA1\xE5\x91\xBD\xE4\xBB\xA4", 0.0f, 0.0f, "" },
-        { "SpeechToTextSendVoiceModel", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE8\xAF\xAD\xE9\x9F\xB3\xE5\x8F\x91\xE9\x80\x81\xE9\x85\x8D\xE7\xBD\xAE\xE8\xB7\xAF\xE5\xBE\x84", 0.0f, 0.0f, "" },
-        { "SpeechToTextSendVoiceWorkingDir", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE8\xAF\xAD\xE9\x9F\xB3\xE5\x8F\x91\xE9\x80\x81\xE5\xB7\xA5\xE4\xBD\x9C\xE7\x9B\xAE\xE5\xBD\x95", 0.0f, 0.0f, "" },
-        { "SpeechToTextSendVoiceReferenceAudio", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE8\xAF\xAD\xE9\x9F\xB3\xE5\x8F\x91\xE9\x80\x81\xE5\x8F\x82\xE8\x80\x83\xE9\x9F\xB3\xE9\xA2\x91", 0.0f, 0.0f, "" },
-        { "SpeechToTextSendVoicePromptText", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE8\xAF\xAD\xE9\x9F\xB3\xE5\x8F\x91\xE9\x80\x81\xE5\x8F\x82\xE8\x80\x83\xE6\x96\x87\xE6\x9C\xAC", 0.0f, 0.0f, "" },
-        { "SpeechToTextSendVoicePromptLanguage", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE8\xAF\xAD\xE9\x9F\xB3\xE5\x8F\x91\xE9\x80\x81\xE5\x8F\x82\xE8\x80\x83\xE8\xAF\xAD\xE8\xA8\x80", 0.0f, 0.0f, "" },
-        { "SpeechToTextSendVoiceLanguage", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE8\xAF\xAD\xE9\x9F\xB3\xE5\x8F\x91\xE9\x80\x81\xE6\x96\x87\xE6\x9C\xAC\xE8\xAF\xAD\xE8\xA8\x80", 0.0f, 0.0f, "" },
-        { "SpeechToTextSendVoiceTextSplitMethod", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE8\xAF\xAD\xE9\x9F\xB3\xE5\x8F\x91\xE9\x80\x81\xE5\x88\x87\xE5\x88\x86\xE6\x96\xB9\xE5\xBC\x8F", 0.0f, 0.0f, "" },
-        { "SpeechToTextMinimumRecordSeconds", CfgOptionType::Float, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE6\x9C\x80\xE7\x9F\xAD\xE5\xBD\x95\xE9\x9F\xB3\xE6\x97\xB6\xE9\x95\xBF", 0.05f, 5.0f, "0.30" },
-        { "SpeechToTextCommandPrefix", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "Whisper \xE5\x91\xBD\xE4\xBB\xA4\xE5\x89\x8D\xE7\xBC\x80", 0.0f, 0.0f, "VR\\speech\\whisper-cli.exe" },
-        { "SpeechToTextModel", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "Whisper \xE6\xA8\xA1\xE5\x9E\x8B\xE8\xB7\xAF\xE5\xBE\x84", 0.0f, 0.0f, "VR\\speech\\models\\ggml-base.bin" },
-        { "SpeechToTextLanguage", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "Whisper \xE8\xAF\xAD\xE8\xA8\x80", 0.0f, 0.0f, "zh" },
-        { "TextToSpeechEnabled", CfgOptionType::Bool, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE5\x90\xAF\xE7\x94\xA8\xE6\x96\x87\xE6\x9C\xAC\xE8\xBD\xAC\xE8\xAF\xAD\xE9\x9F\xB3", 0.0f, 0.0f, "false" },
-        { "TextToSpeechSurvivorOnly", CfgOptionType::Bool, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE5\x8F\xAA\xE6\x9C\x97\xE8\xAF\xBB\xE5\xB9\xB8\xE5\xAD\x98\xE8\x80\x85\xE5\x8F\x91\xE8\xA8\x80", 0.0f, 0.0f, "true" },
-        { "TextToSpeechIncludeSpeakerName", CfgOptionType::Bool, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE6\x9C\x97\xE8\xAF\xBB\xE6\x97\xB6\xE5\xB8\xA6\xE6\x98\xB5\xE7\xA7\xB0", 0.0f, 0.0f, "true" },
-        { "TextToSpeechSkipOwnMessages", CfgOptionType::Bool, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE8\xB7\xB3\xE8\xBF\x87\xE8\x87\xAA\xE5\xB7\xB1\xE6\xB6\x88\xE6\x81\xAF", 0.0f, 0.0f, "true" },
-        { "TextToSpeechVolume", CfgOptionType::Float, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "TTS \xE9\x9F\xB3\xE9\x87\x8F", 0.0f, 2.0f, "1.0" },
-        { "TextToSpeechWhitelistRegexes", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE6\xAD\xA3\xE5\x88\x99\xE6\x92\xAD\xE6\x94\xBE\xE7\x99\xBD\xE5\x90\x8D\xE5\x8D\x95", 0.0f, 0.0f, "" },
-        { "TextToSpeechWhitelistSeparator", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE7\x99\xBD\xE5\x90\x8D\xE5\x8D\x95\xE5\x88\x86\xE9\x9A\x94\xE7\xAC\xA6", 0.0f, 0.0f, "__VR_REGEX_SPLIT__" },
-        { "TextToSpeechCommandPrefix", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "GPT-SoVITS \xE6\x9C\x8D\xE5\x8A\xA1\xE5\x91\xBD\xE4\xBB\xA4", 0.0f, 0.0f, "python api_v2.py" },
-        { "TextToSpeechModel", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "GPT-SoVITS \xE9\x85\x8D\xE7\xBD\xAE\xE8\xB7\xAF\xE5\xBE\x84", 0.0f, 0.0f, "VR\\speech\\GPT-SoVITS\\GPT_SoVITS\\configs\\tts_infer.yaml" },
-        { "TextToSpeechWorkingDir", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "GPT-SoVITS \xE5\xB7\xA5\xE4\xBD\x9C\xE7\x9B\xAE\xE5\xBD\x95", 0.0f, 0.0f, "VR\\speech\\GPT-SoVITS" },
-        { "TextToSpeechServerPort", CfgOptionType::Int, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "GPT-SoVITS \xE7\xAB\xAF\xE5\x8F\xA3", 1.0f, 65535.0f, "9880" },
-        { "TextToSpeechReferenceAudio", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE5\x8F\x82\xE8\x80\x83\xE9\x9F\xB3\xE9\xA2\x91\xE8\xB7\xAF\xE5\xBE\x84", 0.0f, 0.0f, "VR\\speech\\GPT-SoVITS\\reference.wav" },
-        { "TextToSpeechPromptText", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE5\x8F\x82\xE8\x80\x83\xE9\x9F\xB3\xE9\xA2\x91\xE6\x96\x87\xE6\x9C\xAC", 0.0f, 0.0f, "" },
-        { "TextToSpeechPromptLanguage", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE5\x8F\x82\xE8\x80\x83\xE9\x9F\xB3\xE9\xA2\x91\xE8\xAF\xAD\xE8\xA8\x80", 0.0f, 0.0f, "zh" },
-        { "TextToSpeechLanguage", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE8\x81\x8A\xE5\xA4\xA9\xE6\x96\x87\xE6\x9C\xAC\xE8\xAF\xAD\xE8\xA8\x80", 0.0f, 0.0f, "zh" },
-        { "TextToSpeechTextSplitMethod", CfgOptionType::String, "\xE8\xAF\xAD\xE9\x9F\xB3 / \xE6\x9C\x97\xE8\xAF\xBB", "\xE6\x96\x87\xE6\x9C\xAC\xE5\x88\x87\xE5\x88\x86\xE6\x96\xB9\xE5\xBC\x8F", 0.0f, 0.0f, "cut5" },
         { "AutoRepeatSemiAutoFire", CfgOptionType::Bool, "\xE6\xAD\xA6\xE5\x99\xA8 / \xE5\xBC\x80\xE7\x81\xAB", "\xE5\x8D\x95\xE5\x8F\x91\xE6\x9E\xAA\xE9\x95\xBF\xE6\x8C\x89\xE8\xBF\x9E\xE5\x8F\x91", 0.0f, 0.0f, "false" },
         { "AutoRepeatSemiAutoFireHz", CfgOptionType::Float, "\xE6\xAD\xA6\xE5\x99\xA8 / \xE5\xBC\x80\xE7\x81\xAB", "\xE8\xBF\x9E\xE7\x82\xB9\xE9\xA2\x91\xE7\x8E\x87 (Hz)", 1.0f, 12.0f, "20.0" },
         { "AutoRepeatSprayPushEnabled", CfgOptionType::Bool, "\xE6\xAD\xA6\xE5\x99\xA8 / \xE5\xBC\x80\xE7\x81\xAB", "\xE8\x87\xAA\xE5\x8A\xA8 Spray-Push", 0.0f, 0.0f, "false" },
@@ -313,38 +281,6 @@ namespace
         { "ViewmodelAdjustEnabled", "Interaction / Combos", "\344\272\244\344\272\222 / \347\273\204\345\220\210\351\224\256", "Enable Weapon Position Adjustment", "\345\220\257\347\224\250\346\255\246\345\231\250\344\275\215\347\275\256\350\260\203\346\225\264", "Allows saving manual weapon model offsets in VR.", "\345\205\201\350\256\270\345\234\250VR\344\270\255\344\277\235\345\255\230\346\255\246\345\231\250\346\250\241\345\236\213\347\232\204\344\275\215\347\275\256\345\201\217\347\247\273\343\200\202", "", "" },
         { "ViewmodelAdjustCombo", "Interaction / Combos", "\344\272\244\344\272\222 / \347\273\204\345\220\210\351\224\256", "Weapon Position Adjust Combo", "\346\255\246\345\231\250\344\275\215\347\275\256\350\260\203\346\225\264\347\273\204\345\220\210\351\224\256", "Action combo to toggle weapon position adjustment mode.", "\347\224\250\344\272\216\345\210\207\346\215\242\346\255\246\345\231\250\344\275\215\347\275\256\350\260\203\346\225\264\346\250\241\345\274\217\347\232\204\347\273\204\345\220\210\345\212\250\344\275\234\343\200\202", "Set to \"false\" to disable if you never edit offsets.", "\350\213\245\344\270\215\351\234\200\350\246\201\345\217\257\350\256\276\344\270\272 \"false\" \347\246\201\347\224\250\343\200\202" },
         { "ViewmodelDisableMoveBob", "Interaction / Combos", "\344\272\244\344\272\222 / \347\273\204\345\220\210\351\224\256", "Disable Weapon Move Bob", "\347\246\201\347\224\250\346\255\246\345\231\250\347\247\273\345\212\250\346\231\203\345\212\250", "Disables movement bob/sway on the first-person weapon model.", "\347\246\201\347\224\250\347\254\254\344\270\200\344\272\272\347\247\260\346\255\246\345\231\250\346\250\241\345\236\213\351\232\217\347\247\273\345\212\250\344\272\247\347\224\237\347\232\204\346\231\203\345\212\250/\346\221\206\345\212\250\343\200\202", "When enabled, the weapon model appears more stable while moving.", "\345\274\200\345\220\257\345\220\216\357\274\214\347\247\273\345\212\250\346\227\266\346\255\246\345\231\250\346\250\241\345\236\213\344\274\232\346\233\264\347\250\263\345\256\232\343\200\202" },
-        { "SpeechToTextEnabled", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Enable Speech-to-Text Chat", "\345\220\257\347\224\250\350\257\255\351\237\263\350\275\254\346\226\207\345\255\227\350\201\212\345\244\251", "Holding the dedicated SteamVR Speech To Text action records microphone audio. Releasing it transcribes the clip with Whisper and can send the result to chat.", "\346\214\211\344\275\217 SteamVR \351\207\214\345\215\225\347\213\254\346\263\250\345\206\214\347\232\204 Speech To Text \345\212\250\344\275\234\346\227\266\345\275\225\345\210\266\351\272\246\345\205\213\351\243\216\357\274\233\346\235\276\345\274\200\345\220\216\347\224\250 Whisper \350\275\254\345\206\231\357\274\214\345\271\266\345\217\257\346\212\212\347\273\223\346\236\234\345\217\221\345\210\260\350\201\212\345\244\251\343\200\202", "Bind the action in SteamVR Input. Whisper is launched only when a recording is submitted.", "\350\257\267\345\234\250 SteamVR Input \351\207\214\347\273\231\350\277\231\344\270\252\345\212\250\344\275\234\347\273\221\351\224\256\343\200\202\345\217\252\346\234\211\345\234\250\346\217\220\344\272\244\345\275\225\351\237\263\346\227\266\346\211\215\344\274\232\345\220\257\345\212\250 Whisper\343\200\202" },
-        { "SpeechToTextSendChatEnabled", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Send Transcript to Chat", "\350\275\254\345\206\231\345\220\216\345\217\221\351\200\201\345\210\260\350\201\212\345\244\251", "When enabled, the recognized text is sent with Source's say command after release.", "\345\274\200\345\220\257\345\220\216\357\274\214\350\257\206\345\210\253\345\207\272\347\232\204\346\226\207\346\234\254\344\274\232\345\234\250\346\235\276\345\274\200\346\214\211\351\224\256\345\220\216\351\200\232\350\277\207 Source \347\232\204 say \345\221\275\344\273\244\345\217\221\345\210\260\350\201\212\345\244\251\343\200\202", "Turn this off if you only want to verify recognition in vrmod_log.txt first.", "\345\246\202\346\236\234\344\275\240\345\217\252\346\203\263\345\205\210\345\234\250 vrmod_log.txt \351\207\214\351\252\214\350\257\201\350\257\206\345\210\253\347\273\223\346\236\234\357\274\214\345\217\257\344\273\245\345\205\210\345\205\263\346\216\211\343\200\202" },
-        { "SpeechToTextSendVoiceEnabled", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Synthesize and Send Voice", "\350\275\254\345\206\231\345\220\216\345\220\210\346\210\220\345\271\266\345\217\221\350\257\255\351\237\263", "After Whisper returns text, GPT-SoVITS synthesizes the transcript, plays it locally, and injects it into Source voice chat.", "Whisper \350\277\224\345\233\236\346\226\207\346\234\254\345\220\216\357\274\214\350\260\203\347\224\250 GPT-SoVITS \345\220\210\346\210\220\350\277\231\345\217\245\345\206\205\345\256\271\357\274\214\344\270\200\350\276\271\346\234\254\345\234\260\346\222\255\346\224\276\357\274\214\344\270\200\350\276\271\346\263\250\345\205\245\345\210\260 Source \346\270\270\346\210\217\350\257\255\351\237\263\343\200\202", "You can leave the dedicated voice-send TTS overrides blank to inherit the normal chat TTS profile, or fill them to use a different voice just for outbound STT audio.", "\344\270\213\351\235\242\347\232\204\342\200\234\350\257\255\351\237\263\345\217\221\351\200\201\344\270\223\347\224\250 TTS \350\246\206\347\233\226\351\241\271\342\200\235\347\225\231\347\251\272\346\227\266\344\274\232\347\273\247\346\211\277\346\231\256\351\200\232\350\201\212\345\244\251\346\234\227\350\257\273\351\205\215\347\275\256\357\274\233\345\241\253\344\272\206\344\271\213\345\220\216\357\274\214\345\217\252\345\257\271 STT \345\217\221\350\257\255\351\237\263\350\277\231\344\270\200\350\267\257\344\275\277\347\224\250\345\217\246\344\270\200\345\245\227\345\243\260\347\272\277\343\200\202" },
-        { "SpeechToTextSendVoiceLoopbackEnabled", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Voice Send Loopback", "\350\257\255\351\237\263\345\217\221\351\200\201\346\234\254\345\234\260\345\233\236\345\220\254", "When enabled, auto-sent STT voice temporarily turns on Source's voice_loopback so you can hear the game voice channel itself.", "\345\274\200\345\220\257\345\220\216\357\274\214\350\207\252\345\212\250\345\217\221\351\200\201\347\232\204 STT \350\257\255\351\237\263\344\274\232\344\270\264\346\227\266\346\211\223\345\274\200 Source \347\232\204 voice_loopback\357\274\214\350\256\251\344\275\240\350\203\275\345\220\254\345\210\260\346\270\270\346\210\217\350\257\255\351\237\263\351\200\232\351\201\223\346\234\254\350\272\253\343\200\202", "This is for verification and may sound like a second delayed copy on top of the normal local playback.", "\350\277\231\346\230\257\351\252\214\350\257\201\347\224\250\345\274\200\345\205\263\357\274\233\351\231\244\344\272\206\346\255\243\345\270\270\346\234\254\345\234\260\346\222\255\346\224\276\345\244\226\357\274\214\344\275\240\350\277\230\345\217\257\350\203\275\345\220\254\345\210\260\344\270\200\344\273\275\347\250\215\345\276\256\345\273\266\350\277\237\347\232\204\347\254\254\344\272\214\344\273\275\345\233\236\345\243\260\343\200\202" },
-        { "SpeechToTextSendVoiceCommandPrefix", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Voice Send Server Command", "\350\257\255\351\237\263\345\217\221\351\200\201\346\234\215\345\212\241\345\221\275\344\273\244", "Optional GPT-SoVITS launch command override for STT voice-send synthesis.", "STT \345\217\221\350\257\255\351\237\263\344\270\223\347\224\250\347\232\204 GPT-SoVITS \345\220\257\345\212\250\345\221\275\344\273\244\350\246\206\347\233\226\351\241\271\343\200\202", "Leave blank to inherit TextToSpeechCommandPrefix.", "\347\225\231\347\251\272\345\210\231\347\273\247\346\211\277 TextToSpeechCommandPrefix\343\200\202" },
-        { "SpeechToTextSendVoiceModel", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Voice Send Config Path", "\350\257\255\351\237\263\345\217\221\351\200\201\351\205\215\347\275\256\350\267\257\345\276\204", "Optional GPT-SoVITS tts_infer.yaml override for STT voice-send synthesis.", "STT \345\217\221\350\257\255\351\237\263\344\270\223\347\224\250\347\232\204 GPT-SoVITS tts_infer.yaml \350\246\206\347\233\226\351\241\271\343\200\202", "Leave blank to inherit TextToSpeechModel.", "\347\225\231\347\251\272\345\210\231\347\273\247\346\211\277 TextToSpeechModel\343\200\202" },
-        { "SpeechToTextSendVoiceWorkingDir", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Voice Send Working Dir", "\350\257\255\351\237\263\345\217\221\351\200\201\345\267\245\344\275\234\347\233\256\345\275\225", "Optional GPT-SoVITS working-directory override for STT voice-send synthesis.", "STT \345\217\221\350\257\255\351\237\263\344\270\223\347\224\250\347\232\204 GPT-SoVITS \345\267\245\344\275\234\347\233\256\345\275\225\350\246\206\347\233\226\351\241\271\343\200\202", "Leave blank to inherit TextToSpeechWorkingDir.", "\347\225\231\347\251\272\345\210\231\347\273\247\346\211\277 TextToSpeechWorkingDir\343\200\202" },
-        { "SpeechToTextSendVoiceReferenceAudio", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Voice Send Reference Audio", "\350\257\255\351\237\263\345\217\221\351\200\201\345\217\202\350\200\203\351\237\263\351\242\221", "Optional reference wav override for STT voice-send synthesis.", "STT \345\217\221\350\257\255\351\237\263\344\270\223\347\224\250\347\232\204\345\217\202\350\200\203 wav \350\246\206\347\233\226\351\241\271\343\200\202", "Leave blank to inherit TextToSpeechReferenceAudio.", "\347\225\231\347\251\272\345\210\231\347\273\247\346\211\277 TextToSpeechReferenceAudio\343\200\202" },
-        { "SpeechToTextSendVoicePromptText", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Voice Send Prompt Text", "\350\257\255\351\237\263\345\217\221\351\200\201\345\217\202\350\200\203\346\226\207\346\234\254", "Optional prompt_text override for STT voice-send synthesis.", "STT \345\217\221\350\257\255\351\237\263\344\270\223\347\224\250\347\232\204 prompt_text \350\246\206\347\233\226\351\241\271\343\200\202", "Leave blank to inherit TextToSpeechPromptText.", "\347\225\231\347\251\272\345\210\231\347\273\247\346\211\277 TextToSpeechPromptText\343\200\202" },
-        { "SpeechToTextSendVoicePromptLanguage", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Voice Send Prompt Language", "\350\257\255\351\237\263\345\217\221\351\200\201\345\217\202\350\200\203\350\257\255\350\250\200", "Optional prompt-language override for STT voice-send synthesis.", "STT \345\217\221\350\257\255\351\237\263\344\270\223\347\224\250\347\232\204\345\217\202\350\200\203\350\257\255\350\250\200\350\246\206\347\233\226\351\241\271\343\200\202", "Leave blank to inherit TextToSpeechPromptLanguage.", "\347\225\231\347\251\272\345\210\231\347\273\247\346\211\277 TextToSpeechPromptLanguage\343\200\202" },
-        { "SpeechToTextSendVoiceLanguage", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Voice Send Text Language", "\350\257\255\351\237\263\345\217\221\351\200\201\346\226\207\346\234\254\350\257\255\350\250\200", "Optional input-text language override for STT voice-send synthesis.", "STT \345\217\221\350\257\255\351\237\263\344\270\223\347\224\250\347\232\204\350\276\223\345\205\245\346\226\207\346\234\254\350\257\255\350\250\200\350\246\206\347\233\226\351\241\271\343\200\202", "Leave blank to inherit TextToSpeechLanguage.", "\347\225\231\347\251\272\345\210\231\347\273\247\346\211\277 TextToSpeechLanguage\343\200\202" },
-        { "SpeechToTextSendVoiceTextSplitMethod", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Voice Send Split Method", "\350\257\255\351\237\263\345\217\221\351\200\201\345\210\207\345\210\206\346\226\271\345\274\217", "Optional v2 text_split_method override for STT voice-send synthesis.", "STT \345\217\221\350\257\255\351\237\263\344\270\223\347\224\250\347\232\204 v2 text_split_method \350\246\206\347\233\226\351\241\271\343\200\202", "Leave blank to inherit TextToSpeechTextSplitMethod.", "\347\225\231\347\251\272\345\210\231\347\273\247\346\211\277 TextToSpeechTextSplitMethod\343\200\202" },
-        { "SpeechToTextMinimumRecordSeconds", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Minimum Record Seconds", "\346\234\200\347\237\255\345\275\225\351\237\263\346\227\266\351\225\277", "Clips shorter than this are discarded instead of being transcribed.", "\347\237\255\344\272\216\350\277\231\344\270\252\346\227\266\351\225\277\347\232\204\345\275\225\351\237\263\344\274\232\347\233\264\346\216\245\344\270\242\345\274\203\357\274\214\344\270\215\350\277\233\345\205\245\350\275\254\345\206\231\343\200\202", "Useful for filtering accidental taps on the speech button.", "\345\217\257\347\224\250\344\272\216\350\277\207\346\273\244\350\257\257\350\247\246\346\214\211\351\224\256\351\200\240\346\210\220\347\232\204\346\236\201\347\237\255\345\275\225\351\237\263\343\200\202" },
-        { "SpeechToTextCommandPrefix", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Whisper Command Prefix", "Whisper \345\221\275\344\273\244\345\211\215\347\274\200", "Command used to launch local transcription. The default expects whisper.cpp's CLI under VR\\speech.", "\347\224\250\344\272\216\345\220\257\345\212\250\346\234\254\345\234\260\350\275\254\345\206\231\347\232\204\345\221\275\344\273\244\343\200\202\351\273\230\350\256\244\345\200\274\345\201\207\345\256\232 whisper.cpp \347\232\204 CLI \346\224\276\345\234\250 VR\\speech \344\270\213\343\200\202", "Examples: VR\\speech\\whisper-cli.exe or a custom wrapper command.", "\347\244\272\344\276\213\357\274\232VR\\speech\\whisper-cli.exe\357\274\214\346\210\226\344\275\240\350\207\252\345\267\261\347\232\204\345\214\205\350\243\205\345\221\275\344\273\244\343\200\202" },
-        { "SpeechToTextModel", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Whisper Model Path", "Whisper \346\250\241\345\236\213\350\267\257\345\276\204", "Path to the local Whisper model file. Relative paths are resolved from the VR folder when possible.", "\346\234\254\345\234\260 Whisper \346\250\241\345\236\213\346\226\207\344\273\266\350\267\257\345\276\204\343\200\202\347\233\270\345\257\271\350\267\257\345\276\204\344\274\232\344\274\230\345\205\210\346\214\211 VR \347\233\256\345\275\225\350\247\243\346\236\220\343\200\202", "Example: VR\\speech\\models\\ggml-base.bin", "\347\244\272\344\276\213\357\274\232VR\\speech\\models\\ggml-base.bin" },
-        { "SpeechToTextLanguage", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Whisper Language", "Whisper \350\257\255\350\250\200", "Language hint passed to Whisper. Leave it as zh for Chinese or change it to en/ja/etc.", "\344\274\240\347\273\231 Whisper \347\232\204\350\257\255\350\250\200\346\217\220\347\244\272\343\200\202\344\270\255\346\226\207\347\224\250 zh\357\274\214\344\271\237\345\217\257\344\273\245\346\224\271\346\210\220 en\343\200\201ja \347\255\211\343\200\202", "Uses Whisper's CLI language code format.", "\344\275\277\347\224\250 Whisper CLI \347\232\204\350\257\255\350\250\200\344\273\243\347\240\201\346\240\274\345\274\217\343\200\202" },
-        { "TextToSpeechEnabled", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Enable Text-to-Speech", "\345\220\257\347\224\250\346\226\207\346\234\254\350\275\254\350\257\255\351\237\263", "Reads captured chat lines aloud with a local GPT-SoVITS voice.", "\347\224\250\346\234\254\345\234\260 GPT-SoVITS \350\257\255\351\237\263\346\212\212\346\215\225\350\216\267\345\210\260\347\232\204\350\201\212\345\244\251\345\206\205\345\256\271\346\234\227\350\257\273\345\207\272\346\235\245\343\200\202", "The GPT-SoVITS server is launched only when this switch is on and a chat line arrives.", "\345\217\252\346\234\211\345\274\200\345\205\263\346\211\223\345\274\200\344\270\224\346\224\266\345\210\260\350\201\212\345\244\251\346\227\266\357\274\214\346\211\215\344\274\232\345\220\257\345\212\250 GPT-SoVITS \346\234\215\345\212\241\345\271\266\345\212\240\350\275\275\346\250\241\345\236\213\343\200\202" },
-        { "TextToSpeechSurvivorOnly", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Only Read Survivor Lines", "\345\217\252\346\234\227\350\257\273\345\271\270\345\255\230\350\200\205\345\217\221\350\250\200", "By default, only survivor team player chat is read aloud in full.", "\351\273\230\350\256\244\346\203\205\345\206\265\344\270\213\357\274\214\345\217\252\346\234\211\345\271\270\345\255\230\350\200\205\351\230\237\344\274\215\347\216\251\345\256\266\350\257\264\347\232\204\350\257\235\344\274\232\350\242\253\346\225\264\345\217\245\346\234\227\350\257\273\343\200\202", "Regex whitelist matches below can still force playback for non-survivor or system text.", "\344\270\213\351\235\242\347\232\204\346\255\243\345\210\231\347\231\275\345\220\215\345\215\225\345\221\275\344\270\255\345\220\216\357\274\214\351\235\236\345\271\270\345\255\230\350\200\205\346\210\226\347\263\273\347\273\237\346\226\207\346\234\254\344\271\237\345\217\257\344\273\245\350\242\253\345\274\272\345\210\266\346\222\255\346\224\276\343\200\202" },
-        { "TextToSpeechIncludeSpeakerName", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Include Speaker Name", "\346\234\227\350\257\273\346\227\266\345\270\246\346\230\265\347\247\260", "Prefixes the spoken line with the sender's name when available.", "\345\234\250\346\234\211\346\230\265\347\247\260\346\227\266\357\274\214\346\234\227\350\257\273\345\206\205\345\256\271\345\211\215\344\274\232\345\205\210\345\212\240\344\270\212\345\217\221\351\200\201\350\200\205\345\220\215\345\255\227\343\200\202", "", "" },
-        { "TextToSpeechSkipOwnMessages", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Skip Own Messages", "\350\267\263\350\277\207\350\207\252\345\267\261\346\266\210\346\201\257", "Prevents the game from reading back lines sent by your own player name.", "\351\201\277\345\205\215\346\212\212\344\275\240\350\207\252\345\267\261\346\230\265\347\247\260\345\217\221\345\207\272\347\232\204\350\201\212\345\244\251\345\217\210\346\234\227\350\257\273\344\270\200\351\201\215\343\200\202", "", "" },
-        { "TextToSpeechVolume", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "TTS Volume", "TTS \351\237\263\351\207\217", "Playback gain for synthesized chat lines after GPT-SoVITS returns the wav.", "GPT-SoVITS \347\224\237\346\210\220 wav \344\271\213\345\220\216\357\274\214\346\222\255\346\224\276\345\210\260\346\234\254\345\234\260\345\217\215\351\246\210\351\237\263\351\242\221\351\200\232\351\201\223\346\227\266\344\275\277\347\224\250\347\232\204\351\237\263\351\207\217\345\200\215\347\216\207\343\200\202", "1.0 keeps the generated wav at normal playback gain.", "1.0 \350\241\250\347\244\272\346\214\211\347\224\237\346\210\220 wav \347\232\204\346\255\243\345\270\270\345\242\236\347\233\212\346\222\255\346\224\276\343\200\202" },
-        { "TextToSpeechWhitelistRegexes", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Regex Playback Whitelist", "\346\255\243\345\210\231\346\222\255\346\224\276\347\231\275\345\220\215\345\215\225", "Literal delimiter-separated regex rules. If a rule matches, only the matched portion is spoken.", "\344\275\277\347\224\250\345\255\227\351\235\242\345\210\206\351\232\224\347\254\246\350\277\236\346\216\245\347\232\204\345\244\232\346\235\241\346\255\243\345\210\231\350\247\204\345\210\231\343\200\202\345\217\252\350\246\201\346\237\220\346\235\241\345\221\275\344\270\255\357\274\214\345\260\261\345\217\252\346\234\227\350\257\273\350\242\253\345\214\271\351\205\215\345\210\260\347\232\204\351\202\243\344\270\200\351\203\250\345\210\206\343\200\202", "The last rule has the highest priority. This can override survivor-only filtering for system text.", "\346\234\200\345\220\216\344\270\200\346\235\241\350\247\204\345\210\231\344\274\230\345\205\210\347\272\247\346\234\200\351\253\230\343\200\202\345\256\203\345\217\257\344\273\245\350\246\206\347\233\226\342\200\234\345\217\252\346\222\255\345\271\270\345\255\230\350\200\205\342\200\235\350\247\204\345\210\231\357\274\214\350\256\251\347\263\273\347\273\237\346\226\207\346\234\254\347\232\204\345\214\271\351\205\215\347\211\207\346\256\265\344\271\237\350\203\275\350\242\253\346\234\227\350\257\273\343\200\202" },
-        { "TextToSpeechWhitelistSeparator", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Whitelist Separator", "\347\231\275\345\220\215\345\215\225\345\210\206\351\232\224\347\254\246", "Literal separator string used to split the regex whitelist into multiple rules.", "\347\224\250\344\272\216\346\212\212\346\255\243\345\210\231\347\231\275\345\220\215\345\215\225\346\213\206\346\210\220\345\244\232\346\235\241\350\247\204\345\210\231\347\232\204\345\255\227\351\235\242\345\210\206\351\232\224\347\254\246\345\255\227\347\254\246\344\270\262\343\200\202", "Default: __VR_REGEX_SPLIT__. Pick any token that does not appear inside your regexes.", "\351\273\230\350\256\244\345\200\274\357\274\232__VR_REGEX_SPLIT__\343\200\202\345\217\252\350\246\201\350\277\231\344\270\252\346\240\207\350\256\260\346\234\254\350\272\253\344\270\215\345\207\272\347\216\260\345\234\250\346\255\243\345\210\231\351\207\214\357\274\214\345\260\261\344\270\215\344\274\232\345\275\261\345\223\215\346\255\243\345\210\231\350\257\255\346\263\225\343\200\202" },
-        { "TextToSpeechCommandPrefix", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "GPT-SoVITS Server Command", "GPT-SoVITS \346\234\215\345\212\241\345\221\275\344\273\244", "Command used to start GPT-SoVITS inside the configured working directory.", "\347\224\250\344\272\216\345\234\250\346\214\207\345\256\232\345\267\245\344\275\234\347\233\256\345\275\225\351\207\214\345\220\257\345\212\250 GPT-SoVITS \347\232\204\345\221\275\344\273\244\343\200\202", "Example: python api_v2.py.", "\347\244\272\344\276\213\357\274\232python api_v2.py\343\200\202" },
-        { "TextToSpeechModel", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "GPT-SoVITS Config Path", "GPT-SoVITS \351\205\215\347\275\256\350\267\257\345\276\204", "Path to the tts_infer.yaml for the voice you want to run.", "\350\277\231\351\207\214\345\241\253\350\246\201\350\277\220\350\241\214\345\243\260\347\272\277\345\257\271\345\272\224\347\232\204 tts_infer.yaml \350\267\257\345\276\204\343\200\202", "Example: VR\\speech\\GPT-SoVITS\\GPT_SoVITS\\configs\\tts_infer.yaml", "\347\244\272\344\276\213\357\274\232VR\\speech\\GPT-SoVITS\\GPT_SoVITS\\configs\\tts_infer.yaml" },
-        { "TextToSpeechWorkingDir", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "GPT-SoVITS Working Dir", "GPT-SoVITS \345\267\245\344\275\234\347\233\256\345\275\225", "Folder that contains api_v2.py and the GPT_SoVITS package. The server starts from here.", "\345\214\205\345\220\253 api_v2.py \345\222\214 GPT_SoVITS \345\214\205\347\232\204\347\233\256\345\275\225\343\200\202\346\234\215\345\212\241\344\274\232\344\273\216\350\277\231\351\207\214\345\220\257\345\212\250\343\200\202", "Example: VR\\speech\\GPT-SoVITS", "\347\244\272\344\276\213\357\274\232VR\\speech\\GPT-SoVITS" },
-        { "TextToSpeechServerPort", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "GPT-SoVITS Port", "GPT-SoVITS \347\253\257\345\217\243", "Local HTTP port used by the hidden GPT-SoVITS server.", "\345\220\216\345\217\260\351\232\220\350\227\217\345\220\257\345\212\250\347\232\204 GPT-SoVITS \346\234\215\345\212\241\344\275\277\347\224\250\347\232\204\346\234\254\345\234\260 HTTP \347\253\257\345\217\243\343\200\202", "Keep this in sync with your own wrapper only if you override the default launch command.", "\345\217\252\346\234\211\345\234\250\344\275\240\350\207\252\345\267\261\346\224\271\344\272\206\345\220\257\345\212\250\345\221\275\344\273\244\346\227\266\357\274\214\346\211\215\351\234\200\350\246\201\347\241\256\344\277\235\350\277\231\351\207\214\345\222\214\345\256\236\351\231\205\347\253\257\345\217\243\344\270\200\350\207\264\343\200\202" },
-        { "TextToSpeechReferenceAudio", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Reference Audio Path", "\345\217\202\350\200\203\351\237\263\351\242\221\350\267\257\345\276\204", "Reference wav used by GPT-SoVITS to define the target timbre.", "GPT-SoVITS \347\224\250\346\235\245\345\256\232\344\271\211\347\233\256\346\240\207\351\237\263\350\211\262\347\232\204\345\217\202\350\200\203 wav \350\267\257\345\276\204\343\200\202", "Fill this with your chosen community voice sample. TTS will not run until this file exists.", "\350\277\231\351\207\214\345\241\253\344\275\240\351\200\211\345\245\275\347\232\204\347\244\276\345\214\272\351\237\263\350\211\262\345\217\202\350\200\203\351\237\263\351\242\221\343\200\202\346\226\207\344\273\266\344\270\215\345\255\230\345\234\250\346\227\266\344\270\215\344\274\232\346\211\247\350\241\214 TTS\343\200\202" },
-        { "TextToSpeechPromptText", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Reference Transcript", "\345\217\202\350\200\203\351\237\263\351\242\221\346\226\207\346\234\254", "Transcript for the reference audio, passed as prompt_text to GPT-SoVITS.", "\345\217\202\350\200\203\351\237\263\351\242\221\345\257\271\345\272\224\347\232\204\346\226\207\346\234\254\357\274\214\344\274\232\344\275\234\344\270\272 prompt_text \344\274\240\347\273\231 GPT-SoVITS\343\200\202", "Match this to the spoken content of the reference clip for best results.", "\345\260\275\351\207\217\345\222\214\345\217\202\350\200\203\351\237\263\351\242\221\351\207\214\345\256\236\351\231\205\350\257\264\347\232\204\350\257\235\344\270\200\350\207\264\357\274\214\346\225\210\346\236\234\344\274\232\346\233\264\347\250\263\343\200\202" },
-        { "TextToSpeechPromptLanguage", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Reference Language", "\345\217\202\350\200\203\351\237\263\351\242\221\350\257\255\350\250\200", "Language code for the reference transcript, such as zh, en, ja, ko, or yue.", "\345\217\202\350\200\203\351\237\263\351\242\221\346\226\207\346\234\254\347\232\204\350\257\255\350\250\200\344\273\243\347\240\201\357\274\214\344\276\213\345\246\202 zh\343\200\201en\343\200\201ja\343\200\201ko\343\200\201yue\343\200\202", "Uses GPT-SoVITS API language codes.", "\344\275\277\347\224\250 GPT-SoVITS \346\216\245\345\217\243\347\232\204\350\257\255\350\250\200\344\273\243\347\240\201\343\200\202" },
-        { "TextToSpeechLanguage", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Chat Language", "\350\201\212\345\244\251\346\226\207\346\234\254\350\257\255\350\250\200", "Language code for the incoming chat text that should be synthesized.", "\346\224\266\345\210\260\347\232\204\350\201\212\345\244\251\346\226\207\346\234\254\345\234\250\345\220\210\346\210\220\346\227\266\344\275\277\347\224\250\347\232\204\350\257\255\350\250\200\344\273\243\347\240\201\343\200\202", "For mixed Chinese and English voices, start with zh and adjust per voice if needed.", "\344\270\255\350\213\261\346\267\267\350\257\273\345\243\260\347\272\277\351\200\232\345\270\270\345\205\210\344\273\216 zh \345\274\200\345\247\213\350\257\225\357\274\214\344\270\215\345\220\210\351\200\202\345\206\215\346\214\211\345\243\260\347\272\277\350\246\201\346\261\202\350\260\203\346\225\264\343\200\202" },
-        { "TextToSpeechTextSplitMethod", "Voice / Speech", "\350\257\255\351\237\263 / \346\234\227\350\257\273", "Text Split Method", "\346\226\207\346\234\254\345\210\207\345\210\206\346\226\271\345\274\217", "text_split_method passed to GPT-SoVITS.", "\344\274\240\347\273\231 GPT-SoVITS \347\232\204 text_split_method\343\200\202", "Available values depend on the GPT-SoVITS build you installed; cut5 is a common default.", "\345\217\257\347\224\250\345\200\274\345\217\226\345\206\263\344\272\216\344\275\240\345\256\211\350\243\205\347\232\204 GPT-SoVITS \347\211\210\346\234\254\357\274\233cut5 \346\230\257\345\270\270\350\247\201\351\273\230\350\256\244\345\200\274\343\200\202" },
         { "AutoRepeatSemiAutoFire", "Weapons / Fire", "\346\255\246\345\231\250 / \345\274\200\347\201\253", "Hold-to-Fire for Semi-Auto", "\345\215\225\345\217\221\346\236\252\351\225\277\346\214\211\350\277\236\345\217\221", "Converts a held primary-fire input into pulses so semi-auto / single-shot guns keep firing while you hold the trigger.", "\346\212\212\346\214\201\347\273\255\346\214\211\344\275\217\347\232\204\344\270\273\345\274\200\347\201\253\350\276\223\345\205\245\345\217\230\346\210\220\342\200\234\347\202\271\345\260\204\350\204\211\345\206\262\342\200\235\357\274\214\350\256\251\345\215\212\350\207\252\345\212\250/\345\215\225\345\217\221\346\255\246\345\231\250\345\234\250\346\214\211\344\275\217\346\211\263\346\234\272\346\227\266\344\271\237\350\203\275\350\277\236\347\273\255\345\260\204\345\207\273\343\200\202", "Does not affect full-auto weapons. Use AutoRepeatSemiAutoFireHz to adjust click rate.", "\344\270\215\345\275\261\345\223\215\345\205\250\350\207\252\345\212\250\346\255\246\345\231\250\343\200\202\345\217\257\347\224\250 AutoRepeatSemiAutoFireHz \350\260\203\346\225\264\342\200\234\350\277\236\347\202\271\342\200\235\351\242\221\347\216\207\343\200\202" },
         { "AutoRepeatSemiAutoFireHz", "Weapons / Fire", "\346\255\246\345\231\250 / \345\274\200\347\201\253", "Auto-Repeat Rate (Hz)", "\350\277\236\347\202\271\351\242\221\347\216\207 (Hz)", "How many fire pulses per second to generate while holding the trigger.", "\346\214\211\344\275\217\346\211\263\346\234\272\346\227\266\346\257\217\347\247\222\347\224\237\346\210\220\345\244\232\345\260\221\346\254\241\345\274\200\347\201\253\350\204\211\345\206\262\343\200\202", "Higher can feel snappier, but the weapon's real fire rate still limits shots.", "\350\260\203\351\253\230\344\274\232\346\233\264\342\200\234\350\267\237\346\211\213\342\200\235\357\274\214\344\275\206\345\256\236\351\231\205\345\260\204\351\200\237\344\273\215\345\217\227\346\255\246\345\231\250\346\234\254\350\272\253\351\231\220\345\210\266\343\200\202" },
         { "AutoRepeatSprayPushEnabled", "Weapons / Fire", "\346\255\246\345\231\250 / \345\274\200\347\201\253", "Auto Spray-Push", "\350\207\252\345\212\250 Spray-Push", "While hold-to-fire is active, automatically applies the extra spray/push input assist used by pump/chrome shotguns and AWP/scout.", "\345\234\250\351\225\277\346\214\211\350\277\236\345\217\221\346\277\200\346\264\273\346\227\266\357\274\214\350\207\252\345\212\250\351\231\204\345\270\246 pump/chrome \351\234\260\345\274\271\346\236\252\345\222\214 AWP/scout \344\275\277\347\224\250\347\232\204 spray/push \350\276\223\345\205\245\350\276\205\345\212\251\343\200\202", "Only matters when Hold-to-Fire for Semi-Auto is enabled.", "\344\273\205\345\234\250\342\200\234\345\215\225\345\217\221\346\236\252\351\225\277\346\214\211\350\277\236\345\217\221\342\200\235\345\274\200\345\220\257\346\227\266\346\211\215\346\234\211\346\204\217\344\271\211\343\200\202" },
@@ -511,12 +447,12 @@ namespace
     static int CfgFindSpecIndex(const std::string& key)
     {
         static std::unordered_map<std::string, int> s_index = []()
-        {
-            std::unordered_map<std::string, int> m;
-            for (int i = 0; i < kCfgOptionSpecCount; ++i)
-                m.emplace(kCfgOptionSpecs[i].key, i);
-            return m;
-        }();
+            {
+                std::unordered_map<std::string, int> m;
+                for (int i = 0; i < kCfgOptionSpecCount; ++i)
+                    m.emplace(kCfgOptionSpecs[i].key, i);
+                return m;
+            }();
 
         auto it = s_index.find(key);
         return it == s_index.end() ? -1 : it->second;
@@ -529,12 +465,12 @@ namespace
             return nullptr;
 
         static std::unordered_map<std::string, int> s_textIndex = []()
-        {
-            std::unordered_map<std::string, int> m;
-            for (int i = 0; i < kCfgOptionTextSpecCount; ++i)
-                m.emplace(kCfgOptionTextSpecs[i].key, i);
-            return m;
-        }();
+            {
+                std::unordered_map<std::string, int> m;
+                for (int i = 0; i < kCfgOptionTextSpecCount; ++i)
+                    m.emplace(kCfgOptionTextSpecs[i].key, i);
+                return m;
+            }();
 
         auto it = s_textIndex.find(key);
         return it == s_textIndex.end() ? nullptr : &kCfgOptionTextSpecs[it->second];
@@ -841,7 +777,7 @@ namespace
                 return false;
 
             if ((std::strcmp(key, "ScopeLookThroughDistanceMeters") == 0 ||
-                 std::strcmp(key, "ScopeLookThroughAngleDeg") == 0) &&
+                std::strcmp(key, "ScopeLookThroughAngleDeg") == 0) &&
                 !CfgIsEnabled(s, "ScopeRequireLookThrough", true))
                 return false;
 
@@ -1446,28 +1382,103 @@ namespace
         s.needsUpload = true;
     }
 
-    static bool CfgIsPauseMenuActive()
+    static bool CfgHasLocalPlayerForMenuButton()
     {
-        if (!g_Game || !g_Game->m_EngineClient)
+        if (!g_Game || !g_Game->m_EngineClient || !g_Game->m_ClientEntityList)
             return false;
 
 #ifdef _MSC_VER
         __try
         {
-            const bool inGame = g_Game->m_EngineClient->IsInGame();
-            const bool paused = g_Game->m_EngineClient->IsPaused();
-            const bool cursorVisible = g_Game->m_VguiSurface && g_Game->m_VguiSurface->IsCursorVisible();
-            return inGame && (paused || cursorVisible);
+            const int playerIndex = g_Game->m_EngineClient->GetLocalPlayer();
+            if (playerIndex <= 0)
+                return false;
+            return g_Game->GetClientEntity(playerIndex) != nullptr;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
             return false;
         }
 #else
+        const int playerIndex = g_Game->m_EngineClient->GetLocalPlayer();
+        if (playerIndex <= 0)
+            return false;
+        return g_Game->GetClientEntity(playerIndex) != nullptr;
+#endif
+    }
+
+    static bool CfgIsPauseMenuActive()
+    {
+        static bool s_seenStableGameplayFrame = false;
+
+        if (!g_Game || !g_Game->m_EngineClient)
+        {
+            s_seenStableGameplayFrame = false;
+            return false;
+        }
+
+#ifdef _MSC_VER
+        __try
+        {
+            const bool inGame = g_Game->m_EngineClient->IsInGame();
+            if (!inGame)
+            {
+                s_seenStableGameplayFrame = false;
+                return false;
+            }
+
+            const bool hasLocalPlayer = CfgHasLocalPlayerForMenuButton();
+            if (!hasLocalPlayer)
+            {
+                s_seenStableGameplayFrame = false;
+                return false;
+            }
+
+            const bool cursorVisible = g_Game->m_VguiSurface && g_Game->m_VguiSurface->IsCursorVisible();
+            if (!cursorVisible)
+            {
+                s_seenStableGameplayFrame = true;
+                return false;
+            }
+
+            if (!s_seenStableGameplayFrame)
+                return false;
+
+            const bool paused = g_Game->m_EngineClient->IsPaused();
+            return paused || cursorVisible;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            s_seenStableGameplayFrame = false;
+            return false;
+        }
+#else
         const bool inGame = g_Game->m_EngineClient->IsInGame();
-        const bool paused = g_Game->m_EngineClient->IsPaused();
+        if (!inGame)
+        {
+            s_seenStableGameplayFrame = false;
+            return false;
+        }
+
+        const bool hasLocalPlayer = CfgHasLocalPlayerForMenuButton();
+        if (!hasLocalPlayer)
+        {
+            s_seenStableGameplayFrame = false;
+            return false;
+        }
+
         const bool cursorVisible = g_Game->m_VguiSurface && g_Game->m_VguiSurface->IsCursorVisible();
-        return inGame && (paused || cursorVisible);
+        if (!cursorVisible)
+        {
+            s_seenStableGameplayFrame = true;
+            return false;
+        }
+
+        if (!s_seenStableGameplayFrame)
+            return false;
+
+        const bool paused = g_Game->m_EngineClient->IsPaused();
+        return paused || cursorVisible;
 #endif
     }
 
@@ -1731,7 +1742,7 @@ namespace
                     CfgAdjustSelected(s, +1);
                 }
                 else if ((spec.type == CfgOptionType::Float || spec.type == CfgOptionType::Int) &&
-                         mx >= kCfgSliderX && mx <= kCfgSliderX + kCfgSliderW)
+                    mx >= kCfgSliderX && mx <= kCfgSliderX + kCfgSliderW)
                 {
                     CfgSetNumericValueFromSlider(s, spec, mx);
                 }

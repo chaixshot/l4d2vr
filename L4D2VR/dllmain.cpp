@@ -1115,6 +1115,27 @@ namespace
         RemoveAutoexecMatSetVideoMode(left4dead2Path / L"cfg" / L"autoexec.cfg");
     }
 
+    void EnsureVrConfigTxtFromSample()
+    {
+        const std::filesystem::path gameRootPath = GetGameRootPath();
+        if (gameRootPath.empty())
+            return;
+
+        const std::filesystem::path vrPath = gameRootPath / L"vr";
+        const std::filesystem::path configPath = vrPath / L"config.txt";
+        if (FileExistsNoThrow(configPath))
+            return;
+
+        const std::filesystem::path samplePath = vrPath / L"config.sample";
+        if (!FileExistsNoThrow(samplePath))
+            return;
+
+        std::error_code ec;
+        std::filesystem::create_directories(vrPath, ec);
+        ec.clear();
+        std::filesystem::copy_file(samplePath, configPath, std::filesystem::copy_options::none, ec);
+    }
+
     void EnsureUiFontFixVpkAndConfig()
     {
         const std::filesystem::path gameRootPath = GetGameRootPath();
@@ -1176,6 +1197,7 @@ DWORD WINAPI InitL4D2VR(HMODULE hModule)
     }
     LocalFree(szArglist);
 
+    EnsureVrConfigTxtFromSample();
     EnsureUiFontFixVpkAndConfig();
 
     if (IsNoHmdLaunchArgPresent())

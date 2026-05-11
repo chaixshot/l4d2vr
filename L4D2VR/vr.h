@@ -142,7 +142,7 @@ public:
 
 	uint32_t m_RenderWidth;
 	uint32_t m_RenderHeight;
-	uint32_t m_AntiAliasing;
+	uint32_t m_AntiAliasing = 0;
 	float m_Aspect;
 	float m_Fov;
 
@@ -207,7 +207,7 @@ public:
 	// If true, third-person camera placement/orbit follows HMD head turns.
 	// If false, the rendered view still follows the HMD, but the third-person camera center/offset
 	// is placed using the engine/body camera basis so turning your head does not drag the whole camera.
-	bool m_ThirdPersonCameraFollowHmd = false;
+	bool m_ThirdPersonCameraFollowHmd = true;
 	// Optional front-observer mode for third-person rendering.
 	// When enabled, 3P camera is placed in front of the player and looks back at the player.
 	bool m_ThirdPersonFrontViewEnabled = false;
@@ -231,13 +231,13 @@ public:
 	Vector m_ThirdPersonRenderCenter = { 0,0,0 };
 	bool m_ThirdPersonPoseInitialized = false;
 	float m_ThirdPersonCameraSmoothing = 0.85f;
-	float m_ThirdPersonVRCameraOffset = 80.0f;
+	float m_ThirdPersonVRCameraOffset = 38.0f;
 	// Front-view third-person camera local offset in camera basis:
 	// x=front/back, y=left/right, z=up/down.
-	Vector m_ThirdPersonFrontVRCameraOffset = { 80.0f, 0.0f, 0.0f };
+	Vector m_ThirdPersonFrontVRCameraOffset = { 80.0f, 30.0f, -15.0f };
 	// Third-person scope overlay local offset in body basis (meters):
 	// x=front/back, y=left/right, z=up/down.
-	Vector m_ThirdPersonScopeOverlayOffset = { 0.35f, 0.18f, -0.04f };
+	Vector m_ThirdPersonScopeOverlayOffset = { 1.5f, 0.4f, -0.3f };
 	Vector m_LeftControllerPosAbs;
 	QAngle m_LeftControllerAngAbs;
 	Vector m_RightControllerPosAbs;
@@ -355,7 +355,7 @@ public:
 	// snapshot on the render thread. 0 disables fixed waiting, but the render hook may still do a small
 	// adaptive wait during real HMD motion to avoid reusing the same pose sample. -1 = strong sync
 	// (wait up to ~50ms).
-	int m_QueuedRenderPoseWaitMs = 1;
+	int m_QueuedRenderPoseWaitMs = 0;
 
 	// Queued rendering: optional render-thread FPS cap, expressed as a percentage of the HMD refresh rate.
 	// 0 = unlimited, 100 = match HMD refresh, 80 = 80% of HMD refresh, etc.
@@ -411,11 +411,11 @@ public:
 	bool m_QueuedRenderMaxFpsSmart = true;
 	// Queued rendering: limit how many extra render frames may reuse the same WaitGetPoses() snapshot.
 	// -1 = disabled, 0 = never reuse (most stable), 1 = allow 1 reuse (2 frames per pose), etc.
-	int m_QueuedRenderMaxFramesAhead = -1;
+	int m_QueuedRenderMaxFramesAhead = 1;
 
 	// Queued rendering: render-thread smoothing time constant (ms) for cameraAnchor/rotationOffset.
 	// 0 = off (follow snapshot exactly), 20~80 = typical. Higher = smoother but more latency.
-	int m_QueuedRenderViewSmoothMs = 35;
+	int m_QueuedRenderViewSmoothMs = 25;
 
 	// Queued rendering: HMD pose smoothing time constant (ms) for visual stability.
 	// 0 = off. Higher values can soften visible stepping from stale pose reuse, but they do not fetch
@@ -435,7 +435,7 @@ public:
 	bool m_ViewmodelDisableMoveBob = false;
 	// Debug logging for queued viewmodel stabilization (prints viewmodel pose + engine-produced pose).
 	bool  m_QueuedViewmodelStabilizeDebugLog = false;
-	float m_QueuedViewmodelStabilizeDebugLogHz = 4.0f; // max prints per second; 0 disables throttling
+	float m_QueuedViewmodelStabilizeDebugLogHz = 6.0f; // max prints per second; 0 disables throttling
 	// Render/HUD/multicore pipeline diagnostics. Default off; logs key frame boundaries only.
 	bool  m_RenderPipelineDebugLog = false;
 	float m_RenderPipelineDebugLogHz = 2.0f;
@@ -446,7 +446,7 @@ public:
 	Vector m_BulletVisualHitOffset = { 0.0f, 0.0f, 0.0f };
 	// Additional offset only when queued rendering is enabled (mat_queue_mode!=0).
 	// Lets you apply extra correction for render-thread decoupling without affecting single-thread.
-	Vector m_QueuedBulletVisualHitOffset = { 0.0f, 0.0f, 0.0f };
+	Vector m_QueuedBulletVisualHitOffset = { 0.0f, 0.0f, 0.02f };
 
 	Vector m_ViewmodelPosAdjust = { 0,0,0 };
 	QAngle m_ViewmodelAngAdjust = { 0,0,0 };
@@ -456,7 +456,7 @@ public:
 	std::string m_LastLoggedViewmodelKey;
 	bool m_ViewmodelAdjustmentsDirty = false;
 	std::string m_ViewmodelAdjustmentSavePath;
-	bool m_ViewmodelAdjustEnabled = true;
+	bool m_ViewmodelAdjustEnabled = false;
 
 	bool m_AdjustingViewmodel = false;
 	std::string m_AdjustingKey;
@@ -481,25 +481,25 @@ public:
 	Vector m_LastAimDirection = { 0,0,0 };
 	Vector m_LastUnforcedAimDirection = { 0,0,0 };
 	bool m_HasAimLine = false;
-	float m_AimLineThickness = 2.0f;
+	float m_AimLineThickness = 0.15f;
 	bool m_AimLineEnabled = true;
 	bool m_AimLineConfigEnabled = true;
 	bool m_AimLineOnlyWhenLaserSight = false;
 	bool m_ScopeForcingAimLine = false;
-	bool m_MeleeAimLineEnabled = true;
+	bool m_MeleeAimLineEnabled = false;
 	bool m_D3DAimLineOverlayEnabled = false;
 	bool m_D3DAimLineOverlaySyncAimLineColor = true;
-	float m_D3DAimLineOverlayWidthPixels = 3.0f;
-	float m_D3DAimLineOverlayOutlinePixels = 2.0f;
-	float m_D3DAimLineOverlayEndpointPixels = 5.0f;
+	float m_D3DAimLineOverlayWidthPixels = 2.0f;
+	float m_D3DAimLineOverlayOutlinePixels = 1.0f;
+	float m_D3DAimLineOverlayEndpointPixels = 1.5f;
 	int m_D3DAimLineOverlayColorR = 255;
 	int m_D3DAimLineOverlayColorG = 0;
 	int m_D3DAimLineOverlayColorB = 0;
-	int m_D3DAimLineOverlayColorA = 255;
-	int m_D3DAimLineOverlayOutlineColorR = 0;
+	int m_D3DAimLineOverlayColorA = 100;
+	int m_D3DAimLineOverlayOutlineColorR = 255;
 	int m_D3DAimLineOverlayOutlineColorG = 0;
 	int m_D3DAimLineOverlayOutlineColorB = 0;
-	int m_D3DAimLineOverlayOutlineColorA = 220;
+	int m_D3DAimLineOverlayOutlineColorA = 1;
 	mutable std::mutex m_D3DAimLineOverlayMutex;
 	std::array<D3DAimLineOverlayEyeState, 2> m_D3DAimLineOverlayEyes{};
 	std::array<IDirect3DSurface9*, 2> m_D3DAimLineOverlayBackupSurfaces{};
@@ -517,11 +517,11 @@ public:
 	// Disable the aim line in those states.
 	bool m_PlayerControlledBySI = false;
 	float m_AimLinePersistence = 0.02f;
-	float m_AimLineFrameDurationMultiplier = 2.0f;
-	int m_AimLineColorR = 0;
-	int m_AimLineColorG = 255;
+	float m_AimLineFrameDurationMultiplier = 0.0f;
+	int m_AimLineColorR = 255;
+	int m_AimLineColorG = 0;
 	int m_AimLineColorB = 0;
-	int m_AimLineColorA = 192;
+	int m_AimLineColorA = 100;
 	struct EffectiveAttackRangeWeaponData
 	{
 		bool valid = false;
@@ -576,12 +576,12 @@ public:
 	std::chrono::steady_clock::time_point m_EffectiveAttackRangeWeaponDataLastLoad{};
 	std::array<EffectiveAttackRangeWeaponData, 64> m_EffectiveAttackRangeWeaponData{};
 	bool m_GameLaserSightBeamEnabled = true;
-	bool m_GameLaserSightReplaceParticle = false;
-	float m_GameLaserSightThickness = 1.5f;
+	bool m_GameLaserSightReplaceParticle = true;
+	float m_GameLaserSightThickness = 0.55f;
 	int m_GameLaserSightColorR = 255;
 	int m_GameLaserSightColorG = 0;
 	int m_GameLaserSightColorB = 0;
-	int m_GameLaserSightColorA = 255;
+	int m_GameLaserSightColorA = 220;
 	Vector m_GameLaserSightEndOffset = { 0.0f, 0.0f, 0.0f };
 	static constexpr int THROW_ARC_SEGMENTS = 16;
 	std::array<Vector, THROW_ARC_SEGMENTS + 1> m_LastThrowArcPoints{};
@@ -599,8 +599,8 @@ public:
 	// --- Spike control / throttling ---
 	// Heavy work can happen many times per frame (notably from dDrawModelExecute).
 	// These knobs cap how often we do expensive debug-overlay primitives and trace tests.
-	float m_AimLineMaxHz = 60.0f;              // caps DrawLineWithThickness calls
-	float m_ThrowArcMaxHz = 30.0f;             // caps throw arc overlay calls
+	float m_AimLineMaxHz = 100.0f;              // caps DrawLineWithThickness calls
+	float m_ThrowArcMaxHz = 100.0f;             // caps throw arc overlay calls
 	float m_SpecialInfectedOverlayMaxHz = 20.0f; // caps arrow drawing + prewarning refresh per entity
 	float m_SpecialInfectedTraceMaxHz = 15.0f;   // caps TraceRay per entity
 
@@ -688,7 +688,7 @@ public:
 	HANDLE m_RenderFrameReadyEvent = NULL;
 	// Present-side wait budget (ms) for a fresh rendered frame in mat_queue_mode!=0.
 	// 0 disables waiting. Used as an upper bound by adaptive submit-wait logic.
-	int m_QueuedSubmitWaitMs = 2;
+	int m_QueuedSubmitWaitMs = 1;
 	// Count of consecutive presents where submit thread observes no newer rendered frame.
 	// Used to apply submit wait adaptively only when stale-frame pressure persists.
 	std::atomic<uint32_t> m_QueuedSubmitStaleStreak{ 0 };
@@ -739,8 +739,8 @@ public:
 	};
 
 	ActionCombo m_VoiceRecordCombo{ &m_ActionCrouch, &m_ActionReload };
-	ActionCombo m_QuickTurnCombo{ &m_ActionCrouch, &m_ActionSecondaryAttack };
-	ActionCombo m_ViewmodelAdjustCombo{ &m_ActionReload, &m_ActionSecondaryAttack };
+	ActionCombo m_QuickTurnCombo{ &m_ActionSecondaryAttack, &m_ActionCrouch };
+	ActionCombo m_ViewmodelAdjustCombo{ &m_ActionSecondaryAttack, &m_ActionUse };
 	bool m_SpeechToTextEnabled = false;
 	bool m_SpeechToTextSendChatEnabled = true;
 	bool m_SpeechToTextSendVoiceEnabled = false;
@@ -832,9 +832,9 @@ public:
 	std::chrono::steady_clock::time_point m_PrevFrameTime;
 	std::chrono::steady_clock::time_point m_LastCompositorErrorLog{};
 
-	float m_TurnSpeed = 0.3;
+	float m_TurnSpeed = 0.3f;
 	bool m_SnapTurning = false;
-	float m_SnapTurnAngle = 45.0;
+	float m_SnapTurnAngle = 45.0f;
 	bool m_LeftHanded = false;
 	// If false: movement (walk axis) follows HMD yaw ("head-oriented locomotion").
 	// If true:  movement follows the right-hand controller yaw ("hand-oriented locomotion").
@@ -851,7 +851,7 @@ public:
 	// If false (default): aim direction is driven by the accumulated mouse pitch + body yaw (m_RotationOffset).
 	// If true:            aim direction follows the HMD center ray (view direction), while the aim line origin
 	//                     remains at the mouse-mode viewmodel anchor (so we do NOT move the aim line to the HMD).
-	bool m_MouseModeAimFromHmd = false;
+	bool m_MouseModeAimFromHmd = true;
 	// Mouse-mode HMD aim sensitivity (only when MouseModeAimFromHmd is true).
 	// 1.0 = 1:1 head rotation, 0 = frozen at enable, >1 amplifies head motion.
 	float m_MouseModeHmdAimSensitivity = 1.0f;
@@ -863,8 +863,8 @@ public:
 	// Additional pitch applied to the HMD view (degrees). Only used when MouseModePitchAffectsView is true.
 	float m_MouseModeViewPitchOffset = 0.0f;
 	// Degrees per mouse-count (tune to taste; negative inverts)
-	float m_MouseModeYawSensitivity = 0.022f;
-	float m_MouseModePitchSensitivity = 0.022f;
+	float m_MouseModeYawSensitivity = 0.01f;
+	float m_MouseModePitchSensitivity = 0.01f;
 	// Mouse-mode yaw smoothing time constant (seconds).
 	//
 	// Implementation note (scheme A): we smooth by "draining" a remaining yaw delta.
@@ -874,14 +874,14 @@ public:
 	//   This guarantees the total applied rotation equals the total mouse input (no "coasting" past the
 	//   user's actual movement), while still smoothing the motion.
 	// - 0 disables yaw smoothing (legacy: apply yaw directly on CreateMove ticks).
-	float m_MouseModeTurnSmoothing = 0.05f;
+	float m_MouseModeTurnSmoothing = 0.03f;
 	// Internal state for scheme A (delta drain).
 	float m_MouseModeYawDeltaRemainingDeg = 0.0f;
 	bool  m_MouseModeYawDeltaInitialized = false;
 	// Legacy (scheme B) target-yaw smoothing fields (kept for compatibility / diff minimization).
 	float m_MouseModeYawTarget = 0.0f;      // degrees in [0,360)
 	bool m_MouseModeYawTargetInitialized = false;
-	float m_MouseModePitchSmoothing = 0.05f; // seconds; 0 disables smoothing (pitch)
+	float m_MouseModePitchSmoothing = 0.03f; // seconds; 0 disables smoothing (pitch)
 	float m_MouseModePitchTarget = 0.0f;      // degrees (aim pitch)
 	bool m_MouseModePitchTargetInitialized = false;
 	float m_MouseModeViewPitchTargetOffset = 0.0f; // degrees; only used when MouseModePitchAffectsView
@@ -890,15 +890,15 @@ public:
 	float m_MouseAimPitchOffset = 0.0f;
 	bool m_MouseAimInitialized = false;
 	// HMD-local offset for the viewmodel anchor (meters; scaled by VRScale).
-	Vector m_MouseModeViewmodelAnchorOffset = { 0.0f, 0.0f, 0.0f };
+	Vector m_MouseModeViewmodelAnchorOffset = { 0.42f, 0.0f, -0.28f };
 	// Optional HMD-local anchor to use while mouse-mode scope is toggled on (meters; scaled by VRScale).
 	// If you want a more "ADS"-like viewmodel position when using ScopeRTT in mouse mode, set this.
-	Vector m_MouseModeScopedViewmodelAnchorOffset = { 0.0f, 0.0f, 0.0f };
+	Vector m_MouseModeScopedViewmodelAnchorOffset = { 0.35f, 0.0f, -0.13f };
 	// Mouse-mode: scope overlay offset relative to the HMD in OpenVR tracking space (meters).
 	// x = right, y = up, z = back (towards the player's face).
 	// If non-zero, mouse mode will place the scope overlay using the HMD tracking pose
 	// so it won't disappear due to mismatched game-units vs meters when using absolute overlays.
-	Vector m_MouseModeScopeOverlayOffset = { 0.0f, 0.0f, 0.0f };
+	Vector m_MouseModeScopeOverlayOffset = { 0.0f, -0.02f, -0.3f };
 	QAngle m_MouseModeScopeOverlayAngleOffset = { 0.0f, 0.0f, 0.0f };
 	bool   m_MouseModeScopeOverlayAngleOffsetSet = false;
 	// Mouse-mode scope hotkeys (keyboard). Format in config.txt: key:X, key:F1..F12 (see parseVirtualKey).
@@ -908,20 +908,20 @@ public:
 	bool m_MouseModeScopeToggleKeyDownPrev = false;
 	bool m_MouseModeScopeMagnificationKeyDownPrev = false;
 	// Per-magnification sensitivity scale (%) for mouse-mode. First entry corresponds to 1x.
-	std::vector<float> m_MouseModeScopeSensitivityScales = { 100.0f };
+	std::vector<float> m_MouseModeScopeSensitivityScales = { 50.0f, 25.0f, 15.0f, 5.0f };
 	// Convergence distance (Source units). Aim ray from the viewmodel anchor is steered to intersect
 	// the HMD-center ray at this distance. Set <= 0 to disable convergence (use raw viewmodel ray).
 	float m_MouseModeAimConvergeDistance = 2048.0f;
 
-	float m_VRScale = 43.2;
-	float m_IpdScale = 1.0;
+	float m_VRScale = 43.2f;
+	float m_IpdScale = 1.0f;
 	bool m_HideArms = false;
 	bool m_SplitArmsToControllers = false;
-	float m_HudDistance = 1.3;
-	float m_FixedHudYOffset = 0.0f;
-	float m_FixedHudDistanceOffset = 0.0f;
-	float m_HudSize = 1.1;
-	float m_TopHudCurvature = 0.0f;
+	float m_HudDistance = 1.3f;
+	float m_FixedHudYOffset = 0.25f;
+	float m_FixedHudDistanceOffset = 0.25f;
+	float m_HudSize = 1.3f;
+	float m_TopHudCurvature = 0.2f;
 	bool m_HudAlwaysVisible = false;
 	bool m_HudToggleState = false;
 	std::chrono::steady_clock::time_point m_HudChatVisibleUntil{};
@@ -942,8 +942,8 @@ public:
 	// Hand HUD alpha (legacy, 0..1): treated as an extra BACKGROUND opacity multiplier.
 	// We intentionally do NOT apply IVROverlay::SetOverlayAlpha to the whole overlay,
 	// because it makes text/bars fade too.
-	float m_LeftWristHudAlpha = 1.0f;
-	float m_RightAmmoHudAlpha = 1.0f;
+	float m_LeftWristHudAlpha = 0.5f;
+	float m_RightAmmoHudAlpha = 0.5f;
 
 	// Left wrist HUD: battery label font scale (1..4) for DrawText5x7.
 	int   m_LeftWristHudBatteryTextScale = 1;
@@ -956,20 +956,20 @@ public:
 	// Hand HUD overlays (SteamVR overlays, raw textures)
 	// ----------------------------
 	bool  m_LeftWristHudEnabled = false;
-	float m_LeftWristHudWidthMeters = 0.11f;
-	float m_LeftWristHudXOffset = -0.02f;
-	float m_LeftWristHudYOffset = 0.02f;
-	float m_LeftWristHudZOffset = 0.07f;
-	QAngle m_LeftWristHudAngleOffset = { -45.0f, 0.0f, 90.0f };
+	float m_LeftWristHudWidthMeters = 0.1f;
+	float m_LeftWristHudXOffset = 0.01f;
+	float m_LeftWristHudYOffset = 0.01f;
+	float m_LeftWristHudZOffset = -0.0f;
+	QAngle m_LeftWristHudAngleOffset = { -75.0f, 0.0f, 0.0f };
 
 	bool  m_RightAmmoHudEnabled = false;
-	float m_RightAmmoHudWidthMeters = 0.04f; // width reduced by ~2/3 by default
-	float m_RightAmmoHudXOffset = 0.02f;
-	float m_RightAmmoHudYOffset = 0.00f;
-	float m_RightAmmoHudZOffset = 0.09f;
-	QAngle m_RightAmmoHudAngleOffset = { 0.0f, 0.0f, 0.0f };
+	float m_RightAmmoHudWidthMeters = 0.13f; // width reduced by ~2/3 by default
+	float m_RightAmmoHudXOffset = -0.07f;
+	float m_RightAmmoHudYOffset = 0.03f;
+	float m_RightAmmoHudZOffset = -0.09f;
+	QAngle m_RightAmmoHudAngleOffset = { -75.0f, 0.0f, 0.0f };
 
-	float m_LeftWristHudCurvature = 0.20f;
+	float m_LeftWristHudCurvature = 0.0f;
 	bool  m_LeftWristHudShowBattery = true;
 	bool  m_LeftWristHudShowTeammates = true;
 
@@ -980,18 +980,18 @@ public:
 	// a dynamic D3D9 texture and presents it as a standard overlay texture (Vulkan)
 	// placed relative to the HMD as a quad HUD.
 	// ----------------------------
-	bool  m_HandHudWorldQuadEnabled = false;
+	bool  m_HandHudWorldQuadEnabled = true;
 	// If true, keep the HUD attached to left/right controllers (tracked-device-relative),
 	// but still use the GPU texture upload path.
-	bool  m_HandHudWorldQuadAttachToControllers = false;
+	bool  m_HandHudWorldQuadAttachToControllers = true;
 	// Distance in meters in front of the HMD (positive). Internally applied as -Z.
-	float m_HandHudWorldQuadDistanceMeters = 0.55f;
+	float m_HandHudWorldQuadDistanceMeters = 0.5f;
 	// Vertical offset in meters (positive up). Negative moves down.
-	float m_HandHudWorldQuadYOffsetMeters = -0.18f;
+	float m_HandHudWorldQuadYOffsetMeters = 0.2f;
 	// Horizontal gap between left/right panels when both are visible.
 	float m_HandHudWorldQuadXGapMeters = 0.01f;
 	// Additional rotation applied to both panels (pitch,yaw,roll in degrees).
-	QAngle m_HandHudWorldQuadAngleOffset = { -15.0f, 0.0f, 0.0f };
+	QAngle m_HandHudWorldQuadAngleOffset = { 40.0f, 0.0f, 0.0f };
 
 	// Backing textures for world-quad hand HUD (dynamic D3D9 textures mirrored to Vulkan).
 	IDirect3DTexture9* m_D9LeftWristHudDynTex = nullptr;
@@ -1101,16 +1101,16 @@ public:
 	QAngle m_HmdAngSmoothed = { 0,0,0 };
 	bool m_QueuedRenderHmdYawTurnPathInitialized = false;
 	float m_QueuedRenderHmdYawTurnPathPrevLocalYaw = 0.0f;
-	CustomActionBinding m_CustomAction1Binding{};
+	CustomActionBinding m_CustomAction1Binding{ "thirdpersonshoulder" };
 	CustomActionBinding m_CustomAction2Binding{};
 	CustomActionBinding m_CustomAction3Binding{};
 	CustomActionBinding m_CustomAction4Binding{};
 	CustomActionBinding m_CustomAction5Binding{};
 
-	float m_MotionGestureSwingThreshold = 1.1f;
-	float m_MotionGesturePushThreshold = 1.8f;
-	float m_MotionGestureDownSwingThreshold = 1.0f;
-	float m_MotionGestureJumpThreshold = 1.0f;
+	float m_MotionGestureSwingThreshold = 2.0f;
+	float m_MotionGesturePushThreshold = 1.5f;
+	float m_MotionGestureDownSwingThreshold = 2.0f;
+	float m_MotionGestureJumpThreshold = 2.0f;
 	float m_MotionGestureCooldown = 0.8f;
 	float m_MotionGestureHoldDuration = 0.2f;
 
@@ -1125,17 +1125,17 @@ public:
 	std::chrono::steady_clock::time_point m_SecondaryGestureCooldownEnd{};
 	std::chrono::steady_clock::time_point m_ReloadGestureCooldownEnd{};
 	std::chrono::steady_clock::time_point m_JumpGestureCooldownEnd{};
-	float m_InventoryGestureRange = 0.25f;
-	Vector m_InventoryChestOffset = { 0.20f, 0.0f, -0.20f };
-	Vector m_InventoryBackOffset = { -0.25f, 0.0f, -0.10f };
-	Vector m_InventoryLeftWaistOffset = { 0.05f, -0.25f, -0.45f };
-	Vector m_InventoryRightWaistOffset = { 0.05f, 0.25f, -0.45f };
+	float m_InventoryGestureRange = 0.16f;
+	Vector m_InventoryChestOffset = { 0.45f, 0.0f, 0.5f };
+	Vector m_InventoryBackOffset = { 0.12f, 0.0f, 0.1f };
+	Vector m_InventoryLeftWaistOffset = { 0.45f, -0.28f, 0.25f };
+	Vector m_InventoryRightWaistOffset = { 0.45f, 0.28f, 0.25f };
 
 	// Inventory quick-switch (Half-Life: Alyx style): press/hold a bind to spawn 4 zones around the RIGHT hand.
 	// When enabled, the legacy body-anchored inventory switching is disabled.
-	bool m_InventoryQuickSwitchEnabled = false;
-	Vector m_InventoryQuickSwitchOffset = { 0.06f, 0.12f, 0.12f }; // meters (forward,right,up) in quick-switch basis
-	float m_InventoryQuickSwitchZoneRadius = 0.10f;               // meters, selection radius per zone
+	bool m_InventoryQuickSwitchEnabled = true;
+	Vector m_InventoryQuickSwitchOffset = { 0.05f, 0.2f, 0.2f }; // meters (forward,right,up) in quick-switch basis
+	float m_InventoryQuickSwitchZoneRadius = 0.15f;               // meters, selection radius per zone
 
 	// Runtime state for quick-switch
 	bool m_InventoryQuickSwitchActive = false;
@@ -1153,7 +1153,7 @@ public:
 
 	// Inventory anchor basis: apply offsets in a BODY space (yaw-only), not head pitch/roll.
 	// This makes anchors stable when you look up/down.
-	Vector m_InventoryBodyOriginOffset = { 0.0f, 0.0f, 0.0f }; // meters (forward,right,up) in body space
+	Vector m_InventoryBodyOriginOffset = { -0.1f, 0.0f, -0.28f }; // meters (forward,right,up) in body space
 
 	// Optional front-of-view debug helper markers (purely visual) so anchors behind/at waist are still discoverable.
 	float m_InventoryHudMarkerDistance = 0.45f;   // meters forward from head
@@ -1189,7 +1189,7 @@ public:
 	// Shadow controls discovered from L4D2's client-side shadow manager / flashlight paths.
 	// We stage config changes here and apply them on the main update thread via VEngineCvar007.
 	bool m_ShadowTweaksEnabled = false;
-	int m_ShadowCvarShadows = 0;
+	int m_ShadowCvarShadows = 1;
 	int m_ShadowCvarRenderToTexture = 0;
 	int m_ShadowCvarFlashlightDepthTexture = 0;
 	int m_ShadowCvarFlashlightDepthRes = 256;
@@ -1197,16 +1197,16 @@ public:
 	int m_ShadowCvarMaxRendered = 0;
 	float m_ShadowCvarMaxRenderableDist = 0.0f;
 	int m_ShadowCvarFlashlightDetailProps = 0;
-	int m_ShadowCvarMobSimpleShadows = 2;
-	int m_ShadowCvarWorldLightShadows = 0;
-	int m_ShadowCvarFlashlightModels = 0;
-	int m_ShadowCvarShadowsOnRenderables = 0;
-	int m_ShadowCvarFlashlightRenderModels = 0;
+	int m_ShadowCvarMobSimpleShadows = 1;
+	int m_ShadowCvarWorldLightShadows = 1;
+	int m_ShadowCvarFlashlightModels = 1;
+	int m_ShadowCvarShadowsOnRenderables = 1;
+	int m_ShadowCvarFlashlightRenderModels = 1;
 	float m_ShadowCvarPlayerShadowDist = 0.0f;
-	int m_ShadowCvarInfectedShadows = 0;
-	float m_ShadowCvarNbShadowBlobbyDist = 0.0f;
-	float m_ShadowCvarNbShadowCullDist = 0.0f;
-	int m_ShadowCvarFlashlightInfectedShadows = 0;
+	int m_ShadowCvarInfectedShadows = 1;
+	float m_ShadowCvarNbShadowBlobbyDist = 493.820007f;
+	float m_ShadowCvarNbShadowCullDist = 500.584991f;
+	int m_ShadowCvarFlashlightInfectedShadows = 1;
 	bool m_ShadowTweaksApplied = false;
 	// In queued/multicore rendering, force one aggressive shadow pass after map entry.
 	// Source can recreate/reset shadow cvars during level load, which makes queued shadows unstable.
@@ -1301,16 +1301,16 @@ public:
 	std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_LocalVScriptConvarBlockedWriteLastLog{};
 	mutable std::mutex m_LocalVScriptConvarLockMutex;
 	bool m_AutoFlashlightEnabled = false;
-	float m_AutoFlashlightDarkThreshold = 90.0f;
-	float m_AutoFlashlightBrightThreshold = 120.0f;
+	float m_AutoFlashlightDarkThreshold = 8.0f;
+	float m_AutoFlashlightBrightThreshold = 8.0f;
 	float m_AutoFlashlightSampleInterval = 0.15f;
 	float m_AutoFlashlightForwardNearDistance = 48.0f;
 	float m_AutoFlashlightForwardFarDistance = 96.0f;
 	float m_AutoFlashlightLateralOffset = 24.0f;
 	float m_AutoFlashlightVerticalOffset = -8.0f;
-	float m_AutoFlashlightSmoothingTime = 0.2f;
-	float m_AutoFlashlightMinOnTime = 0.9f;
-	float m_AutoFlashlightMinOffTime = 0.25f;
+	float m_AutoFlashlightSmoothingTime = 0.45f;
+	float m_AutoFlashlightMinOnTime = 2.0f;
+	float m_AutoFlashlightMinOffTime = 0.8f;
 	float m_AutoFlashlightManualOverrideSeconds = 6.0f;
 	bool m_AutoFlashlightDebugLog = false;
 	float m_AutoFlashlightDebugLogHz = 2.0f;
@@ -1331,16 +1331,16 @@ public:
 	std::chrono::steady_clock::time_point m_AutoFlashlightManualOverrideUntil{};
 	std::chrono::steady_clock::time_point m_AutoFlashlightLastDebugLog{};
 
-	bool m_DrawInventoryAnchors = false;
+	bool m_DrawInventoryAnchors = true;
 	int m_InventoryAnchorColorR = 0;
 	int m_InventoryAnchorColorG = 255;
 	int m_InventoryAnchorColorB = 255;
-	int m_InventoryAnchorColorA = 64;
+	int m_InventoryAnchorColorA = 255;
 	bool m_ServerHookFallbackPending = false;
 	int m_ServerHookFallbackDelayMs = 3000;
 	std::chrono::steady_clock::time_point m_ServerHookFallbackCheckTime{};
 	bool m_ForceNonVRServerMovement = false;
-	bool m_Roomscale1To1Movement = true;
+	bool m_Roomscale1To1Movement = false;
 	float m_Roomscale1To1MaxStepMeters = 0.35f;
 
 	// Roomscale 1:1 movement (ForceNonVRServerMovement=false):
@@ -1348,7 +1348,7 @@ public:
 	// - The player entity is only pulled/teleported when the camera drifts too far away.
 	// - Roomscale is optionally disabled while thumbstick locomotion is active to avoid conflicts.
 	bool m_Roomscale1To1DecoupleCamera = true;
-	bool m_Roomscale1To1UseCameraDistanceChase = true;
+	bool m_Roomscale1To1UseCameraDistanceChase = false;
 	bool m_Roomscale1To1DisableWhileThumbstick = true;
 	float m_Roomscale1To1AllowedCameraDriftMeters = 0.25f;
 	float m_Roomscale1To1ChaseHysteresisMeters = 0.05f;
@@ -1384,7 +1384,7 @@ public:
 	float m_NonVRMeleeHysteresis = 0.60f;        // re-arm threshold = threshold * hysteresis
 	float m_NonVRMeleeAngVelThreshold = 0.0f;    // deg/s, 0 = disabled (optional wrist-flick trigger)
 	float m_NonVRMeleeSwingDirBlend = 0.0f;      // 0..1 blend locked aim toward velocity direction
-	bool m_RequireSecondaryAttackForItemSwitch = true;
+	bool m_RequireSecondaryAttackForItemSwitch = false;
 
 	// ----------------------------
 	// Non-VR server aim consistency (ForceNonVRServerMovement)
@@ -1504,7 +1504,7 @@ public:
 	bool m_AimLineHitsFriendly = false;           // updated from a ray trace (aim ray)
 	// Extra radius (meters) for the friendly-fire aim guard trace.
 	// 0 = legacy thin ray; >0 uses a swept hull (fat ray) to reduce misses from spread/latency.
-	float m_BlockFireOnFriendlyAimRadiusMeters = 0.0f;
+	float m_BlockFireOnFriendlyAimRadiusMeters = 0.05f;
 
 
 	// Aim-line teammate HUD hint (left wrist HUD):
@@ -1593,32 +1593,32 @@ public:
 		std::chrono::steady_clock::time_point queuedAt{};
 	};
 
-	bool m_HitSoundEnabled = true;
+	bool m_HitSoundEnabled = false;
 	float m_HitSoundPlaybackCooldownSeconds = 0.03f;
-	std::string m_HitSoundSpec = "gamesound:VR_HitMarker";
-	float m_HitSoundVolume = 0.80f;
+	std::string m_HitSoundSpec = "game:vrmod/hit.wav";
+	float m_HitSoundVolume = 1.2f;
 	bool m_HitSoundPending = false;
 	uint32_t m_HitSoundPendingMergedCount = 0;
 	Vector m_HitSoundPendingWorldPos = { 0,0,0 };
 	std::chrono::steady_clock::time_point m_HitSoundPendingQueuedAt{};
-	bool m_KillSoundEnabled = true;
+	bool m_KillSoundEnabled = false;
 	float m_KillSoundDetectionWindowSeconds = 0.75f;
 	float m_KillSoundPlaybackCooldownSeconds = 0.04f;
-	std::string m_KillSoundNormalSpec = "gamesound:VR_KillMarker";
-	std::string m_KillSoundHeadshotSpec = "gamesound:VR_HeadshotMarker";
-	float m_KillSoundVolume = 0.95f;
-	float m_HeadshotSoundVolume = 1.10f;
-	float m_FeedbackSoundSpatialBlend = 0.85f;
-	float m_FeedbackSoundSpatialRange = 1400.0f;
+	std::string m_KillSoundNormalSpec = "game:vrmod/kill.wav";
+	std::string m_KillSoundHeadshotSpec = "game:vrmod/headshot.wav";
+	float m_KillSoundVolume = 1.8f;
+	float m_HeadshotSoundVolume = 1.3f;
+	float m_FeedbackSoundSpatialBlend = 0.0f;
+	float m_FeedbackSoundSpatialRange = 1000.0f;
 	int m_FeedbackSoundDebugForceChannel = 0; // -1 = left only, 1 = right only
 	bool m_FeedbackSoundDebugLog = false;
 	float m_FeedbackSoundDebugLogHz = 1.0f;
 	bool m_HitIndicatorEnabled = false;
-	bool m_KillIndicatorEnabled = true;
+	bool m_KillIndicatorEnabled = false;
 	bool m_KillIndicatorDebugLog = false;
 	float m_KillIndicatorDebugLogHz = 1.0f;
-	float m_KillIndicatorLifetimeSeconds = 0.85f;
-	float m_KillIndicatorSizePixels = 180.0f;
+	float m_KillIndicatorLifetimeSeconds = 0.8f;
+	float m_KillIndicatorSizePixels = 160.0f;
 	float m_KillIndicatorRiseUnits = 18.0f;
 	float m_KillIndicatorMaxDistance = 4096.0f;
 	std::string m_KillIndicatorMaterialBaseSpec = "overlays/2965700751";
@@ -1913,7 +1913,7 @@ public:
 	//   AutoRepeatSprayPushEnabled
 	//   AutoRepeatSprayPushDelayTicks
 	//   AutoRepeatSprayPushHoldTicks
-	bool m_AutoRepeatSprayPushEnabled = true;
+	bool m_AutoRepeatSprayPushEnabled = false;
 	int m_AutoRepeatSprayPushDelayTicks = 0;
 	int m_AutoRepeatSprayPushHoldTicks = 1;
 
@@ -2074,24 +2074,24 @@ public:
 	// Gun-mounted scope (RTT overlay)
 	// ----------------------------
 	bool  m_ScopeEnabled = false;
-	int   m_ScopeRTTSize = 1024;               // square RTT size in pixels
+	int   m_ScopeRTTSize = 512;               // square RTT size in pixels
 	float m_ScopeRTTMaxHz = 90.0f;
 	std::chrono::steady_clock::time_point m_LastScopeRTTRenderTime{};
 	float m_ScopeFov = 20.0f;                  // smaller = more zoom
 	float m_ScopeZNear = 2.0f;                 // game units
-	std::vector<float> m_ScopeMagnificationOptions{ 20.0f, 15.0f, 10.0f, 5.0f };
+	std::vector<float> m_ScopeMagnificationOptions{ 20.0f, 15.0f, 5.0f, 3.0f };
 	size_t m_ScopeMagnificationIndex = 0;
 
 	// Scope camera pose relative to gun hand (game units, in controller basis fwd/right/up)
-	Vector m_ScopeCameraOffset = { 10.0f, 0.0f, 2.0f };
+	Vector m_ScopeCameraOffset = { 12.0f, 0.0f, 3.0f };
 	QAngle m_ScopeCameraAngleOffset = { 0.0f, 0.0f, 0.0f };
 
 	// Overlay placement relative to tracked device (meters, in controller local space)
-	float  m_ScopeOverlayWidthMeters = 0.06f;
-	float  m_ScopeOverlayXOffset = 0.00f;
-	float  m_ScopeOverlayYOffset = 0.00f;
-	float  m_ScopeOverlayZOffset = 0.10f;
-	QAngle m_ScopeOverlayAngleOffset = { 0.0f, 0.0f, 0.0f };
+	float  m_ScopeOverlayWidthMeters = 0.3f;
+	float  m_ScopeOverlayXOffset = 0.02f;
+	float  m_ScopeOverlayYOffset = 0.04f;
+	float  m_ScopeOverlayZOffset = -0.06f;
+	QAngle m_ScopeOverlayAngleOffset = { -45.0f, -5.0f, -5.0f };
 	// If true, when scoped-in the aim line is rendered only during the scope RTT pass.
 	bool  m_ScopeAimLineOnlyInScope = true;
 	// If true, hide the local player model while rendering scope RTT (prevents head/body obstruction).
@@ -2099,15 +2099,15 @@ public:
 
 	// Look-through activation (HMD -> scope camera)
 	bool  m_ScopeRequireLookThrough = true;
-	float m_ScopeLookThroughDistanceMeters = 0.12f;
-	float m_ScopeLookThroughAngleDeg = 12.0f;
-	bool  m_ScopeOverlayAlwaysVisible = true;
-	float m_ScopeOverlayIdleAlpha = 0.35f;
+	float m_ScopeLookThroughDistanceMeters = 0.5f;
+	float m_ScopeLookThroughAngleDeg = 60.0f;
+	bool  m_ScopeOverlayAlwaysVisible = false;
+	float m_ScopeOverlayIdleAlpha = 0.5f;
 	// Scope stabilization (visual only): smooth the scope RTT camera pose when scoped-in.
 	// This reduces high-magnification jitter without changing shooting / aim direction.
 	bool  m_ScopeStabilizationEnabled = true;
-	float m_ScopeStabilizationMinCutoff = 1.0f;  // Hz (lower = smoother, more latency)
-	float m_ScopeStabilizationBeta = 0.08f;      // responsiveness to fast motion
+	float m_ScopeStabilizationMinCutoff = 0.5f;  // Hz (lower = smoother, more latency)
+	float m_ScopeStabilizationBeta = 0.5f;      // responsiveness to fast motion
 	float m_ScopeStabilizationDCutoff = 1.0f;    // Hz (derivative low-pass cutoff)
 
 	// Scoped aim sensitivity scaling (mouse-style ADS / zoom sensitivity).
@@ -2115,7 +2115,7 @@ public:
 	//  - 1.0 = unchanged
 	//  - 0.8 = 80% sensitivity (slower)
 	// Supports per-magnification values via config: ScopeAimSensitivityScale=100,85,70,55
-	std::vector<float> m_ScopeAimSensitivityScales{ 1.0f };
+	std::vector<float> m_ScopeAimSensitivityScales{ 0.6f, 0.4f, 0.35f, 0.15f };
 	bool   m_ScopeAimSensitivityInit = false;
 	QAngle m_ScopeAimSensitivityBaseAng = { 0.0f, 0.0f, 0.0f };
 

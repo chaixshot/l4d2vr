@@ -651,7 +651,7 @@ void VR::ParseConfigFile()
         return values;
         };
 
-    const std::string injectedCmd = getString("cmd", getString("Cmd", ""));
+    const std::string injectedCmd = getString("cmd", getString("Cmd", "exec cam.cfg"));
     if (!injectedCmd.empty())
     {
         m_Game->ClientCmd_Unrestricted(injectedCmd.c_str());
@@ -992,7 +992,7 @@ void VR::ParseConfigFile()
     m_HandHudDebugLog = getBool("HandHudDebugLog", m_HandHudDebugLog);
     m_HandHudDebugLogHz = std::clamp(getFloat("HandHudDebugLogHz", m_HandHudDebugLogHz), 0.0f, 240.0f);
 
-    m_AntiAliasing = std::stol(userConfig["AntiAliasing"]);
+    m_AntiAliasing = static_cast<uint32_t>(std::max(0, getInt("AntiAliasing", 0)));
     m_FixedHudYOffset = getFloat("FixedHudYOffset", m_FixedHudYOffset);
     m_FixedHudDistanceOffset = getFloat("FixedHudDistanceOffset", m_FixedHudDistanceOffset);
     float controllerSmoothingValue = m_ControllerSmoothing;
@@ -1433,12 +1433,12 @@ void VR::ParseConfigFile()
         Vector tmp = getVector3("MouseModeScopeOverlayAngleOffset", Vector{ m_MouseModeScopeOverlayAngleOffset.x, m_MouseModeScopeOverlayAngleOffset.y, m_MouseModeScopeOverlayAngleOffset.z });
         m_MouseModeScopeOverlayAngleOffset = QAngle{ tmp.x, tmp.y, tmp.z };
     }
-    m_MouseModeScopeToggleKey = parseVirtualKey(getString("MouseModeScopeToggleKey", "key:f9"));
-    m_MouseModeScopeMagnificationKey = parseVirtualKey(getString("MouseModeScopeMagnificationKey", "key:f10"));
+    m_MouseModeScopeToggleKey = parseVirtualKey(getString("MouseModeScopeToggleKey", "key:q"));
+    m_MouseModeScopeMagnificationKey = parseVirtualKey(getString("MouseModeScopeMagnificationKey", "key:z"));
 
     // Optional bindable impulses for mouse-mode scope control.
     // Using impulses avoids GetAsyncKeyState issues and allows normal Source binds.
-    auto mouseModeScopeSensitivityList = getFloatList("MouseModeScopeSensitivityScale", "100");
+    auto mouseModeScopeSensitivityList = getFloatList("MouseModeScopeSensitivityScale", "50,25,15,5");
     if (mouseModeScopeSensitivityList.empty())
         mouseModeScopeSensitivityList.push_back(100.0f);
     for (auto& v : mouseModeScopeSensitivityList)
@@ -1499,7 +1499,7 @@ void VR::ParseConfigFile()
     }
     m_DesktopMirrorKeepAspect = getBool("DesktopMirrorKeepAspect", m_DesktopMirrorKeepAspect);
     m_DesktopMirrorLinearFilter = getBool("DesktopMirrorLinearFilter", m_DesktopMirrorLinearFilter);
-    m_DesktopMirrorHidePluginOverlays = getBool("DesktopMirrorHidePluginOverlays", m_DesktopMirrorHidePluginOverlays);
+    m_DesktopMirrorHidePluginOverlays = getBool("DesktopMirrorHidePluginOverlays", getBool("m_DesktopMirrorHidePluginOverlays", m_DesktopMirrorHidePluginOverlays));
     m_ItemModelLabelQueuedMaxVisiblePerEye = std::clamp(getInt("ItemModelLabelQueuedMaxVisiblePerEye", m_ItemModelLabelQueuedMaxVisiblePerEye), 1, 16);
     m_ItemModelLabelQueuedMaxChars = std::clamp(getInt("ItemModelLabelQueuedMaxChars", m_ItemModelLabelQueuedMaxChars), 4, 32);
     m_ItemModelLabelPlayerSuppressRadius = std::max(0.0f, getFloat("ItemModelLabelPlayerSuppressRadius", m_ItemModelLabelPlayerSuppressRadius));
