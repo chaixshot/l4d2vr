@@ -217,6 +217,90 @@ void VR::IssueFlashlightToggle(bool manual)
     }
 }
 
+
+namespace
+{
+    static void ClearRenderTargetColorForMenuTransition(VR* vr, IMatRenderContext* ctx, ITexture* target, int width, int height, unsigned char alpha)
+    {
+        if (!vr || !ctx || !target)
+            return;
+
+        if (width <= 0)
+            width = target->GetMappingWidth();
+        if (height <= 0)
+            height = target->GetMappingHeight();
+        width = (std::max)(1, width);
+        height = (std::max)(1, height);
+
+        ctx->SetRenderTarget(target);
+        if (Hooks::hkViewport.fOriginal)
+            Hooks::hkViewport.fOriginal(ctx, 0, 0, width, height);
+
+        ctx->OverrideAlphaWriteEnable(true, true);
+        ctx->ClearColor4ub(0, 0, 0, alpha);
+        ctx->ClearBuffers(true, true, true);
+        ctx->OverrideAlphaWriteEnable(false, true);
+    }
+
+    static void ClearVRMenuTransitionResiduals(VR* vr, const char* reason)
+    {
+        if (!vr || !vr->m_Game || !vr->m_Game->m_MaterialSystem)
+            return;
+
+        IMatRenderContext* ctx = vr->m_Game->m_MaterialSystem->GetRenderContext();
+        if (!ctx)
+        {
+            vr->HandleMissingRenderContext("ClearVRMenuTransitionResiduals");
+            return;
+        }
+
+        std::lock_guard<TextureStateMutex> textureLock(vr->m_TextureMutex);
+
+        ITexture* oldRT = ctx->GetRenderTarget();
+        int oldX = 0;
+        int oldY = 0;
+        int oldW = 0;
+        int oldH = 0;
+        const bool restoreViewport = Hooks::hkGetViewport.fOriginal && Hooks::hkViewport.fOriginal;
+        if (restoreViewport)
+            Hooks::hkGetViewport.fOriginal(ctx, oldX, oldY, oldW, oldH);
+
+        ClearRenderTargetColorForMenuTransition(vr, ctx, vr->m_LeftEyeTexture,
+            static_cast<int>(vr->m_RenderWidth), static_cast<int>(vr->m_RenderHeight), 255);
+        ClearRenderTargetColorForMenuTransition(vr, ctx, vr->m_RightEyeTexture,
+            static_cast<int>(vr->m_RenderWidth), static_cast<int>(vr->m_RenderHeight), 255);
+        ClearRenderTargetColorForMenuTransition(vr, ctx, vr->m_LeftEyeSubmitTexture,
+            static_cast<int>(vr->m_RenderWidth), static_cast<int>(vr->m_RenderHeight), 255);
+        ClearRenderTargetColorForMenuTransition(vr, ctx, vr->m_RightEyeSubmitTexture,
+            static_cast<int>(vr->m_RenderWidth), static_cast<int>(vr->m_RenderHeight), 255);
+        ClearRenderTargetColorForMenuTransition(vr, ctx, vr->m_DesktopMirrorTexture,
+            static_cast<int>(vr->m_RenderWidth), static_cast<int>(vr->m_RenderHeight), 255);
+
+        // HUD overlay must be transparent. Otherwise the next map can show the last captured HUD
+        // before the new map's first VGUI paint refreshes vrHUD.
+        ClearRenderTargetColorForMenuTransition(vr, ctx, vr->m_HUDTexture, 0, 0, 0);
+
+        ClearRenderTargetColorForMenuTransition(vr, ctx, vr->m_ScopeTexture,
+            static_cast<int>(vr->m_ScopeRTTSize), static_cast<int>(vr->m_ScopeRTTSize), 255);
+        ClearRenderTargetColorForMenuTransition(vr, ctx, vr->m_RearMirrorTexture,
+            static_cast<int>(vr->m_RearMirrorRTTSize), static_cast<int>(vr->m_RearMirrorRTTSize), 255);
+        ClearRenderTargetColorForMenuTransition(vr, ctx, vr->m_BlankTexture, 0, 0, 255);
+
+        ctx->SetRenderTarget(oldRT);
+        if (restoreViewport)
+            Hooks::hkViewport.fOriginal(ctx, oldX, oldY, oldW, oldH);
+
+        vr->m_RenderedNewFrame.store(false, std::memory_order_release);
+        vr->m_RenderedHud.store(false, std::memory_order_release);
+        vr->m_HudPaintedThisFrame.store(false, std::memory_order_release);
+        vr->m_QueuedHudFreshUntil = std::chrono::steady_clock::time_point{};
+        vr->m_MenuBlankSubmitted = false;
+
+        if (vr->m_RenderPipelineDebugLog)
+            Game::logMsg("[VR][MenuTransition] cleared stale scene/HUD render targets reason=%s", reason ? reason : "unknown");
+    }
+}
+
 void VR::UpdateAutoFlashlight(C_BasePlayer* localPlayer)
 {
     const auto now = std::chrono::steady_clock::now();
@@ -576,10 +660,15 @@ void VR::Update()
     if (!m_Game->m_Initialized)
         return;
 
+    static bool s_WasInGameLastUpdate = false;
+    const bool inGameAtUpdateStart = m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame();
+    const bool returnedToMainMenu = s_WasInGameLastUpdate && !inGameAtUpdateStart;
+    s_WasInGameLastUpdate = inGameAtUpdateStart;
+
     if (m_IsVREnabled && g_D3DVR9)
     {
         // Prevents crashing at menu
-        if (!m_Game->m_EngineClient->IsInGame())
+        if (!inGameAtUpdateStart)
         {
             IMatRenderContext* rndrContext = m_Game->m_MaterialSystem->GetRenderContext();
             if (!rndrContext)
@@ -587,6 +676,10 @@ void VR::Update()
                 HandleMissingRenderContext("VR::Update");
                 return;
             }
+
+            if (returnedToMainMenu)
+                ClearVRMenuTransitionResiduals(this, "Update returned to main menu");
+
             rndrContext->SetRenderTarget(NULL);
             m_Game->m_CachedArmsModel = false;
             m_CreatedVRTextures.store(false, std::memory_order_release); // Have to recreate textures otherwise some workshop maps won't render
@@ -1034,6 +1127,10 @@ void VR::CreateVRTextures()
 
     m_Game->m_MaterialSystem->EndRenderTargetAllocation();
 
+    // CreateNamedRenderTargetTextureEx can reuse video memory containing the last map's
+    // HUD/eye pixels. Clear all VR RTs before they are ever submitted or exposed as overlays.
+    ClearVRMenuTransitionResiduals(this, "CreateVRTextures");
+
     // New textures should not inherit old render/submit bookkeeping.
     m_RenderCompletedFrameId.store(0, std::memory_order_release);
     m_LastSubmittedFrameId.store(0, std::memory_order_release);
@@ -1103,7 +1200,15 @@ void VR::SubmitVRTextures()
         return;
 
     const bool inGame = (m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame());
-    const bool renderedNewFrame = m_RenderedNewFrame.load(std::memory_order_acquire);
+    bool renderedNewFrame = m_RenderedNewFrame.load(std::memory_order_acquire);
+
+    if (!inGame && renderedNewFrame)
+    {
+        // A render can complete on the old map after the engine has already returned to
+        // the main menu. Never let that stale stereo/HUD frame enter the menu path.
+        ClearVRMenuTransitionResiduals(this, "Submit not in game with pending frame");
+        renderedNewFrame = false;
+    }
 
     // In the main menu, keep the scene side of the compositor static after the first
     // successful blank submit. Repeating blank Vulkan submits every frame is unnecessary

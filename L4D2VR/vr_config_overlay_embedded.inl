@@ -79,6 +79,8 @@ namespace
 
     static const CfgOptionSpec kCfgOptionSpecs[] =
     {
+        { "ConfigOverlayDistanceMeters", CfgOptionType::Float, "配置面板", "配置面板距离", 0.6f, 3.0f, "1.35" },
+        { "ConfigOverlaySizeMeters", CfgOptionType::Float, "配置面板", "配置面板大小", 0.8f, 4.0f, "2.05" },
         { "VRScale", CfgOptionType::Float, "\xE8\xA7\x86\xE8\xA7\x92 / \xE5\xB0\xBA\xE5\xBA\xA6", "\xE4\xB8\x96\xE7\x95\x8C\xE7\xBC\xA9\xE6\x94\xBE", 30.0f, 55.0f, "43.2" },
         { "IPDScale", CfgOptionType::Float, "\xE8\xA7\x86\xE8\xA7\x92 / \xE5\xB0\xBA\xE5\xBA\xA6", "\xE7\x9E\xB3\xE8\xB7\x9D\xE7\xBC\xA9\xE6\x94\xBE", 0.8f, 1.2f, "1.0" },
         { "LeftHanded", CfgOptionType::Bool, "\xE8\xBE\x93\xE5\x85\xA5 / \xE8\xBD\xAC\xE5\x90\x91", "\xE5\xB7\xA6\xE6\x89\x8B\xE6\x8C\x81\xE6\xAD\xA6", 0.0f, 0.0f, "false" },
@@ -232,6 +234,8 @@ namespace
 
     static const CfgOptionTextSpec kCfgOptionTextSpecs[] =
     {
+        { "ConfigOverlayDistanceMeters", "Config Overlay", "配置面板", "Panel Distance", "配置面板距离", "Distance from the HMD to the built-in config panel (meters).", "配置面板相对头显的前方距离（米）。", "Increase it if the panel is too close; decrease it if the panel is too far.", "面板太贴脸就调大，太远就调小。" },
+        { "ConfigOverlaySizeMeters", "Config Overlay", "配置面板", "Panel Size", "配置面板大小", "Physical width of the built-in config panel (meters). Height follows the panel aspect ratio.", "配置面板的物理宽度（米），高度会按面板比例自动计算。", "Increase it if the text is too small; decrease it if the panel blocks too much view.", "文字太小就调大，遮挡太多就调小。" },
         { "VRScale", "View / Scale", "\350\247\206\350\247\222 / \345\260\272\345\272\246", "World Scale", "\344\270\226\347\225\214\347\274\251\346\224\276", "Adjusts overall world scale (distance and size perception).", "\350\260\203\346\225\264\346\225\264\344\275\223\344\270\226\347\225\214\345\260\272\345\272\246\357\274\210\350\267\235\347\246\273\344\270\216\345\244\247\345\260\217\346\204\237\347\237\245\357\274\211\343\200\202", "Keep close to real-world meter scale. 43.2 covers most play spaces.", "\345\260\275\351\207\217\344\277\235\346\214\201\344\270\216\347\234\237\345\256\236\344\270\226\347\225\214\346\216\245\350\277\221\343\200\20243.2\344\270\200\350\210\254\346\234\200\345\220\210\351\200\202\343\200\202" },
         { "IPDScale", "View / Scale", "\350\247\206\350\247\222 / \345\260\272\345\272\246", "IPD Scale", "\347\236\263\350\267\235\347\274\251\346\224\276", "Multiplies headset IPD to fine-tune stereo separation.", "\346\214\211\346\257\224\344\276\213\350\260\203\346\225\264\345\244\264\346\230\276\347\236\263\350\267\235\344\273\245\345\276\256\350\260\203\347\253\213\344\275\223\345\210\206\347\246\273\345\272\246\343\200\202", "Use for small comfort tweaks only.", "\344\273\205\347\224\250\344\272\216\345\260\217\345\271\205\350\210\222\351\200\202\345\272\246\345\276\256\350\260\203\343\200\202" },
         { "LeftHanded", "Input / Turning", "\350\276\223\345\205\245 / \350\275\254\345\220\221", "Left-Handed Mode", "\345\267\246\346\211\213\346\214\201\346\255\246", "Swaps dominant hand interactions for left-handed players.", "\344\270\272\345\267\246\346\211\213\347\216\251\345\256\266\345\210\207\346\215\242\344\270\273\350\246\201\344\272\244\344\272\222\346\211\213\343\200\202", "Toggle if you primarily aim with the left controller.", "\345\246\202\346\236\234\344\270\273\350\246\201\347\224\250\345\267\246\346\211\213\347\236\204\345\207\206\357\274\214\350\257\267\345\274\200\345\220\257\343\200\202" },
@@ -398,10 +402,16 @@ namespace
         std::vector<uint8_t> menuButtonRgba;
         bool menuButtonNeedsUpload = true;
         bool menuButtonRenderedChinese = true;
+        bool hasUnsavedEdits = false;
+        bool configWriteTimeValid = false;
+        std::filesystem::file_time_type configWriteTime{};
+        uint32_t lastConfigStatMs = 0;
         std::mutex mutex;
     };
 
     CfgOverlayState g_CfgOverlay;
+
+    static void CfgApplyOverlayPlacement(CfgOverlayState& s, vr::IVROverlay* ov = nullptr);
 
     static std::wstring CfgUtf8ToWide(const char* s)
     {
@@ -682,12 +692,70 @@ namespace
         return dir.empty() ? std::string("vr\\config.txt") : dir + "\\vr\\config.txt";
     }
 
+    static bool CfgReadConfigWriteTime(CfgOverlayState& s, std::filesystem::file_time_type& outTime)
+    {
+        if (s.configPath.empty())
+            s.configPath = CfgDefaultConfigPath();
+
+        try
+        {
+            outTime = std::filesystem::last_write_time(s.configPath);
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    static void CfgRefreshConfigWriteTime(CfgOverlayState& s)
+    {
+        std::filesystem::file_time_type writeTime{};
+        if (CfgReadConfigWriteTime(s, writeTime))
+        {
+            s.configWriteTime = writeTime;
+            s.configWriteTimeValid = true;
+        }
+        else
+        {
+            s.configWriteTimeValid = false;
+        }
+    }
+
+    static void CfgMarkEdited(CfgOverlayState& s)
+    {
+        s.hasUnsavedEdits = true;
+        s.dirty = true;
+    }
+
     static std::string CfgValueFor(const CfgOverlayState& s, const CfgOptionSpec& spec)
     {
         const auto it = s.values.find(spec.key);
         if (it != s.values.end())
             return it->second;
         return spec.defaultValue ? spec.defaultValue : "";
+    }
+
+    static float CfgFloatValue(const CfgOverlayState& s, const char* key, float fallback)
+    {
+        if (!key || !*key)
+            return fallback;
+
+        const int specIndex = CfgFindSpecIndex(key);
+        std::string value;
+        auto it = s.values.find(key);
+        if (it != s.values.end())
+            value = it->second;
+        else if (specIndex >= 0)
+            value = kCfgOptionSpecs[specIndex].defaultValue ? kCfgOptionSpecs[specIndex].defaultValue : "";
+
+        float parsed = fallback;
+        if (!CfgTryFloat(value, parsed) || !std::isfinite(parsed))
+            parsed = fallback;
+
+        if (specIndex >= 0)
+            parsed = CfgClampFloatToSpec(kCfgOptionSpecs[specIndex], parsed);
+        return parsed;
     }
 
     static bool CfgIsAdjustable(const CfgOptionSpec& spec)
@@ -937,6 +1005,8 @@ namespace
         }
 
         CfgRebuildVisibleIndexes(s);
+        CfgRefreshConfigWriteTime(s);
+        s.hasUnsavedEdits = false;
         s.status = s.useChinese
             ? ("\345\267\262\350\275\275\345\205\245\351\205\215\347\275\256\345\267\245\345\205\267\351\200\211\351\241\271\357\274\232" + std::to_string(kCfgOptionSpecCount) + " \351\241\271\343\200\202")
             : ("Loaded ConfigTool options: " + std::to_string(kCfgOptionSpecCount) + " items.");
@@ -995,6 +1065,8 @@ namespace
         for (const CfgOverlayLine& line : s.lines)
             out << line.raw << "\n";
 
+        CfgRefreshConfigWriteTime(s);
+        s.hasUnsavedEdits = false;
         s.status = s.useChinese ? "\345\267\262\344\277\235\345\255\230 config.txt\357\274\214\347\216\260\346\234\211\347\203\255\345\212\240\350\275\275\351\200\273\350\276\221\344\274\232\350\207\252\345\212\250\347\224\237\346\225\210\343\200\202" : "Saved config.txt. Existing hot-reload logic will apply it.";
         s.dirty = true;
     }
@@ -1017,7 +1089,7 @@ namespace
                 s.useChinese = next;
             s.status = std::string(spec.key) + " = " + value;
             CfgRebuildVisibleIndexes(s);
-            s.dirty = true;
+            CfgMarkEdited(s);
             return;
         }
 
@@ -1031,7 +1103,7 @@ namespace
             s.values[spec.key] = value;
             s.status = std::string(spec.key) + " = " + value;
             CfgRebuildVisibleIndexes(s);
-            s.dirty = true;
+            CfgMarkEdited(s);
             return;
         }
 
@@ -1046,7 +1118,7 @@ namespace
             s.values[spec.key] = value;
             s.status = std::string(spec.key) + " = " + value;
             CfgRebuildVisibleIndexes(s);
-            s.dirty = true;
+            CfgMarkEdited(s);
             return;
         }
 
@@ -1570,7 +1642,8 @@ namespace
             if (ev.eventType == vr::VREvent_MouseButtonDown)
             {
                 s.visible = true;
-                CfgReadLanguageValue(s);
+                CfgLoad(s);
+                CfgApplyOverlayPlacement(s, ov);
                 s.status = s.useChinese
                     ? "\345\267\262\346\211\223\345\274\200\343\200\202\347\224\250 VR \346\216\247\345\210\266\345\231\250\345\260\204\347\272\277\347\202\271\345\207\273\346\214\211\351\222\256\343\200\202"
                     : "Opened. Point and click with the VR controller laser.";
@@ -1617,16 +1690,57 @@ namespace
         CfgPollMenuButtonEvents(s);
     }
 
-    static void CfgSetHmdTransform(vr::IVROverlay* ov, vr::VROverlayHandle_t h)
+    static float CfgOverlayDistanceMeters(const CfgOverlayState& s)
     {
+        float fallback = 1.35f;
+        if (g_Game && g_Game->m_VR)
+            fallback = g_Game->m_VR->m_ConfigOverlayDistanceMeters;
+        return (std::clamp)(CfgFloatValue(s, "ConfigOverlayDistanceMeters", fallback), 0.6f, 3.0f);
+    }
+
+    static float CfgOverlaySizeMeters(const CfgOverlayState& s)
+    {
+        float fallback = 2.05f;
+        if (g_Game && g_Game->m_VR)
+            fallback = g_Game->m_VR->m_ConfigOverlaySizeMeters;
+        return (std::clamp)(CfgFloatValue(s, "ConfigOverlaySizeMeters", fallback), 0.8f, 4.0f);
+    }
+
+    static void CfgSetHmdTransform(const CfgOverlayState& s, vr::IVROverlay* ov, vr::VROverlayHandle_t h)
+    {
+        const float distanceMeters = CfgOverlayDistanceMeters(s);
+
         vr::HmdMatrix34_t mat{};
         mat.m[0][0] = 1.0f;
         mat.m[1][1] = 1.0f;
         mat.m[2][2] = 1.0f;
         mat.m[0][3] = 0.0f;
         mat.m[1][3] = -0.08f;
-        mat.m[2][3] = -1.35f;
+        mat.m[2][3] = -distanceMeters;
         ov->SetOverlayTransformTrackedDeviceRelative(h, vr::k_unTrackedDeviceIndex_Hmd, &mat);
+    }
+
+    static void CfgApplyOverlayPlacement(CfgOverlayState& s, vr::IVROverlay* ov)
+    {
+        if (s.handle == vr::k_ulOverlayHandleInvalid)
+            return;
+
+        if (!ov)
+            ov = vr::VROverlay();
+        if (!ov)
+            return;
+
+        const float distanceMeters = CfgOverlayDistanceMeters(s);
+        const float sizeMeters = CfgOverlaySizeMeters(s);
+
+        if (g_Game && g_Game->m_VR)
+        {
+            g_Game->m_VR->m_ConfigOverlayDistanceMeters = distanceMeters;
+            g_Game->m_VR->m_ConfigOverlaySizeMeters = sizeMeters;
+        }
+
+        ov->SetOverlayWidthInMeters(s.handle, sizeMeters);
+        CfgSetHmdTransform(s, ov, s.handle);
     }
 
     static bool CfgEnsureOverlay(CfgOverlayState& s)
@@ -1636,7 +1750,10 @@ namespace
             return false;
 
         if (s.handle != vr::k_ulOverlayHandleInvalid)
+        {
+            CfgApplyOverlayPlacement(s, ov);
             return true;
+        }
 
         vr::EVROverlayError err = ov->CreateOverlay("l4d2vr.config.overlay", "L4D2VR Config", &s.handle);
         if (err != vr::VROverlayError_None || s.handle == vr::k_ulOverlayHandleInvalid)
@@ -1645,7 +1762,8 @@ namespace
             return false;
         }
 
-        ov->SetOverlayWidthInMeters(s.handle, 2.05f);
+        CfgLoad(s);
+        CfgApplyOverlayPlacement(s, ov);
         ov->SetOverlayAlpha(s.handle, 1.0f);
         // Keep the built-in config panel above L4D2VR HUD/scope/hand overlays.
         // SteamVR renders higher sort-order overlays on top.
@@ -1654,8 +1772,7 @@ namespace
         ov->SetOverlayFlag(s.handle, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);
         vr::HmdVector2_t mouseScale{ (float)kCfgOverlayW, (float)kCfgOverlayH };
         ov->SetOverlayMouseScale(s.handle, &mouseScale);
-        CfgSetHmdTransform(ov, s.handle);
-        CfgLoad(s);
+        CfgApplyOverlayPlacement(s, ov);
         return true;
     }
 
@@ -1683,7 +1800,7 @@ namespace
             s.status = std::string(spec.key) + " = " + value;
         }
         CfgRebuildVisibleIndexes(s);
-        s.dirty = true;
+        CfgMarkEdited(s);
     }
 
     static void CfgHandleClick(CfgOverlayState& s, int mx, int my)
@@ -1701,11 +1818,13 @@ namespace
             if (mx >= kCfgReloadX && mx <= kCfgReloadX + kCfgReloadW)
             {
                 CfgLoad(s);
+                CfgApplyOverlayPlacement(s);
                 return;
             }
             if (mx >= kCfgSaveX && mx <= kCfgSaveX + kCfgSaveW)
             {
                 CfgSave(s);
+                CfgApplyOverlayPlacement(s);
                 return;
             }
             if (mx >= kCfgCloseX && mx <= kCfgCloseX + kCfgCloseW)
@@ -1764,6 +1883,34 @@ namespace
         }
     }
 
+    static void CfgReloadIfConfigFileChanged(CfgOverlayState& s)
+    {
+        if (s.hasUnsavedEdits)
+            return;
+
+        const uint32_t nowMs = static_cast<uint32_t>(GetTickCount());
+        if (s.lastConfigStatMs != 0 && (nowMs - s.lastConfigStatMs) < 250u)
+            return;
+        s.lastConfigStatMs = nowMs;
+
+        std::filesystem::file_time_type writeTime{};
+        if (!CfgReadConfigWriteTime(s, writeTime))
+            return;
+
+        if (!s.configWriteTimeValid)
+        {
+            s.configWriteTime = writeTime;
+            s.configWriteTimeValid = true;
+            return;
+        }
+
+        if (writeTime != s.configWriteTime)
+        {
+            CfgLoad(s);
+            CfgApplyOverlayPlacement(s);
+        }
+    }
+
     static void CfgPollOverlayEvents(CfgOverlayState& s)
     {
         if (s.handle == vr::k_ulOverlayHandleInvalid)
@@ -1812,7 +1959,10 @@ namespace
                 std::lock_guard<std::mutex> lock(s.mutex);
                 s.visible = !s.visible;
                 if (s.visible)
-                    CfgReadLanguageValue(s);
+                {
+                    CfgLoad(s);
+                    CfgApplyOverlayPlacement(s);
+                }
                 s.status = s.visible
                     ? (s.useChinese ? "\345\267\262\346\211\223\345\274\200\343\200\202\347\224\250 VR \346\216\247\345\210\266\345\231\250\345\260\204\347\272\277\347\202\271\345\207\273\346\214\211\351\222\256\343\200\202" : "Opened. Point and click with the VR controller laser.")
                     : (s.useChinese ? "\345\267\262\345\205\263\351\227\255\343\200\202\346\214\211 F8 \345\217\257\351\207\215\346\226\260\346\211\223\345\274\200\343\200\202" : "Closed. Press F8 to reopen.");
@@ -1837,7 +1987,8 @@ namespace
             }
 
             CfgHideMenuButton(s);
-            CfgSetHmdTransform(ov, s.handle);
+            CfgReloadIfConfigFileChanged(s);
+            CfgApplyOverlayPlacement(s, ov);
             // Re-assert alpha/sort every frame because some runtimes reset overlay state after recreation.
             ov->SetOverlayAlpha(s.handle, 1.0f);
             ov->SetOverlaySortOrder(s.handle, 100000u);

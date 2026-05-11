@@ -894,6 +894,9 @@ void VR::ParseConfigFile()
     m_LeftHanded = getBool("LeftHanded", m_LeftHanded);
     m_VRScale = getFloat("VRScale", m_VRScale);
     m_IpdScale = getFloat("IPDScale", m_IpdScale);
+    // Built-in config overlay placement. Keep this in the normal hot-reload path.
+    m_ConfigOverlayDistanceMeters = std::clamp(getFloat("ConfigOverlayDistanceMeters", m_ConfigOverlayDistanceMeters), 0.6f, 3.0f);
+    m_ConfigOverlaySizeMeters = std::clamp(getFloat("ConfigOverlaySizeMeters", m_ConfigOverlaySizeMeters), 0.8f, 4.0f);
     m_ThirdPersonVRCameraOffset = std::max(0.0f, getFloat("ThirdPersonVRCameraOffset", m_ThirdPersonVRCameraOffset));
     {
         // Backward-compatible parsing:

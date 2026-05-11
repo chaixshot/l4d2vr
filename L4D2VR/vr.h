@@ -915,6 +915,9 @@ public:
 
 	float m_VRScale = 43.2f;
 	float m_IpdScale = 1.0f;
+	// Built-in config overlay placement. Parsed by ParseConfigFile() so config hot-reload can update it.
+	float m_ConfigOverlayDistanceMeters = 1.35f;
+	float m_ConfigOverlaySizeMeters = 2.05f;
 	bool m_HideArms = false;
 	bool m_SplitArmsToControllers = false;
 	float m_HudDistance = 1.3f;
