@@ -1505,9 +1505,19 @@ void VR::ParseConfigFile()
     m_DesktopMirrorHidePluginOverlaysRequested =
         getBool("DesktopMirrorHidePluginOverlays",
             getBool("m_DesktopMirrorHidePluginOverlays", m_DesktopMirrorHidePluginOverlaysRequested));
-    // Runtime may force this off in queued/multicore mode. Keep the requested value
-    // separate so switching back to single-threaded rendering can re-enable it.
-    m_DesktopMirrorHidePluginOverlays = m_DesktopMirrorHidePluginOverlaysRequested;
+    // Keep requested/effective state separate. The runtime flag is allowed to stay true
+    // in queued/multicore mode now; the render hook uses a clean Source RenderView pass
+    // there instead of the old unsafe raw D3D9 post-eye copy.
+    const bool desktopMirrorTexturesReady = m_CreatedVRTextures.load(std::memory_order_acquire);
+    const bool desktopMirrorCleanTargetReady = (m_DesktopMirrorTexture != nullptr);
+    m_DesktopMirrorHidePluginOverlays =
+        m_DesktopMirrorHidePluginOverlaysRequested && desktopMirrorCleanTargetReady;
+    if (m_DesktopMirrorHidePluginOverlaysRequested && desktopMirrorTexturesReady && !m_DesktopMirrorTexture)
+    {
+        std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
+        m_CreatedVRTextures.store(false, std::memory_order_release);
+        m_CreatingTextureID = Texture_None;
+    }
     m_ItemModelLabelQueuedMaxVisiblePerEye = std::clamp(getInt("ItemModelLabelQueuedMaxVisiblePerEye", m_ItemModelLabelQueuedMaxVisiblePerEye), 1, 16);
     m_ItemModelLabelQueuedMaxChars = std::clamp(getInt("ItemModelLabelQueuedMaxChars", m_ItemModelLabelQueuedMaxChars), 4, 32);
     m_ItemModelLabelPlayerSuppressRadius = std::max(0.0f, getFloat("ItemModelLabelPlayerSuppressRadius", m_ItemModelLabelPlayerSuppressRadius));

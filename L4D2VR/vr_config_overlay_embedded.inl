@@ -56,6 +56,13 @@ namespace
     constexpr int kCfgMinusX = 1118;
     constexpr int kCfgPlusX = 1184;
     constexpr int kCfgAdjustButtonW = 50;
+    constexpr int kCfgComponentX = 500;
+    constexpr int kCfgComponentButtonW = 62;
+    constexpr int kCfgComponentButtonH = 30;
+    constexpr int kCfgComponentGap = 8;
+    constexpr int kCfgComponentValueX = 792;
+    constexpr int kCfgStringEditX = 1100;
+    constexpr int kCfgStringEditW = 120;
 
     constexpr int kCfgMenuButtonW = 260;
     constexpr int kCfgMenuButtonH = 90;
@@ -63,6 +70,10 @@ namespace
     constexpr uint32_t kCfgOverlaySortOrderBase = 0x7FFFFF00u;
     constexpr uint32_t kCfgOverlaySortOrderActive = 0x7FFFFF10u;
     constexpr uint32_t kCfgMenuButtonSortOrder = 0x7FFFFF20u;
+    // After joystick/trackpad scrolling, temporarily ignore hover-to-select mouse move
+    // events from the VR laser pointer. Without this guard, a stationary pointer over a
+    // row can immediately steal selection back from the scroll target.
+    constexpr uint32_t kCfgHoverSelectSuppressAfterScrollMs = 260u;
 
     enum class CfgOptionType
     {
@@ -431,6 +442,14 @@ namespace
         bool menuButtonHovered = false;
         bool menuButtonManualSelectPrev = false;
         int hoveredItem = -1;
+        uint32_t hoverSelectionSuppressedUntilMs = 0;
+        std::string componentEditKey;
+        int componentEditIndex = 0;
+        bool keyboardActive = false;
+        std::string keyboardEditKey;
+        vr::VROverlayHandle_t keyboardEventHandle = vr::k_ulOverlayHandleInvalid;
+        uint64_t keyboardUserValue = 0;
+        uint32_t keyboardOpenMs = 0;
         std::mutex mutex;
     };
 
@@ -704,6 +723,150 @@ namespace
         return CfgTrimTrailingZeros(buf);
     }
 
+    static int CfgComponentCount(const CfgOptionSpec& spec)
+    {
+        if (spec.type == CfgOptionType::Color)
+            return 4;
+        if (spec.type == CfgOptionType::Vec3)
+            return 3;
+        return 0;
+    }
+
+    static const char* CfgComponentLabel(const CfgOptionSpec& spec, int index)
+    {
+        static const char* kVecLabels[] = { "X", "Y", "Z" };
+        static const char* kColorLabels[] = { "R", "G", "B", "A" };
+        if (spec.type == CfgOptionType::Color)
+            return (index >= 0 && index < 4) ? kColorLabels[index] : "?";
+        if (spec.type == CfgOptionType::Vec3)
+            return (index >= 0 && index < 3) ? kVecLabels[index] : "?";
+        return "?";
+    }
+
+    static bool CfgParseComponentValues(const CfgOptionSpec& spec, const std::string& text, std::vector<float>& out)
+    {
+        const int count = CfgComponentCount(spec);
+        out.assign((size_t)count, 0.0f);
+        if (count <= 0)
+            return false;
+
+        std::string source = CfgTrim(text);
+        if (source.empty())
+            source = spec.defaultValue ? spec.defaultValue : "";
+
+        std::stringstream ss(source);
+        std::string part;
+        int index = 0;
+        bool ok = true;
+        while (std::getline(ss, part, ',') && index < count)
+        {
+            float parsed = 0.0f;
+            if (!CfgTryFloat(part, parsed))
+            {
+                parsed = 0.0f;
+                ok = false;
+            }
+            out[(size_t)index++] = parsed;
+        }
+
+        if (index < count)
+            ok = false;
+
+        if (!ok && spec.defaultValue && source != spec.defaultValue)
+            return CfgParseComponentValues(spec, spec.defaultValue, out);
+
+        return ok;
+    }
+
+    static float CfgComponentStep(const CfgOptionSpec& spec, int index, float current)
+    {
+        (void)index;
+        if (spec.type == CfgOptionType::Color)
+            return 1.0f;
+        return CfgStepForFloat(spec, current);
+    }
+
+    static std::string CfgFormatComponentValues(const CfgOptionSpec& spec, const std::vector<float>& values)
+    {
+        const int count = CfgComponentCount(spec);
+        std::string result;
+        for (int i = 0; i < count; ++i)
+        {
+            if (i > 0)
+                result += ",";
+
+            const float v = (i < (int)values.size()) ? values[(size_t)i] : 0.0f;
+            if (spec.type == CfgOptionType::Color)
+            {
+                const int iv = (std::clamp)((int)std::lround(v), 0, 255);
+                result += std::to_string(iv);
+            }
+            else
+            {
+                const float step = CfgComponentStep(spec, i, v);
+                result += CfgFormatFloat(CfgClampFloatToSpec(spec, v), step);
+            }
+        }
+        return result;
+    }
+
+    static int CfgSelectedComponentIndex(CfgOverlayState& s, const CfgOptionSpec& spec)
+    {
+        const int count = CfgComponentCount(spec);
+        if (count <= 0)
+            return 0;
+        if (s.componentEditKey != spec.key)
+        {
+            s.componentEditKey = spec.key;
+            s.componentEditIndex = 0;
+        }
+        s.componentEditIndex = (std::clamp)(s.componentEditIndex, 0, count - 1);
+        return s.componentEditIndex;
+    }
+
+    static void CfgSetSelectedComponentIndex(CfgOverlayState& s, const CfgOptionSpec& spec, int index)
+    {
+        const int count = CfgComponentCount(spec);
+        if (count <= 0)
+            return;
+        s.componentEditKey = spec.key;
+        s.componentEditIndex = (std::clamp)(index, 0, count - 1);
+        s.dirty = true;
+    }
+
+    static void CfgMarkEdited(CfgOverlayState& s);
+    static std::string CfgValueFor(const CfgOverlayState& s, const CfgOptionSpec& spec);
+    static bool CfgIsComponentEditable(const CfgOptionSpec& spec);
+    static void CfgRebuildVisibleIndexes(CfgOverlayState& s);
+
+    static void CfgAdjustComponentValue(CfgOverlayState& s, const CfgOptionSpec& spec, int dir)
+    {
+        if (!CfgIsComponentEditable(spec))
+            return;
+
+        std::vector<float> values;
+        CfgParseComponentValues(spec, CfgValueFor(s, spec), values);
+        const int index = CfgSelectedComponentIndex(s, spec);
+        if (index < 0 || index >= (int)values.size())
+            return;
+
+        const float current = values[(size_t)index];
+        const float step = CfgComponentStep(spec, index, current);
+        float next = current + (float)dir * step;
+        if (spec.type == CfgOptionType::Color)
+            next = (std::clamp)(next, 0.0f, 255.0f);
+        else
+            next = CfgClampFloatToSpec(spec, next);
+
+        values[(size_t)index] = next;
+        const std::string value = CfgFormatComponentValues(spec, values);
+        s.values[spec.key] = value;
+        s.status = std::string(spec.key) + ": " + CfgComponentLabel(spec, index) + " = " +
+            (spec.type == CfgOptionType::Color ? std::to_string((int)std::lround(next)) : CfgFormatFloat(next, step));
+        CfgRebuildVisibleIndexes(s);
+        CfgMarkEdited(s);
+    }
+
     static std::string CfgGetModuleDir()
     {
         char path[MAX_PATH] = {};
@@ -787,9 +950,23 @@ namespace
         return parsed;
     }
 
+    static bool CfgIsKeyboardEditable(const CfgOptionSpec& spec)
+    {
+        return spec.type == CfgOptionType::String;
+    }
+
+    static bool CfgIsComponentEditable(const CfgOptionSpec& spec)
+    {
+        return spec.type == CfgOptionType::Vec3 || spec.type == CfgOptionType::Color;
+    }
+
     static bool CfgIsAdjustable(const CfgOptionSpec& spec)
     {
-        return spec.type == CfgOptionType::Bool || spec.type == CfgOptionType::Float || spec.type == CfgOptionType::Int;
+        return spec.type == CfgOptionType::Bool ||
+            spec.type == CfgOptionType::Float ||
+            spec.type == CfgOptionType::Int ||
+            CfgIsComponentEditable(spec) ||
+            CfgIsKeyboardEditable(spec);
     }
 
     static void CfgParseLine(CfgOverlayLine& cl)
@@ -1184,7 +1361,20 @@ namespace
             return;
         }
 
-        s.status = std::string(s.useChinese ? "\350\257\245\347\261\273\345\236\213\346\232\202\344\270\215\346\224\257\346\214\201\345\234\250 VR \351\235\242\346\235\277\344\270\255\347\274\226\350\276\221\357\274\232" : "This option is read-only in the VR panel: ") + spec.key;
+        if (CfgIsComponentEditable(spec))
+        {
+            CfgAdjustComponentValue(s, spec, dir);
+            return;
+        }
+
+        if (CfgIsKeyboardEditable(spec))
+        {
+            s.status = std::string(s.useChinese ? "Click Edit to open VR keyboard: " : "Click Edit to open the VR keyboard: ") + spec.key;
+            s.dirty = true;
+            return;
+        }
+
+        s.status = std::string(s.useChinese ? "This option is not editable in the VR panel: " : "This option is not editable in the VR panel: ") + spec.key;
         s.dirty = true;
     }
 
@@ -1415,7 +1605,7 @@ namespace
         CfgGdiText(g, 26, 84, 1228, 24, std::string(s.useChinese ? "\351\205\215\347\275\256\346\226\207\344\273\266\357\274\232" : "Config: ") + s.configPath, g.smallFont, { 150, 162, 180 });
         CfgGdiFill(g, 26, 112, 560, 36, { 24, 36, 56 });
         CfgGdiFrame(g, 26, 112, 560, 36, { 68, 86, 116 }, 1);
-        CfgGdiText(g, 40, 112, 520, 36, s.useChinese ? "\346\220\234\347\264\242\357\274\210\346\232\202\346\234\252\346\216\245\345\205\245 VR \351\224\256\347\233\230\357\274\211" : "Search (VR keyboard not connected yet)", g.normalFont, { 112, 125, 145 });
+        CfgGdiText(g, 40, 112, 520, 36, s.useChinese ? "Text rows: Edit opens VR keyboard. Vec3/Color: select component then -/+." : "Text rows: Edit opens VR keyboard. Vec3/Color: select component then -/+.", g.normalFont, { 112, 125, 145 });
 
         const int total = (int)s.visibleSpecIndexes.size();
         if (s.selected < s.scroll)
@@ -1481,8 +1671,35 @@ namespace
                 CfgGdiText(g, 42, rowY + 3, 420, 26, CfgTitleText(s, spec), selected ? g.boldFont : g.normalFont, { 232, 236, 244 });
                 if (selected)
                     CfgGdiText(g, 42, rowY + 25, 420, 16, spec.key, g.smallFont, { 132, 146, 166 });
-                CfgGdiText(g, kCfgSliderX, rowY + 4, 590, 34, value, g.normalFont, { 185, 210, 190 });
-                CfgGdiButton(g, 1100, rowY + 7, 120, 30, s.useChinese ? "\345\217\252\350\257\273" : "Read-only", false);
+
+                if (CfgIsComponentEditable(spec))
+                {
+                    const int count = CfgComponentCount(spec);
+                    const int activeIndex = selected ? CfgSelectedComponentIndex(s, spec) : (s.componentEditKey == spec.key ? (std::clamp)(s.componentEditIndex, 0, (std::max)(0, count - 1)) : 0);
+                    for (int i = 0; i < count; ++i)
+                    {
+                        const int bx = kCfgComponentX + i * (kCfgComponentButtonW + kCfgComponentGap);
+                        const bool active = i == activeIndex;
+                        CfgGdiFill(g, bx, rowY + 7, kCfgComponentButtonW, kCfgComponentButtonH, active ? CfgRgb{ 42, 86, 150 } : CfgRgb{ 46, 56, 76 });
+                        CfgGdiFrame(g, bx, rowY + 7, kCfgComponentButtonW, kCfgComponentButtonH, active ? CfgRgb{ 150, 190, 255 } : CfgRgb{ 136, 162, 205 }, 2);
+                        CfgGdiText(g, bx + 4, rowY + 7, kCfgComponentButtonW - 8, kCfgComponentButtonH, CfgComponentLabel(spec, i), g.boldFont, { 238, 243, 248 }, DT_CENTER);
+                    }
+
+                    CfgGdiText(g, kCfgComponentValueX, rowY + 4, 300, 34, value, g.normalFont, { 185, 210, 190 });
+                    CfgGdiButton(g, kCfgMinusX, rowY + 7, kCfgAdjustButtonW, 30, "-");
+                    CfgGdiButton(g, kCfgPlusX, rowY + 7, kCfgAdjustButtonW, 30, "+");
+                }
+                else if (CfgIsKeyboardEditable(spec))
+                {
+                    const bool editing = s.keyboardActive && s.keyboardEditKey == spec.key;
+                    CfgGdiText(g, kCfgSliderX, rowY + 4, 590, 34, value, g.normalFont, editing ? CfgRgb{ 255, 230, 150 } : CfgRgb{ 185, 210, 190 });
+                    CfgGdiButton(g, kCfgStringEditX, rowY + 7, kCfgStringEditW, 30, editing ? (s.useChinese ? "Editing" : "Editing") : (s.useChinese ? "Edit" : "Edit"));
+                }
+                else
+                {
+                    CfgGdiText(g, kCfgSliderX, rowY + 4, 590, 34, value, g.normalFont, { 185, 210, 190 });
+                    CfgGdiButton(g, 1100, rowY + 7, 120, 30, s.useChinese ? "Read-only" : "Read-only", false);
+                }
             }
 
             y += kCfgOverlayRowH;
@@ -1629,7 +1846,7 @@ namespace
         if (!ov || !CfgIsValidOverlayHandle(h))
             return;
 
-        ov->SetOverlayAlpha(h, 1.0f);
+        ov->SetOverlayAlpha(h, 0.4f);
         ov->SetOverlaySortOrder(h, active ? kCfgOverlaySortOrderActive : kCfgOverlaySortOrderBase);
         ov->SetOverlayInputMethod(h, active ? vr::VROverlayInputMethod_Mouse : vr::VROverlayInputMethod_None);
         ov->SetOverlayFlag(h, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);
@@ -2259,6 +2476,27 @@ namespace
             CfgInvalidateFixedPlacement(s);
     }
 
+    static uint32_t CfgNowMs()
+    {
+        return static_cast<uint32_t>(GetTickCount());
+    }
+
+    static bool CfgHoverSelectionSuppressed(const CfgOverlayState& s, uint32_t nowMs = CfgNowMs())
+    {
+        return s.hoverSelectionSuppressedUntilMs != 0 &&
+            static_cast<int32_t>(nowMs - s.hoverSelectionSuppressedUntilMs) < 0;
+    }
+
+    static void CfgSuppressHoverSelectionAfterScroll(CfgOverlayState& s)
+    {
+        s.hoverSelectionSuppressedUntilMs = CfgNowMs() + kCfgHoverSelectSuppressAfterScrollMs;
+        if (s.hoveredItem != -1)
+        {
+            s.hoveredItem = -1;
+            s.dirty = true;
+        }
+    }
+
     static int CfgHitTestRowItem(const CfgOverlayState& s, int my)
     {
         const int total = (int)s.visibleSpecIndexes.size();
@@ -2288,6 +2526,17 @@ namespace
 
     static bool CfgSelectHoveredRow(CfgOverlayState& s, int my)
     {
+        if (CfgHoverSelectionSuppressed(s))
+        {
+            if (s.hoveredItem != -1)
+            {
+                s.hoveredItem = -1;
+                s.dirty = true;
+            }
+            return false;
+        }
+
+        s.hoverSelectionSuppressedUntilMs = 0;
         const int item = CfgHitTestRowItem(s, my);
         if (!CfgIsSelectableRow(s, item))
         {
@@ -2303,6 +2552,102 @@ namespace
             s.dirty = true;
         }
         return true;
+    }
+
+
+    static void CfgBeginStringEdit(CfgOverlayState& s, const CfgOptionSpec& spec)
+    {
+        if (!CfgIsKeyboardEditable(spec))
+            return;
+
+        vr::IVROverlay* ov = vr::VROverlay();
+        if (!ov)
+        {
+            s.status = "VR keyboard is unavailable.";
+            s.dirty = true;
+            return;
+        }
+
+        const std::string currentValue = CfgValueFor(s, spec);
+        const std::string description = std::string(CfgTitleText(s, spec)) + " [" + spec.key + "]";
+        const uint64_t userValue = (static_cast<uint64_t>(GetTickCount()) << 16) ^ static_cast<uint64_t>((uintptr_t)spec.key & 0xFFFFu);
+        vr::EVROverlayError err = ov->ShowKeyboardForOverlay(
+            s.handle,
+            vr::k_EGamepadTextInputModeNormal,
+            vr::k_EGamepadTextInputLineModeSingleLine,
+            static_cast<uint32_t>(vr::KeyboardFlag_Modal),
+            description.c_str(),
+            MAX_STR_LEN - 1,
+            currentValue.c_str(),
+            userValue);
+
+        if (err != vr::VROverlayError_None)
+        {
+            s.status = std::string("ShowKeyboardForOverlay failed: ") + std::to_string((int)err);
+            s.keyboardActive = false;
+            s.keyboardEditKey.clear();
+            s.keyboardEventHandle = vr::k_ulOverlayHandleInvalid;
+            s.dirty = true;
+            return;
+        }
+
+        s.keyboardActive = true;
+        s.keyboardEditKey = spec.key;
+        s.keyboardEventHandle = s.handle;
+        s.keyboardUserValue = userValue;
+        s.keyboardOpenMs = static_cast<uint32_t>(GetTickCount());
+        s.status = std::string("Editing with VR keyboard: ") + spec.key;
+        s.dirty = true;
+    }
+
+    static void CfgCommitKeyboardText(CfgOverlayState& s)
+    {
+        if (!s.keyboardActive || s.keyboardEditKey.empty())
+            return;
+
+        vr::IVROverlay* ov = vr::VROverlay();
+        if (!ov)
+            return;
+
+        char text[MAX_STR_LEN] = {};
+        const uint32_t copied = ov->GetKeyboardText(text, (uint32_t)sizeof(text));
+        (void)copied;
+
+        const int specIndex = CfgFindSpecIndex(s.keyboardEditKey);
+        if (specIndex < 0)
+        {
+            s.keyboardActive = false;
+            s.keyboardEditKey.clear();
+            s.keyboardEventHandle = vr::k_ulOverlayHandleInvalid;
+            s.keyboardUserValue = 0;
+            s.dirty = true;
+            return;
+        }
+
+        const CfgOptionSpec& spec = kCfgOptionSpecs[specIndex];
+        std::string value = text;
+        value.erase(std::remove(value.begin(), value.end(), '\r'), value.end());
+        value.erase(std::remove(value.begin(), value.end(), '\n'), value.end());
+        s.values[spec.key] = value;
+        s.status = std::string(spec.key) + " = " + value;
+        s.keyboardActive = false;
+        s.keyboardEditKey.clear();
+        s.keyboardEventHandle = vr::k_ulOverlayHandleInvalid;
+        s.keyboardUserValue = 0;
+        CfgRebuildVisibleIndexes(s);
+        CfgMarkEdited(s);
+    }
+
+    static void CfgCancelKeyboardText(CfgOverlayState& s)
+    {
+        if (!s.keyboardActive)
+            return;
+        s.keyboardActive = false;
+        s.keyboardEditKey.clear();
+        s.keyboardEventHandle = vr::k_ulOverlayHandleInvalid;
+        s.keyboardUserValue = 0;
+        s.status = "VR keyboard closed.";
+        s.dirty = true;
     }
 
     static void CfgHandleClick(CfgOverlayState& s, int mx, int my)
@@ -2341,7 +2686,17 @@ namespace
             }
             if (mx >= kCfgCloseX && mx <= kCfgCloseX + kCfgCloseW)
             {
+                if (s.keyboardActive)
+                {
+                    if (vr::IVROverlay* ov = vr::VROverlay())
+                        ov->HideKeyboard();
+                    s.keyboardActive = false;
+                    s.keyboardEditKey.clear();
+                    s.keyboardEventHandle = vr::k_ulOverlayHandleInvalid;
+                }
                 s.visible = false;
+                s.hoverSelectionSuppressedUntilMs = 0;
+                s.hoveredItem = -1;
                 s.status = s.useChinese ? "\345\267\262\345\205\263\351\227\255\343\200\202\346\214\211 F8 \345\217\257\351\207\215\346\226\260\346\211\223\345\274\200\343\200\202" : "Closed. Press F8 to reopen.";
                 s.dirty = true;
                 return;
@@ -2365,6 +2720,39 @@ namespace
         {
             CfgSetNumericValueFromSlider(s, spec, mx);
         }
+        else if (CfgIsComponentEditable(spec))
+        {
+            const int count = CfgComponentCount(spec);
+            bool componentClicked = false;
+            for (int i = 0; i < count; ++i)
+            {
+                const int bx = kCfgComponentX + i * (kCfgComponentButtonW + kCfgComponentGap);
+                if (mx >= bx && mx <= bx + kCfgComponentButtonW)
+                {
+                    CfgSetSelectedComponentIndex(s, spec, i);
+                    componentClicked = true;
+                    break;
+                }
+            }
+
+            if (mx >= kCfgMinusX && mx <= kCfgMinusX + kCfgAdjustButtonW)
+                CfgAdjustComponentValue(s, spec, -1);
+            else if (mx >= kCfgPlusX && mx <= kCfgPlusX + kCfgAdjustButtonW)
+                CfgAdjustComponentValue(s, spec, +1);
+            else if (!componentClicked)
+                s.status = std::string("Select a component, then click -/+ to adjust: ") + spec.key;
+            s.dirty = true;
+        }
+        else if (CfgIsKeyboardEditable(spec))
+        {
+            if (mx >= kCfgSliderX || mx >= kCfgStringEditX)
+                CfgBeginStringEdit(s, spec);
+            else
+            {
+                s.status = std::string("Click Edit to change: ") + spec.key;
+                s.dirty = true;
+            }
+        }
         else if (CfgIsAdjustable(spec))
         {
             // Clicking the left/right side of a numeric row still gives coarse adjustment,
@@ -2373,7 +2761,7 @@ namespace
         }
         else
         {
-            s.status = std::string(s.useChinese ? "\350\257\245\347\261\273\345\236\213\346\232\202\344\270\215\346\224\257\346\214\201\345\234\250 VR \351\235\242\346\235\277\344\270\255\347\274\226\350\276\221\357\274\232" : "This option is read-only in the VR panel: ") + spec.key;
+            s.status = std::string("This option is not editable in the VR panel: ") + spec.key;
             s.dirty = true;
         }
     }
@@ -2496,11 +2884,34 @@ namespace
             {
                 const float ydelta = ev.data.scroll.ydelta;
                 if (std::fabs(ydelta) > 0.01f)
+                {
+                    CfgSuppressHoverSelectionAfterScroll(s);
                     CfgMoveSelection(s, (ydelta > 0.0f) ? -3 : 3);
+                }
                 break;
             }
+            case vr::VREvent_KeyboardDone:
+                CfgCommitKeyboardText(s);
+                break;
+            case vr::VREvent_KeyboardClosed:
+                CfgCancelKeyboardText(s);
+                break;
             default:
                 break;
+            }
+        }
+
+        if (s.keyboardActive &&
+            CfgIsValidOverlayHandle(s.keyboardEventHandle) &&
+            s.keyboardEventHandle != s.handle)
+        {
+            vr::VREvent_t kev{};
+            while (ov->PollNextOverlayEvent(s.keyboardEventHandle, &kev, sizeof(kev)))
+            {
+                if (kev.eventType == vr::VREvent_KeyboardDone)
+                    CfgCommitKeyboardText(s);
+                else if (kev.eventType == vr::VREvent_KeyboardClosed)
+                    CfgCancelKeyboardText(s);
             }
         }
     }
@@ -2517,6 +2928,8 @@ namespace
             {
                 std::lock_guard<std::mutex> lock(s.mutex);
                 s.visible = !s.visible;
+                s.hoverSelectionSuppressedUntilMs = 0;
+                s.hoveredItem = -1;
                 if (s.visible)
                 {
                     CfgLoad(s);

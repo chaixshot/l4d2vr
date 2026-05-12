@@ -3347,10 +3347,13 @@ void VR::DrawLineWithThickness(const Vector& start, const Vector& end, float dur
         return;
 
     const int lineQueueMode = m_Game ? m_Game->GetMatQueueMode() : 0;
-    const float overlayDuration =
-        ((lineQueueMode == 0) && m_DesktopMirrorHidePluginOverlays && m_DesktopMirrorEnabled && !m_ScopeRenderingPass)
-            ? 0.001f
-            : duration;
+    const bool cleanDesktopMirrorSingleCopyActive =
+        (lineQueueMode == 0) &&
+        m_DesktopMirrorHidePluginOverlays &&
+        m_DesktopMirrorEnabled &&
+        (m_DesktopMirrorTexture != nullptr) &&
+        !m_ScopeRenderingPass;
+    const float overlayDuration = cleanDesktopMirrorSingleCopyActive ? 0.001f : duration;
 
     int colorR = 0;
     int colorG = 0;

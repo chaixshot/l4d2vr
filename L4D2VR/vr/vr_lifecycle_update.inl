@@ -308,39 +308,35 @@ namespace
         if (!vr)
             return;
 
-        // Clean desktop mirror hiding requires a post-eye D3D9 copy into desktopMirrorClean0.
-        // Under mat_queue_mode != 0, that copy path can enter DXVK's queued command stream
-        // from an unsafe state. Keep the user-facing config as a request, but force the
-        // runtime flag off while queued rendering is active so the desktop mirror falls
-        // back to the normal eye texture.
-        //
-        // Do not rebuild all VR render targets here. Rebuilding while mat_queue_mode just
-        // switched on can create vrHUD from a transient render-context size/viewport, which
-        // makes the HUD look compressed. The clean mirror target is simply ignored while
-        // this flag is false.
-        const bool requested = vr->m_DesktopMirrorHidePluginOverlaysRequested;
-        const bool effective = requested && !queuedRendering;
-        if (vr->m_DesktopMirrorHidePluginOverlays == effective)
-            return;
+        // The user-facing setting is a request; the runtime flag is only true when the
+        // clean desktop mirror target is available. In queued/multicore rendering the
+        // clean target is updated by an extra Source RenderView pass, not by the old
+        // raw D3D9 post-eye copy.
 
+        const bool requested = vr->m_DesktopMirrorHidePluginOverlaysRequested;
+        const bool texturesReady = vr->m_CreatedVRTextures.load(std::memory_order_acquire);
+        const bool cleanTargetReady = (vr->m_DesktopMirrorTexture != nullptr);
+        const bool effective = requested && cleanTargetReady;
+        const bool needRecreate = requested && texturesReady && !vr->m_DesktopMirrorTexture;
+
+        const bool changed = (vr->m_DesktopMirrorHidePluginOverlays != effective);
         vr->m_DesktopMirrorHidePluginOverlays = effective;
 
-        // If textures were originally created while queued rendering was already active,
-        // desktopMirrorClean0 was not allocated. When returning to single-threaded rendering
-        // and the user still wants a clean desktop mirror, recreate then; that path has a
-        // stable HUD/backbuffer size and does not trigger the multicore HUD compression bug.
-        if (effective && !vr->m_DesktopMirrorTexture)
+        // Older builds did not allocate desktopMirrorClean0 while mat_queue_mode was active.
+        // If a live session enters that state, recreate all VR RTs once so the desktop mirror
+        // never points at a missing clean target. Keep the runtime flag false until that happens.
+        if (needRecreate)
         {
             std::lock_guard<TextureStateMutex> textureLock(vr->m_TextureMutex);
             vr->m_CreatedVRTextures.store(false, std::memory_order_release);
             vr->m_CreatingTextureID = VR::Texture_None;
         }
 
-        if (vr->m_RenderPipelineDebugLog)
+        if ((changed || needRecreate) && vr->m_RenderPipelineDebugLog)
         {
-            Game::logMsg("[VR][DesktopMirror] HidePluginOverlays requested=%d effective=%d queue=%d; fullRecreate=%d",
+            Game::logMsg("[VR][DesktopMirror] HidePluginOverlays requested=%d effective=%d queue=%d; recreate=%d cleanTarget=%d",
                 requested ? 1 : 0, effective ? 1 : 0, queuedRendering ? 1 : 0,
-                (effective && !vr->m_DesktopMirrorTexture) ? 1 : 0);
+                needRecreate ? 1 : 0, vr->m_DesktopMirrorTexture ? 1 : 0);
         }
     }
 }
@@ -1092,16 +1088,14 @@ void VR::CreateVRTextures()
     }
 
     const bool createDesktopMirrorCleanTarget =
-        m_DesktopMirrorHidePluginOverlaysRequested &&
-        !(m_Game && (m_Game->GetMatQueueMode() != 0));
-    m_DesktopMirrorHidePluginOverlays = createDesktopMirrorCleanTarget;
+        m_DesktopMirrorHidePluginOverlaysRequested;
+    m_DesktopMirrorHidePluginOverlays = false;
     if (createDesktopMirrorCleanTarget)
     {
         // Full-size clean eye RTT for desktop mirroring. This is intentionally not
-        // submitted to SteamVR. The selected eye is copied here after its normal
-        // RenderView and before VR-only post overlays are drawn, avoiding an
-        // extra scene RenderView. This clean target is not created in queued/multicore
-        // mode because DXVK's queued command stream is not safe for post-eye D3D9 copies.
+        // submitted to SteamVR. In single-threaded rendering it is updated by the
+        // cheap post-eye copy path; in queued/multicore rendering it is updated by
+        // a separate clean Source RenderView pass, avoiding unsafe raw D3D9 draws/copies.
         m_CreatingTextureID = Texture_DesktopMirror;
         m_DesktopMirrorTexture = m_Game->m_MaterialSystem->CreateNamedRenderTargetTextureEx(
             "desktopMirrorClean0",
@@ -1111,6 +1105,7 @@ void VR::CreateVRTextures()
             eyeFormat,
             MATERIAL_RT_DEPTH_SEPARATE,
             TEXTUREFLAGS_NOMIP);
+        m_DesktopMirrorHidePluginOverlays = (m_DesktopMirrorTexture != nullptr);
     }
 
     m_CreatingTextureID = Texture_HUD;

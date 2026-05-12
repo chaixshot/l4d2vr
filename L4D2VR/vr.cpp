@@ -8647,9 +8647,9 @@ bool VR::CopyEyeToDesktopMirrorTexture(int eyeIndex)
     if (eyeIndex < 0 || eyeIndex > 1)
         return false;
 
-    // Queued/multicore rendering uses DXVK's command stream from Source's render path.
-    // Direct D3D9 copies/draws here can corrupt that stream (crash in DxvkCsChunk::push).
-    // Keep the low-cost clean mirror path only for single-threaded rendering.
+    // Queued/multicore rendering updates desktopMirrorClean0 through a separate
+    // Source RenderView pass. Direct D3D9 copies/draws here can corrupt DXVK's
+    // queued command stream, so this low-cost copy path stays single-threaded only.
     if (m_Game && m_Game->GetMatQueueMode() != 0)
         return false;
 
