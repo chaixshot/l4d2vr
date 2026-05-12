@@ -1407,14 +1407,10 @@ void VR::ParseConfigFile()
     m_Roomscale1To1DebugLog = getBool("Roomscale1To1DebugLog", m_Roomscale1To1DebugLog);
     m_Roomscale1To1DebugLogHz = getFloat("Roomscale1To1DebugLogHz", m_Roomscale1To1DebugLogHz);
 
-    // 1:1 roomscale camera decoupling / chase
+    // 1:1 roomscale cmd movement / camera decoupling
     m_Roomscale1To1DecoupleCamera = getBool("Roomscale1To1DecoupleCamera", m_Roomscale1To1DecoupleCamera);
-    m_Roomscale1To1UseCameraDistanceChase = getBool("Roomscale1To1UseCameraDistanceChase", m_Roomscale1To1UseCameraDistanceChase);
     m_Roomscale1To1DisableWhileThumbstick = getBool("Roomscale1To1DisableWhileThumbstick", m_Roomscale1To1DisableWhileThumbstick);
-    m_Roomscale1To1AllowedCameraDriftMeters = std::max(0.0f, getFloat("Roomscale1To1AllowedCameraDriftMeters", m_Roomscale1To1AllowedCameraDriftMeters));
-    m_Roomscale1To1ChaseHysteresisMeters = std::max(0.0f, getFloat("Roomscale1To1ChaseHysteresisMeters", m_Roomscale1To1ChaseHysteresisMeters));
     m_Roomscale1To1MinApplyMeters = std::max(0.0f, getFloat("Roomscale1To1MinApplyMeters", m_Roomscale1To1MinApplyMeters));
-    m_Roomscale1To1ChaseActive = false;
 
     // Mouse mode (desktop-style aiming while staying in VR rendering)
     m_MouseModeEnabled = getBool("MouseModeEnabled", m_MouseModeEnabled);
