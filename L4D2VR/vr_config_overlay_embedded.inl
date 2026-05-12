@@ -1846,7 +1846,7 @@ namespace
         if (!ov || !CfgIsValidOverlayHandle(h))
             return;
 
-        ov->SetOverlayAlpha(h, 0.4f);
+        ov->SetOverlayAlpha(h, 1.0f);
         ov->SetOverlaySortOrder(h, active ? kCfgOverlaySortOrderActive : kCfgOverlaySortOrderBase);
         ov->SetOverlayInputMethod(h, active ? vr::VROverlayInputMethod_Mouse : vr::VROverlayInputMethod_None);
         ov->SetOverlayFlag(h, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, true);

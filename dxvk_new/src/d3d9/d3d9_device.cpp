@@ -2776,26 +2776,26 @@ namespace dxvk {
         if (pViewport == nullptr)
             return D3DERR_INVALIDCALL;
 
+        // Main menu/native VGUI is sensitive to Source observing the adjusted viewport.
+        // Preserve the known-good a4a712bf behavior exactly for !IsInGame(): mutate the
+        // caller's viewport before locking/recording instead of using only a local copy.
+        if (g_Game && g_Game->m_VR) {
+            VR* vr = g_Game->m_VR;
+            if (g_Game->m_EngineClient && !g_Game->m_EngineClient->IsInGame()) {
+                D3DVIEWPORT9* menuViewport = const_cast<D3DVIEWPORT9*>(pViewport);
+                menuViewport->Width = vr->m_RenderWidth;
+                menuViewport->Height = vr->m_RenderHeight;
+            }
+        }
+
         D3DVIEWPORT9 effectiveViewport = *pViewport;
 
         D3D9DeviceLock lock = LockDevice();
 
-        // L4D2VR: keep the old menu behaviour. The main menu/native VGUI pass can
-        // render through normal backbuffer/temporary surfaces before the gameplay HUD
-        // surfaces are active. If we derive the menu viewport from the current RT extent
-        // or reset X/Y there, the desktop menu and the SteamVR main-menu panel can be
-        // clipped or scaled to only part of the texture.
-        if (g_Game && g_Game->m_VR) {
+        if (g_Game && g_Game->m_VR && g_Game->m_EngineClient && g_Game->m_EngineClient->IsInGame())
+        {
             VR* vr = g_Game->m_VR;
-            if (g_Game->m_EngineClient && !g_Game->m_EngineClient->IsInGame()) {
-                effectiveViewport.Width = vr->m_RenderWidth;
-                effectiveViewport.Height = vr->m_RenderHeight;
-            }
-            // Only apply the in-game full-RT viewport clamp in queued/multicore mode.
-            // In single-threaded rendering, Source's native HUD can intentionally use
-            // a desktop/logical viewport on the VR HUD surface; forcing it to the RT
-            // extent makes the right/bottom HUD area disappear.
-            else if (m_state.renderTargets[0] != nullptr && g_Game->GetMatQueueMode() != 0) {
+            if (m_state.renderTargets[0] != nullptr && g_Game->GetMatQueueMode() != 0) {
                 IDirect3DSurface9* currentRt = static_cast<IDirect3DSurface9*>(m_state.renderTargets[0].ptr());
                 const bool forceVrViewport =
                     currentRt == vr->m_D9HUDSurface ||

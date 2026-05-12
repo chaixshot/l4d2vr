@@ -1406,6 +1406,9 @@ void VR::SubmitVRTextures()
 
     auto submitEye = [&](vr::EVREye eye, vr::Texture_t* texture, const vr::VRTextureBounds_t* bounds)
         {
+            if (!texture || !texture->handle)
+                return false;
+
             ensureTimingData();
 
             std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
@@ -1492,20 +1495,14 @@ void VR::SubmitVRTextures()
             if (vr::VROverlay()->IsOverlayVisible(m_MainMenuHandle))
                 vr::VROverlay()->HideOverlay(m_MainMenuHandle);
 
-            // Submit the most recent stereo textures again (safe even if they didn't change this tick).
+            // During map load we can be in-game before fresh VR render targets are recreated.
+            // Do not submit stale menu/blank Vulkan handles here; wait for the first rendered frame.
             const bool texturesReady = m_CreatedVRTextures.load(std::memory_order_acquire);
-            if (texturesReady)
-            {
-                submitStereoPair(&m_VKLeftEye.m_VRTexture, &(m_TextureBounds)[0],
-                    &m_VKRightEye.m_VRTexture, &(m_TextureBounds)[1]);
-            }
-            else
-            {
-                if (!m_BlankTexture)
-                    CreateVRTextures();
-                submitStereoPair(&m_VKBlankTexture.m_VRTexture, nullptr,
-                    &m_VKBlankTexture.m_VRTexture, nullptr);
-            }
+            if (!texturesReady)
+                return;
+
+            submitStereoPair(&m_VKLeftEye.m_VRTexture, &(m_TextureBounds)[0],
+                &m_VKRightEye.m_VRTexture, &(m_TextureBounds)[1]);
 
             if (successfulSubmit && m_CompositorExplicitTiming)
             {
