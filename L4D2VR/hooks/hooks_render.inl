@@ -1712,7 +1712,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		m_VR->m_IsVREnabled &&
 		m_VR->m_DesktopMirrorEnabled &&
 		m_VR->m_DesktopMirrorHidePluginOverlays &&
-		(m_VR->m_DesktopMirrorTexture != nullptr);
+		(m_VR->m_DesktopMirrorTexture != nullptr) &&
+		(queueMode == 0);
 	const bool desktopMirrorHidePluginOverlaysSingleCopyActive =
 		desktopMirrorHidePluginOverlaysRequestedThisFrame && (queueMode == 0);
 	const bool desktopMirrorHidePluginOverlaysQueuedRtActive =

@@ -1035,10 +1035,78 @@ namespace
         return parts;
     }
 
+    static bool StripLeadingClosedTag(std::string& value, const std::string& openToken, const std::string& closeToken, size_t maxBytes)
+    {
+        if (openToken.empty() || closeToken.empty() || value.rfind(openToken, 0) != 0)
+            return false;
+
+        const size_t closePos = value.find(closeToken, openToken.size());
+        if (closePos == std::string::npos || closePos > maxBytes)
+            return false;
+
+        std::string rest = TrimCopy(value.substr(closePos + closeToken.size()));
+        if (rest.empty())
+            return false;
+
+        value = rest;
+        return true;
+    }
+
+    static std::string NormalizeHudChatSpeakerForPlayerLookup(std::string value)
+    {
+        value = CollapseWhitespace(value);
+        for (int pass = 0; pass < 8 && !value.empty(); ++pass)
+        {
+            const std::string before = value;
+
+            if (StripLeadingClosedTag(value, "(", ")", 64)
+                || StripLeadingClosedTag(value, "\xEF\xBC\x88", "\xEF\xBC\x89", 96)
+                || StripLeadingClosedTag(value, "\xE3\x80\x90", "\xE3\x80\x91", 96))
+            {
+                value = CollapseWhitespace(value);
+                continue;
+            }
+
+            if (value.size() > 2 && value[0] == '*')
+            {
+                const size_t closePos = value.find('*', 1);
+                if (closePos != std::string::npos && closePos <= 32)
+                {
+                    std::string rest = TrimCopy(value.substr(closePos + 1));
+                    if (!rest.empty())
+                    {
+                        value = CollapseWhitespace(rest);
+                        continue;
+                    }
+                }
+            }
+
+            if (value.size() > 4 && value[0] == '[' && StartsWithInsensitive(value.substr(1), "lv"))
+            {
+                const size_t closePos = value.find(']', 1);
+                if (closePos != std::string::npos && closePos <= 16)
+                {
+                    std::string rest = TrimCopy(value.substr(closePos + 1));
+                    if (!rest.empty())
+                    {
+                        value = CollapseWhitespace(rest);
+                        continue;
+                    }
+                }
+            }
+
+            if (value == before)
+                break;
+        }
+
+        return value;
+    }
+
     static bool TryGetPlayerTeamByNormalizedName(Game* game, const std::string& normalizedName, int& outTeam)
     {
         outTeam = 0;
-        if (!game || !game->m_EngineClient || normalizedName.empty())
+        const std::string lookupName = NormalizeHudChatSpeakerForPlayerLookup(normalizedName);
+        if (!game || !game->m_EngineClient || lookupName.empty())
             return false;
 
         for (int playerIndex = 1; playerIndex <= 64; ++playerIndex)
@@ -1048,7 +1116,10 @@ namespace
                 continue;
 
             const std::string candidateName = CollapseWhitespace(playerName);
-            if (candidateName.empty() || _stricmp(candidateName.c_str(), normalizedName.c_str()) != 0)
+            const std::string candidateLookupName = NormalizeHudChatSpeakerForPlayerLookup(candidateName);
+            if (candidateName.empty()
+                || (_stricmp(candidateName.c_str(), lookupName.c_str()) != 0
+                    && (candidateLookupName.empty() || _stricmp(candidateLookupName.c_str(), lookupName.c_str()) != 0)))
                 continue;
 
             C_BasePlayer* player = reinterpret_cast<C_BasePlayer*>(game->GetClientEntity(playerIndex));
@@ -6684,11 +6755,12 @@ void VR::QueueChatTextToSpeech(const std::string& speaker, const std::string& te
     if (m_TextToSpeechSkipOwnMessages && !collapsedSpeaker.empty() && m_Game && m_Game->m_EngineClient)
     {
         const int localPlayerIndex = m_Game->m_EngineClient->GetLocalPlayer();
-        player_info_t playerInfo{};
-        if (localPlayerIndex > 0 && m_Game->m_EngineClient->GetPlayerInfo(localPlayerIndex, &playerInfo))
+        char localPlayerName[128] = {};
+        if (localPlayerIndex > 0 && GetPlayerNameUtf8Safe(m_Game->m_EngineClient, localPlayerIndex, localPlayerName, sizeof(localPlayerName)))
         {
-            const std::string localName = CollapseWhitespace(playerInfo.name);
-            if (!localName.empty() && _stricmp(localName.c_str(), collapsedSpeaker.c_str()) == 0)
+            const std::string localName = NormalizeHudChatSpeakerForPlayerLookup(localPlayerName);
+            const std::string speakerName = NormalizeHudChatSpeakerForPlayerLookup(collapsedSpeaker);
+            if (!localName.empty() && !speakerName.empty() && _stricmp(localName.c_str(), speakerName.c_str()) == 0)
                 return;
         }
     }

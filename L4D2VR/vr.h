@@ -1263,7 +1263,8 @@ public:
 	bool m_DesktopMirrorKeepAspect = true;
 	bool m_DesktopMirrorLinearFilter = true;
 	// Requested value from config.txt. The runtime effective flag below is forced off
-	// in mat_queue_mode != 0 because clean-mirror D3D9 copies are not DXVK queue-safe.
+	// in mat_queue_mode != 0 so queued desktop mirroring uses the eye surface directly
+	// instead of a partial clean target that makes DebugOverlay aim lines flicker.
 	bool m_DesktopMirrorHidePluginOverlaysRequested = true;
 	// Runtime effective value. External mirror code can keep reading this field.
 	bool m_DesktopMirrorHidePluginOverlays = true;
@@ -1355,10 +1356,17 @@ public:
 	// normal prediction, collision, server validation, and multiplayer compatibility.
 	bool m_Roomscale1To1DecoupleCamera = true;
 	bool m_Roomscale1To1DisableWhileThumbstick = true;
+	float m_Roomscale1To1MovementScale = 1.0f;
 	float m_Roomscale1To1MinApplyMeters = 0.005f;
+	bool m_Roomscale1To1PhysicalCrouch = true;
+	float m_Roomscale1To1CrouchEnterMeters = 0.25f;
+	float m_Roomscale1To1CrouchExitMeters = 0.18f;
 
 	Vector m_Roomscale1To1PrevCorrectedAbs = {};
 	bool m_Roomscale1To1PrevValid = false;
+	float m_Roomscale1To1StandingHmdZ = 0.0f;
+	bool m_Roomscale1To1StandingHmdZValid = false;
+	bool m_Roomscale1To1PhysicalCrouchActive = false;
 	// Debug logging for 1:1 roomscale cmd movement.
 	bool m_Roomscale1To1DebugLog = false;
 	float m_Roomscale1To1DebugLogHz = 4.0f; // max prints per second; 0 disables throttling

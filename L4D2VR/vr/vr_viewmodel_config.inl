@@ -178,6 +178,8 @@ void VR::ResetPosition()
     m_HeightOffset += m_SetupOrigin.z - m_HmdPosAbs.z;
     m_Roomscale1To1PrevValid = false;
     m_Roomscale1To1PrevCorrectedAbs = {};
+    m_Roomscale1To1StandingHmdZValid = false;
+    m_Roomscale1To1PhysicalCrouchActive = false;
 }
 
 std::string VR::GetMeleeWeaponName(C_WeaponCSBase* weapon) const
@@ -1410,7 +1412,11 @@ void VR::ParseConfigFile()
     // 1:1 roomscale cmd movement / camera decoupling
     m_Roomscale1To1DecoupleCamera = getBool("Roomscale1To1DecoupleCamera", m_Roomscale1To1DecoupleCamera);
     m_Roomscale1To1DisableWhileThumbstick = getBool("Roomscale1To1DisableWhileThumbstick", m_Roomscale1To1DisableWhileThumbstick);
+    m_Roomscale1To1MovementScale = std::clamp(getFloat("Roomscale1To1MovementScale", m_Roomscale1To1MovementScale), 0.0f, 4.0f);
     m_Roomscale1To1MinApplyMeters = std::max(0.0f, getFloat("Roomscale1To1MinApplyMeters", m_Roomscale1To1MinApplyMeters));
+    m_Roomscale1To1PhysicalCrouch = getBool("Roomscale1To1PhysicalCrouch", m_Roomscale1To1PhysicalCrouch);
+    m_Roomscale1To1CrouchEnterMeters = std::clamp(getFloat("Roomscale1To1CrouchEnterMeters", m_Roomscale1To1CrouchEnterMeters), 0.05f, 1.0f);
+    m_Roomscale1To1CrouchExitMeters = std::clamp(getFloat("Roomscale1To1CrouchExitMeters", m_Roomscale1To1CrouchExitMeters), 0.0f, m_Roomscale1To1CrouchEnterMeters);
 
     // Mouse mode (desktop-style aiming while staying in VR rendering)
     m_MouseModeEnabled = getBool("MouseModeEnabled", m_MouseModeEnabled);
@@ -1501,9 +1507,9 @@ void VR::ParseConfigFile()
     m_DesktopMirrorHidePluginOverlaysRequested =
         getBool("DesktopMirrorHidePluginOverlays",
             getBool("m_DesktopMirrorHidePluginOverlays", m_DesktopMirrorHidePluginOverlaysRequested));
-    // Keep requested/effective state separate. The runtime flag is allowed to stay true
-    // in queued/multicore mode now; the render hook uses a clean Source RenderView pass
-    // there instead of the old unsafe raw D3D9 post-eye copy.
+    // Keep requested/effective state separate. Config loading can only provisionally
+    // enable the clean mirror path; the frame update forces it off in queued/multicore
+    // mode so the desktop mirror shows the same stable overlays as the selected eye.
     const bool desktopMirrorTexturesReady = m_CreatedVRTextures.load(std::memory_order_acquire);
     const bool desktopMirrorCleanTargetReady = (m_DesktopMirrorTexture != nullptr);
     m_DesktopMirrorHidePluginOverlays =

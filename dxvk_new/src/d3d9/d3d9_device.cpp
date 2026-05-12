@@ -616,8 +616,9 @@ namespace dxvk {
             if (!device || !vr || !vr->m_DesktopMirrorEnabled)
                 return;
 
+            const bool queued = g_Game && (g_Game->GetMatQueueMode() != 0);
             IDirect3DSurface9* source = nullptr;
-            if (vr->m_DesktopMirrorHidePluginOverlays && vr->m_D9DesktopMirrorSurface)
+            if (!queued && vr->m_DesktopMirrorHidePluginOverlays && vr->m_D9DesktopMirrorSurface)
                 source = vr->m_D9DesktopMirrorSurface;
             else if (vr->m_DesktopMirrorEye == 0)
                 source = vr->m_D9LeftEyeSubmitSurface ? vr->m_D9LeftEyeSubmitSurface : vr->m_D9LeftEyeSurface;

@@ -11,7 +11,39 @@ void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool contr
     if (!cmd || !m_Roomscale1To1Movement)
     {
         m_Roomscale1To1PrevValid = false;
+        m_Roomscale1To1StandingHmdZValid = false;
+        m_Roomscale1To1PhysicalCrouchActive = false;
         return;
+    }
+
+    constexpr int kIN_DUCK = (1 << 2);
+    if (m_Roomscale1To1PhysicalCrouch)
+    {
+        if (!m_Roomscale1To1StandingHmdZValid)
+        {
+            m_Roomscale1To1StandingHmdZ = cur.z;
+            m_Roomscale1To1StandingHmdZValid = true;
+            m_Roomscale1To1PhysicalCrouchActive = false;
+        }
+
+        if (!m_Roomscale1To1PhysicalCrouchActive && cur.z > m_Roomscale1To1StandingHmdZ)
+            m_Roomscale1To1StandingHmdZ = cur.z;
+
+        const float enterM = std::clamp(m_Roomscale1To1CrouchEnterMeters, 0.05f, 1.0f);
+        const float exitM = std::clamp(m_Roomscale1To1CrouchExitMeters, 0.0f, enterM);
+        const float crouchDepthM = m_Roomscale1To1StandingHmdZ - cur.z;
+        if (!m_Roomscale1To1PhysicalCrouchActive && crouchDepthM >= enterM)
+            m_Roomscale1To1PhysicalCrouchActive = true;
+        else if (m_Roomscale1To1PhysicalCrouchActive && crouchDepthM <= exitM)
+            m_Roomscale1To1PhysicalCrouchActive = false;
+
+        if (m_Roomscale1To1PhysicalCrouchActive)
+            cmd->buttons |= kIN_DUCK;
+    }
+    else
+    {
+        m_Roomscale1To1StandingHmdZValid = false;
+        m_Roomscale1To1PhysicalCrouchActive = false;
     }
 
     if (m_Roomscale1To1DisableWhileThumbstick && controlLocomotionActive)
@@ -40,6 +72,10 @@ void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool contr
     if (lenM <= noiseDeadzoneM)
         return;
 
+    const float movementScale = std::clamp(m_Roomscale1To1MovementScale, 0.0f, 4.0f);
+    if (movementScale <= 0.0001f)
+        return;
+
     const float maxStepM = std::max(0.0f, m_Roomscale1To1MaxStepMeters);
     if (maxStepM > 0.0f && lenM > maxStepM)
     {
@@ -53,7 +89,8 @@ void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool contr
         dt = 1.0f / 30.0f;
     dt = std::clamp(dt, 1.0f / 240.0f, 1.0f / 15.0f);
 
-    Vector roomWorldVelocity(deltaM.x * m_VRScale / dt, deltaM.y * m_VRScale / dt, 0.0f);
+    const Vector gameDeltaM(deltaM.x * movementScale, deltaM.y * movementScale, 0.0f);
+    Vector roomWorldVelocity(gameDeltaM.x * m_VRScale / dt, gameDeltaM.y * m_VRScale / dt, 0.0f);
     const float roomSpeed = std::sqrt((roomWorldVelocity.x * roomWorldVelocity.x) + (roomWorldVelocity.y * roomWorldVelocity.y));
     const float maxCmdSpeed = m_AdjustingViewmodel ? 25.0f : 250.0f;
     if (roomSpeed > maxCmdSpeed && roomSpeed > 0.0001f)
@@ -84,9 +121,11 @@ void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool contr
 
     if (m_Roomscale1To1DebugLog && !ShouldThrottle(m_Roomscale1To1DebugLastEncode, m_Roomscale1To1DebugLogHz))
     {
-        Game::logMsg("[VR][1to1][cmdmove] cmd=%d tick=%d dt=%.4f dM=(%.3f %.3f) vel=(%.1f %.1f) move=(%.1f %.1f)",
+        Game::logMsg("[VR][1to1][cmdmove] cmd=%d tick=%d dt=%.4f scale=%.3f hmdM=(%.3f %.3f) gameM=(%.3f %.3f) vel=(%.1f %.1f) move=(%.1f %.1f)",
             cmd->command_number, cmd->tick_count, dt,
+            movementScale,
             deltaM.x, deltaM.y,
+            gameDeltaM.x, gameDeltaM.y,
             roomWorldVelocity.x, roomWorldVelocity.y,
             cmd->forwardmove, cmd->sidemove);
     }
