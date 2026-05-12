@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <unordered_set>
 #include "game.h"
 #include "hooks.h"
 #include "vr.h"
@@ -1389,6 +1390,45 @@ namespace
         return !input.bad();
     }
 
+    bool TryExtractConfigParameterKey(const std::string& rawLine, std::string& outKey)
+    {
+        std::string line = rawLine;
+        size_t cut = std::string::npos;
+        const size_t p1 = line.find("//");
+        const size_t p2 = line.find('#');
+        const size_t p3 = line.find(';');
+        if (p1 != std::string::npos) cut = p1;
+        if (p2 != std::string::npos) cut = (cut == std::string::npos) ? p2 : (std::min)(cut, p2);
+        if (p3 != std::string::npos) cut = (cut == std::string::npos) ? p3 : (std::min)(cut, p3);
+        if (cut != std::string::npos)
+            line.erase(cut);
+
+        line = TrimAsciiWhitespace(line);
+        if (line.empty())
+            return false;
+
+        const size_t eq = line.find('=');
+        if (eq == std::string::npos)
+            return false;
+
+        outKey = TrimAsciiWhitespace(line.substr(0, eq));
+        return !outKey.empty();
+    }
+
+    std::unordered_set<std::string> ExtractConfigParameterKeys(const std::string& text)
+    {
+        std::unordered_set<std::string> keys;
+        std::istringstream stream(text);
+        std::string line;
+        while (std::getline(stream, line))
+        {
+            std::string key;
+            if (TryExtractConfigParameterKey(line, key))
+                keys.insert(key);
+        }
+        return keys;
+    }
+
     void AppendUpdateLog(const std::filesystem::path& updateDir, const std::string& line)
     {
         std::error_code ec;
@@ -2145,17 +2185,45 @@ namespace
 
         const std::filesystem::path vrPath = gameRootPath / L"vr";
         const std::filesystem::path configPath = vrPath / L"config.txt";
-        if (FileExistsNoThrow(configPath))
-            return;
-
         const std::filesystem::path samplePath = vrPath / L"config.sample";
         if (!FileExistsNoThrow(samplePath))
             return;
 
-        std::error_code ec;
-        std::filesystem::create_directories(vrPath, ec);
-        ec.clear();
-        std::filesystem::copy_file(samplePath, configPath, std::filesystem::copy_options::none, ec);
+        std::string sampleText;
+        if (!ReadAsciiFile(samplePath, sampleText))
+            return;
+
+        std::string configText;
+        ReadAsciiFile(configPath, configText);
+
+        std::unordered_set<std::string> existingKeys = ExtractConfigParameterKeys(configText);
+        std::vector<std::string> missingLines;
+
+        std::istringstream sampleStream(sampleText);
+        std::string line;
+        while (std::getline(sampleStream, line))
+        {
+            std::string key;
+            if (!TryExtractConfigParameterKey(line, key))
+                continue;
+            if (!existingKeys.insert(key).second)
+                continue;
+
+            missingLines.push_back(line);
+        }
+
+        if (missingLines.empty())
+            return;
+
+        std::ostringstream output;
+        output << configText;
+        if (!configText.empty() && configText.back() != '\n')
+            output << '\n';
+
+        for (const std::string& missingLine : missingLines)
+            output << missingLine << '\n';
+
+        WriteAsciiFile(configPath, output.str());
     }
 
     void EnsureUiFontFixVpkAndConfig()
