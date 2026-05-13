@@ -684,6 +684,7 @@ public:
 	// dRenderView increments m_RenderCompletedFrameId and signals m_RenderFrameReadyEvent
 	// when a full stereo frame is rendered into eye textures.
 	std::atomic<uint32_t> m_RenderCompletedFrameId{ 0 };
+	std::atomic<uint32_t> m_RenderCompletedPoseToken{ 0 };
 	std::atomic<uint32_t> m_LastSubmittedFrameId{ 0 };
 	HANDLE m_RenderFrameReadyEvent = NULL;
 	// Present-side wait budget (ms) for a fresh rendered frame in mat_queue_mode!=0.

@@ -433,6 +433,15 @@ Game::Game()
     InstallVertexFormatWarningFilter();
     m_Initialized = true;
 
+    char cwd[MAX_PATH] = {};
+    GetCurrentDirectoryA(MAX_PATH, cwd);
+    logMsg("[VR][Startup] Game initialized cwd=%s client=0x%IX engine=0x%IX material=0x%IX server=0x%IX",
+        cwd,
+        m_BaseClient,
+        m_BaseEngine,
+        m_BaseMaterialSystem,
+        m_BaseServer);
+
 }
 
 // === Fallback Interface ===
@@ -444,6 +453,9 @@ void* Game::GetInterface(const char* dllname, const char* interfacename)
 // === Thread-safe Log Message with Timestamp ===
 void Game::logMsg(const char* fmt, ...)
 {
+    if (fmt && std::strncmp(fmt, "[VR][DesktopHUD]", 16) == 0)
+        return;
+
     std::lock_guard<std::mutex> lock(logMutex);
 
     auto now = std::chrono::system_clock::now();

@@ -459,6 +459,9 @@ void VR::ParseConfigFile()
 {
     std::ifstream configStream("VR\\config.txt");
     if (!configStream) {
+        char cwd[MAX_PATH] = {};
+        GetCurrentDirectoryA(MAX_PATH, cwd);
+        Game::logMsg("[VR][Config] open failed path=VR\\config.txt cwd=%s gle=%lu", cwd, GetLastError());
         //  Ҳ    ͱ  ֹ   ʱ  Ĭ  ֵ
         return;
     }
@@ -476,6 +479,7 @@ void VR::ParseConfigFile()
 
     std::unordered_map<std::string, std::string> userConfig;
     std::string line;
+    size_t parsedEntryCount = 0;
     while (std::getline(configStream, line))
     {
         // ȥ  ע  
@@ -498,9 +502,26 @@ void VR::ParseConfigFile()
         std::string key = line.substr(0, eq);
         std::string value = line.substr(eq + 1);
         trim(key); trim(value);
+        if (key.size() >= 3 &&
+            static_cast<unsigned char>(key[0]) == 0xEF &&
+            static_cast<unsigned char>(key[1]) == 0xBB &&
+            static_cast<unsigned char>(key[2]) == 0xBF)
+        {
+            key.erase(0, 3);
+            trim(key);
+        }
         if (!key.empty())
+        {
             userConfig[key] = value;
+            ++parsedEntryCount;
+        }
     }
+
+    const auto renderPipelineDebugLogIt = userConfig.find("RenderPipelineDebugLog");
+    Game::logMsg("[VR][Config] loaded entries=%zu hasRenderPipelineDebugLog=%d raw=%s",
+        parsedEntryCount,
+        renderPipelineDebugLogIt != userConfig.end() ? 1 : 0,
+        renderPipelineDebugLogIt != userConfig.end() ? renderPipelineDebugLogIt->second.c_str() : "<missing>");
 
     // С   ߣ   Ĭ  ֵ İ ȫ  ȡ
     auto getBool = [&](const char* k, bool defVal)->bool {
@@ -1209,8 +1230,19 @@ void VR::ParseConfigFile()
     m_ViewmodelDisableMoveBob = getBool("ViewmodelDisableMoveBob", m_ViewmodelDisableMoveBob);
     m_QueuedViewmodelStabilizeDebugLog = getBool("QueuedViewmodelStabilizeDebugLog", m_QueuedViewmodelStabilizeDebugLog);
     m_QueuedViewmodelStabilizeDebugLogHz = std::max(0.0f, getFloat("QueuedViewmodelStabilizeDebugLogHz", m_QueuedViewmodelStabilizeDebugLogHz));
+    const bool previousRenderPipelineDebugLog = m_RenderPipelineDebugLog;
     m_RenderPipelineDebugLog = getBool("RenderPipelineDebugLog", m_RenderPipelineDebugLog);
     m_RenderPipelineDebugLogHz = std::clamp(getFloat("RenderPipelineDebugLogHz", m_RenderPipelineDebugLogHz), 0.0f, 60.0f);
+    if (m_RenderPipelineDebugLog || previousRenderPipelineDebugLog != m_RenderPipelineDebugLog)
+    {
+        Game::logMsg("[VR][Config] RenderPipelineDebugLog=%d hz=%.1f queue=%d queuedSubmitWaitMs=%d queuedPoseWaitMs=%d maxFramesAhead=%d",
+            m_RenderPipelineDebugLog ? 1 : 0,
+            m_RenderPipelineDebugLogHz,
+            (m_Game && m_Game->m_Initialized) ? m_Game->GetMatQueueMode() : -1,
+            m_QueuedSubmitWaitMs,
+            m_QueuedRenderPoseWaitMs,
+            m_QueuedRenderMaxFramesAhead);
+    }
 
     // Bullet FX alignment: fine-tune client-side tracer/impact visuals.
     // Units: meters in aim-ray space (X=forward, Y=right, Z=up). Visual-only.
@@ -2971,10 +3003,18 @@ void VR::AuditLocalVScriptConvarsCurrentValues(const char* reason)
 void VR::WaitForConfigUpdate()
 {
     char currentDir[MAX_STR_LEN];
-    GetCurrentDirectory(MAX_STR_LEN, currentDir);
+    GetCurrentDirectoryA(MAX_STR_LEN, currentDir);
     char configDir[MAX_STR_LEN];
     sprintf_s(configDir, MAX_STR_LEN, "%s\\VR\\", currentDir);
     HANDLE fileChangeHandle = FindFirstChangeNotificationA(configDir, false, FILE_NOTIFY_CHANGE_LAST_WRITE);
+    if (fileChangeHandle == INVALID_HANDLE_VALUE)
+    {
+        Game::logMsg("[VR][ConfigWatch] start cwd=%s dir=%s handle=INVALID gle=%lu", currentDir, configDir, GetLastError());
+    }
+    else
+    {
+        Game::logMsg("[VR][ConfigWatch] start cwd=%s dir=%s handle=0x%p", currentDir, configDir, fileChangeHandle);
+    }
 
     FILETIME configLastModified{};
     FILETIME hapticsLastModified{};
@@ -2985,6 +3025,7 @@ void VR::WaitForConfigUpdate()
         WIN32_FILE_ATTRIBUTE_DATA fileAttributes{};
         if (!GetFileAttributesExA("VR\\config.txt", GetFileExInfoStandard, &fileAttributes))
         {
+            Game::logMsg("[VR][ConfigWatch] GetFileAttributes failed path=VR\\config.txt gle=%lu", GetLastError());
             m_Game->errorMsg("config.txt not found.");
             return;
         }
@@ -2994,10 +3035,21 @@ void VR::WaitForConfigUpdate()
             configLastModified = fileAttributes.ftLastWriteTime;
             try
             {
+                Game::logMsg("[VR][ConfigWatch] parsing config writeTime=%lu:%lu size=%lu",
+                    configLastModified.dwHighDateTime,
+                    configLastModified.dwLowDateTime,
+                    fileAttributes.nFileSizeLow);
                 ParseConfigFile();
+                Game::logMsg("[VR][ConfigWatch] parse complete");
             }
             catch (const std::invalid_argument&)
             {
+                Game::logMsg("[VR][ConfigWatch] parse failed invalid_argument");
+                m_Game->errorMsg("Failed to parse config.txt");
+            }
+            catch (...)
+            {
+                Game::logMsg("[VR][ConfigWatch] parse failed unknown exception");
                 m_Game->errorMsg("Failed to parse config.txt");
             }
         }
@@ -3044,7 +3096,18 @@ void VR::WaitForConfigUpdate()
             }
         }
 
-        FindNextChangeNotification(fileChangeHandle);
+        if (fileChangeHandle == INVALID_HANDLE_VALUE)
+        {
+            Sleep(1000);
+            continue;
+        }
+
+        if (!FindNextChangeNotification(fileChangeHandle))
+        {
+            Game::logMsg("[VR][ConfigWatch] FindNextChangeNotification failed gle=%lu", GetLastError());
+            Sleep(1000);
+            continue;
+        }
         WaitForSingleObject(fileChangeHandle, INFINITE);
         Sleep(100); // Sometimes the thread tries to read config.txt before it's finished writing
     }

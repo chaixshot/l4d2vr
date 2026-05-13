@@ -137,6 +137,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	// main-thread seqlock snapshot of camera anchor/scale/offsets, then publish a render-thread snapshot
 	// that all render-time getters can read consistently during this dRenderView.
 	const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
+	uint32_t renderPoseTokenUsed = 0;
 	struct RenderSnapshotTLSGuard
 	{
 		bool enable = false;
@@ -751,6 +752,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			// Update last poseSeq even when we didn't enter the wait block.
 			if (havePoses && poseSeq != 0)
 				s_lastPoseSeq = poseSeq;
+			if (havePoses && poseSeq != 0)
+				renderPoseTokenUsed = poseSeq;
 
 			// Periodic diagnostics (piggyback on QueuedViewmodelStabilizeDebugLog).
 			if (m_VR->m_QueuedViewmodelStabilizeDebugLog)
@@ -777,6 +780,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				if (!(predicted >= 0.0f && predicted <= 0.5f))
 					predicted = 0.0f;
 				m_VR->m_System->GetDeviceToAbsoluteTrackingPose(trackingOrigin, predicted, renderPoses.data(), vr::k_unMaxTrackedDeviceCount);
+				renderPoseTokenUsed = m_VR->m_PoseWaiterSeq.load(std::memory_order_acquire);
 			}
 
 			if (renderPoses[vr::k_unTrackedDeviceIndex_Hmd].bPoseIsValid)
@@ -2092,8 +2096,29 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	if (touchedEngineAngles && m_Game && m_Game->m_EngineClient)
 		m_Game->m_EngineClient->SetViewAngles(prevEngineAngles);
 	const uint32_t completedFrameId = m_VR->m_RenderCompletedFrameId.fetch_add(1, std::memory_order_acq_rel) + 1;
-	(void)completedFrameId;
+	if (queueMode != 0)
+	{
+		if (renderPoseTokenUsed == 0)
+			renderPoseTokenUsed = m_VR->m_SubmitPoseToken.load(std::memory_order_acquire);
+		m_VR->m_RenderCompletedPoseToken.store(renderPoseTokenUsed, std::memory_order_release);
+	}
+	m_VR->m_RenderedNewFrame.store(true, std::memory_order_release);
 	if (m_VR->m_RenderFrameReadyEvent)
 		SetEvent(m_VR->m_RenderFrameReadyEvent);
-	m_VR->m_RenderedNewFrame.store(true, std::memory_order_release);
+	if (queueMode != 0 && m_VR->m_RenderPipelineDebugLog)
+	{
+		static thread_local std::chrono::steady_clock::time_point s_lastRenderCompleteLog{};
+		if (!ShouldThrottleLog(s_lastRenderCompleteLog, m_VR->m_RenderPipelineDebugLogHz))
+		{
+			Game::logMsg("[VR][Queued][RenderComplete] tid=%lu q=%d completed=%u frameSeq=%u renderPose=%u poseSeq=%u submitPose=%u lastSubmitted=%u renderedNew=%d",
+				GetCurrentThreadId(), queueMode,
+				completedFrameId,
+				m_VR->m_RenderFrameSeq.load(std::memory_order_acquire),
+				renderPoseTokenUsed,
+				m_VR->m_PoseWaiterSeq.load(std::memory_order_acquire),
+				m_VR->m_SubmitPoseToken.load(std::memory_order_acquire),
+				m_VR->m_LastSubmittedFrameId.load(std::memory_order_acquire),
+				m_VR->m_RenderedNewFrame.load(std::memory_order_acquire) ? 1 : 0);
+		}
+	}
 }

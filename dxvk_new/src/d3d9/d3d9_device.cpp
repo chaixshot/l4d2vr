@@ -4877,32 +4877,6 @@ namespace dxvk {
             const bool inGame = (g_Game->m_EngineClient && g_Game->m_EngineClient->IsInGame());
             const bool queued = (g_Game->GetMatQueueMode() != 0);
 
-            // Queued/multicore only: if submit side is reusing stale rendered frames, wait a tiny budget
-            // for a fresh render->submit handoff event. Adaptive strategy keeps default path at 0ms wait.
-            if (queued && inGame && vr->m_RenderFrameReadyEvent && vr->m_QueuedSubmitWaitMs > 0) {
-                uint32_t completed = vr->m_RenderCompletedFrameId.load(std::memory_order_acquire);
-                const uint32_t submitted = vr->m_LastSubmittedFrameId.load(std::memory_order_acquire);
-
-                if (completed <= submitted) {
-                    const uint32_t streak = vr->m_QueuedSubmitStaleStreak.fetch_add(1, std::memory_order_acq_rel) + 1;
-                    const uint32_t waitUpper = std::clamp<uint32_t>((uint32_t)vr->m_QueuedSubmitWaitMs, 0u, 20u);
-
-                    DWORD waitMs = 0;
-                    if (waitUpper > 0) {
-                        if (streak >= 6)
-                            waitMs = (DWORD)std::min<uint32_t>(2u, waitUpper);
-                        else if (streak >= 3)
-                            waitMs = (DWORD)std::min<uint32_t>(1u, waitUpper);
-                    }
-
-                    if (waitMs > 0) {
-                        WaitForSingleObject(vr->m_RenderFrameReadyEvent, waitMs);
-                        completed = vr->m_RenderCompletedFrameId.load(std::memory_order_acquire);
-                    }
-                }
-                if (completed > submitted)
-                    vr->m_QueuedSubmitStaleStreak.store(0, std::memory_order_release);
-            }
             // The desktop swapchain is presented below. Do all eye-surface resolve and optional
             // right/left-eye desktop mirroring before Present(), otherwise the window shows the old
             // backbuffer for this frame.

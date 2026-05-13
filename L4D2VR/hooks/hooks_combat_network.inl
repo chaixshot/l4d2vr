@@ -1,6 +1,46 @@
 void __fastcall Hooks::dEndFrame(void* ecx, void* edx)
 {
-	return hkEndFrame.fOriginal(ecx);
+	const bool logQueuedEndFrame =
+		m_VR &&
+		m_VR->m_RenderPipelineDebugLog &&
+		m_Game &&
+		m_Game->GetMatQueueMode() != 0;
+
+	const uint32_t beforeCompleted = logQueuedEndFrame
+		? m_VR->m_RenderCompletedFrameId.load(std::memory_order_acquire)
+		: 0;
+	const uint32_t beforeSubmitted = logQueuedEndFrame
+		? m_VR->m_LastSubmittedFrameId.load(std::memory_order_acquire)
+		: 0;
+	const uint32_t beforePose = logQueuedEndFrame
+		? m_VR->m_SubmitPoseToken.load(std::memory_order_acquire)
+		: 0;
+	const bool beforeRenderedNew = logQueuedEndFrame
+		? m_VR->m_RenderedNewFrame.load(std::memory_order_acquire)
+		: false;
+
+	hkEndFrame.fOriginal(ecx);
+
+	if (logQueuedEndFrame)
+	{
+		static thread_local std::chrono::steady_clock::time_point s_lastMaterialEndFrameLog{};
+		if (!ShouldThrottleLog(s_lastMaterialEndFrameLog, m_VR->m_RenderPipelineDebugLogHz))
+		{
+			const int queueMode = m_Game->GetMatQueueMode();
+			const uint32_t afterCompleted = m_VR->m_RenderCompletedFrameId.load(std::memory_order_acquire);
+			const uint32_t afterSubmitted = m_VR->m_LastSubmittedFrameId.load(std::memory_order_acquire);
+			const uint32_t afterPose = m_VR->m_SubmitPoseToken.load(std::memory_order_acquire);
+			const bool afterRenderedNew = m_VR->m_RenderedNewFrame.load(std::memory_order_acquire);
+			Game::logMsg("[VR][Queued][MaterialEndFrame] tid=%lu q=%d completed=%u->%u submitted=%u->%u pose=%u->%u renderedNew=%d->%d inFlight=%d",
+				GetCurrentThreadId(), queueMode,
+				beforeCompleted, afterCompleted,
+				beforeSubmitted, afterSubmitted,
+				beforePose, afterPose,
+				beforeRenderedNew ? 1 : 0,
+				afterRenderedNew ? 1 : 0,
+				m_VR->m_SubmitInFlight.load(std::memory_order_acquire) ? 1 : 0);
+		}
+	}
 }
 
 static inline void CallCalcViewModelViewOriginal(void* ecx, void* owner, const Vector& eyePosition, const QAngle& eyeAngles)

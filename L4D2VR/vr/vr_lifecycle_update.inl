@@ -735,6 +735,32 @@ void VR::Update()
 
     bool posesValid = UpdatePosesAndActions();
     UpdateAutoMatQueueMode();
+    const int queueModeAfterAuto = m_Game ? m_Game->GetMatQueueMode() : 0;
+    static int s_LastObservedQueueMode = -999;
+    if (s_LastObservedQueueMode != queueModeAfterAuto)
+    {
+        const uint32_t completedFrameId = m_RenderCompletedFrameId.load(std::memory_order_acquire);
+        if (queueModeAfterAuto == 0)
+        {
+            m_LastSubmittedFrameId.store(completedFrameId, std::memory_order_release);
+            m_RenderCompletedPoseToken.store(0, std::memory_order_release);
+            m_RenderedNewFrame.store(false, std::memory_order_release);
+            m_SubmitInFlight.store(false, std::memory_order_release);
+            m_QueuedSubmitStaleStreak.store(0, std::memory_order_release);
+        }
+
+        if (m_RenderPipelineDebugLog)
+        {
+            Game::logMsg("[VR][QueueMode] changed %d->%d inGame=%d completed=%u submitted=%u pose=%u",
+                s_LastObservedQueueMode,
+                queueModeAfterAuto,
+                inGameAtUpdateStart ? 1 : 0,
+                completedFrameId,
+                m_LastSubmittedFrameId.load(std::memory_order_acquire),
+                m_SubmitPoseToken.load(std::memory_order_acquire));
+        }
+        s_LastObservedQueueMode = queueModeAfterAuto;
+    }
     ApplyShadowSettingsIfNeeded();
     ApplyFlashlightEnhancementIfNeeded();
     ApplyLocalVScriptConvarsIfNeeded();
@@ -961,6 +987,7 @@ void VR::ReleaseVRRenderTargetsForDeviceReset()
     m_CreatingTextureID = Texture_None;
 
     m_RenderCompletedFrameId.store(0, std::memory_order_release);
+    m_RenderCompletedPoseToken.store(0, std::memory_order_release);
     m_LastSubmittedFrameId.store(0, std::memory_order_release);
     m_SubmitPoseToken.store(0, std::memory_order_release);
     m_LastSubmittedPoseToken.store(0, std::memory_order_release);
@@ -1180,6 +1207,7 @@ void VR::CreateVRTextures()
 
     // New textures should not inherit old render/submit bookkeeping.
     m_RenderCompletedFrameId.store(0, std::memory_order_release);
+    m_RenderCompletedPoseToken.store(0, std::memory_order_release);
     m_LastSubmittedFrameId.store(0, std::memory_order_release);
     m_SubmitPoseToken.store(0, std::memory_order_release);
     m_LastSubmittedPoseToken.store(0, std::memory_order_release);
@@ -1340,6 +1368,7 @@ void VR::SubmitVRTextures()
     } submitInFlightGuard{};
 
     uint32_t poseToken = 0;
+    uint32_t renderPoseToken = 0;
     uint32_t compositorFrameIndex = 0;
     if (queued)
     {
@@ -1349,8 +1378,7 @@ void VR::SubmitVRTextures()
         submitInFlightGuard.flag = &m_SubmitInFlight;
 
         poseToken = m_SubmitPoseToken.load(std::memory_order_acquire);
-        const uint32_t lastSubmittedToken = m_LastSubmittedPoseToken.load(std::memory_order_acquire);
-        if (poseToken == 0 || poseToken == lastSubmittedToken)
+        if (poseToken == 0)
             return;
 
         auto queryCompositorFrameIndex = [&]() -> uint32_t
@@ -1367,9 +1395,117 @@ void VR::SubmitVRTextures()
         if (compositorFrameIndex != 0 && compositorFrameIndex == lastSubmittedCompositorFrameIndex)
         {
             // Same compositor frame index: treat as already handled for this submit token.
-            m_LastSubmittedPoseToken.store(poseToken, std::memory_order_release);
             return;
         }
+    }
+
+    if (queued && inGame)
+    {
+        uint32_t completedFrameId = m_RenderCompletedFrameId.load(std::memory_order_acquire);
+        uint32_t lastSubmittedFrameId = m_LastSubmittedFrameId.load(std::memory_order_acquire);
+        const bool haveUnsubmittedFrame = (completedFrameId != 0 && completedFrameId != lastSubmittedFrameId);
+
+        if (!renderedNewFrame && haveUnsubmittedFrame)
+            renderedNewFrame = true;
+
+        bool waitedForRenderFrame = false;
+        DWORD waitResult = WAIT_TIMEOUT;
+        const uint32_t staleStreakBefore = m_QueuedSubmitStaleStreak.load(std::memory_order_acquire);
+        const int submitWaitMs = std::clamp(m_QueuedSubmitWaitMs, 0, 20);
+        if (!renderedNewFrame && submitWaitMs > 0 && m_RenderFrameReadyEvent)
+        {
+            waitedForRenderFrame = true;
+            waitResult = WaitForSingleObject(m_RenderFrameReadyEvent, static_cast<DWORD>(submitWaitMs));
+            renderedNewFrame = m_RenderedNewFrame.load(std::memory_order_acquire);
+            completedFrameId = m_RenderCompletedFrameId.load(std::memory_order_acquire);
+            lastSubmittedFrameId = m_LastSubmittedFrameId.load(std::memory_order_acquire);
+            if (!renderedNewFrame && completedFrameId != 0 && completedFrameId != lastSubmittedFrameId)
+                renderedNewFrame = true;
+        }
+
+        if (renderedNewFrame)
+            m_QueuedSubmitStaleStreak.store(0, std::memory_order_release);
+        else
+            m_QueuedSubmitStaleStreak.fetch_add(1, std::memory_order_acq_rel);
+
+        if (m_RenderPipelineDebugLog && (waitedForRenderFrame || !renderedNewFrame))
+        {
+            static std::chrono::steady_clock::time_point s_lastQueuedSubmitWaitLog{};
+            if (!ShouldThrottle(s_lastQueuedSubmitWaitLog, m_RenderPipelineDebugLogHz))
+            {
+                Game::logMsg("[VR][Queued][SubmitWait] tid=%lu waitMs=%d waited=%d waitResult=0x%08lX renderedNew=%d completed=%u submitted=%u pose=%u lastPose=%u stale=%u->%u",
+                    GetCurrentThreadId(), submitWaitMs,
+                    waitedForRenderFrame ? 1 : 0,
+                    static_cast<unsigned long>(waitResult),
+                    renderedNewFrame ? 1 : 0,
+                    completedFrameId,
+                    lastSubmittedFrameId,
+                    poseToken,
+                    m_LastSubmittedPoseToken.load(std::memory_order_acquire),
+                    staleStreakBefore,
+                    m_QueuedSubmitStaleStreak.load(std::memory_order_acquire));
+            }
+        }
+    }
+
+    if (queued)
+    {
+        renderPoseToken = m_RenderCompletedPoseToken.load(std::memory_order_acquire);
+        uint32_t effectivePoseToken = (renderPoseToken != 0) ? renderPoseToken : poseToken;
+        const uint32_t lastSubmittedToken = m_LastSubmittedPoseToken.load(std::memory_order_acquire);
+        if (inGame && effectivePoseToken == lastSubmittedToken && poseToken != lastSubmittedToken && m_RenderFrameReadyEvent)
+        {
+            const DWORD duplicatePoseWaitMs = static_cast<DWORD>(std::clamp(std::max(m_QueuedSubmitWaitMs, 2), 0, 20));
+            if (duplicatePoseWaitMs > 0)
+            {
+                const DWORD duplicateWaitResult = WaitForSingleObject(m_RenderFrameReadyEvent, duplicatePoseWaitMs);
+                const uint32_t waitedRenderPoseToken = m_RenderCompletedPoseToken.load(std::memory_order_acquire);
+                if (waitedRenderPoseToken != 0)
+                {
+                    renderPoseToken = waitedRenderPoseToken;
+                    effectivePoseToken = waitedRenderPoseToken;
+                }
+
+                if (m_RenderPipelineDebugLog)
+                {
+                    static std::chrono::steady_clock::time_point s_lastQueuedSubmitPoseWaitLog{};
+                    if (!ShouldThrottle(s_lastQueuedSubmitPoseWaitLog, m_RenderPipelineDebugLogHz))
+                    {
+                        Game::logMsg("[VR][Queued][SubmitPoseWait] tid=%lu waitMs=%lu result=0x%08lX currentPose=%u renderPose=%u lastPose=%u completed=%u submitted=%u renderedNew=%d",
+                            GetCurrentThreadId(),
+                            static_cast<unsigned long>(duplicatePoseWaitMs),
+                            static_cast<unsigned long>(duplicateWaitResult),
+                            poseToken,
+                            renderPoseToken,
+                            lastSubmittedToken,
+                            m_RenderCompletedFrameId.load(std::memory_order_acquire),
+                            m_LastSubmittedFrameId.load(std::memory_order_acquire),
+                            m_RenderedNewFrame.load(std::memory_order_acquire) ? 1 : 0);
+                    }
+                }
+            }
+        }
+
+        if (effectivePoseToken == 0 || effectivePoseToken == lastSubmittedToken)
+        {
+            if (m_RenderPipelineDebugLog)
+            {
+                static std::chrono::steady_clock::time_point s_lastQueuedSubmitSkipLog{};
+                if (!ShouldThrottle(s_lastQueuedSubmitSkipLog, m_RenderPipelineDebugLogHz))
+                {
+                    Game::logMsg("[VR][Queued][SubmitSkip] tid=%lu currentPose=%u renderPose=%u lastPose=%u completed=%u submitted=%u renderedNew=%d",
+                        GetCurrentThreadId(),
+                        poseToken,
+                        renderPoseToken,
+                        lastSubmittedToken,
+                        m_RenderCompletedFrameId.load(std::memory_order_acquire),
+                        m_LastSubmittedFrameId.load(std::memory_order_acquire),
+                        m_RenderedNewFrame.load(std::memory_order_acquire) ? 1 : 0);
+                }
+            }
+            return;
+        }
+        poseToken = effectivePoseToken;
     }
 
     bool successfulSubmit = false;

@@ -16,6 +16,8 @@ Hooks::Hooks(Game* game)
 	initSourceHooks();
 
 	hkGetRenderTarget.enableHook();
+	if (hkEndFrame.pTarget)
+		hkEndFrame.enableHook();
 	hkCalcViewModelView.enableHook();
 	hkServerFireTerrorBullets.enableHook();
 	hkClientFireTerrorBullets.enableHook();
@@ -83,6 +85,16 @@ int Hooks::initSourceHooks()
 {
 	LPVOID pGetRenderTargetVFunc = (LPVOID)(m_Game->m_Offsets->GetRenderTarget.address);
 	hkGetRenderTarget.createHook(pGetRenderTargetVFunc, &dGetRenderTarget);
+
+	if (m_Game->m_MaterialSystem)
+	{
+		void** materialVTable = *reinterpret_cast<void***>(m_Game->m_MaterialSystem);
+		if (materialVTable)
+		{
+			// IMaterialSystem::EndFrame is vfunc #37 in VMaterialSystem080.
+			hkEndFrame.createHook(materialVTable[37], &dEndFrame);
+		}
+	}
 
 	LPVOID pRenderViewVFunc = (LPVOID)(m_Game->m_Offsets->RenderView.address);
 	hkRenderView.createHook(pRenderViewVFunc, &dRenderView);
