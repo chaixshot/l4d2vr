@@ -1912,6 +1912,9 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	auto renderToTexture_SetRT = [&](ITexture* target, int texW, int texH, QAngle passAngles,
 		CViewSetup& view, CViewSetup& hud)
 		{
+			if (queueMode != 0)
+				return;
+
 			IMatRenderContext* rc = m_Game->m_MaterialSystem->GetRenderContext();
 			if (!rc)
 			{

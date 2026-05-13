@@ -17,6 +17,7 @@ Roomscale1To1DebugLog=false
 AutoMatQueueMode=false
 QueuedRenderHmdYawUsesTurnPath=false
 QueuedSubmitWaitMs=1
+QueuedSubmitUseRenderPoseToken=true
 QueuedRenderPoseWaitMs=0
 QueuedRenderMaxFpsSmart=true
 QueuedRenderMaxFps=0

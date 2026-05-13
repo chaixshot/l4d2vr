@@ -1202,6 +1202,9 @@ void VR::ParseConfigFile()
     // Multicore rendering: present-side wait budget (ms) for a fresh dRenderView frame before submit.
     // 0 = no wait (max FPS, can increase stale-frame submits), 1~3 = usually best balance.
     m_QueuedSubmitWaitMs = std::clamp(getInt("QueuedSubmitWaitMs", m_QueuedSubmitWaitMs), 0, 20);
+    // true = only submit frames whose render-completed pose advanced (less ghosting, can skip frames).
+    // false = original submit-pose-token route (smoother cadence, can submit stale render-pose frames).
+    m_QueuedSubmitUseRenderPoseToken = getBool("QueuedSubmitUseRenderPoseToken", m_QueuedSubmitUseRenderPoseToken);
 
     // Queued rendering: optional render-thread FPS cap as % of HMD refresh.
     // 0 = unlimited, 100 = match HMD refresh.
@@ -1235,11 +1238,12 @@ void VR::ParseConfigFile()
     m_RenderPipelineDebugLogHz = std::clamp(getFloat("RenderPipelineDebugLogHz", m_RenderPipelineDebugLogHz), 0.0f, 60.0f);
     if (m_RenderPipelineDebugLog || previousRenderPipelineDebugLog != m_RenderPipelineDebugLog)
     {
-        Game::logMsg("[VR][Config] RenderPipelineDebugLog=%d hz=%.1f queue=%d queuedSubmitWaitMs=%d queuedPoseWaitMs=%d maxFramesAhead=%d",
+        Game::logMsg("[VR][Config] RenderPipelineDebugLog=%d hz=%.1f queue=%d queuedSubmitWaitMs=%d queuedSubmitUseRenderPoseToken=%d queuedPoseWaitMs=%d maxFramesAhead=%d",
             m_RenderPipelineDebugLog ? 1 : 0,
             m_RenderPipelineDebugLogHz,
             (m_Game && m_Game->m_Initialized) ? m_Game->GetMatQueueMode() : -1,
             m_QueuedSubmitWaitMs,
+            m_QueuedSubmitUseRenderPoseToken ? 1 : 0,
             m_QueuedRenderPoseWaitMs,
             m_QueuedRenderMaxFramesAhead);
     }

@@ -690,6 +690,10 @@ public:
 	// Present-side wait budget (ms) for a fresh rendered frame in mat_queue_mode!=0.
 	// 0 disables waiting. Used as an upper bound by adaptive submit-wait logic.
 	int m_QueuedSubmitWaitMs = 1;
+	// Queued submit policy switch:
+	// true = submit only frames whose render-completed pose token advanced (less ghosting, may skip frames)
+	// false = original submit-pose-token path (smoother cadence, can submit stale render-pose frames)
+	bool m_QueuedSubmitUseRenderPoseToken = true;
 	// Count of consecutive presents where submit thread observes no newer rendered frame.
 	// Used to apply submit wait adaptively only when stale-frame pressure persists.
 	std::atomic<uint32_t> m_QueuedSubmitStaleStreak{ 0 };

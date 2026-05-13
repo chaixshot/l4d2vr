@@ -1380,6 +1380,9 @@ void VR::SubmitVRTextures()
         poseToken = m_SubmitPoseToken.load(std::memory_order_acquire);
         if (poseToken == 0)
             return;
+        const uint32_t lastSubmittedTokenAtPoseRead = m_LastSubmittedPoseToken.load(std::memory_order_acquire);
+        if (!m_QueuedSubmitUseRenderPoseToken && poseToken == lastSubmittedTokenAtPoseRead)
+            return;
 
         auto queryCompositorFrameIndex = [&]() -> uint32_t
             {
@@ -1395,11 +1398,13 @@ void VR::SubmitVRTextures()
         if (compositorFrameIndex != 0 && compositorFrameIndex == lastSubmittedCompositorFrameIndex)
         {
             // Same compositor frame index: treat as already handled for this submit token.
+            if (!m_QueuedSubmitUseRenderPoseToken)
+                m_LastSubmittedPoseToken.store(poseToken, std::memory_order_release);
             return;
         }
     }
 
-    if (queued && inGame)
+    if (queued && inGame && m_QueuedSubmitUseRenderPoseToken)
     {
         uint32_t completedFrameId = m_RenderCompletedFrameId.load(std::memory_order_acquire);
         uint32_t lastSubmittedFrameId = m_LastSubmittedFrameId.load(std::memory_order_acquire);
@@ -1448,7 +1453,7 @@ void VR::SubmitVRTextures()
         }
     }
 
-    if (queued)
+    if (queued && m_QueuedSubmitUseRenderPoseToken)
     {
         renderPoseToken = m_RenderCompletedPoseToken.load(std::memory_order_acquire);
         uint32_t effectivePoseToken = (renderPoseToken != 0) ? renderPoseToken : poseToken;
