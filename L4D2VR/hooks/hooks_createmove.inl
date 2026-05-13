@@ -55,6 +55,13 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 	if (!cmd->command_number)
 		return hkCreateMove.fOriginal(ecx, flInputSampleTime, cmd);
 
+	// Keep the latest real CUserCmd number latched beyond this function call.
+	// On remote servers, ClientFireTerrorBullets can be reached by prediction replay
+	// outside the immediate CreateMove call stack; restoring the value here makes
+	// those replays look like fresh shots and causes repeated hit sounds.
+	if (m_VR)
+		m_VR->m_CurrentPredictedHitFeedbackCmdNumber = cmd->command_number;
+
 	bool result = hkCreateMove.fOriginal(ecx, flInputSampleTime, cmd);
 
 	m_VR->m_EffectiveAttackRangeAutoFireActive = false;

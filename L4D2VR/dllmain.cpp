@@ -1677,38 +1677,104 @@ namespace
         return false;
     }
 
-    std::string BuildManifestNotesText(const std::string& json)
+    bool JsonFindStringValueFromKeys(const std::string& json, const char* const* keys, size_t keyCount, std::string& outValue)
+    {
+        for (size_t i = 0; i < keyCount; ++i)
+        {
+            std::string value;
+            if (JsonFindStringValue(json, keys[i], value))
+            {
+                value = TrimAsciiWhitespace(value);
+                if (!value.empty())
+                {
+                    outValue = value;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    bool JsonFindStringArrayValueFromKeys(const std::string& json, const char* const* keys, size_t keyCount, std::vector<std::string>& outValues)
+    {
+        for (size_t i = 0; i < keyCount; ++i)
+        {
+            std::vector<std::string> values;
+            if (JsonFindStringArrayValue(json, keys[i], values) && !values.empty())
+            {
+                outValues = values;
+                return true;
+            }
+        }
+
+        outValues.clear();
+        return false;
+    }
+
+    std::string BuildManifestNotesText(const std::string& json, bool useChineseText)
     {
         std::string notes;
-        const char* stringKeys[] = {
-            "notes",
+
+        const char* const chineseStringKeys[] = {
             "changesh",
+            "changesZh",
+            "changesZH",
+            "changesCn",
+            "changesCN"
+        };
+        const char* const englishStringKeys[] = {
             "changes",
+            "changesEn",
+            "changesEN",
+            "changesEnglish"
+        };
+        const char* const genericStringKeys[] = {
+            "notes",
             "changelog",
             "changeLog",
             "releaseNotes",
             "updateNotes"
         };
 
-        for (const char* key : stringKeys)
+        const char* const* localizedStringKeys = useChineseText ? chineseStringKeys : englishStringKeys;
+        const size_t localizedStringKeyCount = useChineseText ? _countof(chineseStringKeys) : _countof(englishStringKeys);
+        const char* const* fallbackStringKeys = useChineseText ? englishStringKeys : chineseStringKeys;
+        const size_t fallbackStringKeyCount = useChineseText ? _countof(englishStringKeys) : _countof(chineseStringKeys);
+
+        if (!JsonFindStringValueFromKeys(json, localizedStringKeys, localizedStringKeyCount, notes) &&
+            !JsonFindStringValueFromKeys(json, genericStringKeys, _countof(genericStringKeys), notes))
         {
-            std::string value;
-            if (JsonFindStringValue(json, key, value))
-            {
-                value = TrimAsciiWhitespace(value);
-                if (!value.empty())
-                {
-                    notes = value;
-                    break;
-                }
-            }
+            JsonFindStringValueFromKeys(json, fallbackStringKeys, fallbackStringKeyCount, notes);
         }
 
         std::vector<std::string> changes;
-        if (!JsonFindStringArrayValue(json, "changesh", changes) &&
-            !JsonFindStringArrayValue(json, "changes", changes))
+        const char* const chineseArrayKeys[] = {
+            "changesh",
+            "changesZh",
+            "changesZH",
+            "changesCn",
+            "changesCN"
+        };
+        const char* const englishArrayKeys[] = {
+            "changes",
+            "changesEn",
+            "changesEN",
+            "changesEnglish"
+        };
+        const char* const genericArrayKeys[] = {
+            "updateItems"
+        };
+
+        const char* const* localizedArrayKeys = useChineseText ? chineseArrayKeys : englishArrayKeys;
+        const size_t localizedArrayKeyCount = useChineseText ? _countof(chineseArrayKeys) : _countof(englishArrayKeys);
+        const char* const* fallbackArrayKeys = useChineseText ? englishArrayKeys : chineseArrayKeys;
+        const size_t fallbackArrayKeyCount = useChineseText ? _countof(englishArrayKeys) : _countof(chineseArrayKeys);
+
+        if (!JsonFindStringArrayValueFromKeys(json, localizedArrayKeys, localizedArrayKeyCount, changes) &&
+            !JsonFindStringArrayValueFromKeys(json, genericArrayKeys, _countof(genericArrayKeys), changes))
         {
-            JsonFindStringArrayValue(json, "updateItems", changes);
+            JsonFindStringArrayValueFromKeys(json, fallbackArrayKeys, fallbackArrayKeyCount, changes);
         }
 
         if (!changes.empty())
@@ -1785,7 +1851,7 @@ namespace
             return false;
         }
 
-        manifest.notes = BuildManifestNotesText(json);
+        manifest.notes = BuildManifestNotesText(json, ShouldUseChineseLaunchArgumentPrompt());
         return true;
     }
 

@@ -1049,7 +1049,7 @@ int Hooks::dClientFireTerrorBullets(
 			// RegisterPotentialKillSoundHit keeps a VR-corrected impact candidate for
 			// later hurt/death events and also serves as the fallback path for
 			// common-infected hit feedback when local hurt events are unavailable.
-			m_VR->BeginPredictedHitFeedbackShot();
+			m_VR->BeginPredictedHitFeedbackShot(m_VR->m_CurrentPredictedHitFeedbackCmdNumber);
 			// Use the final VR-corrected shot ray for predicted hit feedback so the
 			// hit sound / hit indicator matches the actual VR muzzle origin and aim.
 			m_VR->RegisterPotentialKillSoundHit(vecNewOrigin, vecNewAngles);

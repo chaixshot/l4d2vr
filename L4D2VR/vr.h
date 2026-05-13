@@ -1531,6 +1531,17 @@ public:
 		Vector impactPos = { 0,0,0 };
 	};
 
+	struct PredictedHitFeedbackEmission
+	{
+		std::uintptr_t entityTag = 0;
+		std::uintptr_t weaponTag = 0;
+		int clip1 = -2147483647;
+		uint32_t shotSerial = 0;
+		Vector start = { 0,0,0 };
+		Vector dir = { 0,0,0 };
+		std::chrono::steady_clock::time_point emittedAt{};
+	};
+
 	struct ActiveKillIndicator
 	{
 		Vector worldPos = { 0,0,0 };
@@ -1604,6 +1615,8 @@ public:
 	float m_HitSoundVolume = 1.2f;
 	bool m_HitSoundPending = false;
 	uint32_t m_HitSoundPendingMergedCount = 0;
+	uint32_t m_HitSoundPendingShotSerial = 0;
+	std::uintptr_t m_HitSoundPendingEntityTag = 0;
 	Vector m_HitSoundPendingWorldPos = { 0,0,0 };
 	std::chrono::steady_clock::time_point m_HitSoundPendingQueuedAt{};
 	bool m_KillSoundEnabled = false;
@@ -1642,8 +1655,18 @@ public:
 	std::chrono::steady_clock::time_point m_LastPredictedHitFeedbackTime{};
 	uint32_t m_PredictedHitFeedbackShotSerial = 0;
 	uint32_t m_LastPredictedHitSoundShotSerial = 0;
+	int m_CurrentPredictedHitFeedbackCmdNumber = 0;
+	std::array<uint32_t, 64> m_RecentPredictedHitFeedbackShotSerials{};
+	uint32_t m_RecentPredictedHitFeedbackShotSerialCursor = 0;
+	std::array<PredictedHitFeedbackEmission, 32> m_RecentPredictedHitFeedbackEmissions{};
+	uint32_t m_RecentPredictedHitFeedbackEmissionCursor = 0;
 	std::chrono::steady_clock::time_point m_LastPredictedHitFeedbackShotTime{};
 	std::chrono::steady_clock::time_point m_LastHitSoundPlaybackTime{};
+	std::chrono::steady_clock::time_point m_LastHitSoundQueueAcceptedTime{};
+	Vector m_LastHitSoundQueueAcceptedWorldPos = { 0,0,0 };
+	std::uintptr_t m_LastHitSoundQueueAcceptedEntityTag = 0;
+	std::array<uint32_t, 64> m_RecentHitSoundPlaybackShotSerials{};
+	uint32_t m_RecentHitSoundPlaybackShotSerialCursor = 0;
 	std::chrono::steady_clock::time_point m_LastKillSoundPlaybackTime{};
 	std::chrono::steady_clock::time_point m_LastKillSoundEventRegisterAttempt{};
 	std::chrono::steady_clock::time_point m_LastKillIndicatorTrimTime{};
@@ -2335,7 +2358,7 @@ public:
 	void UpdateAimTeammateHudTarget(C_BasePlayer* localPlayer, const Vector& start, const Vector& end, bool aimLineActive);
 	bool GetAimTeammateHudInfo(int& outPlayerIndex, int& outPercent, char* outName, size_t outNameSize);
 	int GetIncapMaxHealth() const;
-	void BeginPredictedHitFeedbackShot();
+	void BeginPredictedHitFeedbackShot(int commandNumber = 0);
 	void RegisterPotentialKillSoundHit(const Vector& start, const QAngle& angles);
 	void UpdateKillSoundFeedback();
 	void EnsureKillSoundEventListener();
@@ -2361,7 +2384,7 @@ public:
 	void PlayHitSound(const Vector* worldPos = nullptr);
 	void PlayKillSound(bool headshot, const Vector* worldPos = nullptr);
 	bool TryPlayKillSoundSpec(const std::string& spec, float baseVolume = 1.0f, const Vector* worldPos = nullptr, bool preferLoadedPathReuse = true);
-	void QueueHitSoundPlayback(const Vector* worldPos = nullptr);
+	void QueueHitSoundPlayback(const Vector* worldPos = nullptr, uint32_t shotSerial = 0, std::uintptr_t entityTag = 0);
 	void FlushPendingHitSound(std::chrono::steady_clock::time_point now);
 	void ComputeFeedbackSoundStereoVolumes(const Vector* worldPos, float baseVolume, int& outLeftVolume, int& outRightVolume) const;
 	void SyncVrmodFeedbackGameSounds() const;

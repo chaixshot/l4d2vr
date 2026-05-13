@@ -5260,12 +5260,24 @@ bool VR::IsKillSoundTargetEntity(const C_BaseEntity* entity) const
     return false;
 }
 
-void VR::BeginPredictedHitFeedbackShot()
+void VR::BeginPredictedHitFeedbackShot(int commandNumber)
 {
     const auto now = std::chrono::steady_clock::now();
-    ++m_PredictedHitFeedbackShotSerial;
-    if (m_PredictedHitFeedbackShotSerial == 0)
-        m_PredictedHitFeedbackShotSerial = 1;
+
+    // Client prediction can replay the same CUserCmd on remote servers. Use the
+    // command number as the shot id when available, so a replay of the same shot
+    // cannot emit another local hit sound / hit indicator.
+    if (commandNumber > 0)
+    {
+        m_PredictedHitFeedbackShotSerial = static_cast<uint32_t>(commandNumber);
+    }
+    else
+    {
+        ++m_PredictedHitFeedbackShotSerial;
+        if (m_PredictedHitFeedbackShotSerial == 0)
+            m_PredictedHitFeedbackShotSerial = 1;
+    }
+
     m_LastPredictedHitFeedbackShotTime = now;
 }
 
@@ -5330,8 +5342,85 @@ void VR::RegisterPotentialKillSoundHit(const Vector& start, const QAngle& angles
     }
 
     const auto now = std::chrono::steady_clock::now();
-    bool triggerDirectHitFeedback = true;
-    if (m_PredictedHitFeedbackDedupWindowSeconds > 0.0f)
+    const uint32_t shotSerial = m_PredictedHitFeedbackShotSerial;
+    const bool canUseShotGate = shotSerial != 0
+        && m_LastPredictedHitFeedbackShotTime.time_since_epoch().count() != 0
+        && std::chrono::duration<float>(now - m_LastPredictedHitFeedbackShotTime).count() <= 0.35f;
+
+    std::uintptr_t weaponTag = 0;
+    int clip1 = -2147483647;
+#ifdef _MSC_VER
+    __try
+    {
+        C_BaseCombatWeapon* activeWeapon = localPlayer->GetActiveWeapon();
+        weaponTag = reinterpret_cast<std::uintptr_t>(activeWeapon);
+        if (activeWeapon)
+            VR_TryReadI32(reinterpret_cast<const unsigned char*>(activeWeapon), kClip1Offset, clip1);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        weaponTag = 0;
+        clip1 = -2147483647;
+    }
+#else
+    C_BaseCombatWeapon* activeWeapon = localPlayer->GetActiveWeapon();
+    weaponTag = reinterpret_cast<std::uintptr_t>(activeWeapon);
+    if (activeWeapon)
+        VR_TryReadI32(reinterpret_cast<const unsigned char*>(activeWeapon), kClip1Offset, clip1);
+#endif
+
+    const std::uintptr_t entityTag = reinterpret_cast<std::uintptr_t>(entity);
+
+    const bool shotAlreadyEmitted = canUseShotGate
+        && std::find(
+            m_RecentPredictedHitFeedbackShotSerials.begin(),
+            m_RecentPredictedHitFeedbackShotSerials.end(),
+            shotSerial) != m_RecentPredictedHitFeedbackShotSerials.end();
+
+    bool replaySignatureAlreadyEmitted = false;
+    if (!shotAlreadyEmitted)
+    {
+        static constexpr float kPredictedHitReplayDedupeSeconds = 0.22f;
+        static constexpr float kPredictedHitReplayStartDistSqr = 64.0f;
+        static constexpr float kPredictedHitReplayAimDot = 0.9985f;
+        static constexpr int kUnknownClip1 = -2147483647;
+
+        for (const PredictedHitFeedbackEmission& emitted : m_RecentPredictedHitFeedbackEmissions)
+        {
+            if (emitted.emittedAt.time_since_epoch().count() == 0)
+                continue;
+
+            const float age = std::chrono::duration<float>(now - emitted.emittedAt).count();
+            if (age < 0.0f || age > kPredictedHitReplayDedupeSeconds)
+                continue;
+
+            const bool sameShotSerial = canUseShotGate && emitted.shotSerial != 0 && emitted.shotSerial == shotSerial;
+            if (sameShotSerial)
+            {
+                replaySignatureAlreadyEmitted = true;
+                break;
+            }
+
+            const bool sameWeapon = weaponTag != 0 && emitted.weaponTag == weaponTag;
+            const bool sameClip = clip1 != kUnknownClip1 && emitted.clip1 != kUnknownClip1 && emitted.clip1 == clip1;
+            if (!sameWeapon || !sameClip)
+                continue;
+
+            const Vector deltaStart = start - emitted.start;
+            const float startDistSq = deltaStart.LengthSqr();
+            const float aimDot = DotProduct(forward, emitted.dir);
+            const bool sameTrajectory = startDistSq <= kPredictedHitReplayStartDistSqr && aimDot >= kPredictedHitReplayAimDot;
+            const bool sameEntity = entityTag != 0 && emitted.entityTag == entityTag;
+            if (sameTrajectory || sameEntity)
+            {
+                replaySignatureAlreadyEmitted = true;
+                break;
+            }
+        }
+    }
+
+    bool triggerDirectHitFeedback = !shotAlreadyEmitted && !replaySignatureAlreadyEmitted;
+    if (triggerDirectHitFeedback && m_PredictedHitFeedbackDedupWindowSeconds > 0.0f)
     {
         const auto elapsed = std::chrono::duration<float>(now - m_LastPredictedHitFeedbackTime).count();
         if (m_LastPredictedHitFeedbackTime.time_since_epoch().count() != 0
@@ -5348,23 +5437,30 @@ void VR::RegisterPotentialKillSoundHit(const Vector& start, const QAngle& angles
 
     if (triggerDirectHitFeedback)
     {
-        const uint32_t shotSerial = m_PredictedHitFeedbackShotSerial;
-        const bool canUseShotGate = shotSerial != 0
-            && m_LastPredictedHitFeedbackShotTime.time_since_epoch().count() != 0
-            && std::chrono::duration<float>(now - m_LastPredictedHitFeedbackShotTime).count() <= 0.35f;
-
         if (m_HitSoundEnabled)
-        {
-            const bool shouldQueueHitSound = !canUseShotGate || m_LastPredictedHitSoundShotSerial != shotSerial;
-            if (shouldQueueHitSound)
-            {
-                QueueHitSoundPlayback(&trace.endpos);
-                if (canUseShotGate)
-                    m_LastPredictedHitSoundShotSerial = shotSerial;
-            }
-        }
+            QueueHitSoundPlayback(&trace.endpos, canUseShotGate ? shotSerial : 0, entityTag);
         if (m_HitIndicatorEnabled)
             SpawnHitIndicator(trace.endpos);
+
+        if (canUseShotGate)
+        {
+            m_LastPredictedHitSoundShotSerial = shotSerial;
+            m_RecentPredictedHitFeedbackShotSerials[
+                m_RecentPredictedHitFeedbackShotSerialCursor % m_RecentPredictedHitFeedbackShotSerials.size()] = shotSerial;
+            ++m_RecentPredictedHitFeedbackShotSerialCursor;
+        }
+
+        PredictedHitFeedbackEmission& emitted =
+            m_RecentPredictedHitFeedbackEmissions[
+                m_RecentPredictedHitFeedbackEmissionCursor % m_RecentPredictedHitFeedbackEmissions.size()];
+        emitted.entityTag = entityTag;
+        emitted.weaponTag = weaponTag;
+        emitted.clip1 = clip1;
+        emitted.shotSerial = shotSerial;
+        emitted.start = start;
+        emitted.dir = forward;
+        emitted.emittedAt = now;
+        ++m_RecentPredictedHitFeedbackEmissionCursor;
 
         m_LastPredictedHitFeedbackStart = start;
         m_LastPredictedHitFeedbackDir = forward;
@@ -5374,15 +5470,13 @@ void VR::RegisterPotentialKillSoundHit(const Vector& start, const QAngle& angles
 
     const auto expiresAt = now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
         std::chrono::duration<float>(m_KillSoundDetectionWindowSeconds));
-    const std::uintptr_t entityTag = reinterpret_cast<std::uintptr_t>(entity);
-    const uint32_t shotSerial = m_PredictedHitFeedbackShotSerial;
     const SpecialInfectedType specialType = GetSpecialInfectedType(entity);
 
     if (m_FeedbackSoundDebugLog &&
         !ShouldThrottle(m_LastFeedbackSoundDebugLogTime, m_FeedbackSoundDebugLogHz))
     {
         Game::logMsg(
-            "[VR][KillSound][predicted-hit] shot=%u idx=%d entity=%p class=%s team=%d life=%d z=%d si=%d direct=%d pos=(%.1f %.1f %.1f)",
+            "[VR][KillSound][predicted-hit] shot=%u idx=%d entity=%p class=%s team=%d life=%d z=%d si=%d direct=%d shotDupe=%d replayDupe=%d clip=%d weapon=%p pos=(%.1f %.1f %.1f)",
             shotSerial,
             entityIndex,
             reinterpret_cast<void*>(entityTag),
@@ -5392,6 +5486,10 @@ void VR::RegisterPotentialKillSoundHit(const Vector& start, const QAngle& angles
             hasZombieClass ? zombieClass : -1,
             static_cast<int>(specialType),
             triggerDirectHitFeedback ? 1 : 0,
+            shotAlreadyEmitted ? 1 : 0,
+            replaySignatureAlreadyEmitted ? 1 : 0,
+            clip1,
+            reinterpret_cast<void*>(weaponTag),
             trace.endpos.x,
             trace.endpos.y,
             trace.endpos.z);
@@ -6930,23 +7028,101 @@ void VR::PlayHitSound(const Vector* worldPos)
     m_LastHitSoundPlaybackTime = now;
 }
 
-void VR::QueueHitSoundPlayback(const Vector* worldPos)
+void VR::QueueHitSoundPlayback(const Vector* worldPos, uint32_t shotSerial, std::uintptr_t entityTag)
 {
     const auto now = std::chrono::steady_clock::now();
-    if (!m_HitSoundPending)
+    const Vector queuedPos = worldPos ? *worldPos : Vector{};
+
+    auto isSameImpactAs = [&](const Vector& rhs) -> bool
+        {
+            if (!worldPos || rhs.IsZero())
+                return false;
+            // Keep this tight: it is only meant to catch prediction replays of the same bullet,
+            // not hide real follow-up shots on the same infected.
+            return (queuedPos - rhs).LengthSqr() <= 144.0f;
+        };
+
+    auto recordSuppressed = [&]()
+        {
+            ++m_HitSoundStatsMerged;
+            ++m_HitSoundPendingMergedCount;
+        };
+
+    // If a sound has just been emitted, do not keep another pending sound alive until
+    // the cooldown expires. Remote-server prediction replays were using that delayed
+    // pending path and turned one hit into several staggered hit sounds.
+    if (m_HitSoundPlaybackCooldownSeconds > 0.0f && m_LastHitSoundPlaybackTime.time_since_epoch().count() != 0)
     {
-        m_HitSoundPending = true;
-        ++m_HitSoundStatsQueued;
-        m_HitSoundPendingMergedCount = 1;
-        m_HitSoundPendingQueuedAt = now;
-        m_HitSoundPendingWorldPos = worldPos ? *worldPos : Vector{};
+        const float elapsed = std::chrono::duration<float>(now - m_LastHitSoundPlaybackTime).count();
+        if (elapsed >= 0.0f && elapsed < m_HitSoundPlaybackCooldownSeconds)
+        {
+            recordSuppressed();
+            return;
+        }
+    }
+
+    if (shotSerial != 0)
+    {
+        const bool shotAlreadyPlayed = std::find(
+            m_RecentHitSoundPlaybackShotSerials.begin(),
+            m_RecentHitSoundPlaybackShotSerials.end(),
+            shotSerial) != m_RecentHitSoundPlaybackShotSerials.end();
+        if (shotAlreadyPlayed)
+        {
+            recordSuppressed();
+            return;
+        }
+    }
+
+    if (m_HitSoundPending)
+    {
+        const bool samePendingShot = shotSerial != 0 && m_HitSoundPendingShotSerial == shotSerial;
+        const bool samePendingEntity = entityTag != 0 && m_HitSoundPendingEntityTag == entityTag;
+        if (samePendingShot || (samePendingEntity && isSameImpactAs(m_HitSoundPendingWorldPos)))
+        {
+            recordSuppressed();
+            if (worldPos)
+                m_HitSoundPendingWorldPos = queuedPos;
+            return;
+        }
+
+        ++m_HitSoundStatsMerged;
+        ++m_HitSoundPendingMergedCount;
+        if (worldPos)
+            m_HitSoundPendingWorldPos = queuedPos;
+        if (shotSerial != 0)
+            m_HitSoundPendingShotSerial = shotSerial;
+        if (entityTag != 0)
+            m_HitSoundPendingEntityTag = entityTag;
         return;
     }
 
-    ++m_HitSoundStatsMerged;
-    ++m_HitSoundPendingMergedCount;
-    if (worldPos)
-        m_HitSoundPendingWorldPos = *worldPos;
+    // Some remote servers cause ClientFireTerrorBullets to be replayed with a new local
+    // shot serial but the same impact a few frames later. Suppress only very-near duplicate
+    // impact signatures; normal automatic fire still passes because the window is short.
+    if (m_LastHitSoundQueueAcceptedTime.time_since_epoch().count() != 0)
+    {
+        constexpr float kQueueReplayDedupeSeconds = 0.090f;
+        const float elapsed = std::chrono::duration<float>(now - m_LastHitSoundQueueAcceptedTime).count();
+        const bool inReplayWindow = elapsed >= 0.0f && elapsed <= kQueueReplayDedupeSeconds;
+        const bool sameRecentEntity = entityTag != 0 && m_LastHitSoundQueueAcceptedEntityTag == entityTag;
+        if (inReplayWindow && sameRecentEntity && isSameImpactAs(m_LastHitSoundQueueAcceptedWorldPos))
+        {
+            recordSuppressed();
+            return;
+        }
+    }
+
+    m_HitSoundPending = true;
+    ++m_HitSoundStatsQueued;
+    m_HitSoundPendingMergedCount = 1;
+    m_HitSoundPendingShotSerial = shotSerial;
+    m_HitSoundPendingEntityTag = entityTag;
+    m_HitSoundPendingQueuedAt = now;
+    m_HitSoundPendingWorldPos = queuedPos;
+    m_LastHitSoundQueueAcceptedTime = now;
+    m_LastHitSoundQueueAcceptedWorldPos = queuedPos;
+    m_LastHitSoundQueueAcceptedEntityTag = entityTag;
 }
 
 void VR::FlushPendingHitSound(std::chrono::steady_clock::time_point now)
@@ -6957,15 +7133,37 @@ void VR::FlushPendingHitSound(std::chrono::steady_clock::time_point now)
     if (m_HitSoundPlaybackCooldownSeconds > 0.0f && m_LastHitSoundPlaybackTime.time_since_epoch().count() != 0)
     {
         const float elapsed = std::chrono::duration<float>(now - m_LastHitSoundPlaybackTime).count();
-        if (elapsed < m_HitSoundPlaybackCooldownSeconds)
+        if (elapsed >= 0.0f && elapsed < m_HitSoundPlaybackCooldownSeconds)
+        {
+            // Do not delay a replayed hit until the cooldown ends. Drop it here; otherwise a
+            // single server-prediction replay can become an audible echo after the cooldown.
+            ++m_HitSoundStatsMerged;
+            m_HitSoundPending = false;
+            m_HitSoundPendingMergedCount = 0;
+            m_HitSoundPendingShotSerial = 0;
+            m_HitSoundPendingEntityTag = 0;
+            m_HitSoundPendingWorldPos = Vector{};
+            m_HitSoundPendingQueuedAt = {};
             return;
+        }
     }
 
+    const uint32_t playedShotSerial = m_HitSoundPendingShotSerial;
     const Vector* worldPos = m_HitSoundPendingWorldPos.IsZero() ? nullptr : &m_HitSoundPendingWorldPos;
     PlayHitSound(worldPos);
     ++m_HitSoundStatsFlushed;
+
+    if (playedShotSerial != 0)
+    {
+        m_RecentHitSoundPlaybackShotSerials[
+            m_RecentHitSoundPlaybackShotSerialCursor % m_RecentHitSoundPlaybackShotSerials.size()] = playedShotSerial;
+        ++m_RecentHitSoundPlaybackShotSerialCursor;
+    }
+
     m_HitSoundPending = false;
     m_HitSoundPendingMergedCount = 0;
+    m_HitSoundPendingShotSerial = 0;
+    m_HitSoundPendingEntityTag = 0;
     m_HitSoundPendingWorldPos = Vector{};
     m_HitSoundPendingQueuedAt = {};
 }
@@ -8997,12 +9195,24 @@ void VR::UpdateKillSoundFeedback()
             m_PendingKillSoundEvents.clear();
             m_HitSoundPending = false;
             m_HitSoundPendingMergedCount = 0;
+            m_HitSoundPendingShotSerial = 0;
+            m_HitSoundPendingEntityTag = 0;
             m_HitSoundPendingWorldPos = Vector{};
             m_HitSoundPendingQueuedAt = {};
+            m_LastHitSoundQueueAcceptedTime = {};
+            m_LastHitSoundQueueAcceptedWorldPos = Vector{};
+            m_LastHitSoundQueueAcceptedEntityTag = 0;
+            m_RecentHitSoundPlaybackShotSerials.fill(0);
+            m_RecentHitSoundPlaybackShotSerialCursor = 0;
             m_LastKillSoundCommonKills = -1;
             m_LastKillSoundSpecialKills = -1;
             m_PredictedHitFeedbackShotSerial = 0;
             m_LastPredictedHitSoundShotSerial = 0;
+            m_CurrentPredictedHitFeedbackCmdNumber = 0;
+            m_RecentPredictedHitFeedbackShotSerials.fill(0);
+            m_RecentPredictedHitFeedbackShotSerialCursor = 0;
+            m_RecentPredictedHitFeedbackEmissions = {};
+            m_RecentPredictedHitFeedbackEmissionCursor = 0;
             m_LastPredictedHitFeedbackShotTime = {};
             m_FeedbackSoundWarmupSignature.clear();
         };
