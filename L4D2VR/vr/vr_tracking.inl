@@ -10,6 +10,8 @@
         m_ThirdPersonMapLoadCooldownPending = true;
         Hooks::s_ServerUnderstandsVR = false;
         m_ServerHookFallbackPending = true;
+        m_ServerHookFallbackForcedNonVRServerMovement = false;
+        m_ForceNonVRServerMovement = m_ConfigForceNonVRServerMovement;
         if (m_ServerHookFallbackDelayMs > 0)
             m_ServerHookFallbackCheckTime = std::chrono::steady_clock::now() + std::chrono::milliseconds(m_ServerHookFallbackDelayMs);
         else
@@ -69,13 +71,13 @@
         if (Hooks::s_ServerUnderstandsVR)
         {
             m_ServerHookFallbackPending = false;
+            m_ServerHookFallbackForcedNonVRServerMovement = false;
+            m_ForceNonVRServerMovement = m_ConfigForceNonVRServerMovement;
         }
         else if (now >= m_ServerHookFallbackCheckTime)
         {
-            if (!m_ForceNonVRServerMovement)
-            {
-                m_ForceNonVRServerMovement = true;
-            }
+            m_ServerHookFallbackForcedNonVRServerMovement = true;
+            m_ForceNonVRServerMovement = true;
             m_ServerHookFallbackPending = false;
         }
     }

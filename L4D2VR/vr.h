@@ -1347,6 +1347,8 @@ public:
 	bool m_ServerHookFallbackPending = false;
 	int m_ServerHookFallbackDelayMs = 3000;
 	std::chrono::steady_clock::time_point m_ServerHookFallbackCheckTime{};
+	bool m_ServerHookFallbackForcedNonVRServerMovement = false;
+	bool m_ConfigForceNonVRServerMovement = false;
 	bool m_ForceNonVRServerMovement = false;
 	bool m_Roomscale1To1Movement = false;
 	float m_Roomscale1To1MaxStepMeters = 0.35f;

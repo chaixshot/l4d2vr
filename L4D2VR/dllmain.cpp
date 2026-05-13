@@ -28,8 +28,8 @@ namespace
 {
     constexpr wchar_t kDesiredVrWindowTitle[] = L"Left 4 Dead 2 VR - Vulkan";
     constexpr wchar_t kUiFontFixFileName[] = L"UI Font Fix.vpk";
-    constexpr wchar_t kWorkshopUpdateItemId[] = L"3724012405";
-    constexpr wchar_t kWorkshopUpdateVpkName[] = L"3724012405.vpk";
+    constexpr wchar_t kWorkshopUpdateItemId[] = L"3724995607";
+    constexpr wchar_t kWorkshopUpdateVpkName[] = L"3724995607.vpk";
 
     struct WindowSearchContext
     {
@@ -2045,7 +2045,7 @@ namespace
         const std::filesystem::path vpkPath = FindWorkshopUpdateVpk(gameRootPath);
         if (vpkPath.empty())
         {
-            AppendUpdateLog(updateDir, "workshop vpk not found: 3724012405.vpk");
+            AppendUpdateLog(updateDir, "workshop vpk not found: 3724995607.vpk");
             return false;
         }
 
@@ -2141,7 +2141,7 @@ namespace
         DWORD updateExtractExit = 0;
         if (!RunPowerShellScript(extractUpdateScript, { vpkPath, stagingPath }, updateExtractExit) || updateExtractExit != 0)
         {
-            ShowUpdateError(L"Failed to extract root files from 3724012405.vpk. Check VR\\update\\update_check.log.", L"\u65E0\u6CD5\u4ECE 3724012405.vpk \u89E3\u538B\u66F4\u65B0\u6587\u4EF6\u3002\u8BF7\u68C0\u67E5 VR\\update\\update_check.log\u3002");
+            ShowUpdateError(L"Failed to extract root files from 3724995607.vpk. Check VR\\update\\update_check.log.", L"\u65E0\u6CD5\u4ECE 3724995607.vpk \u89E3\u538B\u66F4\u65B0\u6587\u4EF6\u3002\u8BF7\u68C0\u67E5 VR\\update\\update_check.log\u3002");
             AppendUpdateLog(updateDir, "failed to extract update files, exit=" + std::to_string(updateExtractExit));
             return false;
         }

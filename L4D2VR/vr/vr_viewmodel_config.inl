@@ -1398,7 +1398,8 @@ void VR::ParseConfigFile()
         getFloat("DamageFeedbackOverallScale", m_DamageFeedbackOverallScale),
         0.0f, 1.0f);
 
-    m_ForceNonVRServerMovement = getBool("ForceNonVRServerMovement", m_ForceNonVRServerMovement);
+    m_ConfigForceNonVRServerMovement = getBool("ForceNonVRServerMovement", m_ConfigForceNonVRServerMovement);
+    m_ForceNonVRServerMovement = m_ConfigForceNonVRServerMovement || m_ServerHookFallbackForcedNonVRServerMovement;
 
     // Non-VR server movement: make client-side bullet/muzzle effects originate from controller (visual-only).
     m_NonVRServerMovementEffectsFromController = getBool("NonVRServerMovementEffectsFromController", m_NonVRServerMovementEffectsFromController);

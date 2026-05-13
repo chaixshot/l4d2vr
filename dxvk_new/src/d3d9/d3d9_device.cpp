@@ -597,15 +597,11 @@ namespace dxvk {
                 return true;
 
             const bool inGame = vr->m_Game->m_EngineClient->IsInGame();
-            const bool isPaused = vr->m_Game->m_EngineClient->IsPaused();
-            // Keep this matched with Hooks::dVGui_Paint().  In live gameplay we suppress
-            // Source's normal VGUI/backbuffer path and use the captured native HUD texture
-            // for the desktop mirror.  Chat is still live gameplay: if we stop compositing
-            // just because the chat/cursor path is active, the desktop mirror loses both the
-            // chat box and the normal HUD.
-            // Pause/menu paths are allowed to use Source's normal path, so don't add a second
-            // desktop HUD layer there.
-            return inGame && !isPaused;
+            // Present() mirrors the selected VR eye after Source has painted VGUI to the
+            // normal backbuffer, so that native backbuffer path is overwritten. Composite
+            // the captured HUD/VGUI texture for every in-game desktop mirror frame,
+            // including pause/cursor menus.
+            return inGame;
         }
 
         static void VrMirrorEyeToDesktopBackBuffer(
