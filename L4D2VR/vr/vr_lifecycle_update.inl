@@ -291,6 +291,10 @@ namespace
             Hooks::hkViewport.fOriginal(ctx, oldX, oldY, oldW, oldH);
 
         vr->m_RenderedNewFrame.store(false, std::memory_order_release);
+        vr->m_RenderCompletedPoseToken.store(0, std::memory_order_release);
+        vr->m_LastSubmittedPoseToken.store(0, std::memory_order_release);
+        vr->m_SubmitInFlight.store(false, std::memory_order_release);
+        vr->m_QueuedSubmitStaleStreak.store(0, std::memory_order_release);
         vr->m_RenderedHud.store(false, std::memory_order_release);
         vr->m_HudPaintedThisFrame.store(false, std::memory_order_release);
         vr->m_QueuedHudFreshUntil = std::chrono::steady_clock::time_point{};
@@ -1275,7 +1279,16 @@ void VR::SubmitVRTextures()
         return;
 
     const bool inGame = (m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame());
+    bool hasLocalPlayer = false;
+    if (inGame && m_Game)
+    {
+        const int playerIndex = m_Game->m_EngineClient->GetLocalPlayer();
+        hasLocalPlayer = (m_Game->GetClientEntity(playerIndex) != nullptr);
+    }
+    const bool sceneReadyForStaleResubmit = inGame && hasLocalPlayer;
     bool renderedNewFrame = m_RenderedNewFrame.load(std::memory_order_acquire);
+    if (inGame && !hasLocalPlayer)
+        renderedNewFrame = false;
 
     if (!inGame && renderedNewFrame)
     {
@@ -1404,7 +1417,7 @@ void VR::SubmitVRTextures()
         }
     }
 
-    if (queued && inGame && m_QueuedSubmitUseRenderPoseToken)
+    if (queued && sceneReadyForStaleResubmit && m_QueuedSubmitUseRenderPoseToken)
     {
         uint32_t completedFrameId = m_RenderCompletedFrameId.load(std::memory_order_acquire);
         uint32_t lastSubmittedFrameId = m_LastSubmittedFrameId.load(std::memory_order_acquire);
@@ -1453,12 +1466,12 @@ void VR::SubmitVRTextures()
         }
     }
 
-    if (queued && m_QueuedSubmitUseRenderPoseToken)
+    if (queued && sceneReadyForStaleResubmit && m_QueuedSubmitUseRenderPoseToken)
     {
         renderPoseToken = m_RenderCompletedPoseToken.load(std::memory_order_acquire);
         uint32_t effectivePoseToken = (renderPoseToken != 0) ? renderPoseToken : poseToken;
         const uint32_t lastSubmittedToken = m_LastSubmittedPoseToken.load(std::memory_order_acquire);
-        if (inGame && effectivePoseToken == lastSubmittedToken && poseToken != lastSubmittedToken && m_RenderFrameReadyEvent)
+        if (effectivePoseToken == lastSubmittedToken && poseToken != lastSubmittedToken && m_RenderFrameReadyEvent)
         {
             const DWORD duplicatePoseWaitMs = static_cast<DWORD>(std::clamp(std::max(m_QueuedSubmitWaitMs, 2), 0, 20));
             if (duplicatePoseWaitMs > 0)
@@ -1632,7 +1645,7 @@ void VR::SubmitVRTextures()
         // When that happens, m_RenderedNewFrame may still be false even though we're already in-game.
         // Showing the backbuffer/menu overlay in this state creates an extra compositor layer and can cause
         // severe stutter (and a visible backbuffer rectangle). Instead, just re-submit the last eye textures.
-        if (inGame)
+        if (sceneReadyForStaleResubmit)
         {
             // Ensure the menu overlay is not left visible while in-game.
             if (vr::VROverlay()->IsOverlayVisible(m_MainMenuHandle))
@@ -1673,7 +1686,7 @@ void VR::SubmitVRTextures()
         vr::VROverlay()->HideOverlay(m_LeftWristHudHandle);
         vr::VROverlay()->HideOverlay(m_RightAmmoHudHandle);
 
-        if (!inGame)
+        if (!sceneReadyForStaleResubmit)
         {
             submitStereoPair(&m_VKBlankTexture.m_VRTexture, nullptr,
                 &m_VKBlankTexture.m_VRTexture, nullptr);

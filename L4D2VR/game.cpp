@@ -433,15 +433,6 @@ Game::Game()
     InstallVertexFormatWarningFilter();
     m_Initialized = true;
 
-    char cwd[MAX_PATH] = {};
-    GetCurrentDirectoryA(MAX_PATH, cwd);
-    logMsg("[VR][Startup] Game initialized cwd=%s client=0x%IX engine=0x%IX material=0x%IX server=0x%IX",
-        cwd,
-        m_BaseClient,
-        m_BaseEngine,
-        m_BaseMaterialSystem,
-        m_BaseServer);
-
 }
 
 // === Fallback Interface ===

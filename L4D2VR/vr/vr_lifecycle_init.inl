@@ -907,8 +907,6 @@ VR::VR(Game* game)
 
     InstallApplicationManifest("manifest.vrmanifest");
     SetActionManifest("action_manifest.json");
-
-    Game::logMsg("[VR][Startup] starting config watcher and VR overlays");
     std::thread configParser(&VR::WaitForConfigUpdate, this);
     configParser.detach();
 
