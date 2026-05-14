@@ -1267,9 +1267,8 @@ public:
 	int  m_DesktopMirrorEye = 1; // 0 = left eye, 1 = right eye
 	bool m_DesktopMirrorKeepAspect = true;
 	bool m_DesktopMirrorLinearFilter = true;
-	// Requested value from config.txt. The runtime effective flag below is forced off
-	// in mat_queue_mode != 0 so queued desktop mirroring uses the eye surface directly
-	// instead of a partial clean target that makes DebugOverlay aim lines flicker.
+	// Requested value from config.txt. The runtime effective flag below is true only
+	// when the clean desktop mirror target exists.
 	bool m_DesktopMirrorHidePluginOverlaysRequested = true;
 	// Runtime effective value. External mirror code can keep reading this field.
 	bool m_DesktopMirrorHidePluginOverlays = true;

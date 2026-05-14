@@ -313,24 +313,22 @@ namespace
             return;
 
         // The user-facing setting is a request; the runtime flag is only true when the
-        // clean desktop mirror target is available and rendering is single-threaded.
-        // In queued/multicore rendering, a partial clean-mirror path is worse than
-        // letting the desktop mirror show the same overlays as the VR eye: the aim line
-        // visibly flickers as the clean target and normal eye source alternate.
+        // clean desktop mirror target is available. In queued/multicore rendering the
+        // clean target is updated by an extra Source RenderView pass, not by the old
+        // raw D3D9 post-eye copy.
 
         const bool requested = vr->m_DesktopMirrorHidePluginOverlaysRequested;
         const bool texturesReady = vr->m_CreatedVRTextures.load(std::memory_order_acquire);
         const bool cleanTargetReady = (vr->m_DesktopMirrorTexture != nullptr);
-        const bool effective = requested && cleanTargetReady && !queuedRendering;
-        const bool needRecreate = requested && !queuedRendering && texturesReady && !vr->m_DesktopMirrorTexture;
+        const bool effective = requested && cleanTargetReady;
+        const bool needRecreate = requested && texturesReady && !vr->m_DesktopMirrorTexture;
 
         const bool changed = (vr->m_DesktopMirrorHidePluginOverlays != effective);
         vr->m_DesktopMirrorHidePluginOverlays = effective;
 
         // Older builds did not allocate desktopMirrorClean0 while mat_queue_mode was active.
         // If a live session enters that state, recreate all VR RTs once so the desktop mirror
-        // never points at a missing clean target in single-threaded mode. Keep the runtime
-        // flag false until that happens.
+        // never points at a missing clean target. Keep the runtime flag false until that happens.
         if (needRecreate)
         {
             std::lock_guard<TextureStateMutex> textureLock(vr->m_TextureMutex);
