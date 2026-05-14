@@ -7,11 +7,37 @@
 
 #include <openvr.h>
 
+#ifdef _WIN32
+#include <shellapi.h>
+#endif
+
 using VR_InitInternalProc        = vr::IVRSystem* (VR_CALLTYPE *)(vr::EVRInitError*, vr::EVRApplicationType);
 using VR_ShutdownInternalProc    = void  (VR_CALLTYPE *)();
 using VR_GetGenericInterfaceProc = void* (VR_CALLTYPE *)(const char*, vr::EVRInitError*);
 
 namespace dxvk {
+
+  static bool IsNoHmdLaunchArgPresent() {
+#ifdef _WIN32
+    int nArgs = 0;
+    LPWSTR* argList = CommandLineToArgvW(GetCommandLineW(), &nArgs);
+    if (!argList)
+      return false;
+
+    bool noHmd = false;
+    for (int i = 0; i < nArgs; i++) {
+      if (_wcsicmp(argList[i], L"-nohmd") == 0) {
+        noHmd = true;
+        break;
+      }
+    }
+
+    LocalFree(argList);
+    return noHmd;
+#else
+    return false;
+#endif
+  }
   
   struct VrFunctions {
     VR_InitInternalProc        initInternal        = nullptr;
@@ -23,7 +49,8 @@ namespace dxvk {
   VrInstance VrInstance::s_instance;
 
   VrInstance:: VrInstance() {
-    m_no_vr = env::getEnvVar("DXVK_NO_VR") == "1";
+    m_no_vr = env::getEnvVar("DXVK_NO_VR") == "1"
+           || IsNoHmdLaunchArgPresent();
   }
   VrInstance::~VrInstance() { }
 
