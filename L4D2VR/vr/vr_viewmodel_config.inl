@@ -1236,6 +1236,13 @@ void VR::ParseConfigFile()
     const bool oldReShadeVRCompat = m_ReShadeVRCompat;
     m_ReShadeVRCompat = getBool("ReShadeVRCompat", m_ReShadeVRCompat);
     L4D2VR_D3D9_SetForceDeviceLock(m_ReShadeVRCompat ? 1 : 0);
+    if (oldReShadeVRCompat != m_ReShadeVRCompat)
+    {
+        m_ReShadeVRCompatResolvedFrameId.store(0, std::memory_order_release);
+        m_ReShadeVRCompatPendingRenderReady.store(0, std::memory_order_release);
+        m_ReShadeVRCompatPendingRenderPoseToken.store(0, std::memory_order_release);
+        m_ReShadeVRCompatPendingRenderFrameSeq.store(0, std::memory_order_release);
+    }
     if (m_Compositor && oldReShadeVRCompat != m_ReShadeVRCompat)
         ConfigureExplicitTiming();
 

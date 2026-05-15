@@ -21,6 +21,42 @@ void __fastcall Hooks::dEndFrame(void* ecx, void* edx)
 
 	hkEndFrame.fOriginal(ecx);
 
+	if (m_VR && m_Game && m_Game->GetMatQueueMode() != 0 && m_VR->m_ReShadeVRCompat)
+	{
+		const uint32_t pendingReady = m_VR->m_ReShadeVRCompatPendingRenderReady.exchange(0, std::memory_order_acq_rel);
+		if (pendingReady != 0)
+		{
+			uint32_t renderPoseToken = m_VR->m_ReShadeVRCompatPendingRenderPoseToken.exchange(0, std::memory_order_acq_rel);
+			const uint32_t pendingFrameSeq = m_VR->m_ReShadeVRCompatPendingRenderFrameSeq.exchange(0, std::memory_order_acq_rel);
+			if (renderPoseToken == 0)
+				renderPoseToken = m_VR->m_SubmitPoseToken.load(std::memory_order_acquire);
+
+			const uint32_t completedFrameId = m_VR->m_RenderCompletedFrameId.fetch_add(1, std::memory_order_acq_rel) + 1;
+			m_VR->m_RenderCompletedPoseToken.store(renderPoseToken, std::memory_order_release);
+			m_VR->m_RenderedNewFrame.store(true, std::memory_order_release);
+			if (m_VR->m_RenderFrameReadyEvent)
+				SetEvent(m_VR->m_RenderFrameReadyEvent);
+
+			if (m_VR->m_RenderPipelineDebugLog)
+			{
+				static thread_local std::chrono::steady_clock::time_point s_lastReShadeEndFrameCompleteLog{};
+				if (!ShouldThrottleLog(s_lastReShadeEndFrameCompleteLog, m_VR->m_RenderPipelineDebugLogHz))
+				{
+					Game::logMsg("[VR][Queued][RenderCompleteEndFrame] tid=%lu q=%d completed=%u frameSeq=%u renderPose=%u poseSeq=%u submitPose=%u lastSubmitted=%u renderedNew=%d",
+						GetCurrentThreadId(),
+						m_Game->GetMatQueueMode(),
+						completedFrameId,
+						pendingFrameSeq,
+						renderPoseToken,
+						m_VR->m_PoseWaiterSeq.load(std::memory_order_acquire),
+						m_VR->m_SubmitPoseToken.load(std::memory_order_acquire),
+						m_VR->m_LastSubmittedFrameId.load(std::memory_order_acquire),
+						m_VR->m_RenderedNewFrame.load(std::memory_order_acquire) ? 1 : 0);
+				}
+			}
+		}
+	}
+
 	if (logQueuedEndFrame)
 	{
 		static thread_local std::chrono::steady_clock::time_point s_lastMaterialEndFrameLog{};

@@ -1847,6 +1847,10 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			return true;
 		};
 
+	std::unique_lock<std::recursive_mutex> reshadeQueuedSurfaceLock;
+	if (queueMode != 0 && m_VR->m_ReShadeVRCompat)
+		reshadeQueuedSurfaceLock = std::unique_lock<std::recursive_mutex>(m_VR->m_ReShadeVRCompatSurfaceMutex);
+
 	if (desktopMirrorHidePluginOverlaysQueuedRtActive)
 	{
 		// Queued/multicore clean mirror cannot use the cheap D3D copy path safely on all DXVK builds.
@@ -2103,13 +2107,44 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	// Restore engine angles immediately after our stereo render (single-threaded only).
 	if (touchedEngineAngles && m_Game && m_Game->m_EngineClient)
 		m_Game->m_EngineClient->SetViewAngles(prevEngineAngles);
-	const uint32_t completedFrameId = m_VR->m_RenderCompletedFrameId.fetch_add(1, std::memory_order_acq_rel) + 1;
 	if (queueMode != 0)
 	{
 		if (renderPoseTokenUsed == 0)
 			renderPoseTokenUsed = m_VR->m_SubmitPoseToken.load(std::memory_order_acquire);
+
+		if (m_VR->m_ReShadeVRCompat)
+		{
+			// In queued Source rendering, RenderView can return before MaterialSystem::EndFrame
+			// has submitted/flushed all D3D work. ReShadeVRCompat resolves eye RTs after
+			// Present; publishing completion here lets the submit thread copy a half-flushed
+			// stereo frame in complex scenes. Delay the completion signal until dEndFrame.
+			m_VR->m_ReShadeVRCompatPendingRenderPoseToken.store(renderPoseTokenUsed, std::memory_order_release);
+			m_VR->m_ReShadeVRCompatPendingRenderFrameSeq.store(m_VR->m_RenderFrameSeq.load(std::memory_order_acquire), std::memory_order_release);
+			m_VR->m_ReShadeVRCompatPendingRenderReady.store(1, std::memory_order_release);
+
+			if (m_VR->m_RenderPipelineDebugLog)
+			{
+				static thread_local std::chrono::steady_clock::time_point s_lastRenderPendingLog{};
+				if (!ShouldThrottleLog(s_lastRenderPendingLog, m_VR->m_RenderPipelineDebugLogHz))
+				{
+					Game::logMsg("[VR][Queued][RenderCompletePending] tid=%lu q=%d completed=%u frameSeq=%u renderPose=%u poseSeq=%u submitPose=%u lastSubmitted=%u renderedNew=%d",
+						GetCurrentThreadId(), queueMode,
+						m_VR->m_RenderCompletedFrameId.load(std::memory_order_acquire),
+						m_VR->m_RenderFrameSeq.load(std::memory_order_acquire),
+						renderPoseTokenUsed,
+						m_VR->m_PoseWaiterSeq.load(std::memory_order_acquire),
+						m_VR->m_SubmitPoseToken.load(std::memory_order_acquire),
+						m_VR->m_LastSubmittedFrameId.load(std::memory_order_acquire),
+						m_VR->m_RenderedNewFrame.load(std::memory_order_acquire) ? 1 : 0);
+				}
+			}
+			return;
+		}
+
 		m_VR->m_RenderCompletedPoseToken.store(renderPoseTokenUsed, std::memory_order_release);
 	}
+
+	const uint32_t completedFrameId = m_VR->m_RenderCompletedFrameId.fetch_add(1, std::memory_order_acq_rel) + 1;
 	m_VR->m_RenderedNewFrame.store(true, std::memory_order_release);
 	if (m_VR->m_RenderFrameReadyEvent)
 		SetEvent(m_VR->m_RenderFrameReadyEvent);

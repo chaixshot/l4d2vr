@@ -1280,6 +1280,18 @@ public:
 	// full-eye texture bounds, and disables application-managed explicit compositor
 	// timing. This is intended only for real SteamVR/ALVR HMDs with ReShade loaded.
 	bool m_ReShadeVRCompat = false;
+	// ReShade + mat_queue_mode 2 needs an additional coarse guard around eye RT writes,
+	// post-Present resolve, and SteamVR submit. Per-call D3D9 locking is not enough here:
+	// the Present thread can otherwise resolve half-written eye textures when complex
+	// scenes make the queued render worker lag behind.
+	mutable std::recursive_mutex m_ReShadeVRCompatSurfaceMutex;
+	std::atomic<uint32_t> m_ReShadeVRCompatResolvedFrameId{ 0 };
+	// In Source queued rendering, RenderView can return before MaterialSystem::EndFrame
+	// has flushed all D3D work. ReShadeVRCompat resolves eye RTs after Present, so only
+	// publish a completed stereo frame after EndFrame has finished.
+	std::atomic<uint32_t> m_ReShadeVRCompatPendingRenderReady{ 0 };
+	std::atomic<uint32_t> m_ReShadeVRCompatPendingRenderPoseToken{ 0 };
+	std::atomic<uint32_t> m_ReShadeVRCompatPendingRenderFrameSeq{ 0 };
 
 
 	bool m_FlashlightEnhancementEnabled = false;

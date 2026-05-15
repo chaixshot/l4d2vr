@@ -292,6 +292,10 @@ namespace
 
         vr->m_RenderedNewFrame.store(false, std::memory_order_release);
         vr->m_RenderCompletedPoseToken.store(0, std::memory_order_release);
+        vr->m_ReShadeVRCompatResolvedFrameId.store(0, std::memory_order_release);
+        vr->m_ReShadeVRCompatPendingRenderReady.store(0, std::memory_order_release);
+        vr->m_ReShadeVRCompatPendingRenderPoseToken.store(0, std::memory_order_release);
+        vr->m_ReShadeVRCompatPendingRenderFrameSeq.store(0, std::memory_order_release);
         vr->m_LastSubmittedPoseToken.store(0, std::memory_order_release);
         vr->m_SubmitInFlight.store(false, std::memory_order_release);
         vr->m_QueuedSubmitStaleStreak.store(0, std::memory_order_release);
@@ -731,6 +735,14 @@ void VR::Update()
     }
 
     const bool queuedAtFrameStart = (m_Game && (m_Game->GetMatQueueMode() != 0));
+    const uint32_t updateThreadId = static_cast<uint32_t>(::GetCurrentThreadId());
+    const uint32_t renderThreadIdAtUpdate = m_RenderThreadId.load(std::memory_order_acquire);
+    const bool suppressQueuedReShadeSubmitOnRenderThread =
+        queuedAtFrameStart &&
+        m_ReShadeVRCompat &&
+        renderThreadIdAtUpdate != 0 &&
+        renderThreadIdAtUpdate == updateThreadId;
+
     UpdateDesktopMirrorOverlayHideEffective(this, queuedAtFrameStart);
     if (!queuedAtFrameStart)
         SubmitVRTextures();
@@ -746,6 +758,9 @@ void VR::Update()
         {
             m_LastSubmittedFrameId.store(completedFrameId, std::memory_order_release);
             m_RenderCompletedPoseToken.store(0, std::memory_order_release);
+            m_ReShadeVRCompatPendingRenderReady.store(0, std::memory_order_release);
+            m_ReShadeVRCompatPendingRenderPoseToken.store(0, std::memory_order_release);
+            m_ReShadeVRCompatPendingRenderFrameSeq.store(0, std::memory_order_release);
             m_RenderedNewFrame.store(false, std::memory_order_release);
             m_SubmitInFlight.store(false, std::memory_order_release);
             m_QueuedSubmitStaleStreak.store(0, std::memory_order_release);
@@ -771,8 +786,23 @@ void VR::Update()
         // Continue using the last known poses so smoothing and aim helpers stay active.
     }
 
-    if (queuedAtFrameStart)
+    if (queuedAtFrameStart && !suppressQueuedReShadeSubmitOnRenderThread)
+    {
         SubmitVRTextures();
+    }
+    else if (suppressQueuedReShadeSubmitOnRenderThread && m_RenderPipelineDebugLog)
+    {
+        static thread_local std::chrono::steady_clock::time_point s_lastQueuedReShadeUpdateSubmitSkipLog{};
+        if (!ShouldThrottle(s_lastQueuedReShadeUpdateSubmitSkipLog, m_RenderPipelineDebugLogHz))
+        {
+            Game::logMsg("[VR][Queued][ReShadeUpdateSubmitSkip] tid=%lu renderTid=%u completed=%u submitted=%u renderedNew=%d",
+                ::GetCurrentThreadId(),
+                renderThreadIdAtUpdate,
+                m_RenderCompletedFrameId.load(std::memory_order_acquire),
+                m_LastSubmittedFrameId.load(std::memory_order_acquire),
+                m_RenderedNewFrame.load(std::memory_order_acquire) ? 1 : 0);
+        }
+    }
 
     // Auto ResetPosition shortly after a level finishes loading.
 
@@ -990,6 +1020,10 @@ void VR::ReleaseVRRenderTargetsForDeviceReset()
 
     m_RenderCompletedFrameId.store(0, std::memory_order_release);
     m_RenderCompletedPoseToken.store(0, std::memory_order_release);
+    m_ReShadeVRCompatResolvedFrameId.store(0, std::memory_order_release);
+    m_ReShadeVRCompatPendingRenderReady.store(0, std::memory_order_release);
+    m_ReShadeVRCompatPendingRenderPoseToken.store(0, std::memory_order_release);
+    m_ReShadeVRCompatPendingRenderFrameSeq.store(0, std::memory_order_release);
     m_LastSubmittedFrameId.store(0, std::memory_order_release);
     m_SubmitPoseToken.store(0, std::memory_order_release);
     m_LastSubmittedPoseToken.store(0, std::memory_order_release);
@@ -1217,6 +1251,10 @@ void VR::CreateVRTextures()
     // New textures should not inherit old render/submit bookkeeping.
     m_RenderCompletedFrameId.store(0, std::memory_order_release);
     m_RenderCompletedPoseToken.store(0, std::memory_order_release);
+    m_ReShadeVRCompatResolvedFrameId.store(0, std::memory_order_release);
+    m_ReShadeVRCompatPendingRenderReady.store(0, std::memory_order_release);
+    m_ReShadeVRCompatPendingRenderPoseToken.store(0, std::memory_order_release);
+    m_ReShadeVRCompatPendingRenderFrameSeq.store(0, std::memory_order_release);
     m_LastSubmittedFrameId.store(0, std::memory_order_release);
     m_SubmitPoseToken.store(0, std::memory_order_release);
     m_LastSubmittedPoseToken.store(0, std::memory_order_release);
