@@ -373,16 +373,61 @@ namespace dxvk {
 
             device->EndScene();
         }
+        static bool VrTextureBoundsToSourceRect(
+            const vr::VRTextureBounds_t* bounds,
+            const D3DSURFACE_DESC& desc,
+            RECT& outRect) {
+            if (!bounds || desc.Width == 0 || desc.Height == 0)
+                return false;
+
+            const float u0 = std::clamp(std::min(bounds->uMin, bounds->uMax), 0.0f, 1.0f);
+            const float u1 = std::clamp(std::max(bounds->uMin, bounds->uMax), 0.0f, 1.0f);
+            const float v0 = std::clamp(std::min(bounds->vMin, bounds->vMax), 0.0f, 1.0f);
+            const float v1 = std::clamp(std::max(bounds->vMin, bounds->vMax), 0.0f, 1.0f);
+
+            LONG left = static_cast<LONG>(std::floor(u0 * static_cast<float>(desc.Width) + 0.5f));
+            LONG right = static_cast<LONG>(std::floor(u1 * static_cast<float>(desc.Width) + 0.5f));
+            LONG top = static_cast<LONG>(std::floor(v0 * static_cast<float>(desc.Height) + 0.5f));
+            LONG bottom = static_cast<LONG>(std::floor(v1 * static_cast<float>(desc.Height) + 0.5f));
+
+            left = std::clamp<LONG>(left, 0, static_cast<LONG>(desc.Width));
+            right = std::clamp<LONG>(right, 0, static_cast<LONG>(desc.Width));
+            top = std::clamp<LONG>(top, 0, static_cast<LONG>(desc.Height));
+            bottom = std::clamp<LONG>(bottom, 0, static_cast<LONG>(desc.Height));
+
+            if (right <= left || bottom <= top)
+                return false;
+
+            outRect = RECT{ left, top, right, bottom };
+            return true;
+        }
+
         static void VrResolveSurfaceToSubmit(
             D3D9DeviceEx* device,
             IDirect3DSurface9* source,
-            IDirect3DSurface9* submitTarget) {
+            IDirect3DSurface9* submitTarget,
+            const vr::VRTextureBounds_t* prebakeBounds = nullptr) {
             if (!device || !source || !submitTarget || source == submitTarget)
                 return;
 
-            HRESULT resolveResult = device->StretchRect(source, nullptr, submitTarget, nullptr, D3DTEXF_NONE);
+            RECT srcRect{};
+            const RECT* srcRectPtr = nullptr;
+            D3DTEXTUREFILTERTYPE filter = D3DTEXF_NONE;
+
+            if (prebakeBounds) {
+                D3DSURFACE_DESC sourceDesc{};
+                if (SUCCEEDED(source->GetDesc(&sourceDesc)) && VrTextureBoundsToSourceRect(prebakeBounds, sourceDesc, srcRect)) {
+                    srcRectPtr = &srcRect;
+                    filter = D3DTEXF_LINEAR;
+                }
+            }
+
+            HRESULT resolveResult = device->StretchRect(source, srcRectPtr, submitTarget, nullptr, filter);
+            if (FAILED(resolveResult) && filter != D3DTEXF_NONE)
+                resolveResult = device->StretchRect(source, srcRectPtr, submitTarget, nullptr, D3DTEXF_NONE);
+
             if (FAILED(resolveResult))
-                Logger::warn(str::format("VR eye MSAA resolve to submit texture failed: 0x", std::hex, resolveResult));
+                Logger::warn(str::format("VR eye resolve to submit texture failed: 0x", std::hex, resolveResult));
         }
 
         static bool VrGetPositiveRectSize(const RECT* rect, UINT& width, UINT& height) {
@@ -4873,6 +4918,7 @@ namespace dxvk {
 
         if (g_Game && g_Game->m_VR && g_Game->m_VR->m_CreatedVRTextures) {
             VR* vr = g_Game->m_VR;
+            g_l4d2vrForceDeviceLock.store(vr->m_ReShadeVRCompat, std::memory_order_relaxed);
             const bool inGame = (g_Game->m_EngineClient && g_Game->m_EngineClient->IsInGame());
             const bool queued = (g_Game->GetMatQueueMode() != 0);
 
@@ -4889,12 +4935,22 @@ namespace dxvk {
                     VrAimLineDrawOverlayToSurface(this, vr, 1, vr->m_D9RightEyeSurface);
             }
 
+            const vr::VRTextureBounds_t* leftPrebakeBounds = vr->m_ReShadeVRCompat ? &vr->m_TextureBounds[0] : nullptr;
+            const vr::VRTextureBounds_t* rightPrebakeBounds = vr->m_ReShadeVRCompat ? &vr->m_TextureBounds[1] : nullptr;
             if (vr->m_D9LeftEyeSubmitSurface)
-                VrResolveSurfaceToSubmit(this, vr->m_D9LeftEyeSurface, vr->m_D9LeftEyeSubmitSurface);
+                VrResolveSurfaceToSubmit(this, vr->m_D9LeftEyeSurface, vr->m_D9LeftEyeSubmitSurface, leftPrebakeBounds);
             if (vr->m_D9RightEyeSubmitSurface)
-                VrResolveSurfaceToSubmit(this, vr->m_D9RightEyeSurface, vr->m_D9RightEyeSubmitSurface);
+                VrResolveSurfaceToSubmit(this, vr->m_D9RightEyeSurface, vr->m_D9RightEyeSubmitSurface, rightPrebakeBounds);
 
             VrMirrorEyeToDesktopBackBuffer(this, vr, pDestRect, hDestWindowOverride);
+
+            // Do not wait the DXVK device idle before Present here.
+            // With Source mat_queue_mode 2 the material/render worker can still be issuing
+            // DrawIndexedPrimitive commands while the desktop Present path is entered. A
+            // pre-Present WaitDeviceIdle flushes DXVK's command stream from the wrong timing
+            // window and can race m_csChunk, producing AVs in DxvkCsChunk::push/alloc.
+            // Synchronize after Present instead, immediately before VR::Update submits the
+            // eye textures to OpenVR/ALVR.
         }
 
         HRESULT result = m_implicitSwapchain->Present(
@@ -4934,7 +4990,10 @@ namespace dxvk {
             }
         }
 
-        // Keep conservative sync behavior for stability.
+        // Keep conservative sync behavior for stability. ReShade compatibility still
+        // needs this after Present: it is the safe point before VR::Update submits the
+        // resolved eye textures to OpenVR/ALVR. Waiting before Present can overlap Source's
+        // queued material worker and corrupt DXVK command-stream ownership.
         if (g_D3DVR9)
             g_D3DVR9->WaitDeviceIdle();
 

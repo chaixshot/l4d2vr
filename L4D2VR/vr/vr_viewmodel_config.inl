@@ -1,3 +1,5 @@
+extern "C" void L4D2VR_D3D9_SetForceDeviceLock(int enabled);
+
 void VR::GetAimLineColor(int& r, int& g, int& b, int& a) const
 {
     if (m_SpecialInfectedBlindSpotWarningActive)
@@ -1226,6 +1228,16 @@ void VR::ParseConfigFile()
     m_QueuedViewmodelStabilizeDebugLogHz = std::max(0.0f, getFloat("QueuedViewmodelStabilizeDebugLogHz", m_QueuedViewmodelStabilizeDebugLogHz));
     m_RenderPipelineDebugLog = getBool("RenderPipelineDebugLog", m_RenderPipelineDebugLog);
     m_RenderPipelineDebugLogHz = std::clamp(getFloat("RenderPipelineDebugLogHz", m_RenderPipelineDebugLogHz), 0.0f, 60.0f);
+
+    // ReShade compatibility: ReShade's D3D9 runtime can leave the device/backbuffer state in
+    // a state that is valid for flat desktop Present but invalid for our per-eye VR RT chain.
+    // This enables a guarded path around each eye render and avoids submitting VR after a
+    // post-Present idle wait that includes ReShade's desktop backbuffer work.
+    const bool oldReShadeVRCompat = m_ReShadeVRCompat;
+    m_ReShadeVRCompat = getBool("ReShadeVRCompat", m_ReShadeVRCompat);
+    L4D2VR_D3D9_SetForceDeviceLock(m_ReShadeVRCompat ? 1 : 0);
+    if (m_Compositor && oldReShadeVRCompat != m_ReShadeVRCompat)
+        ConfigureExplicitTiming();
 
     // Bullet FX alignment: fine-tune client-side tracer/impact visuals.
     // Units: meters in aim-ray space (X=forward, Y=right, Z=up). Visual-only.

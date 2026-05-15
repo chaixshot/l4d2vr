@@ -1101,7 +1101,14 @@ void VR::CreateVRTextures()
     m_CreatingTextureID = Texture_RightEye;
     m_RightEyeTexture = m_Game->m_MaterialSystem->CreateNamedRenderTargetTextureEx("rightEye0", m_RenderWidth, m_RenderHeight, RT_SIZE_NO_CHANGE, eyeFormat, MATERIAL_RT_DEPTH_SEPARATE, TEXTUREFLAGS_NOMIP);
 
+    // ReShade/OpenVR compatibility: real HMD runtimes such as ALVR can lose the
+    // first eye when submitting Vulkan eye textures with non-full texture bounds.
+    // Create dedicated submit textures even without MSAA so the D3D9 Present path
+    // can pre-bake the per-eye projection crop into a full-frame texture and submit
+    // it with full bounds. This keeps the original stereo crop while avoiding the
+    // ReShade/OpenVR non-full-bounds path.
     const bool useDedicatedEyeSubmitTextures =
+        m_ReShadeVRCompat ||
         m_AntiAliasing == 2 || m_AntiAliasing == 4 || m_AntiAliasing == 8 || m_AntiAliasing == 16;
     if (useDedicatedEyeSubmitTextures)
     {
@@ -1325,6 +1332,26 @@ void VR::SubmitVRTextures()
         m_MenuBlankSubmitted = false;
 
     const bool queued = (m_Game && (m_Game->GetMatQueueMode() != 0));
+
+    static const vr::VRTextureBounds_t fullEyeSubmitBounds{ 0.0f, 0.0f, 1.0f, 1.0f };
+
+    const bool reshadeSubmitPrebakedToFullBounds =
+        m_ReShadeVRCompat &&
+        m_D9LeftEyeSubmitSurface != nullptr &&
+        m_D9RightEyeSubmitSurface != nullptr;
+
+    // Normal path: submit the raw eye textures with SteamVR's asymmetric per-eye crop.
+    // ReShade/OpenVR compatibility path: the D3D9 Present path has already copied the
+    // cropped part of each eye texture into a dedicated full-frame submit texture, so
+    // submit with full bounds. This avoids ALVR/ReShade dropping the first eye while
+    // preserving the same effective projection crop as the normal path.
+    const vr::VRTextureBounds_t* leftEyeSubmitBounds = reshadeSubmitPrebakedToFullBounds
+        ? &fullEyeSubmitBounds
+        : &(m_TextureBounds)[0];
+    const vr::VRTextureBounds_t* rightEyeSubmitBounds = reshadeSubmitPrebakedToFullBounds
+        ? &fullEyeSubmitBounds
+        : &(m_TextureBounds)[1];
+
     if (m_RenderPipelineDebugLog && !ShouldThrottle(m_RenderPipelineLastSubmitLog, m_RenderPipelineDebugLogHz))
     {
         const uint32_t renderCompletedFrameId = m_RenderCompletedFrameId.load(std::memory_order_acquire);
@@ -1655,8 +1682,8 @@ void VR::SubmitVRTextures()
             if (!texturesReady)
                 return;
 
-            submitStereoPair(&m_VKLeftEye.m_VRTexture, &(m_TextureBounds)[0],
-                &m_VKRightEye.m_VRTexture, &(m_TextureBounds)[1]);
+            submitStereoPair(&m_VKLeftEye.m_VRTexture, leftEyeSubmitBounds,
+                &m_VKRightEye.m_VRTexture, rightEyeSubmitBounds);
 
             if (successfulSubmit && m_CompositorExplicitTiming)
             {
@@ -1926,8 +1953,8 @@ void VR::SubmitVRTextures()
 
     UpdateHandHudOverlays();
 
-    submitStereoPair(&m_VKLeftEye.m_VRTexture, &(m_TextureBounds)[0],
-        &m_VKRightEye.m_VRTexture, &(m_TextureBounds)[1]);
+    submitStereoPair(&m_VKLeftEye.m_VRTexture, leftEyeSubmitBounds,
+        &m_VKRightEye.m_VRTexture, rightEyeSubmitBounds);
 
     if (successfulSubmit && m_CompositorExplicitTiming)
     {

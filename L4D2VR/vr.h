@@ -1274,6 +1274,13 @@ public:
 	bool m_DesktopMirrorHidePluginOverlays = true;
 	bool m_DesktopMirrorCleanRenderingPass = false;
 
+	// ReShadeVRCompat=true/false
+	// When enabled, the VR render path uses conservative per-eye D3D9 RT binding,
+	// forces DXVK D3D9 device locking for ReShade + Source queued rendering, submits
+	// full-eye texture bounds, and disables application-managed explicit compositor
+	// timing. This is intended only for real SteamVR/ALVR HMDs with ReShade loaded.
+	bool m_ReShadeVRCompat = false;
+
 
 	bool m_FlashlightEnhancementEnabled = false;
 	bool m_FlashlightEnhancementApplied = false;

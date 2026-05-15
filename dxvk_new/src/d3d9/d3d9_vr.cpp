@@ -82,6 +82,8 @@ namespace dxvk {
       if (unlikely(pSurface == nullptr))
         return D3DERR_INVALIDCALL;
 
+      D3D9DeviceLock lock = m_device->LockDevice();
+
       auto* tex = static_cast<D3D9Surface*>(pSurface)->GetCommonTexture();
       const auto& image = tex->GetImage();
 
@@ -114,6 +116,12 @@ namespace dxvk {
     }
 
     HRESULT STDMETHODCALLTYPE WaitDeviceIdle() {
+      // This can be called from the VR/Present path while Source's queued material
+      // thread is active. DXVK's D3D9 command chunk is device-owned mutable state, so
+      // flushing/synchronizing without the same device lock used by draw calls can race
+      // DrawIndexedPrimitive and leave m_csChunk null/moved.
+      D3D9DeviceLock lock = m_device->LockDevice();
+
       m_device->Flush();
       // Not clear if we need all here, perhaps...
       m_device->SynchronizeCsThread(DxvkCsThread::SynchronizeAll);

@@ -2,7 +2,11 @@
 
 #include "d3d9_include.h"
 
+#include <atomic>
+
 namespace dxvk {
+
+  extern std::atomic<bool> g_l4d2vrForceDeviceLock;
 
   /**
    * \brief Device lock
@@ -61,7 +65,7 @@ namespace dxvk {
       BOOL                  Protected);
 
     D3D9DeviceLock AcquireLock() {
-      return m_protected
+      return (m_protected || g_l4d2vrForceDeviceLock.load(std::memory_order_relaxed))
         ? D3D9DeviceLock(m_mutex)
         : D3D9DeviceLock();
     }

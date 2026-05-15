@@ -1873,40 +1873,46 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	if (desktopMirrorHidePluginOverlaysSingleCopyActive)
 		m_VR->ScanSpecialInfectedEntitiesFromClientList();
 
-	rndrContext->SetRenderTarget(m_VR->m_LeftEyeTexture);
-	if (hkViewport.fOriginal)
-		hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
-	if (m_VR->m_IsVREnabled)
-		m_VR->RenderDrawGameLaserSight(localPlayer);
-	callOriginalRenderView(leftEyeView, hudLeft, nClearFlags, whatToDraw);
-	if (desktopMirrorHidePluginOverlaysSingleCopyActive && m_VR->m_DesktopMirrorEye == 0)
-		m_VR->CopyEyeToDesktopMirrorTexture(0);
-	if (m_VR->m_IsVREnabled)
 	{
 		rndrContext->SetRenderTarget(m_VR->m_LeftEyeTexture);
 		if (hkViewport.fOriginal)
-			hkViewport.fOriginal(rndrContext, 0, 0, m_VR->m_RenderWidth, m_VR->m_RenderHeight);
-		m_VR->DrawPostMirrorPluginOverlays(rndrContext, localPlayer, leftEyeView);
+			hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
+		ScopedReShadeVRCompatD3D9StateGuard reshadeGuard(m_VR, m_VR->m_D9LeftEyeSurface);
+		if (m_VR->m_IsVREnabled)
+			m_VR->RenderDrawGameLaserSight(localPlayer);
+		callOriginalRenderView(leftEyeView, hudLeft, nClearFlags, whatToDraw);
+		if (desktopMirrorHidePluginOverlaysSingleCopyActive && m_VR->m_DesktopMirrorEye == 0)
+			m_VR->CopyEyeToDesktopMirrorTexture(0);
+		if (m_VR->m_IsVREnabled)
+		{
+			rndrContext->SetRenderTarget(m_VR->m_LeftEyeTexture);
+			if (hkViewport.fOriginal)
+				hkViewport.fOriginal(rndrContext, 0, 0, m_VR->m_RenderWidth, m_VR->m_RenderHeight);
+			m_VR->DrawPostMirrorPluginOverlays(rndrContext, localPlayer, leftEyeView);
+		}
+		if (m_VR->m_IsVREnabled)
+			m_VR->UpdateD3DAimLineOverlayForView(localPlayer, leftEyeView, 0);
 	}
-	if (m_VR->m_IsVREnabled)
-		m_VR->UpdateD3DAimLineOverlayForView(localPlayer, leftEyeView, 0);
 	m_PushedHud = false;
 
-	rndrContext->SetRenderTarget(m_VR->m_RightEyeTexture);
-	if (hkViewport.fOriginal)
-		hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
-	callOriginalRenderView(rightEyeView, hudRight, nClearFlags, whatToDraw);
-	if (desktopMirrorHidePluginOverlaysSingleCopyActive && m_VR->m_DesktopMirrorEye != 0)
-		m_VR->CopyEyeToDesktopMirrorTexture(1);
-	if (m_VR->m_IsVREnabled)
 	{
 		rndrContext->SetRenderTarget(m_VR->m_RightEyeTexture);
 		if (hkViewport.fOriginal)
-			hkViewport.fOriginal(rndrContext, 0, 0, m_VR->m_RenderWidth, m_VR->m_RenderHeight);
-		m_VR->DrawPostMirrorPluginOverlays(rndrContext, localPlayer, rightEyeView);
+			hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
+		ScopedReShadeVRCompatD3D9StateGuard reshadeGuard(m_VR, m_VR->m_D9RightEyeSurface);
+		callOriginalRenderView(rightEyeView, hudRight, nClearFlags, whatToDraw);
+		if (desktopMirrorHidePluginOverlaysSingleCopyActive && m_VR->m_DesktopMirrorEye != 0)
+			m_VR->CopyEyeToDesktopMirrorTexture(1);
+		if (m_VR->m_IsVREnabled)
+		{
+			rndrContext->SetRenderTarget(m_VR->m_RightEyeTexture);
+			if (hkViewport.fOriginal)
+				hkViewport.fOriginal(rndrContext, 0, 0, m_VR->m_RenderWidth, m_VR->m_RenderHeight);
+			m_VR->DrawPostMirrorPluginOverlays(rndrContext, localPlayer, rightEyeView);
+		}
+		if (m_VR->m_IsVREnabled)
+			m_VR->UpdateD3DAimLineOverlayForView(localPlayer, rightEyeView, 1);
 	}
-	if (m_VR->m_IsVREnabled)
-		m_VR->UpdateD3DAimLineOverlayForView(localPlayer, rightEyeView, 1);
 
 	auto renderToTexture_SetRT = [&](ITexture* target, int texW, int texH, QAngle passAngles,
 		CViewSetup& view, CViewSetup& hud)
