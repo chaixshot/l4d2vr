@@ -1501,12 +1501,15 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
 
     const bool queued = (queueMode != 0);
     const bool scopeOverlayNeedsDebugAimLine = ShouldRenderScope();
-    const bool d3dAimLineEffective = m_D3DAimLineOverlayEnabled && !queued && !scopeOverlayNeedsDebugAimLine;
     // Source DebugOverlay primitives are global. When desktop mirror overlay hiding is
     // active, skip DebugOverlay aim primitives and draw the VR-only line through the
-    // post-mirror D3D path instead.
+    // post-mirror D3D path instead. That D3D path must still share the normal aim-line
+    // occlusion result, otherwise first-person lines can pass through walls while
+    // third-person appears correct because its converge point was already traced.
     const bool deferDebugAimOverlayForCleanMirror =
         !queued && m_DesktopMirrorHidePluginOverlays && m_DesktopMirrorEnabled && !m_ScopeRenderingPass;
+    const bool d3dAimLineNeedsVisibleSegment =
+        !queued && !scopeOverlayNeedsDebugAimLine && (m_D3DAimLineOverlayEnabled || deferDebugAimOverlayForCleanMirror);
 
 
     C_WeaponCSBase* activeWeapon = nullptr;
@@ -1735,7 +1738,7 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
     m_HasAimLine = true;
     m_HasThrowArc = false;
 
-    if (d3dAimLineEffective && localPlayer && m_Game && m_Game->m_EngineTrace
+    if (d3dAimLineNeedsVisibleSegment && localPlayer && m_Game && m_Game->m_EngineTrace
         && m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame())
     {
         Vector visibleEnd = target;
@@ -3108,6 +3111,68 @@ bool VR::GetD3DAimLineOverlayEye(int eyeIndex, D3DAimLineOverlayEyeState& out) c
     return out.valid;
 }
 
+bool VR::ApplyD3DAimLineOcclusionFromAimLine(C_BasePlayer* localPlayer, Vector& start, Vector& end)
+{
+    Vector renderDir = end - start;
+    const float renderLength = renderDir.Length();
+    if (!std::isfinite(renderLength) || renderLength <= 0.1f)
+        return false;
+
+    Vector cachedWorldStart{};
+    Vector cachedWorldEnd{};
+    bool hasCachedWorldSegment = false;
+    {
+        std::lock_guard<std::mutex> lock(m_D3DAimLineOverlayMutex);
+        cachedWorldStart = m_D3DAimLineWorldStart;
+        cachedWorldEnd = m_D3DAimLineWorldEnd;
+        hasCachedWorldSegment = m_HasD3DAimLineWorldSegment;
+    }
+
+    if (hasCachedWorldSegment)
+    {
+        Vector cachedDir = cachedWorldEnd - cachedWorldStart;
+        const float visibleDistance = cachedDir.Length();
+        if (std::isfinite(visibleDistance) && visibleDistance > 0.1f && visibleDistance < (renderLength - 0.5f))
+        {
+            Vector renderDirNorm = renderDir;
+            VectorNormalize(renderDirNorm);
+
+            // The cache is produced by UpdateAimingLaser from the real aim ray. Reuse a shortened
+            // visible distance for D3D screen-space drawing so this overlay follows the same
+            // wall/entity obstruction result as the Source DebugOverlay aim line. If the cache is
+            // effectively the full ray, fall through to the trace path below so a stale unoccluded
+            // cache cannot make the first-person D3D line pass through walls.
+            end = start + renderDirNorm * visibleDistance;
+            return !((end - start).IsZero());
+        }
+    }
+
+    // Fallback for the first frame after enabling the D3D path, or when the cache was cleared.
+    // This keeps every D3D aim-line route from inventing a separate no-occlusion behavior.
+    if (!localPlayer || !m_Game || !m_Game->m_EngineTrace || !m_Game->m_EngineClient || !m_Game->m_EngineClient->IsInGame())
+        return true;
+
+    CGameTrace visibleTrace;
+    Ray_t visibleRay;
+    C_BaseEntity* mountedUseEnt = GetMountedGunUseEntity(localPlayer);
+    C_BaseCombatWeapon* activeWeaponForTrace = localPlayer->GetActiveWeapon();
+    IClientEntityList* entityList = m_Game ? m_Game->m_ClientEntityList : nullptr;
+    IHandleEntity* safeMountedUseEnt = VR_GetSafeTraceSkipEntity(entityList, reinterpret_cast<IHandleEntity*>(mountedUseEnt));
+    IHandleEntity* safeActiveWeapon = VR_GetSafeTraceSkipEntity(entityList, reinterpret_cast<IHandleEntity*>(activeWeaponForTrace));
+    CTraceFilterSkipThreeEntities tracefilterThree((IHandleEntity*)localPlayer, safeMountedUseEnt, safeActiveWeapon, 0);
+    CTraceFilter* pTraceFilter = static_cast<CTraceFilter*>(&tracefilterThree);
+
+    visibleRay.Init(start, end);
+    if (VR_SafeTraceRay(m_Game->m_EngineTrace, visibleRay, STANDARD_TRACE_MASK, pTraceFilter, visibleTrace)
+        && visibleTrace.fraction < 1.0f
+        && visibleTrace.fraction > 0.0f)
+    {
+        end = visibleTrace.endpos;
+    }
+
+    return !((end - start).IsZero());
+}
+
 void VR::UpdateD3DAimLineOverlayForView(C_BasePlayer* localPlayer, const CViewSetup& view, int eyeIndex)
 {
     if (eyeIndex < 0 || eyeIndex >= static_cast<int>(m_D3DAimLineOverlayEyes.size()))
@@ -3145,25 +3210,10 @@ void VR::UpdateD3DAimLineOverlayForView(C_BasePlayer* localPlayer, const CViewSe
         return;
     }
 
-    Vector cachedWorldStart{};
-    Vector cachedWorldEnd{};
-    bool hasCachedWorldSegment = false;
+    if (!ApplyD3DAimLineOcclusionFromAimLine(localPlayer, start, end))
     {
-        std::lock_guard<std::mutex> lock(m_D3DAimLineOverlayMutex);
-        cachedWorldStart = m_D3DAimLineWorldStart;
-        cachedWorldEnd = m_D3DAimLineWorldEnd;
-        hasCachedWorldSegment = m_HasD3DAimLineWorldSegment;
-    }
-
-    if (hasCachedWorldSegment)
-    {
-        Vector dir = end - start;
-        const float visibleDistance = (cachedWorldEnd - cachedWorldStart).Length();
-        if (!dir.IsZero() && visibleDistance > 0.1f)
-        {
-            VectorNormalize(dir);
-            end = start + dir * visibleDistance;
-        }
+        clearEye();
+        return;
     }
 
     D3DAimLineOverlayEyeState state{};

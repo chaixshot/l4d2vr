@@ -8850,8 +8850,11 @@ void VR::DrawPostMirrorPluginOverlays(IMatRenderContext* renderContext, C_BasePl
         {
             Vector start{};
             Vector end{};
-            if (BuildRenderAimLineSegment(localPlayer, start, end))
+            if (BuildRenderAimLineSegment(localPlayer, start, end)
+                && ApplyD3DAimLineOcclusionFromAimLine(localPlayer, start, end))
+            {
                 drawWorldLine(start, end);
+            }
         }
     }
 

@@ -1356,7 +1356,7 @@ public:
 	int m_InventoryAnchorColorB = 255;
 	int m_InventoryAnchorColorA = 255;
 	bool m_ServerHookFallbackPending = false;
-	int m_ServerHookFallbackDelayMs = 3000;
+	int m_ServerHookFallbackDelayMs = 0;
 	std::chrono::steady_clock::time_point m_ServerHookFallbackCheckTime{};
 	bool m_ServerHookFallbackForcedNonVRServerMovement = false;
 	bool m_ConfigForceNonVRServerMovement = false;
@@ -2467,6 +2467,7 @@ public:
 	void ClearD3DAimLineOverlayEye(int eyeIndex);
 	void ClearD3DAimLineOverlay();
 	bool GetD3DAimLineOverlayEye(int eyeIndex, D3DAimLineOverlayEyeState& out) const;
+	bool ApplyD3DAimLineOcclusionFromAimLine(C_BasePlayer* localPlayer, Vector& start, Vector& end);
 	// In queued (multicore) rendering, the render thread uses a render-frame pose snapshot.
 	// Draw the aim line from the render hook (dRenderView) using that snapshot to avoid head-turn ghosting.
 	void RenderDrawAimLineQueued(C_BasePlayer* localPlayer);
