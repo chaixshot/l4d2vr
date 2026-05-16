@@ -1871,13 +1871,13 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		m_VR->RenderDrawAimLineQueued(localPlayer);
 	}
 
-	// Populate the persistent D3D arrow cache once per stereo frame. This replaces the
-	// old clean-mirror path that scanned before each eye and submitted short-lived
-	// DebugOverlay lines. Only the single-threaded copy path uses this D3D cache.
-	if (desktopMirrorHidePluginOverlaysSingleCopyActive)
-		m_VR->ScanSpecialInfectedEntitiesFromClientList();
+	const bool submitSpecialInfectedArrowsFromEyePass =
+		desktopMirrorHidePluginOverlaysQueuedRtActive;
 
 	{
+		if (submitSpecialInfectedArrowsFromEyePass)
+			m_VR->ScanSpecialInfectedEntitiesFromClientList();
+
 		rndrContext->SetRenderTarget(m_VR->m_LeftEyeTexture);
 		if (hkViewport.fOriginal)
 			hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
@@ -1900,6 +1900,9 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	m_PushedHud = false;
 
 	{
+		if (submitSpecialInfectedArrowsFromEyePass)
+			m_VR->ScanSpecialInfectedEntitiesFromClientList();
+
 		rndrContext->SetRenderTarget(m_VR->m_RightEyeTexture);
 		if (hkViewport.fOriginal)
 			hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));

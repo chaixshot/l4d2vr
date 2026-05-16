@@ -388,13 +388,16 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 	if (info.pModel)
 	{
 		modelName = m_Game->m_ModelInfo->GetModelName(info.pModel);
-		// In desktop-mirror overlay hide mode, special-infected arrows are collected
-		// once from the render hook and drawn later by the post-mirror D3D path.
-		// Avoid scanning from DrawModelExecute, which can run many times per frame.
-		const int earlyQueueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
-		const bool cleanMirrorPostD3DActiveEarly =
-			(earlyQueueMode == 0) && m_VR->m_DesktopMirrorHidePluginOverlays && m_VR->m_DesktopMirrorEnabled;
-		if (!cleanMirrorPostD3DActiveEarly)
+		// In desktop-mirror overlay hide mode, special-infected arrows are submitted
+		// from the RenderView hook at a fixed stereo-pass point. Never scan from
+		// DrawModelExecute in that mode: under mat_queue_mode 2 this hook can run
+		// once per model, and the desktop-mirror path intentionally disables the
+		// global scan throttle so both eyes can receive short-lived DebugOverlay
+		// arrows. Calling it here would turn one stereo frame into many full
+		// client-entity-list scans.
+		const bool desktopMirrorOverlayHideActiveEarly =
+			m_VR->m_DesktopMirrorHidePluginOverlays && m_VR->m_DesktopMirrorEnabled;
+		if (!desktopMirrorOverlayHideActiveEarly)
 			m_VR->ScanSpecialInfectedEntitiesFromClientList();
 
 		const C_BaseEntity* entity = nullptr;
@@ -411,9 +414,7 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 		}
 		const bool suppressDesktopMirrorPluginOverlays =
 			m_VR->m_DesktopMirrorCleanRenderingPass && m_VR->m_DesktopMirrorHidePluginOverlays;
-		const int queueModeForDesktopMirrorOverlays = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
 		const bool desktopMirrorOverlayHideActive =
-			(queueModeForDesktopMirrorOverlays == 0) &&
 			m_VR->m_DesktopMirrorHidePluginOverlays && m_VR->m_DesktopMirrorEnabled;
 		const bool singlePassDesktopMirrorPluginOverlays = false;
 		if (!suppressDesktopMirrorPluginOverlays &&
