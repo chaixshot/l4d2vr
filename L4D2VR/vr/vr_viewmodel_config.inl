@@ -1543,8 +1543,9 @@ void VR::ParseConfigFile()
         getBool("DesktopMirrorHidePluginOverlays",
             getBool("m_DesktopMirrorHidePluginOverlays", m_DesktopMirrorHidePluginOverlaysRequested));
     // Keep requested/effective state separate. Config loading can only provisionally
-    // enable the clean mirror path; the frame update forces it off in queued/multicore
-    // mode so the desktop mirror shows the same stable overlays as the selected eye.
+    // enable the clean mirror path. The frame update recomputes the runtime flag once
+    // the clean mirror target exists; queued/multicore mode remains eligible and uses
+    // its separate clean RenderView path instead of the single-threaded D3D copy path.
     const bool desktopMirrorTexturesReady = m_CreatedVRTextures.load(std::memory_order_acquire);
     const bool desktopMirrorCleanTargetReady = (m_DesktopMirrorTexture != nullptr);
     m_DesktopMirrorHidePluginOverlays =

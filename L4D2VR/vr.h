@@ -1260,9 +1260,10 @@ public:
 	//   DesktopMirrorKeepAspect=true/false
 	//   DesktopMirrorLinearFilter=true/false
 	//   DesktopMirrorHidePluginOverlays=true/false
-	// When hiding plugin overlays, the selected eye is copied to a clean mirror RT
-	// immediately after the normal eye RenderView and before VR-only post overlays are drawn.
-	// This avoids the old extra clean RenderView pass.
+	// When hiding plugin overlays, the selected eye is mirrored through desktopMirrorClean0
+	// before VR-only post overlays are drawn. Single-threaded rendering uses the cheap
+	// post-eye copy path; queued/multicore rendering uses a separate clean RenderView pass
+	// because the raw D3D9 copy path is not safe there.
 	bool m_DesktopMirrorEnabled = true;
 	int  m_DesktopMirrorEye = 1; // 0 = left eye, 1 = right eye
 	bool m_DesktopMirrorKeepAspect = true;

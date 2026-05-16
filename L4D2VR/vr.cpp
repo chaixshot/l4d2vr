@@ -8784,9 +8784,9 @@ void VR::DrawPostMirrorPluginOverlays(IMatRenderContext* renderContext, C_BasePl
         return;
 
     // This function normally uses raw D3D9 draws after Source's RenderView. In queued/multicore
-    // mode those calls can race DXVK's command stream and crash inside DxvkCsChunk::push.
-    // Item labels have a DebugOverlay glyph fallback, so keep only that path alive here
-    // and skip the rest of the post-mirror D3D overlays.
+    // mode those post-mirror D3D draws can race DXVK's queued command stream, so this
+    // function keeps only the DebugOverlay item-label fallback alive and skips the raw
+    // D3D overlay draws for aim lines / special-infected arrows.
     if (m_Game && m_Game->GetMatQueueMode() != 0)
     {
         DrawProjectedItemLabels(renderContext, view);
@@ -8882,8 +8882,8 @@ bool VR::CopyEyeToDesktopMirrorTexture(int eyeIndex)
         return false;
 
     // Queued/multicore rendering updates desktopMirrorClean0 through a separate
-    // Source RenderView pass. Direct D3D9 copies/draws here can corrupt DXVK's
-    // queued command stream, so this low-cost copy path stays single-threaded only.
+    // clean Source RenderView pass. Direct D3D9 copies/draws here can collide with
+    // DXVK's queued command stream, so this low-cost copy path is single-threaded only.
     if (m_Game && m_Game->GetMatQueueMode() != 0)
         return false;
 

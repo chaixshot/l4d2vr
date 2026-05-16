@@ -1710,8 +1710,9 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 	// Queued render: draw aim line from the render-thread snapshot so it stays glued to the hand/gun.
 	// IMPORTANT: must run after we compute m_SetupOrigin / m_ThirdPersonRenderCenter for this frame.
-	// When desktop mirror overlay hiding is active, render a clean selected-eye pass before
-	// any plugin DebugOverlay/D3D overlay primitives are submitted for the VR eyes.
+	// When desktop mirror overlay hiding is active in queued/multicore mode, render a clean
+	// selected-eye pass into desktopMirrorClean0 before plugin DebugOverlay/D3D overlay
+	// primitives are submitted for the VR eyes.
 	const bool desktopMirrorHidePluginOverlaysRequestedThisFrame =
 		m_VR->m_IsVREnabled &&
 		m_VR->m_DesktopMirrorEnabled &&
@@ -1853,11 +1854,11 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 	if (desktopMirrorHidePluginOverlaysQueuedRtActive)
 	{
-		// Queued/multicore clean mirror cannot use the cheap D3D copy path safely on all DXVK builds.
-		// The stable fallback is an extra clean Source RenderView, but doing that every VR frame
-		// costs almost a full additional eye render. Limit the desktop mirror clean pass to about
-		// half-rate. The HMD eyes still render every frame; only the desktop spectator image updates
-		// less often when plugin overlays are hidden from it.
+		// Queued/multicore clean mirror intentionally does not use the cheap D3D copy path,
+		// because direct raw D3D9 copies can collide with DXVK's queued command stream.
+		// Instead, update desktopMirrorClean0 with a separate clean Source RenderView pass.
+		// Running that every VR frame costs almost a full additional eye render, so throttle
+		// only the desktop spectator image to about half-rate; the HMD eyes still render every frame.
 		static thread_local bool s_queuedDesktopMirrorCleanFlip = false;
 		s_queuedDesktopMirrorCleanFlip = !s_queuedDesktopMirrorCleanFlip;
 		if (s_queuedDesktopMirrorCleanFlip)
@@ -1867,7 +1868,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			renderQueuedDesktopMirrorCleanPass(cleanView, cleanHud);
 		}
 
-		// The clean pass window is over. Plugin DebugOverlay primitives can now be submitted for VR eyes.
+		// The clean mirror pass window is over. Plugin DebugOverlay primitives can now be
+		// submitted for the normal VR eye passes without being captured by desktopMirrorClean0.
 		m_VR->RenderDrawAimLineQueued(localPlayer);
 	}
 

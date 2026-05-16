@@ -316,10 +316,10 @@ namespace
         if (!vr)
             return;
 
-        // The user-facing setting is a request; the runtime flag is only true when the
-        // clean desktop mirror target is available. In queued/multicore rendering the
-        // clean target is updated by an extra Source RenderView pass, not by the old
-        // raw D3D9 post-eye copy.
+        // The user-facing setting is a request; the runtime flag is true only when the
+        // clean desktop mirror target exists. Single-threaded rendering fills that target
+        // with a post-eye D3D copy. Queued/multicore rendering fills it with a separate
+        // clean Source RenderView pass, so queued mode is not filtered out here.
 
         const bool requested = vr->m_DesktopMirrorHidePluginOverlaysRequested;
         const bool texturesReady = vr->m_CreatedVRTextures.load(std::memory_order_acquire);
@@ -1165,9 +1165,10 @@ void VR::CreateVRTextures()
     if (createDesktopMirrorCleanTarget)
     {
         // Full-size clean eye RTT for desktop mirroring. This is intentionally not
-        // submitted to SteamVR. In single-threaded rendering it is updated by the
-        // cheap post-eye copy path; in queued/multicore rendering it is updated by
-        // a separate clean Source RenderView pass, avoiding unsafe raw D3D9 draws/copies.
+        // submitted to SteamVR. Single-threaded rendering updates it with the cheap
+        // post-eye D3D copy path. Queued/multicore rendering updates it with a separate
+        // clean Source RenderView pass because direct raw D3D9 copies/draws are unsafe
+        // in the queued command stream.
         m_CreatingTextureID = Texture_DesktopMirror;
         m_DesktopMirrorTexture = m_Game->m_MaterialSystem->CreateNamedRenderTargetTextureEx(
             "desktopMirrorClean0",
