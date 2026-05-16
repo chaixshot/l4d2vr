@@ -1389,7 +1389,7 @@ public:
 	int m_InventoryAnchorColorB = 255;
 	int m_InventoryAnchorColorA = 255;
 	bool m_ServerHookFallbackPending = false;
-	int m_ServerHookFallbackDelayMs = 0;
+	int m_ServerHookFallbackDelayMs = 250;
 	std::chrono::steady_clock::time_point m_ServerHookFallbackCheckTime{};
 	bool m_ServerHookFallbackForcedNonVRServerMovement = false;
 	bool m_ConfigForceNonVRServerMovement = false;

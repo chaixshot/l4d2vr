@@ -1,4 +1,6 @@
-﻿void VR::UpdateTracking()
+static constexpr int kServerHookFallbackDefaultDelayMs = 250;
+
+void VR::UpdateTracking()
 {
     GetPoses();
     // Map load / reconnect detection:
@@ -11,11 +13,8 @@
         Hooks::s_ServerUnderstandsVR = false;
         m_ServerHookFallbackPending = true;
         m_ServerHookFallbackForcedNonVRServerMovement = false;
+        m_ServerHookFallbackCheckTime = {};
         m_ForceNonVRServerMovement = m_ConfigForceNonVRServerMovement;
-        if (m_ServerHookFallbackDelayMs > 0)
-            m_ServerHookFallbackCheckTime = std::chrono::steady_clock::now() + std::chrono::milliseconds(m_ServerHookFallbackDelayMs);
-        else
-            m_ServerHookFallbackCheckTime = std::chrono::steady_clock::now();
     }
     m_WasInGamePrev = inGameNow;
     int playerIndex = m_Game->m_EngineClient->GetLocalPlayer();
@@ -29,6 +28,8 @@
         m_HadLocalPlayerPrev = false;
         m_ThirdPersonMapLoadCooldownPending = true;
         m_ThirdPersonMapLoadCooldownEnd = {};
+        if (m_ServerHookFallbackPending)
+            m_ServerHookFallbackCheckTime = {};
 
         // Publish a safe "no local player" snapshot for the render thread.
         {
@@ -65,14 +66,20 @@
         }
         return;
     }
-    if (m_ServerHookFallbackPending)
+    if (Hooks::s_ServerUnderstandsVR)
+    {
+        m_ServerHookFallbackPending = false;
+        m_ServerHookFallbackForcedNonVRServerMovement = false;
+        m_ServerHookFallbackCheckTime = {};
+        m_ForceNonVRServerMovement = m_ConfigForceNonVRServerMovement;
+    }
+    else if (m_ServerHookFallbackPending)
     {
         const auto now = std::chrono::steady_clock::now();
-        if (Hooks::s_ServerUnderstandsVR)
+        if (m_ServerHookFallbackCheckTime.time_since_epoch().count() == 0)
         {
-            m_ServerHookFallbackPending = false;
-            m_ServerHookFallbackForcedNonVRServerMovement = false;
-            m_ForceNonVRServerMovement = m_ConfigForceNonVRServerMovement;
+            const int delayMs = (m_ServerHookFallbackDelayMs > 0) ? m_ServerHookFallbackDelayMs : kServerHookFallbackDefaultDelayMs;
+            m_ServerHookFallbackCheckTime = now + std::chrono::milliseconds(delayMs);
         }
         else if (now >= m_ServerHookFallbackCheckTime)
         {
