@@ -31,6 +31,7 @@
 #include "d3d9_vr.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cfloat>
 #include <cmath>
 #include <cstring>
@@ -433,6 +434,123 @@ namespace dxvk {
 
         static bool VrHasEyeSubmitSurfaces(const VR* vr) {
             return vr && (vr->m_D9LeftEyeSubmitSurface || vr->m_D9RightEyeSubmitSurface);
+        }
+
+        static HWND VrGetPresentWindow(D3D9DeviceEx* device, HWND hDestWindowOverride) {
+            if (hDestWindowOverride && ::IsWindow(hDestWindowOverride))
+                return hDestWindowOverride;
+
+            if (!device)
+                return nullptr;
+
+            HWND window = device->GetWindow();
+            return ::IsWindow(window) ? window : nullptr;
+        }
+
+        static DWORD VrGetWindowProcessId(HWND hwnd) {
+            if (!hwnd || !::IsWindow(hwnd))
+                return 0;
+
+            DWORD pid = 0;
+            ::GetWindowThreadProcessId(hwnd, &pid);
+            return pid;
+        }
+
+        static bool VrIsCurrentProcessWindow(HWND hwnd) {
+            return VrGetWindowProcessId(hwnd) == ::GetCurrentProcessId();
+        }
+
+        static bool VrIsWindowDrawable(HWND hwnd) {
+            if (!hwnd || !::IsWindow(hwnd))
+                return false;
+
+            if (::IsIconic(hwnd) || !::IsWindowVisible(hwnd))
+                return false;
+
+            RECT clientRect{};
+            if (::GetClientRect(hwnd, &clientRect)) {
+                if (clientRect.right <= clientRect.left || clientRect.bottom <= clientRect.top)
+                    return false;
+            }
+
+            return true;
+        }
+
+        static bool VrIsCurrentProcessForeground() {
+            HWND foreground = ::GetForegroundWindow();
+            if (!foreground)
+                return false;
+
+            if (VrIsCurrentProcessWindow(foreground))
+                return true;
+
+            HWND foregroundRoot = ::GetAncestor(foreground, GA_ROOTOWNER);
+            if (foregroundRoot && foregroundRoot != foreground && VrIsCurrentProcessWindow(foregroundRoot))
+                return true;
+
+            HWND foregroundOwner = ::GetWindow(foreground, GW_OWNER);
+            if (foregroundOwner && VrIsCurrentProcessWindow(foregroundOwner))
+                return true;
+
+            return false;
+        }
+
+        static bool VrIsQueuedReShadePresentSafe(D3D9DeviceEx* device, HWND hDestWindowOverride) {
+            static std::atomic<DWORD> s_suspendUntilMs{ 0 };
+            constexpr DWORD kInactiveDebounceMs = 750;
+
+            // Be conservative around focus loss and window minimization.  DXVK/Source can
+            // route Alt-Tab through WM_ACTIVATEAPP/WM_SIZE before Present sees a reliable
+            // foreground window, so this gate must also be used with the "recently queued"
+            // risk window below instead of only when mat_queue_mode is currently non-zero.
+            const DWORD nowMs = ::GetTickCount();
+            if (!VrIsCurrentProcessForeground()) {
+                s_suspendUntilMs.store(nowMs + kInactiveDebounceMs, std::memory_order_relaxed);
+                return false;
+            }
+
+            const DWORD suspendUntilMs = s_suspendUntilMs.load(std::memory_order_relaxed);
+            if (suspendUntilMs != 0 && static_cast<LONG>(suspendUntilMs - nowMs) > 0)
+                return false;
+
+            HWND presentWindow = VrGetPresentWindow(device, hDestWindowOverride);
+            if (!presentWindow)
+                return true;
+
+            if (!VrIsWindowDrawable(presentWindow)) {
+                s_suspendUntilMs.store(nowMs + kInactiveDebounceMs, std::memory_order_relaxed);
+                return false;
+            }
+
+            return true;
+        }
+
+        static bool VrIsReShadeQueuedRiskWindow(VR* vr, bool inGame, bool queued) {
+            static std::atomic<DWORD> s_lastQueuedReShadeMs{ 0 };
+            constexpr DWORD kRecentlyQueuedMs = 3000;
+
+            if (!inGame || !vr || !vr->m_ReShadeVRCompat)
+                return false;
+
+            const DWORD nowMs = ::GetTickCount();
+            if (queued) {
+                s_lastQueuedReShadeMs.store(nowMs, std::memory_order_relaxed);
+                return true;
+            }
+
+            const DWORD lastQueuedMs = s_lastQueuedReShadeMs.load(std::memory_order_relaxed);
+            return lastQueuedMs != 0 && static_cast<LONG>(nowMs - lastQueuedMs) >= 0 &&
+                static_cast<DWORD>(nowMs - lastQueuedMs) <= kRecentlyQueuedMs;
+        }
+
+        static bool VrShouldSuspendQueuedReShadePresent(
+            D3D9DeviceEx* device,
+            VR* vr,
+            bool inGame,
+            bool queuedRiskWindow,
+            HWND hDestWindowOverride) {
+            return inGame && queuedRiskWindow && vr && vr->m_ReShadeVRCompat &&
+                !VrIsQueuedReShadePresentSafe(device, hDestWindowOverride);
         }
 
         static void VrResolveEyeSurfacesToSubmit(D3D9DeviceEx* device, VR* vrState) {
@@ -4937,6 +5055,8 @@ namespace dxvk {
         VR* postPresentVR = nullptr;
         bool postPresentResolveEyeSubmit = false;
         bool suppressVRFrameConsumptionOnThisPresent = false;
+        bool suspendInactiveQueuedReShadePresent = false;
+        const char* suppressVRFrameConsumptionReason = "none";
 
         if (g_Game && g_Game->m_VR && g_Game->m_VR->m_CreatedVRTextures) {
             VR* vr = g_Game->m_VR;
@@ -4945,10 +5065,28 @@ namespace dxvk {
             const bool queued = (g_Game->GetMatQueueMode() != 0);
             const uint32_t renderThreadId = vr->m_RenderThreadId.load(std::memory_order_acquire);
             const bool queuedReShadeCompat = inGame && queued && vr->m_ReShadeVRCompat;
-            suppressVRFrameConsumptionOnThisPresent =
+            const bool reShadeQueuedRiskWindow = VrIsReShadeQueuedRiskWindow(vr, inGame, queued);
+            const bool renderThreadPresent =
                 queuedReShadeCompat &&
                 renderThreadId != 0 &&
                 renderThreadId == static_cast<uint32_t>(presentThreadId);
+            suspendInactiveQueuedReShadePresent =
+                VrShouldSuspendQueuedReShadePresent(this, vr, inGame, reShadeQueuedRiskWindow, hDestWindowOverride);
+
+            suppressVRFrameConsumptionOnThisPresent = renderThreadPresent || suspendInactiveQueuedReShadePresent;
+            if (renderThreadPresent)
+                suppressVRFrameConsumptionReason = "render-thread-present";
+            else if (suspendInactiveQueuedReShadePresent)
+                suppressVRFrameConsumptionReason = "inactive-window";
+
+            if (suspendInactiveQueuedReShadePresent) {
+                postPresentVR = nullptr;
+                postPresentResolveEyeSubmit = false;
+                vr->m_ReShadeVRCompatPendingRenderReady.store(0, std::memory_order_release);
+                vr->m_ReShadeVRCompatPendingRenderPoseToken.store(0, std::memory_order_release);
+                vr->m_ReShadeVRCompatPendingRenderFrameSeq.store(0, std::memory_order_release);
+                vr->m_RenderedNewFrame.store(false, std::memory_order_release);
+            }
 
             // Source queued rendering can enter the D3D9 Present path from the material/render
             // worker as part of MaterialSystem::EndFrame. In ReShadeVRCompat that thread must
@@ -4974,7 +5112,7 @@ namespace dxvk {
                 // copying at this point produces half-written frames that later get submitted to VR.
                 // Defer the resolve until after the swapchain Present and an explicit DXVK idle wait.
                 const bool deferEyeSubmitResolve =
-                    inGame && queued && vr->m_ReShadeVRCompat && VrHasEyeSubmitSurfaces(vr);
+                    inGame && VrIsReShadeQueuedRiskWindow(vr, inGame, queued) && VrHasEyeSubmitSurfaces(vr);
                 if (deferEyeSubmitResolve) {
                     postPresentVR = vr;
                     postPresentResolveEyeSubmit = true;
@@ -4995,12 +5133,15 @@ namespace dxvk {
             // eye textures to OpenVR/ALVR.
         }
 
-        HRESULT result = m_implicitSwapchain->Present(
-            pSourceRect,
-            pDestRect,
-            hDestWindowOverride,
-            pDirtyRegion,
-            dwFlags);
+        HRESULT result = D3D_OK;
+        if (!suspendInactiveQueuedReShadePresent) {
+            result = m_implicitSwapchain->Present(
+                pSourceRect,
+                pDestRect,
+                hDestWindowOverride,
+                pDirtyRegion,
+                dwFlags);
+        }
 
         if (g_Game && g_Game->m_VR && g_Game->m_VR->m_CreatedVRTextures) {
             VR* vr = g_Game->m_VR;
@@ -5040,30 +5181,64 @@ namespace dxvk {
             // resolved eye textures to OpenVR/ALVR. Waiting before Present can overlap Source's
             // queued material worker and corrupt DXVK command-stream ownership.
             std::unique_lock<std::recursive_mutex> reshadePresentSurfaceLock;
-            if (postPresentResolveEyeSubmit && postPresentVR)
-                reshadePresentSurfaceLock = std::unique_lock<std::recursive_mutex>(postPresentVR->m_ReShadeVRCompatSurfaceMutex);
+            bool skipPostPresentVRWork = false;
+            const char* skipPostPresentVRWorkReason = "none";
+            if (postPresentResolveEyeSubmit && postPresentVR) {
+                reshadePresentSurfaceLock = std::unique_lock<std::recursive_mutex>(postPresentVR->m_ReShadeVRCompatSurfaceMutex, std::try_to_lock);
+                skipPostPresentVRWork = !reshadePresentSurfaceLock.owns_lock();
+                if (skipPostPresentVRWork)
+                    skipPostPresentVRWorkReason = "surface-busy";
+            }
 
-            if (g_D3DVR9)
-                g_D3DVR9->WaitDeviceIdle();
+            if (!skipPostPresentVRWork && postPresentResolveEyeSubmit && postPresentVR &&
+                VrShouldSuspendQueuedReShadePresent(this, postPresentVR, true, true, hDestWindowOverride)) {
+                skipPostPresentVRWork = true;
+                skipPostPresentVRWorkReason = "inactive-window-post";
+            }
 
-            if (postPresentResolveEyeSubmit && postPresentVR && postPresentVR->m_CreatedVRTextures.load(std::memory_order_acquire)) {
+            const bool deferredReShadeResolve = postPresentResolveEyeSubmit && postPresentVR;
+            if (!skipPostPresentVRWork && deferredReShadeResolve && postPresentVR->m_CreatedVRTextures.load(std::memory_order_acquire)) {
                 const uint32_t completedFrameId = postPresentVR->m_RenderCompletedFrameId.load(std::memory_order_acquire);
                 const uint32_t resolvedFrameId = postPresentVR->m_ReShadeVRCompatResolvedFrameId.load(std::memory_order_acquire);
                 if (completedFrameId != 0 && completedFrameId != resolvedFrameId) {
+                    // Do not idle-wait before the resolve.  In Source queued rendering this is the
+                    // dangerous lock inversion point during Alt-Tab/minimize.  The render-complete
+                    // state and surface mutex are the ownership signal; enqueue the eye->submit copy,
+                    // then make that copy visible before VR::Update submits to OpenVR/ALVR.
                     VrResolveEyeSurfacesToSubmit(this, postPresentVR);
                     postPresentVR->m_ReShadeVRCompatResolvedFrameId.store(completedFrameId, std::memory_order_release);
-                    // The submit textures are shared with OpenVR/ALVR. Make the resolve visible before
-                    // VR::Update() calls IVRCompositor::Submit on the Vulkan handles.
                     if (g_D3DVR9)
                         g_D3DVR9->WaitDeviceIdle();
                 }
             }
+            else if (!skipPostPresentVRWork && !deferredReShadeResolve && g_D3DVR9) {
+                g_D3DVR9->WaitDeviceIdle();
+            }
 
-            if (g_Game && g_Game->m_VR)
+            if (!skipPostPresentVRWork && g_Game && g_Game->m_VR)
                 g_Game->m_VR->Update();
 
             if (g_Game && g_Game->m_VR)
                 VrAimLineRestoreOverlayBackups(this, g_Game->m_VR);
+
+            if (skipPostPresentVRWork && postPresentVR && postPresentVR->m_RenderPipelineDebugLog) {
+                static DWORD s_lastReShadePostPresentBusyLogMs = 0;
+                const DWORD nowMs = ::GetTickCount();
+                const float maxHz = postPresentVR->m_RenderPipelineDebugLogHz;
+                const DWORD minIntervalMs = maxHz > 0.0f
+                    ? (DWORD)(1000.0f / std::max(1.0f, maxHz))
+                    : 0;
+                if (minIntervalMs == 0 || nowMs - s_lastReShadePostPresentBusyLogMs >= minIntervalMs) {
+                    s_lastReShadePostPresentBusyLogMs = nowMs;
+                    Game::logMsg("[VR][Queued][ReShadePresentSkip] tid=%lu renderTid=%u completed=%u submitted=%u renderedNew=%d reason=%s",
+                        presentThreadId,
+                        postPresentVR->m_RenderThreadId.load(std::memory_order_acquire),
+                        postPresentVR->m_RenderCompletedFrameId.load(std::memory_order_acquire),
+                        postPresentVR->m_LastSubmittedFrameId.load(std::memory_order_acquire),
+                        postPresentVR->m_RenderedNewFrame.load(std::memory_order_acquire) ? 1 : 0,
+                        skipPostPresentVRWorkReason);
+                }
+            }
         }
         else if (g_Game && g_Game->m_VR && g_Game->m_VR->m_RenderPipelineDebugLog) {
             static DWORD s_lastRenderThreadPresentSkipLogMs = 0;
@@ -5074,12 +5249,13 @@ namespace dxvk {
                 : 0;
             if (minIntervalMs == 0 || nowMs - s_lastRenderThreadPresentSkipLogMs >= minIntervalMs) {
                 s_lastRenderThreadPresentSkipLogMs = nowMs;
-                Game::logMsg("[VR][Queued][ReShadePresentSkip] tid=%lu renderTid=%u completed=%u submitted=%u renderedNew=%d reason=render-thread-present",
+                Game::logMsg("[VR][Queued][ReShadePresentSkip] tid=%lu renderTid=%u completed=%u submitted=%u renderedNew=%d reason=%s",
                     presentThreadId,
                     g_Game->m_VR->m_RenderThreadId.load(std::memory_order_acquire),
                     g_Game->m_VR->m_RenderCompletedFrameId.load(std::memory_order_acquire),
                     g_Game->m_VR->m_LastSubmittedFrameId.load(std::memory_order_acquire),
-                    g_Game->m_VR->m_RenderedNewFrame.load(std::memory_order_acquire) ? 1 : 0);
+                    g_Game->m_VR->m_RenderedNewFrame.load(std::memory_order_acquire) ? 1 : 0,
+                    suppressVRFrameConsumptionReason);
             }
         }
 

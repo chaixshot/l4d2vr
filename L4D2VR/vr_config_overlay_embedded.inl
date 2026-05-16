@@ -98,8 +98,8 @@ namespace
 
     static const CfgOptionSpec kCfgOptionSpecs[] =
     {
-        { "ConfigOverlayDistanceMeters", CfgOptionType::Float, "配置面板", "配置面板距离", 0.6f, 3.0f, "1.35" },
-        { "ConfigOverlaySizeMeters", CfgOptionType::Float, "配置面板", "配置面板大小", 0.8f, 4.0f, "2.05" },
+        { "ConfigOverlayDistanceMeters", CfgOptionType::Float, "\351\205\215\347\275\256\351\235\242\346\235\277", "\351\205\215\347\275\256\351\235\242\346\235\277\350\267\235\347\246\273", 0.6f, 3.0f, "1.35" },
+        { "ConfigOverlaySizeMeters", CfgOptionType::Float, "\351\205\215\347\275\256\351\235\242\346\235\277", "\351\205\215\347\275\256\351\235\242\346\235\277\345\244\247\345\260\217", 0.8f, 4.0f, "2.05" },
         { "VRScale", CfgOptionType::Float, "\xE8\xA7\x86\xE8\xA7\x92 / \xE5\xB0\xBA\xE5\xBA\xA6", "\xE4\xB8\x96\xE7\x95\x8C\xE7\xBC\xA9\xE6\x94\xBE", 30.0f, 55.0f, "43.2" },
         { "Roomscale1To1Movement", CfgOptionType::Bool, "\346\210\277\351\227\264\347\247\273\345\212\250", "1:1\347\247\273\345\212\250", 0.0f, 0.0f, "false" },
         { "Roomscale1To1MovementScale", CfgOptionType::Float, "\346\210\277\351\227\264\347\247\273\345\212\250", "1:1\347\247\273\345\212\250\350\267\235\347\246\273\345\200\215\347\216\207", 0.0f, 4.0f, "1.0" },
@@ -128,6 +128,8 @@ namespace
         { "MouseModeScopeMagnificationKey", CfgOptionType::String, "\xE8\xBE\x93\xE5\x85\xA5 / \xE9\x94\xAE\xE9\xBC\xA0\xE6\xA8\xA1\xE5\xBC\x8F", "\xE9\x94\xAE\xE9\xBC\xA0\xE6\xA8\xA1\xE5\xBC\x8F\xE5\x80\x8D\xE7\x8E\x87\xE5\x88\x87\xE6\x8D\xA2\xE6\x8C\x89\xE9\x94\xAE", 0.0f, 0.0f, "key:z" },
         { "ForceNonVRServerMovement", CfgOptionType::Bool, "\xE5\xA4\x9A\xE4\xBA\xBA / \xE6\x9C\x8D\xE5\x8A\xA1\xE5\x99\xA8", "\xE9\x9D\x9EVR\xE6\x9C\x8D\xE5\x8A\xA1\xE5\x99\xA8\xE5\x85\xBC\xE5\xAE\xB9\xE6\xA8\xA1\xE5\xBC\x8F", 0.0f, 0.0f, "false" },
         { "AutoMatQueueMode", CfgOptionType::Bool, "\xE6\x80\xA7\xE8\x83\xBD", "\xE5\xA4\x9A\xE6\xA0\xB8\xE6\xB8\xB2\xE6\x9F\x93", 0.0f, 0.0f, "false" },
+        { "ReShadeVRCompat", CfgOptionType::Bool, "\xE6\x80\xA7\xE8\x83\xBD", "ReShade VR\xE5\x85\xBC\xE5\xAE\xB9\xE6\xA8\xA1\xE5\xBC\x8F", 0.0f, 0.0f, "false" },
+        { "QueuedRenderPoseWaitMs", CfgOptionType::Int, "\346\200\247\350\203\275", "\345\244\232\346\240\270\345\247\277\346\200\201\347\255\211\345\276\205", 0.0f, 20.0f, "9" },
         { "ShadowTweaksEnabled", CfgOptionType::Bool, "\xE6\x80\xA7\xE8\x83\xBD", "\xE5\x90\xAF\xE7\x94\xA8\xE9\x98\xB4\xE5\xBD\xB1\xE4\xBC\x98\xE5\x8C\x96\xE6\x8E\xA7\xE5\x88\xB6", 0.0f, 0.0f, "false" },
         { "LocalVScriptConvarsEnabled", CfgOptionType::Bool, "\xE6\x80\xA7\xE8\x83\xBD", "\xE5\x90\xAF\xE7\x94\xA8LOD\xE4\xBC\x98\xE5\x8C\x96", 0.0f, 0.0f, "false" },
         { "HudDistance", CfgOptionType::Float, "HUD\xEF\xBC\x88\xE4\xB8\xBB\xE7\x95\x8C\xE9\x9D\xA2\xEF\xBC\x89", "HUD \xE8\xB7\x9D\xE7\xA6\xBB", 0.5f, 3.0f, "1.3" },
@@ -242,8 +244,8 @@ namespace
 
     static const CfgOptionTextSpec kCfgOptionTextSpecs[] =
     {
-        { "ConfigOverlayDistanceMeters", "Config Overlay", "配置面板", "Panel Distance", "配置面板距离", "Distance from the HMD to the built-in config panel (meters).", "配置面板相对头显的前方距离（米）。", "Increase it if the panel is too close; decrease it if the panel is too far.", "面板太贴脸就调大，太远就调小。" },
-        { "ConfigOverlaySizeMeters", "Config Overlay", "配置面板", "Panel Size", "配置面板大小", "Physical width of the built-in config panel (meters). Height follows the panel aspect ratio.", "配置面板的物理宽度（米），高度会按面板比例自动计算。", "Increase it if the text is too small; decrease it if the panel blocks too much view.", "文字太小就调大，遮挡太多就调小。" },
+        { "ConfigOverlayDistanceMeters", "Config Overlay", "\351\205\215\347\275\256\351\235\242\346\235\277", "Panel Distance", "\351\205\215\347\275\256\351\235\242\346\235\277\350\267\235\347\246\273", "Distance from the HMD to the built-in config panel (meters).", "\351\205\215\347\275\256\351\235\242\346\235\277\347\233\270\345\257\271\345\244\264\346\230\276\347\232\204\345\211\215\346\226\271\350\267\235\347\246\273\357\274\210\347\261\263\357\274\211\343\200\202", "Increase it if the panel is too close; decrease it if the panel is too far.", "\351\235\242\346\235\277\345\244\252\350\264\264\350\204\270\345\260\261\350\260\203\345\244\247\357\274\214\345\244\252\350\277\234\345\260\261\350\260\203\345\260\217\343\200\202" },
+        { "ConfigOverlaySizeMeters", "Config Overlay", "\351\205\215\347\275\256\351\235\242\346\235\277", "Panel Size", "\351\205\215\347\275\256\351\235\242\346\235\277\345\244\247\345\260\217", "Physical width of the built-in config panel (meters). Height follows the panel aspect ratio.", "\351\205\215\347\275\256\351\235\242\346\235\277\347\232\204\347\211\251\347\220\206\345\256\275\345\272\246\357\274\210\347\261\263\357\274\211\357\274\214\351\253\230\345\272\246\344\274\232\346\214\211\351\235\242\346\235\277\346\257\224\344\276\213\350\207\252\345\212\250\350\256\241\347\256\227\343\200\202", "Increase it if the text is too small; decrease it if the panel blocks too much view.", "\346\226\207\345\255\227\345\244\252\345\260\217\345\260\261\350\260\203\345\244\247\357\274\214\351\201\256\346\214\241\345\244\252\345\244\232\345\260\261\350\260\203\345\260\217\343\200\202" },
         { "VRScale", "View / Scale", "\350\247\206\350\247\222 / \345\260\272\345\272\246", "World Scale", "\344\270\226\347\225\214\347\274\251\346\224\276", "Adjusts overall world scale (distance and size perception).", "\350\260\203\346\225\264\346\225\264\344\275\223\344\270\226\347\225\214\345\260\272\345\272\246\357\274\210\350\267\235\347\246\273\344\270\216\345\244\247\345\260\217\346\204\237\347\237\245\357\274\211\343\200\202", "Keep close to real-world meter scale. 43.2 covers most play spaces.", "\345\260\275\351\207\217\344\277\235\346\214\201\344\270\216\347\234\237\345\256\236\344\270\226\347\225\214\346\216\245\350\277\221\343\200\20243.2\344\270\200\350\210\254\346\234\200\345\220\210\351\200\202\343\200\202" },
         { "Roomscale1To1Movement", "Roomscale Movement", "\346\210\277\351\227\264\347\247\273\345\212\250", "Enable 1:1 Roomscale Movement", "\345\220\257\347\224\2501:1\346\210\277\351\227\264\347\247\273\345\212\250", "Converts physical HMD movement into normal in-game movement commands.", "\346\212\212\345\244\264\346\230\276\347\216\260\345\256\236\347\247\273\345\212\250\350\275\254\346\215\242\346\210\220\346\270\270\346\210\217\345\206\205\346\240\207\345\207\206\347\247\273\345\212\250\346\214\207\344\273\244\343\200\202", "Works on normal servers because it sends standard movement input.", "\345\217\221\351\200\201\347\232\204\346\230\257\346\240\207\345\207\206\347\247\273\345\212\250\350\276\223\345\205\245\357\274\214\346\211\200\344\273\245\345\217\257\344\273\245\347\224\250\345\234\250\346\231\256\351\200\232\346\234\215\345\212\241\345\231\250\343\200\202" },
         { "Roomscale1To1MovementScale", "Roomscale Movement", "\346\210\277\351\227\264\347\247\273\345\212\250", "1:1 Movement Scale", "1:1\347\247\273\345\212\250\350\267\235\347\246\273\345\200\215\347\216\207", "Multiplies HMD physical movement before it becomes in-game movement.", "\346\212\212\345\244\264\346\230\276\347\216\260\345\256\236\344\275\215\347\247\273\350\275\254\346\215\242\346\210\220\346\270\270\346\210\217\345\206\205\347\247\273\345\212\250\345\211\215\345\206\215\344\271\230\344\273\245\350\277\231\344\270\252\345\200\215\347\216\207\343\200\202", "1.0 means 10cm real movement targets 10cm in game; increase it if in-game movement is too short.", "1.0\350\241\250\347\244\272\347\216\260\345\256\236\347\247\273\345\212\25010cm\347\233\256\346\240\207\344\271\237\346\230\257\346\270\270\346\210\217\345\206\20510cm\357\274\233\346\270\270\346\210\217\351\207\214\350\265\260\345\276\227\345\244\252\347\237\255\345\260\261\350\260\203\345\244\247\343\200\202" },
@@ -272,6 +274,8 @@ namespace
         { "MouseModeScopeMagnificationKey", "Input / Mouse Mode", "\350\276\223\345\205\245 / \351\224\256\351\274\240\346\250\241\345\274\217", "Mouse Mode Scope Magnification Key", "\351\224\256\351\274\240\346\250\241\345\274\217\345\200\215\347\216\207\345\210\207\346\215\242\346\214\211\351\224\256", "Keyboard key used to cycle magnification steps while mouse-mode scope is active.", "\351\224\256\351\274\240\346\250\241\345\274\217\345\274\200\351\225\234\347\212\266\346\200\201\344\270\213\357\274\214\347\224\250\344\272\216\345\210\207\346\215\242\345\200\215\347\216\207\346\241\243\344\275\215\347\232\204\351\224\256\347\233\230\346\214\211\351\224\256\343\200\202", "Format: key:<name> (e.g., key:7, key:f10). Leave empty to disable.", "\346\240\274\345\274\217\357\274\232key:<\346\214\211\351\224\256\345\220\215>\357\274\210\345\246\202 key:7\343\200\201key:f10\357\274\211\343\200\202\347\225\231\347\251\272\350\241\250\347\244\272\347\246\201\347\224\250\343\200\202" },
         { "ForceNonVRServerMovement", "Multiplayer / Server", "\345\244\232\344\272\272 / \346\234\215\345\212\241\345\231\250", "Non-VR Server Compatibility Mode", "\351\235\236VR\346\234\215\345\212\241\345\231\250\345\205\274\345\256\271\346\250\241\345\274\217", "Converts VR movement/interaction to be more acceptable to standard servers.", "\345\260\206VR\347\247\273\345\212\250\344\270\216\344\272\244\344\272\222\350\275\254\346\215\242\344\270\272\346\233\264\347\254\246\345\220\210\344\274\240\347\273\237\346\234\215\345\212\241\345\231\250\347\232\204\345\275\242\345\274\217\343\200\202", "Recommended for public multiplayer servers.", "\351\235\236\350\207\252\345\267\261\345\273\272\346\210\277\345\244\232\345\277\205\351\241\273\345\274\200\345\220\257\343\200\202" },
         { "AutoMatQueueMode", "Performance", "\346\200\247\350\203\275", "Multi-core rendering", "\345\244\232\346\240\270\346\270\262\346\237\223", "Turns on multi-core rendering for the mod. Do not enable the in-game multi-core rendering option.", "\347\224\250\344\272\216\345\274\200\345\220\257\345\267\245\345\205\267\345\206\205\347\232\204\345\244\232\346\240\270\346\270\262\346\237\223\345\212\237\350\203\275\357\274\214\344\270\215\350\246\201\345\216\273\345\274\200\345\220\257\346\270\270\346\210\217\351\207\214\347\232\204\345\244\232\346\240\270\346\270\262\346\237\223\351\200\211\351\241\271\343\200\202", "May cause ghosting. Not recommended for standing play.", "\345\274\200\345\220\257\345\220\216\345\217\257\350\203\275\345\207\272\347\216\260\351\207\215\345\275\261\357\274\214\344\270\215\345\273\272\350\256\256\347\253\231\345\247\277\346\270\270\347\216\251\346\227\266\344\275\277\347\224\250\343\200\202" },
+        { "ReShadeVRCompat", "Performance", "\xE6\x80\xA7\xE8\x83\xBD", "ReShade VR Compatibility", "ReShade VR\xE5\x85\xBC\xE5\xAE\xB9\xE6\xA8\xA1\xE5\xBC\x8F", "Uses a conservative per-eye VR render path for ReShade compatibility.", "\xE5\x90\xAF\xE7\x94\xA8\xE9\x9D\xA2\xE5\x90\x91\x20\x52\x65\x53\x68\x61\x64\x65\x20\xE7\x9A\x84\xE4\xBF\x9D\xE5\xAE\x88\xE9\x80\x90\xE7\x9C\xBC\x20\x56\x52\x20\xE6\xB8\xB2\xE6\x9F\x93\xE8\xB7\xAF\xE5\xBE\x84\xE3\x80\x82", "Enable only when ReShade is actually installed and loaded. It may reduce performance or affect stability.", "\xE5\x8F\xAA\xE5\x9C\xA8\xE5\xAE\x9E\xE9\x99\x85\xE5\xAE\x89\xE8\xA3\x85\xE5\xB9\xB6\xE5\x8A\xA0\xE8\xBD\xBD\x20\x52\x65\x53\x68\x61\x64\x65\x20\xE6\x97\xB6\xE5\xBC\x80\xE5\x90\xAF\xEF\xBC\x8C\xE5\x8F\xAF\xE8\x83\xBD\xE9\x99\x8D\xE4\xBD\x8E\xE6\x80\xA7\xE8\x83\xBD\xE6\x88\x96\xE5\xBD\xB1\xE5\x93\x8D\xE7\xA8\xB3\xE5\xAE\x9A\xE6\x80\xA7\xE3\x80\x82" },
+        { "QueuedRenderPoseWaitMs", "Performance", "\346\200\247\350\203\275", "Queued Pose Wait (ms)", "\345\244\232\346\240\270\345\247\277\346\200\201\347\255\211\345\276\205", "Minimum render-thread wait budget for a fresher VR pose sample in multi-core rendering.", "\346\225\260\345\200\274\350\266\212\345\260\217\347\224\273\351\235\242\350\266\212\344\270\215\347\250\263\345\256\232\345\270\247\347\216\207\350\266\212\351\253\230\345\217\252\351\200\202\345\220\210\345\235\220\345\247\277\346\270\270\347\216\251\357\274\214\346\225\260\345\200\274\350\266\212\345\244\247\347\224\273\351\235\242\350\266\212\347\250\263\345\256\232\344\275\206\346\217\220\345\215\207\347\232\204\345\270\247\347\216\207\345\260\206\344\274\232\345\207\217\345\260\217\357\274\214\346\240\271\346\215\256\345\256\236\351\231\205\346\203\205\345\206\265\350\260\203\346\225\264\357\274\214\350\277\231\344\270\252\345\200\274\345\217\257\350\203\275\346\257\217\344\270\252\350\256\276\345\244\207\344\270\215\344\270\200\346\240\267", "Lower values favor FPS; higher values favor image stability.", "\345\217\252\345\234\250\345\244\232\346\240\270\346\270\262\346\237\223\345\274\200\345\220\257\346\227\266\346\230\276\347\244\272\343\200\202\344\270\215\345\220\214\345\244\264\346\230\276\343\200\201\344\270\262\346\265\201\346\226\271\346\241\210\345\222\214\345\210\267\346\226\260\347\216\207\345\217\257\350\203\275\351\234\200\350\246\201\344\270\215\345\220\214\346\225\260\345\200\274\343\200\202" },
         { "ShadowTweaksEnabled", "Performance", "\346\200\247\350\203\275", "Enable Shadow Optimization Controls", "\345\220\257\347\224\250\351\230\264\345\275\261\344\274\230\345\214\226\346\216\247\345\210\266", "Simplify shadow rendering to improve performance.", "\347\256\200\345\214\226\351\230\264\345\275\261\346\230\276\347\244\272\357\274\214\346\217\220\351\253\230\346\200\247\350\203\275\343\200\202", "", "" },
         { "LocalVScriptConvarsEnabled", "Performance", "\346\200\247\350\203\275", "Enable LOD optimization", "\345\220\257\347\224\250LOD\344\274\230\345\214\226", "Use a more aggressive optimization scheme that slightly reduces visual quality while also improving performance.", "\344\275\277\347\224\250\346\233\264\346\277\200\350\277\233\347\232\204\344\274\230\345\214\226\346\226\271\346\241\210\357\274\214\351\231\215\344\275\216\346\233\264\345\244\232\350\247\206\350\247\211\350\241\250\347\216\260\357\274\214\345\244\247\345\271\205\346\217\220\351\253\230\346\200\247\350\203\275\343\200\202", "", "" },
         { "HudDistance", "HUD (Main)", "HUD\357\274\210\344\270\273\347\225\214\351\235\242\357\274\211", "HUD Distance", "HUD \350\267\235\347\246\273", "Distance from the head to the main HUD plane.", "\345\244\264\351\203\250\345\210\260\344\270\273HUD\345\271\263\351\235\242\347\232\204\350\267\235\347\246\273\343\200\202", "Closer feels larger; farther reduces eye strain.", "\350\266\212\350\277\221\350\266\212\345\244\247\357\274\214\350\266\212\350\277\234\350\266\212\346\212\244\347\234\274\343\200\202" },
@@ -1846,19 +1850,19 @@ namespace
             return;
 
         auto setInput = [&](vr::VROverlayHandle_t h, vr::VROverlayInputMethod method)
-        {
-            if (h != vr::k_ulOverlayHandleInvalid)
-                ov->SetOverlayInputMethod(h, method);
-        };
+            {
+                if (h != vr::k_ulOverlayHandleInvalid)
+                    ov->SetOverlayInputMethod(h, method);
+            };
 
         auto suppress = [&](vr::VROverlayHandle_t h)
-        {
-            if (h == vr::k_ulOverlayHandleInvalid)
-                return;
-            ov->SetOverlayInputMethod(h, vr::VROverlayInputMethod_None);
-            ov->SetOverlaySortOrder(h, 1u);
-            ov->HideOverlay(h);
-        };
+            {
+                if (h == vr::k_ulOverlayHandleInvalid)
+                    return;
+                ov->SetOverlayInputMethod(h, vr::VROverlayInputMethod_None);
+                ov->SetOverlaySortOrder(h, 1u);
+                ov->HideOverlay(h);
+            };
 
         if (blocked)
         {
@@ -2062,16 +2066,16 @@ namespace
             return;
 
         auto setInput = [&](vr::VROverlayHandle_t h, vr::VROverlayInputMethod method)
-        {
-            if (CfgIsValidOverlayHandle(h))
-                ov->SetOverlayInputMethod(h, method);
-        };
+            {
+                if (CfgIsValidOverlayHandle(h))
+                    ov->SetOverlayInputMethod(h, method);
+            };
 
         auto setInteractive = [&](vr::VROverlayHandle_t h, bool enabled)
-        {
-            if (CfgIsValidOverlayHandle(h))
-                ov->SetOverlayFlag(h, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, enabled);
-        };
+            {
+                if (CfgIsValidOverlayHandle(h))
+                    ov->SetOverlayFlag(h, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, enabled);
+            };
 
         if (blocked)
         {

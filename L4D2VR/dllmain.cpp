@@ -30,6 +30,7 @@ namespace
     constexpr wchar_t kUiFontFixFileName[] = L"UI Font Fix.vpk";
     constexpr wchar_t kWorkshopUpdateItemId[] = L"3724995607";
     constexpr wchar_t kWorkshopUpdateVpkName[] = L"3724995607.vpk";
+    constexpr wchar_t kConfigMigrationsStateFile[] = L"config_migrations_applied.txt";
 
     struct WindowSearchContext
     {
@@ -1429,6 +1430,46 @@ namespace
         return keys;
     }
 
+    bool SetConfigParameterValue(std::string& text, const std::string& targetKey, const std::string& targetValue)
+    {
+        if (targetKey.empty())
+            return false;
+
+        std::istringstream input(text);
+        std::ostringstream output;
+        std::string line;
+        bool found = false;
+        bool changed = false;
+
+        while (std::getline(input, line))
+        {
+            std::string key;
+            if (TryExtractConfigParameterKey(line, key) && key == targetKey)
+            {
+                const std::string replacement = targetKey + "=" + targetValue;
+                if (line != replacement)
+                    changed = true;
+                line = replacement;
+                found = true;
+            }
+
+            output << line << '\n';
+        }
+
+        if (!found)
+        {
+            if (!text.empty() && text.back() != '\n')
+                output << '\n';
+            output << targetKey << '=' << targetValue << '\n';
+            changed = true;
+        }
+
+        if (changed)
+            text = output.str();
+
+        return changed;
+    }
+
     void AppendUpdateLog(const std::filesystem::path& updateDir, const std::string& line)
     {
         std::error_code ec;
@@ -2243,6 +2284,101 @@ namespace
         return true;
     }
 
+    struct OneShotConfigMigration
+    {
+        const char* id = nullptr;
+        const char* key = nullptr;
+        const char* value = nullptr;
+    };
+
+    constexpr OneShotConfigMigration kOneShotConfigMigrations[] =
+    {
+        { "2026-05-15_queued_render_pose_wait_ms_default_9", "QueuedRenderPoseWaitMs", "9" },
+    };
+
+    std::unordered_set<std::string> ReadAppliedConfigMigrationIds(const std::filesystem::path& statePath)
+    {
+        std::unordered_set<std::string> ids;
+
+        std::string text;
+        if (!ReadAsciiFile(statePath, text))
+            return ids;
+
+        std::istringstream stream(text);
+        std::string line;
+        while (std::getline(stream, line))
+        {
+            line = TrimAsciiWhitespace(line);
+            if (line.empty() || line[0] == '#')
+                continue;
+
+            const size_t comment = line.find('#');
+            if (comment != std::string::npos)
+                line = TrimAsciiWhitespace(line.substr(0, comment));
+            if (!line.empty())
+                ids.insert(line);
+        }
+
+        return ids;
+    }
+
+    bool WriteAppliedConfigMigrationIds(const std::filesystem::path& statePath, const std::unordered_set<std::string>& ids)
+    {
+        std::vector<std::string> sortedIds(ids.begin(), ids.end());
+        std::sort(sortedIds.begin(), sortedIds.end());
+
+        std::ostringstream output;
+        output << "# L4D2VR one-shot config migrations. Do not edit unless you want a migration to run again.\n";
+        for (const std::string& id : sortedIds)
+            output << id << '\n';
+
+        return WriteAsciiFile(statePath, output.str());
+    }
+
+    void MigrateExistingConfigOnce()
+    {
+        const std::filesystem::path gameRootPath = GetGameRootPath();
+        if (gameRootPath.empty())
+            return;
+
+        const std::filesystem::path vrPath = gameRootPath / L"vr";
+        const std::filesystem::path configPath = vrPath / L"config.txt";
+        const std::filesystem::path statePath = vrPath / kConfigMigrationsStateFile;
+
+        // Only migrate existing user configs. New installs should get current defaults from config.sample.
+        if (!FileExistsNoThrow(configPath))
+            return;
+
+        std::string configText;
+        if (!ReadAsciiFile(configPath, configText))
+            return;
+
+        std::unordered_set<std::string> appliedIds = ReadAppliedConfigMigrationIds(statePath);
+
+        bool anyPendingMigration = false;
+        bool configChanged = false;
+        for (const OneShotConfigMigration& migration : kOneShotConfigMigrations)
+        {
+            if (!migration.id || !*migration.id || !migration.key || !*migration.key || !migration.value)
+                continue;
+            if (appliedIds.find(migration.id) != appliedIds.end())
+                continue;
+
+            anyPendingMigration = true;
+            if (SetConfigParameterValue(configText, migration.key, migration.value))
+                configChanged = true;
+            appliedIds.insert(migration.id);
+        }
+
+        if (!anyPendingMigration)
+            return;
+
+        if (configChanged && !WriteAsciiFile(configPath, configText))
+            return;
+
+        WriteAppliedConfigMigrationIds(statePath, appliedIds);
+    }
+
     void EnsureVrConfigTxtFromSample()
     {
         const std::filesystem::path gameRootPath = GetGameRootPath();
@@ -2353,6 +2489,7 @@ DWORD WINAPI InitL4D2VR(HMODULE hModule)
     }
     LocalFree(szArglist);
 
+    MigrateExistingConfigOnce();
     EnsureVrConfigTxtFromSample();
     EnsureUiFontFixVpkAndConfig();
 
