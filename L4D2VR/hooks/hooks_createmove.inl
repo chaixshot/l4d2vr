@@ -682,6 +682,46 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			}
 
 		}
+
+		// SpecialInfectedAutoEvade: the shove must use the same server-facing viewangles as the target lock.
+		// The visual aim-line path already forces m_RightControllerForward while pre-warning is active;
+		// this block locks CUserCmd too, so +attack2 is resolved toward the same infected target.
+		if (m_VR->m_SpecialInfectedWarningActionEnabled
+			&& m_VR->m_SpecialInfectedWarningActionStep != VR::SpecialInfectedWarningActionStep::None
+			&& m_VR->m_SpecialInfectedWarningTargetActive
+			&& !m_VR->m_AdjustingViewmodel)
+		{
+			Vector aimOrigin = (m_VR->GetViewOriginLeft() + m_VR->GetViewOriginRight()) * 0.5f;
+			if (aimOrigin.IsZero())
+				aimOrigin = m_VR->m_HmdPosAbs;
+
+			Vector dir = m_VR->m_SpecialInfectedWarningTarget - aimOrigin;
+			if (VectorLength(dir) > 0.001f)
+			{
+				VectorNormalize(dir);
+				QAngle lockAngles;
+				QAngle::VectorAngles(dir, lockAngles);
+				NormalizeAndClampViewAngles(lockAngles);
+
+				QAngle oldYawOnly(0.f, cmd->viewangles.y, 0.f);
+				Vector oldForward, oldRight, oldUp;
+				QAngle::AngleVectors(oldYawOnly, &oldForward, &oldRight, &oldUp);
+				Vector worldMove = oldForward * cmd->forwardmove + oldRight * cmd->sidemove;
+
+				cmd->viewangles = lockAngles;
+
+				QAngle newYawOnly(0.f, cmd->viewangles.y, 0.f);
+				Vector newForward, newRight, newUp;
+				QAngle::AngleVectors(newYawOnly, &newForward, &newRight, &newUp);
+				cmd->forwardmove = DotProduct(worldMove, newForward);
+				cmd->sidemove = DotProduct(worldMove, newRight);
+
+				constexpr int kIN_ATTACK = (1 << 0);
+				constexpr int kIN_ATTACK2 = (1 << 11);
+				cmd->buttons &= ~kIN_ATTACK;
+				cmd->buttons |= kIN_ATTACK2;
+			}
+		}
 	}
 
 	// Keep Source's main-thread viewangles aligned with the VR audio listener while

@@ -709,8 +709,14 @@ void VR::UpdateTracking()
     if (!m_RightControllerForwardUnforced.IsZero())
         m_LastUnforcedAimDirection = m_RightControllerForwardUnforced;
 
-    const bool shouldForceAim = m_SpecialInfectedPreWarningActive;
-    const Vector forcedTarget = m_SpecialInfectedPreWarningTarget;
+    const bool shouldForceEvadeAim =
+        m_SpecialInfectedWarningActionEnabled &&
+        m_SpecialInfectedWarningActionStep != SpecialInfectedWarningActionStep::None &&
+        m_SpecialInfectedWarningTargetActive;
+    const bool shouldForceAim = m_SpecialInfectedPreWarningActive || shouldForceEvadeAim;
+    const Vector forcedTarget = shouldForceEvadeAim
+        ? m_SpecialInfectedWarningTarget
+        : m_SpecialInfectedPreWarningTarget;
 
     if (shouldForceAim)
     {

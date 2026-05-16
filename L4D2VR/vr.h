@@ -2079,6 +2079,7 @@ public:
 	float m_SpecialInfectedIntentSenseDistance = 1200.0f;
 	float m_SpecialInfectedIntentSenseLookDot = 0.88f;
 	float m_SpecialInfectedIntentSenseCooldownSeconds = 1.25f;
+	float m_SpecialInfectedIntentSenseMaxContinuousVisibleSeconds = 30.0f;
 	float m_SpecialInfectedIntentSenseHudWidthMeters = 0.46f;
 	float m_SpecialInfectedIntentSenseHudMarginXMeters = 0.025f;
 	float m_SpecialInfectedIntentSenseHudMarginYMeters = 0.025f;
@@ -2096,7 +2097,9 @@ public:
 		float rightBias = 0.0f;
 		bool front = false;
 		uint32_t scanRevision = 0;
+		std::chrono::steady_clock::time_point firstSeen{};
 		std::chrono::steady_clock::time_point lastSeen{};
+		bool suppressedByLongTrack = false;
 	};
 	// Intent-sense HUD text is rendered through a standalone OpenVR overlay.
 	// Do not use engine DebugOverlay screen text here: that call path can crash on L4D2's VDebugOverlay build.
@@ -2112,6 +2115,7 @@ public:
 	int m_SpecialInfectedIntentSenseHudRevision = 0;
 	float m_SpecialInfectedPreWarningEvadeDistance = 260.0f;
 	float m_SpecialInfectedPreWarningEvadeCooldown = 0.85f;
+	bool m_SpecialInfectedAutoEvadeIgnoreBehind = true;
 	int m_LastSpecialInfectedEvadeEntityIndex = -1;
 	bool m_SpecialInfectedPreWarningEvadeArmed = true;
 	std::chrono::steady_clock::time_point m_SpecialInfectedPreWarningEvadeCooldownEnd{};
