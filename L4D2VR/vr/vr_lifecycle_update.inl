@@ -1041,6 +1041,15 @@ void VR::ReleaseVRRenderTargetsForDeviceReset()
     }
 
     DestroyHandHudWorldQuadTextures();
+    for (size_t i = 0; i < m_D9SpecialInfectedIntentSenseHudDynTex.size(); ++i)
+    {
+        SafeReleaseD3D(m_D9SpecialInfectedIntentSenseHudDynSurface[i]);
+        SafeReleaseD3D(m_D9SpecialInfectedIntentSenseHudDynTex[i]);
+        m_D9SpecialInfectedIntentSenseHudDynW[i] = 0;
+        m_D9SpecialInfectedIntentSenseHudDynH[i] = 0;
+        std::memset(&m_VKSpecialInfectedIntentSenseHudDyn[i], 0, sizeof(m_VKSpecialInfectedIntentSenseHudDyn[i]));
+    }
+    m_SpecialInfectedIntentSenseHudDynFront = 0;
     DestroyKillIndicatorOverlayTextures();
     DestroyItemLabelOverlayTexture();
 
@@ -2425,6 +2434,30 @@ void VR::RepositionOverlays()
     vr::VROverlay()->SetOverlayTransformAbsolute(m_HUDTopHandle, trackingOrigin, &hudTopTransform);
     vr::VROverlay()->SetOverlayWidthInMeters(m_HUDTopHandle, m_HudSize);
     vr::VROverlay()->SetOverlayCurvature(m_HUDTopHandle, (std::max)(0.0f, m_TopHudCurvature));
+
+    // Place the intent-sense panel in the upper-right area of the same in-game HUD plane.
+    if (m_SpecialInfectedIntentSenseHudHandle != vr::k_ulOverlayHandleInvalid)
+    {
+        const float hudAspect = (windowWidth > 0)
+            ? ((std::max)(1.0f, static_cast<float>(windowHeight)) / (std::max)(1.0f, static_cast<float>(windowWidth)))
+            : 0.5625f;
+        const float panelWidth = std::clamp(m_SpecialInfectedIntentSenseHudWidthMeters, 0.10f, 1.50f);
+        const float panelHeight = panelWidth * ((std::max)(1, m_SpecialInfectedIntentSenseHudTexH) / (float)(std::max)(1, m_SpecialInfectedIntentSenseHudTexW));
+
+        const float cosYaw = cosf(hmdRotationDegrees);
+        const float sinYaw = sinf(hmdRotationDegrees);
+        const Vector hudRight(cosYaw, 0.0f, -sinYaw);
+        const Vector hudUp(0.0f, 1.0f, 0.0f);
+        const float hudHeightMeters = m_HudSize * hudAspect;
+        const float xOff = (m_HudSize * 0.5f) - (panelWidth * 0.5f) - m_SpecialInfectedIntentSenseHudMarginXMeters;
+        const float yOff = (hudHeightMeters * 0.5f) - (panelHeight * 0.5f) - m_SpecialInfectedIntentSenseHudMarginYMeters;
+        Vector panelPos = hudNewPos + hudRight * xOff + hudUp * yOff;
+        vr::HmdMatrix34_t intentHudTransform = buildFacingTransform(panelPos);
+        vr::VROverlay()->SetOverlayTransformAbsolute(m_SpecialInfectedIntentSenseHudHandle, trackingOrigin, &intentHudTransform);
+        vr::VROverlay()->SetOverlayWidthInMeters(m_SpecialInfectedIntentSenseHudHandle, panelWidth);
+        // Intent-sense HUD is an independent flat overlay. Do not inherit the main game HUD curvature.
+        vr::VROverlay()->SetOverlayCurvature(m_SpecialInfectedIntentSenseHudHandle, 0.0f);
+    }
 
     for (size_t i = 0; i < m_HUDBottomHandles.size(); ++i)
     {

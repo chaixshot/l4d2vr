@@ -133,6 +133,8 @@ public:
 	// Hand HUD overlays (raw, controller-anchored)
 	vr::VROverlayHandle_t m_LeftWristHudHandle = vr::k_ulOverlayHandleInvalid;
 	vr::VROverlayHandle_t m_RightAmmoHudHandle = vr::k_ulOverlayHandleInvalid;
+	// Standalone in-game HUD alert panel for special infected intent sense.
+	vr::VROverlayHandle_t m_SpecialInfectedIntentSenseHudHandle = vr::k_ulOverlayHandleInvalid;
 
 
 	float m_HorizontalOffsetLeft;
@@ -1013,6 +1015,17 @@ public:
 	SharedTextureHolder m_VKRightAmmoHudDyn{};
 	int m_D9RightAmmoHudDynW = 0;
 	int m_D9RightAmmoHudDynH = 0;
+
+	// Standalone special infected intent-sense HUD dynamic textures.
+	// Use a real two-texture GPU ring: SteamVR/OpenVR can cache a submitted texture handle,
+	// so updating and resubmitting the same handle may show only the first frame on some runtimes.
+	// No SetOverlayRaw fallback is used; failures should stay visible in logs/tests.
+	std::array<IDirect3DTexture9*, 2> m_D9SpecialInfectedIntentSenseHudDynTex{};
+	std::array<IDirect3DSurface9*, 2> m_D9SpecialInfectedIntentSenseHudDynSurface{};
+	std::array<SharedTextureHolder, 2> m_VKSpecialInfectedIntentSenseHudDyn{};
+	std::array<int, 2> m_D9SpecialInfectedIntentSenseHudDynW{};
+	std::array<int, 2> m_D9SpecialInfectedIntentSenseHudDynH{};
+	uint8_t m_SpecialInfectedIntentSenseHudDynFront = 0;
 	// Debug logging for hand HUD update stalls (UpdateHandHudOverlays).
 	bool  m_HandHudDebugLog = false;
 	float m_HandHudDebugLogHz = 1.0f; // max prints per second; 0 disables throttling
@@ -1039,12 +1052,16 @@ public:
 	// Double-buffered pixel storage to avoid flicker/tearing when SteamVR reads the same buffer we are updating.
 	std::array<std::vector<uint8_t>, 2> m_LeftWristHudPixels{};
 	std::array<std::vector<uint8_t>, 2> m_RightAmmoHudPixels{};
+	std::array<std::vector<uint8_t>, 2> m_SpecialInfectedIntentSenseHudPixels{};
 	uint8_t m_LeftWristHudPixelsFront = 0;
 	uint8_t m_RightAmmoHudPixelsFront = 0;
+	uint8_t m_SpecialInfectedIntentSenseHudPixelsFront = 0;
 	int m_LeftWristHudTexW = 256;
 	int m_LeftWristHudTexH = 128;
 	int m_RightAmmoHudTexW = 256;
 	int m_RightAmmoHudTexH = 128;
+	int m_SpecialInfectedIntentSenseHudTexW = 512;
+	int m_SpecialInfectedIntentSenseHudTexH = 192;
 	// Hand HUD temp-health decay state (per player index).
 	// We only get m_healthBuffer (amount) + m_healthBufferTime (start time).
 	// The engine computes the decayed remaining value at draw time; we replicate that using wall-clock.
@@ -1091,6 +1108,9 @@ public:
 	uint8_t m_LeftWristHudBgCacheA = 0;
 	uint32_t m_LastHudTeammatesHash = 0;
 	uint32_t m_LastHudAimTargetNameHash = 0;
+	bool m_LastSpecialInfectedIntentSenseHudVisible = false;
+	int m_LastSpecialInfectedIntentSenseHudRevisionDrawn = 0;
+	std::chrono::steady_clock::time_point m_LastSpecialInfectedIntentSenseHudUploadTime{};
 
 	std::vector<uint8_t> m_RightAmmoHudBgCache{};
 	int m_RightAmmoHudBgCacheW = 0;
@@ -2040,6 +2060,56 @@ public:
 	float m_SpecialInfectedBlindSpotWarningDuration = 0.5f;
 	bool m_SpecialInfectedBlindSpotWarningActive = false;
 	std::chrono::steady_clock::time_point m_LastSpecialInfectedWarningTime{};
+	// Special infected intent sense: warn when a special infected targets or clearly looks at the local player.
+	// Uses CTerrorPlayer handle netvars from offsets.txt first, then an optional angle/LOS fallback.
+	static constexpr int kSpecialIntentTongueVictimOffset = 0x1F68;
+	static constexpr int kSpecialIntentPounceVictimOffset = 0x2728;
+	static constexpr int kSpecialIntentJockeyVictimOffset = 0x2748;
+	static constexpr int kSpecialIntentCarryVictimOffset = 0x2718;
+	static constexpr int kSpecialIntentPummelVictimOffset = 0x271C;
+	static constexpr int kSpecialIntentQueuedPummelVictimOffset = 0x2724;
+	static constexpr int kSpecialIntentLookatPlayerOffset = 0x2924;
+	static constexpr int kSpecialIntentAngRotationOffset = 0x118;
+	bool m_SpecialInfectedIntentSenseEnabled = false;
+	bool m_SpecialInfectedIntentSenseHudEnabled = true;
+	bool m_SpecialInfectedIntentSenseHapticsEnabled = true;
+	bool m_SpecialInfectedIntentSenseUseLookFallback = true;
+	// If false, suppress front/front-left/front-right alerts. Side/back alerts still show.
+	bool m_SpecialInfectedIntentSenseWarnFront = false;
+	float m_SpecialInfectedIntentSenseDistance = 1200.0f;
+	float m_SpecialInfectedIntentSenseLookDot = 0.88f;
+	float m_SpecialInfectedIntentSenseCooldownSeconds = 1.25f;
+	float m_SpecialInfectedIntentSenseHudWidthMeters = 0.46f;
+	float m_SpecialInfectedIntentSenseHudMarginXMeters = 0.025f;
+	float m_SpecialInfectedIntentSenseHudMarginYMeters = 0.025f;
+	int m_SpecialInfectedIntentSenseHudMaxLines = 4;
+	float m_SpecialInfectedIntentSenseHapticDuration = 0.045f;
+	float m_SpecialInfectedIntentSenseHapticFrequency = 120.0f;
+	float m_SpecialInfectedIntentSenseHapticAmplitude = 0.38f;
+	std::chrono::steady_clock::time_point m_LastSpecialInfectedIntentSenseAlertTime{};
+	std::unordered_map<int, std::chrono::steady_clock::time_point> m_LastSpecialInfectedIntentSenseEntityAlertTime{};
+	struct SpecialInfectedIntentSenseThreat
+	{
+		SpecialInfectedType type = SpecialInfectedType::None;
+		std::string directionText;
+		float distanceMeters = 0.0f;
+		float rightBias = 0.0f;
+		bool front = false;
+		uint32_t scanRevision = 0;
+		std::chrono::steady_clock::time_point lastSeen{};
+	};
+	// Intent-sense HUD text is rendered through a standalone OpenVR overlay.
+	// Do not use engine DebugOverlay screen text here: that call path can crash on L4D2's VDebugOverlay build.
+	struct SpecialInfectedIntentSenseHudLine
+	{
+		std::string text;
+		RgbColor color{ 255, 238, 218 };
+	};
+	std::mutex m_SpecialInfectedIntentSenseHudMutex{};
+	std::unordered_map<int, SpecialInfectedIntentSenseThreat> m_SpecialInfectedIntentSenseThreats{};
+	std::vector<SpecialInfectedIntentSenseHudLine> m_SpecialInfectedIntentSenseHudLines{};
+	uint32_t m_SpecialInfectedIntentSenseScanRevision = 0;
+	int m_SpecialInfectedIntentSenseHudRevision = 0;
 	float m_SpecialInfectedPreWarningEvadeDistance = 260.0f;
 	float m_SpecialInfectedPreWarningEvadeCooldown = 0.85f;
 	int m_LastSpecialInfectedEvadeEntityIndex = -1;
@@ -2516,6 +2586,11 @@ public:
 	void ScanItemModelLabelEntitiesFromClientListImpl();
 	void RefreshSpecialInfectedPreWarning(const Vector& infectedOrigin, SpecialInfectedType type, int entityIndex, bool isPlayerClass);
 	void RefreshSpecialInfectedBlindSpotWarning(const Vector& infectedOrigin);
+	void BeginSpecialInfectedIntentSenseScan();
+	void FinishSpecialInfectedIntentSenseScan();
+	void RefreshSpecialInfectedIntentSense(const C_BaseEntity* entity, const Vector& infectedOrigin, SpecialInfectedType type, int entityIndex);
+	bool IsSpecialInfectedTargetingLocalPlayer(const C_BaseEntity* entity, const Vector& infectedOrigin, SpecialInfectedType type, int entityIndex, float& outRightBias, const char*& outDirectionText, float& outDistanceMeters, bool& outFront);
+	void NotifySpecialInfectedIntentSense(SpecialInfectedType type, const char* directionText, float distanceMeters, float rightBias, bool front, int entityIndex);
 	bool HasLineOfSightToSpecialInfected(const Vector& infectedOrigin, int entityIndex) const;
 	bool IsSpecialInfectedInBlindSpot(const Vector& infectedOrigin) const;
 	void UpdateSpecialInfectedWarningState();

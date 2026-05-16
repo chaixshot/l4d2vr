@@ -580,6 +580,135 @@ void VR::UpdateHandHudOverlays()
             return SUCCEEDED(transferHr);
         };
 
+    auto DestroyIntentSenseHudTexture = [&]()
+        {
+            for (size_t i = 0; i < m_D9SpecialInfectedIntentSenseHudDynTex.size(); ++i)
+            {
+                SafeReleaseD3D(m_D9SpecialInfectedIntentSenseHudDynSurface[i]);
+                SafeReleaseD3D(m_D9SpecialInfectedIntentSenseHudDynTex[i]);
+                m_D9SpecialInfectedIntentSenseHudDynW[i] = 0;
+                m_D9SpecialInfectedIntentSenseHudDynH[i] = 0;
+                std::memset(&m_VKSpecialInfectedIntentSenseHudDyn[i], 0, sizeof(m_VKSpecialInfectedIntentSenseHudDyn[i]));
+            }
+            m_SpecialInfectedIntentSenseHudDynFront = 0;
+        };
+
+    auto EnsureIntentSenseHudTexture = [&](uint8_t slot, int wantW, int wantH) -> bool
+        {
+            if (slot >= m_D9SpecialInfectedIntentSenseHudDynTex.size() || wantW <= 0 || wantH <= 0)
+                return false;
+
+            IDirect3DTexture9*& tex = m_D9SpecialInfectedIntentSenseHudDynTex[slot];
+            IDirect3DSurface9*& surf = m_D9SpecialInfectedIntentSenseHudDynSurface[slot];
+            SharedTextureHolder& vk = m_VKSpecialInfectedIntentSenseHudDyn[slot];
+            int& curW = m_D9SpecialInfectedIntentSenseHudDynW[slot];
+            int& curH = m_D9SpecialInfectedIntentSenseHudDynH[slot];
+
+            if (tex && (curW != wantW || curH != wantH))
+                DestroyIntentSenseHudTexture();
+
+            if (tex && surf)
+                return true;
+
+            if (!g_D3DVR9)
+                return false;
+
+            IDirect3DDevice9* dev = GetD3DDeviceForHud();
+            if (!dev)
+                return false;
+
+            g_D3DVR9->LockDevice();
+            HRESULT hr = dev->CreateTexture(
+                (UINT)wantW,
+                (UINT)wantH,
+                1,
+                D3DUSAGE_DYNAMIC,
+                D3DFMT_A8R8G8B8,
+                D3DPOOL_DEFAULT,
+                &tex,
+                nullptr);
+
+            if (SUCCEEDED(hr) && tex)
+            {
+                tex->GetSurfaceLevel(0, &surf);
+                if (surf)
+                {
+                    D3D9_TEXTURE_VR_DESC desc{};
+                    if (SUCCEEDED(g_D3DVR9->GetVRDesc(surf, &desc)))
+                    {
+                        std::memcpy(&vk.m_VulkanData, &desc, sizeof(vr::VRVulkanTextureData_t));
+                        vk.m_VRTexture.handle = &vk.m_VulkanData;
+                        vk.m_VRTexture.eColorSpace = vr::ColorSpace_Auto;
+                        vk.m_VRTexture.eType = vr::TextureType_Vulkan;
+                        curW = wantW;
+                        curH = wantH;
+                    }
+                    else
+                    {
+                        SafeReleaseD3D(surf);
+                        SafeReleaseD3D(tex);
+                        curW = curH = 0;
+                        std::memset(&vk, 0, sizeof(vk));
+                    }
+                }
+                else
+                {
+                    SafeReleaseD3D(tex);
+                    curW = curH = 0;
+                    std::memset(&vk, 0, sizeof(vk));
+                }
+            }
+
+            g_D3DVR9->UnlockDevice();
+            dev->Release();
+            return tex != nullptr && surf != nullptr;
+        };
+
+    auto UploadIntentSenseHudTextureRGBA = [&](uint8_t slot, const uint8_t* rgba, int w, int h) -> bool
+        {
+            if (slot >= m_D9SpecialInfectedIntentSenseHudDynTex.size() || !rgba || w <= 0 || h <= 0)
+                return false;
+            if (!EnsureIntentSenseHudTexture(slot, w, h))
+                return false;
+
+            IDirect3DTexture9* tex = m_D9SpecialInfectedIntentSenseHudDynTex[slot];
+            IDirect3DSurface9* surf = m_D9SpecialInfectedIntentSenseHudDynSurface[slot];
+            if (!tex || !surf || !g_D3DVR9)
+                return false;
+
+            g_D3DVR9->LockDevice();
+            D3DLOCKED_RECT lr{};
+            const HRESULT hr = tex->LockRect(0, &lr, nullptr, D3DLOCK_DISCARD);
+            if (FAILED(hr) || !lr.pBits)
+            {
+                g_D3DVR9->UnlockDevice();
+                return false;
+            }
+
+            uint8_t* dst0 = reinterpret_cast<uint8_t*>(lr.pBits);
+            for (int y = 0; y < h; ++y)
+            {
+                const uint8_t* srow = rgba + (size_t)y * (size_t)w * 4;
+                uint8_t* drow = dst0 + (size_t)y * (size_t)lr.Pitch;
+                for (int x = 0; x < w; ++x)
+                {
+                    const uint8_t r = srow[x * 4 + 0];
+                    const uint8_t g = srow[x * 4 + 1];
+                    const uint8_t b = srow[x * 4 + 2];
+                    const uint8_t a = srow[x * 4 + 3];
+                    drow[x * 4 + 0] = b;
+                    drow[x * 4 + 1] = g;
+                    drow[x * 4 + 2] = r;
+                    drow[x * 4 + 3] = a;
+                }
+            }
+
+            tex->UnlockRect(0);
+            const HRESULT transferHr = g_D3DVR9->TransferSurface(surf, FALSE);
+            g_D3DVR9->UnlockDevice();
+            return SUCCEEDED(transferHr);
+        };
+
 
     // If SetOverlayRaw starts returning RequestFailed persistently, the overlay system can end up
     // "stuck" and the HUD freezes on the last successfully-uploaded frame. We recover by recreating
@@ -603,6 +732,10 @@ void VR::UpdateHandHudOverlays()
         leftVisible = false;
         vr::VROverlay()->HideOverlay(m_RightAmmoHudHandle);
         rightVisible = false;
+        if (m_SpecialInfectedIntentSenseHudHandle != vr::k_ulOverlayHandleInvalid)
+            vr::VROverlay()->HideOverlay(m_SpecialInfectedIntentSenseHudHandle);
+        m_LastSpecialInfectedIntentSenseHudVisible = false;
+        m_LastSpecialInfectedIntentSenseHudUploadTime = {};
         DestroyWorldQuadTextures();
         return;
     }
@@ -618,6 +751,10 @@ void VR::UpdateHandHudOverlays()
         leftVisible = false;
         vr::VROverlay()->HideOverlay(m_RightAmmoHudHandle);
         rightVisible = false;
+        if (m_SpecialInfectedIntentSenseHudHandle != vr::k_ulOverlayHandleInvalid)
+            vr::VROverlay()->HideOverlay(m_SpecialInfectedIntentSenseHudHandle);
+        m_LastSpecialInfectedIntentSenseHudVisible = false;
+        m_LastSpecialInfectedIntentSenseHudUploadTime = {};
         DestroyWorldQuadTextures();
         return;
     }
@@ -635,8 +772,165 @@ void VR::UpdateHandHudOverlays()
         leftVisible = false;
         vr::VROverlay()->HideOverlay(m_RightAmmoHudHandle);
         rightVisible = false;
+        if (m_SpecialInfectedIntentSenseHudHandle != vr::k_ulOverlayHandleInvalid)
+            vr::VROverlay()->HideOverlay(m_SpecialInfectedIntentSenseHudHandle);
+        m_LastSpecialInfectedIntentSenseHudVisible = false;
+        m_LastSpecialInfectedIntentSenseHudUploadTime = {};
         DestroyWorldQuadTextures();
         return;
+    }
+
+    // Standalone special infected intent sense HUD. It is anchored near the game HUD's upper-right corner
+    // by RepositionOverlays(), not attached to the right ammo HUD.
+    // Keep this panel live, but do not touch the config-overlay panel or button overlays.
+    auto ensureIntentSenseHudOverlay = [&]() -> bool
+        {
+            if (m_SpecialInfectedIntentSenseHudHandle != vr::k_ulOverlayHandleInvalid)
+                return true;
+
+            std::lock_guard<std::mutex> _lk(m_VROverlayMutex);
+            vr::IVROverlay* ov = vr::VROverlay();
+            if (!ov)
+                ov = m_Overlay;
+            if (!ov)
+                return false;
+            m_Overlay = ov;
+
+            vr::VROverlayHandle_t found = vr::k_ulOverlayHandleInvalid;
+            if (ov->FindOverlay("SpecialInfectedIntentSenseHudOverlayKey", &found) == vr::VROverlayError_None &&
+                found != vr::k_ulOverlayHandleInvalid)
+            {
+                m_SpecialInfectedIntentSenseHudHandle = found;
+            }
+            else
+            {
+                const vr::EVROverlayError err = ov->CreateOverlay("SpecialInfectedIntentSenseHudOverlayKey", "SpecialInfectedIntentSenseHUD", &m_SpecialInfectedIntentSenseHudHandle);
+                if (err != vr::VROverlayError_None)
+                {
+                    m_SpecialInfectedIntentSenseHudHandle = vr::k_ulOverlayHandleInvalid;
+                    return false;
+                }
+            }
+
+            ov->SetOverlayInputMethod(m_SpecialInfectedIntentSenseHudHandle, vr::VROverlayInputMethod_None);
+            ov->SetOverlayAlpha(m_SpecialInfectedIntentSenseHudHandle, 1.0f);
+            ov->SetOverlayTexelAspect(m_SpecialInfectedIntentSenseHudHandle, 1.0f);
+            ov->SetOverlayCurvature(m_SpecialInfectedIntentSenseHudHandle, 0.0f);
+            return true;
+        };
+    if (m_SpecialInfectedIntentSenseEnabled && m_SpecialInfectedIntentSenseHudEnabled &&
+        m_Game && m_Game->m_ClientEntityList)
+    {
+        ScanSpecialInfectedEntitiesFromClientListImpl();
+    }
+
+    {
+        std::vector<SpecialInfectedIntentSenseHudLine> intentLines;
+        int intentRevision = 0;
+        if (m_SpecialInfectedIntentSenseEnabled && m_SpecialInfectedIntentSenseHudEnabled)
+        {
+            std::lock_guard<std::mutex> lock(m_SpecialInfectedIntentSenseHudMutex);
+            intentLines = m_SpecialInfectedIntentSenseHudLines;
+            intentRevision = m_SpecialInfectedIntentSenseHudRevision;
+        }
+
+        const bool wantIntentHud = !intentLines.empty() && ensureIntentSenseHudOverlay();
+        if (!wantIntentHud)
+        {
+            if (m_SpecialInfectedIntentSenseHudHandle != vr::k_ulOverlayHandleInvalid)
+            {
+                std::lock_guard<std::mutex> _lk(m_VROverlayMutex);
+                if (vr::IVROverlay* ov = vr::VROverlay())
+                    ov->HideOverlay(m_SpecialInfectedIntentSenseHudHandle);
+            }
+            m_LastSpecialInfectedIntentSenseHudVisible = false;
+            m_LastSpecialInfectedIntentSenseHudUploadTime = {};
+        }
+        else
+        {
+            // Use a live GPU texture path for this standalone panel.
+            // SetOverlayRaw is intentionally not used here; on some runtimes raw overlays can
+            // lag behind and make distance/direction appear stale.
+            const auto intentHudNow = std::chrono::steady_clock::now();
+            const int w = (std::max)(128, m_SpecialInfectedIntentSenseHudTexW);
+            const int h = (std::max)(64, m_SpecialInfectedIntentSenseHudTexH);
+            const uint8_t backIdx = (uint8_t)(m_SpecialInfectedIntentSenseHudPixelsFront ^ 1);
+            auto& pixels = m_SpecialInfectedIntentSenseHudPixels[backIdx];
+            pixels.resize((size_t)w * (size_t)h * 4);
+
+            HudSurface s{ pixels.data(), w, h, w * 4 };
+            Clear(s, { 0, 0, 0, 0 });
+            FillRect(s, 0, 0, w, h, { 8, 12, 18, 210 });
+            DrawCornerBrackets(s, 2, 2, w - 4, h - 4, { 255, 86, 56, 235 });
+            DrawRect(s, 7, 7, w - 14, h - 14, { 120, 34, 28, 230 }, 1);
+            DrawTextUtf8OutlinedGdiClippedEx(s, 14, 10, w - 28, "\xE6\x9D\x80\xE6\x84\x8F\xE6\x84\x9F\xE7\x9F\xA5", 18, { 255, 210, 190, 255 }, false);
+
+            const int maxLines = std::clamp(m_SpecialInfectedIntentSenseHudMaxLines, 1, 8);
+            const int lineH = 26;
+            int y = 42;
+            for (int i = 0; i < (int)intentLines.size() && i < maxLines && y < h - 18; ++i)
+            {
+                const SpecialInfectedIntentSenseHudLine& line = intentLines[(size_t)i];
+                const int lr = std::clamp(line.color.r, 0, 255);
+                const int lg = std::clamp(line.color.g, 0, 255);
+                const int lb = std::clamp(line.color.b, 0, 255);
+                FillRect(s, 10, y - 2, w - 20, 22, { (uint8_t)(lr / 4), (uint8_t)(lg / 4), (uint8_t)(lb / 4), 150 });
+                DrawTextUtf8OutlinedGdiClippedEx(s, 16, y, w - 32, line.text.c_str(), 17, { (uint8_t)lr, (uint8_t)lg, (uint8_t)lb, 255 }, false);
+                y += lineH;
+            }
+
+            const uint8_t gpuBackIdx = (uint8_t)(m_SpecialInfectedIntentSenseHudDynFront ^ 1);
+            const bool textureUploaded = UploadIntentSenseHudTextureRGBA(gpuBackIdx, pixels.data(), w, h);
+            vr::EVROverlayError textureErr = vr::VROverlayError_RequestFailed;
+            vr::EVROverlayError showErr = vr::VROverlayError_RequestFailed;
+            if (textureUploaded)
+            {
+                {
+                    std::lock_guard<std::mutex> _lk(m_VROverlayMutex);
+                    vr::IVROverlay* ov = vr::VROverlay();
+                    if (!ov)
+                        ov = m_Overlay;
+                    if (ov)
+                    {
+                        ov->SetOverlayAlpha(m_SpecialInfectedIntentSenseHudHandle, 1.0f);
+                        ov->SetOverlayTexelAspect(m_SpecialInfectedIntentSenseHudHandle, 1.0f);
+                        const vr::VRTextureBounds_t fullBounds{ 0.0f, 0.0f, 1.0f, 1.0f };
+                        textureErr = ov->SetOverlayTextureBounds(m_SpecialInfectedIntentSenseHudHandle, &fullBounds);
+                        if (textureErr == vr::VROverlayError_None)
+                            textureErr = ov->SetOverlayTexture(m_SpecialInfectedIntentSenseHudHandle, &m_VKSpecialInfectedIntentSenseHudDyn[gpuBackIdx].m_VRTexture);
+                        if (textureErr == vr::VROverlayError_None)
+                        {
+                            m_SpecialInfectedIntentSenseHudPixelsFront = backIdx;
+                            m_SpecialInfectedIntentSenseHudDynFront = gpuBackIdx;
+                            showErr = ov->ShowOverlay(m_SpecialInfectedIntentSenseHudHandle);
+                        }
+                    }
+                }
+            }
+
+            if (textureUploaded && textureErr == vr::VROverlayError_None)
+            {
+                m_LastSpecialInfectedIntentSenseHudRevisionDrawn = intentRevision;
+                m_LastSpecialInfectedIntentSenseHudUploadTime = intentHudNow;
+                m_LastSpecialInfectedIntentSenseHudVisible = (showErr == vr::VROverlayError_None);
+            }
+            else
+            {
+                DestroyIntentSenseHudTexture();
+                if (textureErr == vr::VROverlayError_InvalidHandle || textureErr == vr::VROverlayError_UnknownOverlay)
+                    m_SpecialInfectedIntentSenseHudHandle = vr::k_ulOverlayHandleInvalid;
+                if (dbgTick)
+                    Game::logMsg("[VR][IntentSenseHUD] dynamic texture upload failed uploaded=%d err=%d", textureUploaded ? 1 : 0, (int)textureErr);
+            }
+
+            if (showErr != vr::VROverlayError_None)
+            {
+                if (showErr == vr::VROverlayError_InvalidHandle || showErr == vr::VROverlayError_UnknownOverlay)
+                    m_SpecialInfectedIntentSenseHudHandle = vr::k_ulOverlayHandleInvalid;
+                if (dbgTick)
+                    Game::logMsg("[VR][IntentSenseHUD] ShowOverlay failed err=%d", (int)showErr);
+            }
+        }
     }
 
     vr::TrackedDeviceIndex_t leftControllerIndex = m_System->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
@@ -1348,7 +1642,8 @@ void VR::UpdateHandHudOverlays()
                 }
             };
 
-        if (weaponId <= 0 || !isAmmoHudEligible(weaponId) || clip < 0)
+        const bool rightAmmoEligible = (weaponId > 0 && isAmmoHudEligible(weaponId) && clip >= 0);
+        if (!rightAmmoEligible)
         {
             if (dbgTick)
                 Game::logMsg("[VR][HandHUD] right: ineligible wid=%d clip=%d (melee/item/etc) -> hide", weaponId, clip);
@@ -1363,16 +1658,23 @@ void VR::UpdateHandHudOverlays()
             goto after_right;
         }
 
-        if (weaponId != m_LastHudWeaponId)
+
+        if (rightAmmoEligible && weaponId != m_LastHudWeaponId)
         {
             m_LastHudWeaponId = weaponId;
             m_HudMaxClipObserved = (std::max)(0, clip);
             m_HudMaxReserveObserved = (std::max)(0, reserve);
         }
-        else
+        else if (rightAmmoEligible)
         {
             m_HudMaxClipObserved = (std::max)(m_HudMaxClipObserved, (std::max)(0, clip));
             m_HudMaxReserveObserved = (std::max)(m_HudMaxReserveObserved, (std::max)(0, reserve));
+        }
+        else
+        {
+            m_LastHudWeaponId = -1;
+            m_HudMaxClipObserved = 0;
+            m_HudMaxReserveObserved = 0;
         }
         // Auto-fit the visible overlay width so the panel tightly frames the ammo string.
         // IMPORTANT: OpenVR texture bounds (uMax) *stretch* the sampled region to fill the overlay quad.
@@ -1401,10 +1703,10 @@ void VR::UpdateHandHudOverlays()
         const int clipWMax = sevenSegWidthAuto(digitCountAuto((std::max)(0, m_HudMaxClipObserved)), clipStAuto);
         const int resWMax = pistolInfinite ? 24 : sevenSegWidthAuto(digitCountAuto((std::max)(0, m_HudMaxReserveObserved)), resStAuto);
         const int totalWMax = clipWMax + slashW + resWMax;
-        const bool willDrawUpg = (upg > 0) && (((upgBits & 1) != 0) || ((upgBits & 2) != 0));
+        const bool willDrawUpg = rightAmmoEligible && (upg > 0) && (((upgBits & 1) != 0) || ((upgBits & 2) != 0));
 
         // Padding chosen to match existing bracket/inner-box margins.
-        int cropW = (std::max)(96, totalWMax + 28);
+        int cropW = rightAmmoEligible ? (std::max)(96, totalWMax + 28) : (std::max)(180, texW);
         if (willDrawUpg)
             cropW = (std::max)(cropW, totalWMax + 28 + 90);
         cropW = (std::min)(texW, cropW);
@@ -1490,25 +1792,28 @@ void VR::UpdateHandHudOverlays()
         const int yBase = 46;
         int x = (std::max)(6, (visW - totalW) / 2);
 
-        Draw7SegInt(s, x, yBase, (std::max)(0, clip), clipSt, clipColor);
-        x += clipW + 2;
-        DrawText5x7(s, x, yBase + 4, "/", { 200, 200, 200, 220 }, 2);
-        x += slashW;
-        if (pistolInfinite)
-            DrawInfinity(s, x, yBase + 4, 24, 10, { 240, 240, 240, 230 });
-        else
-            Draw7SegInt(s, x, yBase, (std::max)(0, reserve), resSt, resColor);
-
-        const bool hasInc = (upgBits & 1) != 0;
-        const bool hasExp = (upgBits & 2) != 0;
-        if (upg > 0 && (hasInc || hasExp))
+        if (rightAmmoEligible)
         {
-            DrawRect(s, visW - 84, 16, 76, 32, { 120, 255, 220, 200 }, 1);
-            if (hasInc) DrawIconFlame(s, visW - 78, 20, 20);
-            else DrawIconBomb(s, visW - 78, 20, 20);
-            char upgBuf[16];
-            std::snprintf(upgBuf, sizeof(upgBuf), "%d", upg);
-            DrawText5x7(s, visW - 52, 22, upgBuf, { 240, 240, 240, 255 }, 2);
+            Draw7SegInt(s, x, yBase, (std::max)(0, clip), clipSt, clipColor);
+            x += clipW + 2;
+            DrawText5x7(s, x, yBase + 4, "/", { 200, 200, 200, 220 }, 2);
+            x += slashW;
+            if (pistolInfinite)
+                DrawInfinity(s, x, yBase + 4, 24, 10, { 240, 240, 240, 230 });
+            else
+                Draw7SegInt(s, x, yBase, (std::max)(0, reserve), resSt, resColor);
+
+            const bool hasInc = (upgBits & 1) != 0;
+            const bool hasExp = (upgBits & 2) != 0;
+            if (upg > 0 && (hasInc || hasExp))
+            {
+                DrawRect(s, visW - 84, 16, 76, 32, { 120, 255, 220, 200 }, 1);
+                if (hasInc) DrawIconFlame(s, visW - 78, 20, 20);
+                else DrawIconBomb(s, visW - 78, 20, 20);
+                char upgBuf[16];
+                std::snprintf(upgBuf, sizeof(upgBuf), "%d", upg);
+                DrawText5x7(s, visW - 52, 22, upgBuf, { 240, 240, 240, 255 }, 2);
+            }
         }
 
 
@@ -1517,7 +1822,7 @@ void VR::UpdateHandHudOverlays()
         {
             const std::uintptr_t aimTag = (std::uintptr_t)m_HudAimTargetTag.load(std::memory_order_relaxed);
             const int aimPct = (std::max)(0, (std::min)(100, m_HudAimTargetPct.load(std::memory_order_relaxed)));
-            if (aimTag != 0 && aimPct > 0)
+            if (rightAmmoEligible && aimTag != 0 && aimPct > 0)
             {
                 const int barX = 16;
                 const int barW = (std::max)(64, visW - 32);

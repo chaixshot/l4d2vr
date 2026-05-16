@@ -1213,8 +1213,9 @@ bool VR::UpdateFriendlyFireAimHit(C_BasePlayer* localPlayer)
     const Vector hullMaxs = { hullRadiusUnits,  hullRadiusUnits,  hullRadiusUnits };
 
     // IMPORTANT: Some Source builds are unstable/crashy if you request CONTENTS_HITBOX in a *hull* trace.
-    // For hull traces we therefore switch to MASK_SHOT_HULL (no CONTENTS_HITBOX).
-    const unsigned int traceMask = useHull ? (unsigned int)MASK_SHOT_HULL : (unsigned int)STANDARD_TRACE_MASK;
+    // Therefore the precise line trace always keeps STANDARD_TRACE_MASK, and the optional
+    // wide hull trace uses MASK_SHOT_HULL only as a second pass. This keeps normal player
+    // hitboxes reliable while still allowing the configurable radius to catch near misses.
 
     // Filters (shared across traces): Skip self + mounted gun use entity + active weapon.
     // This prevents the aim ray from being blocked by your own weapon and flickering on/off.
@@ -1363,15 +1364,32 @@ bool VR::UpdateFriendlyFireAimHit(C_BasePlayer* localPlayer)
             return friendlyHit;
         };
 
+    auto traceFriendlyWithOptionalHull = [&](const Vector& start, const Vector& end) -> bool
+        {
+            // First pass: exact bullet/aim line with hitbox contents. This is the authoritative
+            // "the crosshair is on a teammate" check and must not be skipped just because the
+            // configurable radius is enabled.
+            CGameTrace traceLine;
+            Ray_t rayLine;
+            rayLine.Init(start, end);
+            SafeTraceRay(rayLine, (unsigned int)STANDARD_TRACE_MASK, pTraceFilter, traceLine);
+            if (evalFriendlyHitForTrace(traceLine, start, end))
+                return true;
+
+            // Second pass: optional wider guard. Keep CONTENTS_HITBOX out of the hull trace
+            // because some Source builds can crash on hull traces that request hitboxes.
+            if (!useHull)
+                return false;
+
+            CGameTrace traceHull;
+            Ray_t rayHull;
+            rayHull.Init(start, end, hullMins, hullMaxs);
+            SafeTraceRay(rayHull, (unsigned int)MASK_SHOT_HULL, pTraceFilter, traceHull);
+            return evalFriendlyHitForTrace(traceHull, start, end);
+        };
+
     // 1) Gun/hand ray (aim line)
-    CGameTrace traceGun;
-    Ray_t rayGun;
-    if (useHull)
-        rayGun.Init(gunStart, gunEnd, hullMins, hullMaxs);
-    else
-        rayGun.Init(gunStart, gunEnd);
-    SafeTraceRay(rayGun, traceMask, pTraceFilter, traceGun);
-    const bool friendlyGun = evalFriendlyHitForTrace(traceGun, gunStart, gunEnd);
+    const bool friendlyGun = traceFriendlyWithOptionalHull(gunStart, gunEnd);
 
     // 2) Eye ray (closer to authoritative server bullets, esp. with lag compensation)
     Vector eye = localPlayer->EyePosition();
@@ -1408,15 +1426,7 @@ bool VR::UpdateFriendlyFireAimHit(C_BasePlayer* localPlayer)
         Vector eyeStart = eye + eyeDir2 * 2.0f;
         Vector eyeEnd = eyeStart + eyeDir2 * 8192.0f;
 
-        CGameTrace traceEye;
-        Ray_t rayEye;
-        if (useHull)
-            rayEye.Init(eyeStart, eyeEnd, hullMins, hullMaxs);
-        else
-            rayEye.Init(eyeStart, eyeEnd);
-        SafeTraceRay(rayEye, traceMask, pTraceFilter, traceEye);
-
-        const bool friendlyEye = evalFriendlyHitForTrace(traceEye, eyeStart, eyeEnd);
+        const bool friendlyEye = traceFriendlyWithOptionalHull(eyeStart, eyeEnd);
 
         m_AimLineHitsFriendly = (friendlyGun || friendlyEye);
         return m_AimLineHitsFriendly;

@@ -930,6 +930,8 @@ VR::VR(Game* game)
     // Hand HUD overlays (raw textures, controller anchored)
     m_Overlay->CreateOverlay("LeftWristHudOverlayKey", "LeftWristHUD", &m_LeftWristHudHandle);
     m_Overlay->CreateOverlay("RightAmmoHudOverlayKey", "RightAmmoHUD", &m_RightAmmoHudHandle);
+    // Standalone HUD panel for special infected intent sense.
+    m_Overlay->CreateOverlay("SpecialInfectedIntentSenseHudOverlayKey", "SpecialInfectedIntentSenseHUD", &m_SpecialInfectedIntentSenseHudHandle);
 
     m_Overlay->SetOverlayInputMethod(m_MainMenuHandle, vr::VROverlayInputMethod_Mouse);
     m_Overlay->SetOverlayInputMethod(m_HUDTopHandle, vr::VROverlayInputMethod_Mouse);
@@ -943,6 +945,7 @@ VR::VR(Game* game)
     m_Overlay->SetOverlayInputMethod(m_RearMirrorHandle, vr::VROverlayInputMethod_None);
     m_Overlay->SetOverlayInputMethod(m_LeftWristHudHandle, vr::VROverlayInputMethod_None);
     m_Overlay->SetOverlayInputMethod(m_RightAmmoHudHandle, vr::VROverlayInputMethod_None);
+    m_Overlay->SetOverlayInputMethod(m_SpecialInfectedIntentSenseHudHandle, vr::VROverlayInputMethod_None);
     m_Overlay->SetOverlayFlag(m_ScopeHandle, vr::VROverlayFlags_IgnoreTextureAlpha, true);
     m_Overlay->SetOverlayFlag(m_RearMirrorHandle, vr::VROverlayFlags_IgnoreTextureAlpha, true);
 
