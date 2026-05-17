@@ -2251,7 +2251,10 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 	{
 		if (submitSpecialInfectedArrowsFromEyePass)
+		{
 			m_VR->ScanSpecialInfectedEntitiesFromClientList();
+			m_VR->DrawCachedSpecialInfectedArrowsDebugOverlay();
+		}
 
 		renderEyeScene(1, m_VR->m_LeftEyeTexture, m_VR->m_D9LeftEyeSurface, leftEyeView, hudLeft, true);
 		if (desktopMirrorHidePluginOverlaysSingleCopyActive && m_VR->m_DesktopMirrorEye == 0)
@@ -2270,7 +2273,10 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 	{
 		if (submitSpecialInfectedArrowsFromEyePass)
+		{
 			m_VR->ScanSpecialInfectedEntitiesFromClientList();
+			m_VR->DrawCachedSpecialInfectedArrowsDebugOverlay();
+		}
 
 		renderEyeScene(2, m_VR->m_RightEyeTexture, m_VR->m_D9RightEyeSurface, rightEyeView, hudRight, false);
 		if (desktopMirrorHidePluginOverlaysSingleCopyActive && m_VR->m_DesktopMirrorEye != 0)

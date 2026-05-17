@@ -388,13 +388,10 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 	if (info.pModel)
 	{
 		modelName = m_Game->m_ModelInfo->GetModelName(info.pModel);
-		// In desktop-mirror overlay hide mode, special-infected arrows are submitted
+		// In desktop-mirror overlay hide mode, special-infected arrows are cached
 		// from the RenderView hook at a fixed stereo-pass point. Never scan from
 		// DrawModelExecute in that mode: under mat_queue_mode 2 this hook can run
-		// once per model, and the desktop-mirror path intentionally disables the
-		// global scan throttle so both eyes can receive short-lived DebugOverlay
-		// arrows. Calling it here would turn one stereo frame into many full
-		// client-entity-list scans.
+		// once per model and would multiply client-entity-list scan requests.
 		const bool desktopMirrorOverlayHideActiveEarly =
 			m_VR->m_DesktopMirrorHidePluginOverlays && m_VR->m_DesktopMirrorEnabled;
 		if (!desktopMirrorOverlayHideActiveEarly)
@@ -417,7 +414,9 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 		const bool desktopMirrorOverlayHideActive =
 			m_VR->m_DesktopMirrorHidePluginOverlays && m_VR->m_DesktopMirrorEnabled;
 		const bool singlePassDesktopMirrorPluginOverlays = false;
-		if (!suppressDesktopMirrorPluginOverlays &&
+		const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
+		if (queueMode == 0 &&
+			!suppressDesktopMirrorPluginOverlays &&
 			(info.entity_index == -1 || (info.entity_index > 0 && info.entity_index <= 2048)))
 		{
 			m_VR->DrawItemModelLabel(info.entity_index, modelName, info.origin, entity, className);
@@ -435,7 +434,6 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 // In queued rendering (mat_queue_mode!=0), viewmodels are frequently submitted with custom bone matrices.
 // In that case, overriding ModelRenderInfo_t.origin/angles does NOT move the model (it stays "head-locked").
 // So we apply a rigid delta to the bone matrices for this draw call, based on our controller-anchored target.
-const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
 if (m_VR->m_IsVREnabled && queueMode == 2 && (m_VR->m_QueuedViewmodelStabilize || m_VR->m_ViewmodelDisableMoveBob))
 {
 	const bool isViewmodelClass = className &&

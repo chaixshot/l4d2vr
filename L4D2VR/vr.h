@@ -2513,6 +2513,7 @@ public:
 	void DrawKillIndicators(IMatRenderContext* renderContext, ITexture* hudTexture);
 	void DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSetup& view);
 	void RecordProjectedSpecialInfectedArrow(int entityIndex, const Vector& origin, SpecialInfectedType type);
+	void DrawCachedSpecialInfectedArrowsDebugOverlay();
 	void DrawProjectedSpecialInfectedArrows(IMatRenderContext* renderContext, const CViewSetup& view);
 	void DrawPostMirrorPluginOverlays(IMatRenderContext* renderContext, C_BasePlayer* localPlayer, const CViewSetup& view);
 	bool CopyEyeToDesktopMirrorTexture(int eyeIndex);

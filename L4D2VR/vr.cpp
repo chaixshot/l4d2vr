@@ -8676,6 +8676,80 @@ void VR::RecordProjectedSpecialInfectedArrow(int entityIndex, const Vector& orig
     arrow.lastSeen = std::chrono::steady_clock::now();
 }
 
+void VR::DrawCachedSpecialInfectedArrowsDebugOverlay()
+{
+    if (!m_DesktopMirrorHidePluginOverlays || !m_DesktopMirrorEnabled)
+        return;
+    if (!m_SpecialInfectedArrowEnabled || m_SpecialInfectedArrowSize <= 0.0f || !m_Game || !m_Game->m_DebugOverlay)
+        return;
+
+    const auto now = std::chrono::steady_clock::now();
+    std::vector<ProjectedSpecialInfectedArrow> arrows;
+    {
+        std::lock_guard<std::mutex> lock(m_ProjectedSpecialInfectedArrowMutex);
+        const float holdSeconds = std::clamp(2.0f / std::max(1.0f, m_SpecialInfectedOverlayMaxHz), 0.05f, 0.20f);
+        for (auto it = m_ProjectedSpecialInfectedArrows.begin(); it != m_ProjectedSpecialInfectedArrows.end();)
+        {
+            const float ageSeconds = std::chrono::duration<float>(now - it->second.lastSeen).count();
+            if (ageSeconds < 0.0f || ageSeconds > holdSeconds)
+                it = m_ProjectedSpecialInfectedArrows.erase(it);
+            else
+            {
+                arrows.push_back(it->second);
+                ++it;
+            }
+        }
+    }
+    if (arrows.empty())
+        return;
+
+    const float frameDuration = (std::isfinite(m_LastFrameDuration) && m_LastFrameDuration > 0.0f)
+        ? std::clamp(m_LastFrameDuration, 1.0f / 240.0f, 1.0f / 10.0f)
+        : (1.0f / 60.0f);
+    const float duration = std::clamp(frameDuration * 0.20f, 0.0015f, 0.0060f);
+    const float baseHeight = m_SpecialInfectedArrowHeight;
+    const float wingLength = m_SpecialInfectedArrowSize;
+    const float offset = m_SpecialInfectedArrowThickness * 0.5f;
+    const std::array<Vector, 5> offsets =
+    {
+        Vector(0.0f, 0.0f, 0.0f),
+        Vector(offset, 0.0f, 0.0f),
+        Vector(-offset, 0.0f, 0.0f),
+        Vector(0.0f, offset, 0.0f),
+        Vector(0.0f, -offset, 0.0f)
+    };
+
+    for (const ProjectedSpecialInfectedArrow& arrow : arrows)
+    {
+        if (arrow.type == SpecialInfectedType::None)
+            continue;
+
+        const size_t typeIndex = static_cast<size_t>(arrow.type);
+        const RgbColor& arrowColor = typeIndex < m_SpecialInfectedArrowColors.size()
+            ? m_SpecialInfectedArrowColors[typeIndex]
+            : m_SpecialInfectedArrowDefaultColor;
+
+        const Vector base = arrow.origin + Vector(0.0f, 0.0f, baseHeight);
+        const Vector tip = base + Vector(0.0f, 0.0f, -m_SpecialInfectedArrowSize);
+        auto drawArrowLine = [&](const Vector& start, const Vector& end)
+            {
+                if (offset <= 0.0f)
+                {
+                    m_Game->m_DebugOverlay->AddLineOverlay(start, end, arrowColor.r, arrowColor.g, arrowColor.b, true, duration);
+                    return;
+                }
+                for (const Vector& lineOffset : offsets)
+                    m_Game->m_DebugOverlay->AddLineOverlay(start + lineOffset, end + lineOffset, arrowColor.r, arrowColor.g, arrowColor.b, true, duration);
+            };
+
+        drawArrowLine(base, tip);
+        drawArrowLine(base + Vector(wingLength, 0.0f, 0.0f), tip);
+        drawArrowLine(base + Vector(-wingLength, 0.0f, 0.0f), tip);
+        drawArrowLine(base + Vector(0.0f, wingLength, 0.0f), tip);
+        drawArrowLine(base + Vector(0.0f, -wingLength, 0.0f), tip);
+    }
+}
+
 void VR::DrawProjectedSpecialInfectedArrows(IMatRenderContext* renderContext, const CViewSetup& view)
 {
     if (!renderContext)
@@ -9359,6 +9433,9 @@ extern "C" void __cdecl L4D2VR_RegisterSpecialInfectedFeatureCallbacks(
 
 void VR::DrawItemModelLabel(int entityIndex, const std::string& modelName, const Vector& modelOrigin, const C_BaseEntity* entity, const char* className)
 {
+    if (!m_ItemModelLabelEnabled)
+        return;
+
     auto* callback = GetOptionalSpecialInfectedCallbacks().drawItemModelLabel;
     if (callback)
         callback(this, entityIndex, modelName, modelOrigin, entity, className);
@@ -9366,6 +9443,17 @@ void VR::DrawItemModelLabel(int entityIndex, const std::string& modelName, const
 
 void VR::ScanSpecialInfectedEntitiesFromClientList()
 {
+    const bool wantsEntityScan =
+        m_SpecialInfectedArrowEnabled ||
+        m_SpecialInfectedArrowDebugLog ||
+        m_SpecialInfectedIntentSenseEnabled ||
+        (m_SpecialInfectedBlindSpotDistance > 0.0f) ||
+        (m_SpecialInfectedPreWarningDistance > 0.0f && m_SpecialInfectedPreWarningAutoAimEnabled) ||
+        (m_RearMirrorEnabled && m_RearMirrorShowOnlyOnSpecialWarning
+            && m_RearMirrorSpecialShowHoldSeconds > 0.0f && m_RearMirrorSpecialWarningDistance > 0.0f);
+    if (!wantsEntityScan)
+        return;
+
     auto* callback = GetOptionalSpecialInfectedCallbacks().scanSpecialInfectedEntities;
     if (callback)
         callback(this);
@@ -9373,6 +9461,9 @@ void VR::ScanSpecialInfectedEntitiesFromClientList()
 
 void VR::ScanItemModelLabelEntitiesFromClientList()
 {
+    if (!m_ItemModelLabelEnabled)
+        return;
+
     auto* callback = GetOptionalSpecialInfectedCallbacks().scanItemModelLabelEntities;
     if (callback)
         callback(this);
