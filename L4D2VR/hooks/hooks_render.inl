@@ -1551,10 +1551,11 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	const bool stateIsDeadOrObserver = tpStateDbg.dead || (stateObserver && !observerForceInEye);
 
 	// Death transition anti-flicker: lock to first-person for a short window right after death.
+	// Source can move through observer/deathcam modes during the same transition, so this
+	// lock must override observer render preferences too.
 	static std::chrono::steady_clock::time_point s_deathFpLockUntil{};
 	static bool s_prevDead = false;
 	const bool nowDead = tpStateDbg.dead;
-	const bool nowObserver = stateObserver;
 	const auto nowTp = std::chrono::steady_clock::now();
 
 	// Revive recovery: getting up from incapacitated can leave the engine in a transient camera mode.
@@ -1587,7 +1588,9 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	if (nowDead && !s_prevDead)
 		s_deathFpLockUntil = nowTp + std::chrono::seconds(10);
 	s_prevDead = nowDead;
-	const bool forceFirstPersonAfterDeath = (!nowObserver && (s_deathFpLockUntil.time_since_epoch().count() != 0) && (nowTp < s_deathFpLockUntil));
+	const bool renderDeathFpLockActive =
+		(s_deathFpLockUntil.time_since_epoch().count() != 0) && (nowTp < s_deathFpLockUntil);
+	const bool forceFirstPersonAfterDeath = renderDeathFpLockActive || m_VR->IsDeathFirstPersonLockActive();
 
 	constexpr int kEngineThirdPersonHoldFrames = 2;
 	constexpr int kStateThirdPersonHoldFrames = 2;
@@ -1627,11 +1630,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		m_VR->m_ThirdPersonHoldFrames = 0;
 		s_engineTpCam.Reset();
 	}
-	if (forceFirstPersonAfterDeath)
-	{
-		renderThirdPerson = false;
-		m_VR->m_ThirdPersonHoldFrames = 0;
-	}
 	if (observerForceInEye)
 	{
 		renderThirdPerson = false;
@@ -1642,6 +1640,12 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	{
 		renderThirdPerson = true;
 		m_VR->m_ThirdPersonHoldFrames = std::max(m_VR->m_ThirdPersonHoldFrames, kDeadOrObserverHoldFrames);
+	}
+	if (forceFirstPersonAfterDeath)
+	{
+		renderThirdPerson = false;
+		m_VR->m_ThirdPersonHoldFrames = 0;
+		s_engineTpCam.Reset();
 	}
 
 	// Expose third-person camera to VR helpers (aim line, overlays, etc.)
