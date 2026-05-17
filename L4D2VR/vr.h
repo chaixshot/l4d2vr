@@ -1236,10 +1236,6 @@ public:
 	float m_ShadowCvarNbShadowCullDist = 500.584991f;
 	int m_ShadowCvarFlashlightInfectedShadows = 1;
 	bool m_ShadowTweaksApplied = false;
-	// In queued/multicore rendering, force one aggressive shadow pass after map entry.
-	// Source can recreate/reset shadow cvars during level load, which makes queued shadows unstable.
-	bool m_ShadowTweaksQueuedMapForceApplied = false;
-	bool m_ShadowTweaksQueuedMapHadLocalPlayer = false;
 	bool m_ShadowOriginalsCaptured = false;
 	int m_ShadowOrigShadows = 1;
 	int m_ShadowOrigRenderToTexture = 1;
@@ -2099,7 +2095,11 @@ public:
 		uint32_t scanRevision = 0;
 		std::chrono::steady_clock::time_point firstSeen{};
 		std::chrono::steady_clock::time_point lastSeen{};
+		Vector lastOrigin{ 0.0f, 0.0f, 0.0f };
+		std::chrono::steady_clock::time_point stationarySince{};
+		bool hasLastOrigin = false;
 		bool suppressedByLongTrack = false;
+		bool suppressedByStationaryOrigin = false;
 	};
 	// Intent-sense HUD text is rendered through a standalone OpenVR overlay.
 	// Do not use engine DebugOverlay screen text here: that call path can crash on L4D2's VDebugOverlay build.
@@ -2345,7 +2345,7 @@ public:
 	int SetActionManifest(const char* fileName);
 	void InstallApplicationManifest(const char* fileName);
 	void Update();
-	void ApplyShadowSettingsIfNeeded(bool forceApply = false, bool forceEnable = false);
+	void ApplyShadowSettingsIfNeeded(bool forceApply = false);
 	void ApplyFlashlightEnhancementIfNeeded();
 	void ApplyLocalVScriptConvarsIfNeeded();
 	void AuditLocalVScriptConvarsCurrentValues(const char* reason);
@@ -2594,7 +2594,7 @@ public:
 	void FinishSpecialInfectedIntentSenseScan();
 	void RefreshSpecialInfectedIntentSense(const C_BaseEntity* entity, const Vector& infectedOrigin, SpecialInfectedType type, int entityIndex);
 	bool IsSpecialInfectedTargetingLocalPlayer(const C_BaseEntity* entity, const Vector& infectedOrigin, SpecialInfectedType type, int entityIndex, float& outRightBias, const char*& outDirectionText, float& outDistanceMeters, bool& outFront);
-	void NotifySpecialInfectedIntentSense(SpecialInfectedType type, const char* directionText, float distanceMeters, float rightBias, bool front, int entityIndex);
+	bool NotifySpecialInfectedIntentSense(SpecialInfectedType type, const char* directionText, float distanceMeters, float rightBias, bool front, int entityIndex, const Vector& infectedOrigin);
 	bool HasLineOfSightToSpecialInfected(const Vector& infectedOrigin, int entityIndex) const;
 	bool IsSpecialInfectedInBlindSpot(const Vector& infectedOrigin) const;
 	void UpdateSpecialInfectedWarningState();

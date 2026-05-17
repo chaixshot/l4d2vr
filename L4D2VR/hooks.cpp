@@ -310,6 +310,44 @@ static inline void DebugClientRectSize(int& width, int& height)
 	}
 }
 
+static inline bool DebugIsCurrentProcessForeground()
+{
+	HWND foreground = GetForegroundWindow();
+	if (!foreground)
+		return true;
+
+	DWORD foregroundProcessId = 0;
+	GetWindowThreadProcessId(foreground, &foregroundProcessId);
+	if (foregroundProcessId == GetCurrentProcessId())
+		return true;
+
+	HWND owner = GetWindow(foreground, GW_OWNER);
+	if (owner)
+	{
+		DWORD ownerProcessId = 0;
+		GetWindowThreadProcessId(owner, &ownerProcessId);
+		if (ownerProcessId == GetCurrentProcessId())
+			return true;
+	}
+
+	return false;
+}
+
+static inline bool DebugIsCurrentProcessMainWindowDrawable()
+{
+	HWND hwnd = DebugFindCurrentProcessMainWindow();
+	if (!hwnd)
+		return true;
+	if (!IsWindowVisible(hwnd) || IsIconic(hwnd))
+		return false;
+
+	RECT rc{};
+	if (!GetClientRect(hwnd, &rc))
+		return true;
+
+	return rc.right > rc.left && rc.bottom > rc.top;
+}
+
 static inline bool DebugGetViewport(void* context, int& x, int& y, int& width, int& height)
 {
 	x = 0;

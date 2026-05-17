@@ -50,6 +50,182 @@ namespace
         return std::clamp(1.0f - std::exp(-deltaSeconds / smoothingTime), 0.0f, 1.0f);
     }
 
+    struct FocusWindowSearchContext
+    {
+        DWORD processId = 0;
+        HWND hwnd = nullptr;
+    };
+
+    inline BOOL CALLBACK FindFocusMainWindowProc(HWND hwnd, LPARAM lParam)
+    {
+        auto* ctx = reinterpret_cast<FocusWindowSearchContext*>(lParam);
+        if (!ctx || !IsWindow(hwnd))
+            return TRUE;
+
+        DWORD windowProcessId = 0;
+        GetWindowThreadProcessId(hwnd, &windowProcessId);
+        if (windowProcessId != ctx->processId)
+            return TRUE;
+
+        if (GetWindow(hwnd, GW_OWNER) != nullptr)
+            return TRUE;
+
+        LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
+        if ((style & WS_VISIBLE) == 0)
+            return TRUE;
+
+        ctx->hwnd = hwnd;
+        return FALSE;
+    }
+
+    inline HWND FindFocusMainWindow()
+    {
+        FocusWindowSearchContext ctx;
+        ctx.processId = GetCurrentProcessId();
+        EnumWindows(FindFocusMainWindowProc, reinterpret_cast<LPARAM>(&ctx));
+        return ctx.hwnd;
+    }
+
+    inline bool IsCurrentProcessForegroundForFocusRecovery()
+    {
+        HWND foreground = GetForegroundWindow();
+        if (!foreground)
+            return true;
+
+        DWORD foregroundProcessId = 0;
+        GetWindowThreadProcessId(foreground, &foregroundProcessId);
+        if (foregroundProcessId == GetCurrentProcessId())
+            return true;
+
+        HWND owner = GetWindow(foreground, GW_OWNER);
+        if (owner)
+        {
+            DWORD ownerProcessId = 0;
+            GetWindowThreadProcessId(owner, &ownerProcessId);
+            if (ownerProcessId == GetCurrentProcessId())
+                return true;
+        }
+
+        return false;
+    }
+
+    inline bool IsMainWindowDrawableForFocusRecovery()
+    {
+        HWND hwnd = FindFocusMainWindow();
+        if (!hwnd)
+            return true;
+        if (!IsWindowVisible(hwnd) || IsIconic(hwnd))
+            return false;
+
+        RECT rc{};
+        if (!GetClientRect(hwnd, &rc))
+            return true;
+
+        return rc.right > rc.left && rc.bottom > rc.top;
+    }
+
+    struct FocusShadowCvarSnapshot
+    {
+        int shadows = 1;
+        int renderToTexture = 1;
+        int flashlightDepthTexture = 1;
+        int flashlightDepthRes = 1024;
+        int halfUpdateRate = 0;
+        int maxRendered = 16;
+        bool valid = false;
+    };
+
+    inline void CaptureFocusShadowCvars(Game* game, FocusShadowCvarSnapshot& snapshot)
+    {
+        if (!game)
+            return;
+
+        snapshot.shadows = game->GetConVarIntDirect("r_shadows", snapshot.shadows);
+        snapshot.renderToTexture = game->GetConVarIntDirect("r_shadowrendertotexture", snapshot.renderToTexture);
+        snapshot.flashlightDepthTexture = game->GetConVarIntDirect("r_flashlightdepthtexture", snapshot.flashlightDepthTexture);
+        snapshot.flashlightDepthRes = game->GetConVarIntDirect("r_flashlightdepthres", snapshot.flashlightDepthRes);
+        snapshot.halfUpdateRate = game->GetConVarIntDirect("r_shadow_half_update_rate", snapshot.halfUpdateRate);
+        snapshot.maxRendered = game->GetConVarIntDirect("r_shadowmaxrendered", snapshot.maxRendered);
+        snapshot.valid = true;
+    }
+
+    inline void RestoreFocusShadowCvars(Game* game, const FocusShadowCvarSnapshot& snapshot)
+    {
+        if (!game || !snapshot.valid)
+            return;
+
+        game->SetConVarInt("r_shadows", snapshot.shadows);
+        game->SetConVarInt("r_shadowrendertotexture", snapshot.renderToTexture);
+        game->SetConVarInt("r_flashlightdepthtexture", snapshot.flashlightDepthTexture);
+        game->SetConVarInt("r_flashlightdepthres", snapshot.flashlightDepthRes);
+        game->SetConVarInt("r_shadow_half_update_rate", snapshot.halfUpdateRate);
+        game->SetConVarInt("r_shadowmaxrendered", snapshot.maxRendered);
+    }
+
+    inline void UpdateFocusShadowRecovery(VR* vr, bool inGame)
+    {
+        if (!vr || !vr->m_Game)
+            return;
+
+        struct RecoveryState
+        {
+            bool initialized = false;
+            bool wasWindowUsable = true;
+            int restoreFrames = 0;
+            bool rebuildRenderToTexture = false;
+            FocusShadowCvarSnapshot shadow{};
+        };
+        static RecoveryState state;
+
+        const bool windowUsable =
+            IsCurrentProcessForegroundForFocusRecovery() &&
+            IsMainWindowDrawableForFocusRecovery();
+
+        if (!state.initialized)
+        {
+            state.initialized = true;
+            state.wasWindowUsable = windowUsable;
+            if (inGame && windowUsable)
+                CaptureFocusShadowCvars(vr->m_Game, state.shadow);
+        }
+
+        if (inGame && state.wasWindowUsable && !windowUsable)
+        {
+            CaptureFocusShadowCvars(vr->m_Game, state.shadow);
+            state.restoreFrames = 0;
+            state.rebuildRenderToTexture = false;
+        }
+        else if (inGame && !state.wasWindowUsable && windowUsable)
+        {
+            state.restoreFrames = 8;
+            state.rebuildRenderToTexture = state.shadow.valid && state.shadow.renderToTexture != 0;
+        }
+        else if (!inGame)
+        {
+            state.restoreFrames = 0;
+            state.rebuildRenderToTexture = false;
+            state.shadow.valid = false;
+        }
+
+        state.wasWindowUsable = windowUsable;
+
+        if (!inGame || !windowUsable || state.restoreFrames <= 0 || !state.shadow.valid)
+            return;
+
+        if (state.rebuildRenderToTexture)
+        {
+            // Focus loss can leave Source's shadow RTT/atlas in a valid-but-stale state.
+            // Flip the shadow RTT cvar only for this restore point, then put back the
+            // value the user had before Alt-Tab/minimize.
+            vr->m_Game->SetConVarInt("r_shadowrendertotexture", 0);
+            vr->m_Game->SetConVarInt("r_shadowrendertotexture", state.shadow.renderToTexture);
+            state.rebuildRenderToTexture = false;
+        }
+
+        RestoreFocusShadowCvars(vr->m_Game, state.shadow);
+        --state.restoreFrames;
+    }
+
     inline void BuildYawOnlyFlashlightBasis(const QAngle& viewAngles, Vector& forward, Vector& right)
     {
         Vector viewForward;
@@ -273,8 +449,11 @@ namespace
             static_cast<int>(vr->m_RenderWidth), static_cast<int>(vr->m_RenderHeight), 255);
         ClearRenderTargetColorForMenuTransition(vr, ctx, vr->m_RightEyeSubmitTexture,
             static_cast<int>(vr->m_RenderWidth), static_cast<int>(vr->m_RenderHeight), 255);
-        ClearRenderTargetColorForMenuTransition(vr, ctx, vr->m_DesktopMirrorTexture,
-            static_cast<int>(vr->m_RenderWidth), static_cast<int>(vr->m_RenderHeight), 255);
+        if (vr->m_DesktopMirrorEnabled)
+        {
+            ClearRenderTargetColorForMenuTransition(vr, ctx, vr->m_DesktopMirrorTexture,
+                static_cast<int>(vr->m_RenderWidth), static_cast<int>(vr->m_RenderHeight), 255);
+        }
 
         // HUD overlay must be transparent. Otherwise the next map can show the last captured HUD
         // before the new map's first VGUI paint refreshes vrHUD.
@@ -321,7 +500,7 @@ namespace
         // with a post-eye D3D copy. Queued/multicore rendering fills it with a separate
         // clean Source RenderView pass, so queued mode is not filtered out here.
 
-        const bool requested = vr->m_DesktopMirrorHidePluginOverlaysRequested;
+        const bool requested = vr->m_DesktopMirrorEnabled && vr->m_DesktopMirrorHidePluginOverlaysRequested;
         const bool texturesReady = vr->m_CreatedVRTextures.load(std::memory_order_acquire);
         const bool cleanTargetReady = (vr->m_DesktopMirrorTexture != nullptr);
         const bool effective = requested && cleanTargetReady;
@@ -734,6 +913,8 @@ void VR::Update()
         }
     }
 
+    UpdateFocusShadowRecovery(this, inGameAtUpdateStart);
+
     const bool queuedAtFrameStart = (m_Game && (m_Game->GetMatQueueMode() != 0));
     const uint32_t updateThreadId = static_cast<uint32_t>(::GetCurrentThreadId());
     const uint32_t renderThreadIdAtUpdate = m_RenderThreadId.load(std::memory_order_acquire);
@@ -814,11 +995,6 @@ void VR::Update()
             m_AutoResetHadLocalPlayerPrev = false;
             m_LocalVScriptConvarsMapAuditPending = false;
             m_LocalVScriptConvarsHadLocalPlayerPrev = false;
-
-            if (m_ShadowTweaksQueuedMapForceApplied && !m_ShadowTweaksEnabled)
-                m_ShadowSettingsDirty.store(true, std::memory_order_release);
-            m_ShadowTweaksQueuedMapForceApplied = false;
-            m_ShadowTweaksQueuedMapHadLocalPlayer = false;
         }
         else
         {
@@ -832,26 +1008,6 @@ void VR::Update()
                 m_AutoResetPositionPending = true;
                 const int ms = (int)(std::max)(0.0f, m_AutoResetPositionAfterLoadSeconds * 1000.0f);
                 m_AutoResetPositionDueTime = now + std::chrono::milliseconds(ms);
-            }
-
-            if (!hasLocalPlayer)
-            {
-                m_ShadowTweaksQueuedMapHadLocalPlayer = false;
-            }
-            else
-            {
-                const bool queuedRenderingNow = (m_Game->GetMatQueueMode() != 0);
-                if (!m_ShadowTweaksQueuedMapHadLocalPlayer)
-                {
-                    m_ShadowTweaksQueuedMapHadLocalPlayer = true;
-                    m_ShadowTweaksQueuedMapForceApplied = false;
-                }
-
-                if (queuedRenderingNow && !m_ShadowTweaksQueuedMapForceApplied)
-                {
-                    ApplyShadowSettingsIfNeeded(true, true);
-                    m_ShadowTweaksQueuedMapForceApplied = true;
-                }
             }
 
             m_AutoResetHadLocalPlayerPrev = hasLocalPlayer;
@@ -1169,7 +1325,7 @@ void VR::CreateVRTextures()
     }
 
     const bool createDesktopMirrorCleanTarget =
-        m_DesktopMirrorHidePluginOverlaysRequested;
+        m_DesktopMirrorEnabled && m_DesktopMirrorHidePluginOverlaysRequested;
     m_DesktopMirrorHidePluginOverlays = false;
     if (createDesktopMirrorCleanTarget)
     {

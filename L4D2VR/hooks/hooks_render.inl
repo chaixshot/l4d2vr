@@ -11,8 +11,138 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	// Nested calls must go straight through, otherwise water RTs can be filled with the VR eye
 	// scene/HUD and appear as a second full scene on the water surface in mat_queue_mode 2.
 	static thread_local int s_originalRenderViewDepth = 0;
+	static thread_local int s_vrEyeRenderPass = 0;
+	static thread_local bool s_vrSharedCenterValid = false;
+	static thread_local Vector s_vrSharedCenterOrigin{};
+	static thread_local Vector s_vrSharedEyeOrigin{};
+	auto rtNameContainsI = [](const char* haystack, const char* needle) -> bool
+		{
+			if (!haystack || !needle || !*needle)
+				return false;
+
+			const size_t needleLen = std::strlen(needle);
+			for (const char* p = haystack; *p; ++p)
+			{
+				if (_strnicmp(p, needle, needleLen) == 0)
+					return true;
+			}
+			return false;
+		};
+
+	auto getTextureFormatSafe = [](ITexture* texture) -> ImageFormat
+		{
+			if (!texture)
+				return IMAGE_FORMAT_UNKNOWN;
+
+			__try
+			{
+				return texture->GetImageFormat();
+			}
+			__except (EXCEPTION_EXECUTE_HANDLER)
+			{
+				return IMAGE_FORMAT_UNKNOWN;
+			}
+		};
+
+	auto isDepthFormat = [](ImageFormat format) -> bool
+		{
+			switch (format)
+			{
+			case IMAGE_FORMAT_NV_DST16:
+			case IMAGE_FORMAT_NV_DST24:
+			case IMAGE_FORMAT_NV_INTZ:
+			case IMAGE_FORMAT_NV_RAWZ:
+			case IMAGE_FORMAT_ATI_DST16:
+			case IMAGE_FORMAT_ATI_DST24:
+			case IMAGE_FORMAT_NV_NULL:
+				return true;
+			default:
+				return false;
+			}
+		};
+
+	auto isWaterReflectionRenderTarget = [&](ITexture* texture) -> bool
+		{
+			if (!texture)
+				return false;
+
+			const char* name = DebugTextureName(texture);
+			if (!name || !*name || name[0] == '<')
+				return false;
+
+			// L4D2/Source water uses offscreen reflection/refraction RTs. In queued mode these
+			// can enter RenderView as separate calls, not only recursive calls. Do not treat
+			// them as the outer VR scene.
+			return rtNameContainsI(name, "water") ||
+				rtNameContainsI(name, "reflect") ||
+				rtNameContainsI(name, "refract");
+		};
+
+	auto isShadowDepthRenderTarget = [&](ITexture* texture) -> bool
+		{
+			if (!texture)
+				return false;
+
+			const char* name = DebugTextureName(texture);
+			if (name && *name && name[0] != '<')
+			{
+				if (rtNameContainsI(name, "shadow") ||
+					rtNameContainsI(name, "flashlight") ||
+					rtNameContainsI(name, "depth"))
+				{
+					return true;
+				}
+			}
+
+			return isDepthFormat(getTextureFormatSafe(texture));
+		};
+
+	auto classifySharedStereoRenderTarget = [&](ITexture* texture) -> const char*
+		{
+			if (isWaterReflectionRenderTarget(texture))
+				return "water";
+			if (isShadowDepthRenderTarget(texture))
+				return "shadow-depth";
+			return nullptr;
+		};
+
 	if (s_originalRenderViewDepth > 0)
+	{
+		if (s_vrEyeRenderPass != 0 && s_vrSharedCenterValid && m_Game && m_Game->m_MaterialSystem)
+		{
+			IMatRenderContext* nestedContext = m_Game->m_MaterialSystem->GetRenderContext();
+			ITexture* nestedRt = DebugCurrentRenderTarget(nestedContext);
+			const char* sharedRtReason = classifySharedStereoRenderTarget(nestedRt);
+			if (sharedRtReason != nullptr)
+			{
+				const Vector eyeToCenter = s_vrSharedCenterOrigin - s_vrSharedEyeOrigin;
+				CViewSetup sharedView = setup;
+				CViewSetup sharedHud = hudViewSetup;
+				sharedView.origin += eyeToCenter;
+				sharedHud.origin += eyeToCenter;
+
+				if (m_VR->m_RenderPipelineDebugLog)
+				{
+					static thread_local std::chrono::steady_clock::time_point s_lastSharedCenterLog{};
+					if (!ShouldThrottleLog(s_lastSharedCenterLog, m_VR->m_RenderPipelineDebugLogHz))
+					{
+						Game::logMsg("[VR][RenderView][SharedRTCenter] reason=%s eye=%d tid=%lu rt=%s delta=(%.3f %.3f %.3f) setup=%dx%d clear=0x%X draw=0x%X",
+							sharedRtReason,
+							s_vrEyeRenderPass,
+							GetCurrentThreadId(),
+							DebugTextureName(nestedRt),
+							eyeToCenter.x, eyeToCenter.y, eyeToCenter.z,
+							setup.width, setup.height,
+							nClearFlags, whatToDraw);
+					}
+				}
+
+				return hkRenderView.fOriginal(ecx, sharedView, sharedHud, nClearFlags, whatToDraw);
+			}
+		}
+
 		return hkRenderView.fOriginal(ecx, setup, hudViewSetup, nClearFlags, whatToDraw);
+	}
 
 	auto callOriginalRenderView = [&](CViewSetup& view, CViewSetup& hud, int clearFlags, int drawFlags)
 		{
@@ -35,6 +165,33 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	// Scope / rear-mirror RTTs may be created lazily (see LazyScopeRearMirrorRTT).
 	// Ensure they're available before any offscreen passes try to render into them.
 	m_VR->EnsureOpticsRTTTextures();
+
+	if (!m_VR->m_CreatedVRTextures.load(std::memory_order_acquire) ||
+		!m_VR->m_LeftEyeTexture ||
+		!m_VR->m_RightEyeTexture ||
+		m_VR->m_RenderWidth == 0 ||
+		m_VR->m_RenderHeight == 0)
+	{
+		if (m_VR->m_RenderPipelineDebugLog)
+		{
+			static thread_local std::chrono::steady_clock::time_point s_lastMissingEyeRtLog{};
+			if (!ShouldThrottleLog(s_lastMissingEyeRtLog, m_VR->m_RenderPipelineDebugLogHz))
+			{
+				Game::logMsg("[VR][RenderView][PassThrough] reason=missing-eye-rt tid=%lu created=%d left=%d right=%d eye=%ux%u setup=%dx%d clear=0x%X draw=0x%X",
+					GetCurrentThreadId(),
+					m_VR->m_CreatedVRTextures.load(std::memory_order_acquire) ? 1 : 0,
+					m_VR->m_LeftEyeTexture ? 1 : 0,
+					m_VR->m_RightEyeTexture ? 1 : 0,
+					m_VR->m_RenderWidth,
+					m_VR->m_RenderHeight,
+					setup.width, setup.height,
+					nClearFlags, whatToDraw);
+			}
+		}
+
+		callOriginalRenderView(setup, hudViewSetup, nClearFlags, whatToDraw);
+		return;
+	}
 
 	IMatRenderContext* rndrContext = m_Game->m_MaterialSystem->GetRenderContext();
 	if (!rndrContext)
@@ -74,50 +231,157 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		}
 	};
 	RenderContextStateGuard renderContextStateGuard(rndrContext);
-
-	auto rtNameContainsI = [](const char* haystack, const char* needle) -> bool
+	const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
+	const bool inGameForWindowState =
+		m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame();
+	const bool vrWindowDrawable = DebugIsCurrentProcessMainWindowDrawable();
+	const bool vrWindowForeground = DebugIsCurrentProcessForeground();
+	if (queueMode != 0 && inGameForWindowState && (!vrWindowDrawable || !vrWindowForeground))
+	{
+		if (m_VR->m_RenderPipelineDebugLog)
 		{
-			if (!haystack || !needle || !*needle)
-				return false;
-
-			const size_t needleLen = std::strlen(needle);
-			for (const char* p = haystack; *p; ++p)
+			static thread_local std::chrono::steady_clock::time_point s_lastInactiveWindowPassLog{};
+			if (!ShouldThrottleLog(s_lastInactiveWindowPassLog, m_VR->m_RenderPipelineDebugLogHz))
 			{
-				if (_strnicmp(p, needle, needleLen) == 0)
-					return true;
+				Game::logMsg("[VR][RenderView][PassThrough] reason=inactive-window tid=%lu drawable=%d foreground=%d rt=%s setup=%dx%d clear=0x%X draw=0x%X",
+					GetCurrentThreadId(),
+					vrWindowDrawable ? 1 : 0,
+					vrWindowForeground ? 1 : 0,
+					DebugTextureName(renderContextStateGuard.rt),
+					setup.width, setup.height,
+					nClearFlags, whatToDraw);
 			}
-			return false;
-		};
+		}
 
-	auto isWaterReflectionRenderTarget = [&](ITexture* texture) -> bool
+		m_VR->m_RenderedNewFrame.store(false, std::memory_order_release);
+		callOriginalRenderView(setup, hudViewSetup, nClearFlags, whatToDraw);
+		return;
+	}
+
+	auto isVRManagedRenderTarget = [&](ITexture* texture) -> bool
 		{
 			if (!texture)
 				return false;
 
-			const char* name = DebugTextureName(texture);
-			if (!name || !*name || name[0] == '<')
-				return false;
-
-			// L4D2/Source water uses offscreen reflection/refraction RTs. In queued mode these
-			// can enter RenderView as separate calls, not only recursive calls. Do not treat
-			// them as the outer VR scene.
-			return rtNameContainsI(name, "water") ||
-				rtNameContainsI(name, "reflect") ||
-				rtNameContainsI(name, "refract");
+			return texture == m_VR->m_LeftEyeTexture ||
+				texture == m_VR->m_RightEyeTexture ||
+				texture == m_VR->m_LeftEyeSubmitTexture ||
+				texture == m_VR->m_RightEyeSubmitTexture ||
+				texture == m_VR->m_HUDTexture ||
+				texture == m_VR->m_ScopeTexture ||
+				texture == m_VR->m_RearMirrorTexture ||
+				texture == m_VR->m_DesktopMirrorTexture ||
+				texture == m_VR->m_BlankTexture;
 		};
 
+	auto viewSizeMatches = [](int w, int h, int targetW, int targetH) -> bool
+		{
+			if (w <= 0 || h <= 0 || targetW <= 0 || targetH <= 0)
+				return false;
+
+			return std::abs(w - targetW) <= 4 && std::abs(h - targetH) <= 4;
+		};
+
+	auto isQueuedOffscreenRenderView = [&](const char*& reason) -> bool
+		{
+			reason = nullptr;
+			if (queueMode == 0)
+				return false;
+
+			ITexture* texture = renderContextStateGuard.rt;
+			if (texture && isVRManagedRenderTarget(texture))
+				return false;
+
+			const char* name = DebugTextureName(texture);
+			if (texture && name && *name && name[0] != '<')
+			{
+				if (rtNameContainsI(name, "shadow") ||
+					rtNameContainsI(name, "flashlight") ||
+					rtNameContainsI(name, "depth"))
+				{
+					reason = "queued-shadow-rt";
+					return true;
+				}
+			}
+
+			if (texture && isDepthFormat(getTextureFormatSafe(texture)))
+			{
+				reason = "queued-depth-rt";
+				return true;
+			}
+
+			int backBufferW = 0;
+			int backBufferH = 0;
+			int windowW = 0;
+			int windowH = 0;
+			DebugBackBufferDimensions(m_Game ? m_Game->m_MaterialSystem : nullptr, backBufferW, backBufferH);
+			DebugRenderContextWindowSize(rndrContext, windowW, windowH);
+			const bool haveMainViewSize =
+				(backBufferW > 0 && backBufferH > 0) ||
+				(windowW > 0 && windowH > 0);
+			if (!haveMainViewSize)
+				return false;
+
+			auto isMainViewSized = [&](int w, int h) -> bool
+				{
+					return viewSizeMatches(w, h, backBufferW, backBufferH) ||
+						viewSizeMatches(w, h, windowW, windowH);
+				};
+
+			// A null MaterialSystem render target is normally Source's current backbuffer,
+			// In queued mode the main scene often arrives here as rt=<null>, so treating it
+			// as an offscreen pass freezes VR submission on the last completed stereo frame.
+			if (!texture)
+				return false;
+
+			const bool setupLooksMain =
+				isMainViewSized(setup.width, setup.height) ||
+				isMainViewSized(setup.m_nUnscaledWidth, setup.m_nUnscaledHeight) ||
+				(renderContextStateGuard.hasViewport && isMainViewSized(renderContextStateGuard.w, renderContextStateGuard.h));
+			if (setupLooksMain)
+				return false;
+
+			int rtMapW = 0;
+			int rtMapH = 0;
+			int rtActualW = 0;
+			int rtActualH = 0;
+			DebugTextureFullSize(texture, rtMapW, rtMapH, rtActualW, rtActualH);
+			const bool textureLooksMain =
+				isMainViewSized(rtMapW, rtMapH) ||
+				isMainViewSized(rtActualW, rtActualH);
+			if (!textureLooksMain)
+			{
+				reason = "queued-offscreen-rt";
+				return true;
+			}
+
+			return false;
+		};
+
+	const char* passThroughReason = nullptr;
 	if (isWaterReflectionRenderTarget(renderContextStateGuard.rt))
+		passThroughReason = "water-reflection";
+	else
+		isQueuedOffscreenRenderView(passThroughReason);
+
+	if (passThroughReason != nullptr)
 	{
 		if (m_VR->m_RenderPipelineDebugLog)
 		{
-			static thread_local std::chrono::steady_clock::time_point s_lastWaterPassLog{};
-			if (!ShouldThrottleLog(s_lastWaterPassLog, m_VR->m_RenderPipelineDebugLogHz))
+			static thread_local std::chrono::steady_clock::time_point s_lastOffscreenPassLog{};
+			if (!ShouldThrottleLog(s_lastOffscreenPassLog, m_VR->m_RenderPipelineDebugLogHz))
 			{
 				int rtMapW = 0, rtMapH = 0, rtActualW = 0, rtActualH = 0;
 				DebugTextureFullSize(renderContextStateGuard.rt, rtMapW, rtMapH, rtActualW, rtActualH);
-				Game::logMsg("[VR][RenderView][PassThrough] reason=water-reflection tid=%lu rt=%s(map=%dx%d actual=%dx%d) setup=%dx%d hud=%dx%d clear=0x%X draw=0x%X",
-					GetCurrentThreadId(), DebugTextureName(renderContextStateGuard.rt), rtMapW, rtMapH, rtActualW, rtActualH,
-					setup.width, setup.height, hudViewSetup.width, hudViewSetup.height, nClearFlags, whatToDraw);
+				Game::logMsg("[VR][RenderView][PassThrough] reason=%s tid=%lu q=%d rt=%s(map=%dx%d actual=%dx%d) setup=%dx%d unscaled=%dx%d hud=%dx%d vp=%d,%d %dx%d clear=0x%X draw=0x%X",
+					passThroughReason,
+					GetCurrentThreadId(),
+					queueMode,
+					DebugTextureName(renderContextStateGuard.rt), rtMapW, rtMapH, rtActualW, rtActualH,
+					setup.width, setup.height, setup.m_nUnscaledWidth, setup.m_nUnscaledHeight,
+					hudViewSetup.width, hudViewSetup.height,
+					renderContextStateGuard.x, renderContextStateGuard.y, renderContextStateGuard.w, renderContextStateGuard.h,
+					nClearFlags, whatToDraw);
 			}
 		}
 
@@ -136,7 +400,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	// Ported behavior from the old multicore branch: do a render-thread WaitGetPoses(), combine it with a
 	// main-thread seqlock snapshot of camera anchor/scale/offsets, then publish a render-thread snapshot
 	// that all render-time getters can read consistently during this dRenderView.
-	const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
 	uint32_t renderPoseTokenUsed = 0;
 	struct RenderSnapshotTLSGuard
 	{
@@ -1876,17 +2139,121 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	const bool submitSpecialInfectedArrowsFromEyePass =
 		desktopMirrorHidePluginOverlaysQueuedRtActive;
 
+	const Vector sharedCenterOrigin(
+		(leftEyeView.origin.x + rightEyeView.origin.x) * 0.5f,
+		(leftEyeView.origin.y + rightEyeView.origin.y) * 0.5f,
+		(leftEyeView.origin.z + rightEyeView.origin.z) * 0.5f);
+
+	auto renderEyeScene = [&](int eyeIndex, ITexture* eyeTexture, LPDIRECT3DSURFACE9 reshadeSurface,
+		CViewSetup& eyeView, CViewSetup& eyeHud, bool drawPreViewLaser)
+		{
+			struct EyeRenderTargetScope
+			{
+				IMatRenderContext* ctx = nullptr;
+				ITexture* oldRT = nullptr;
+				int oldX = 0;
+				int oldY = 0;
+				int oldW = 0;
+				int oldH = 0;
+				bool hasViewport = false;
+				bool pushed = false;
+
+				EyeRenderTargetScope(IMatRenderContext* renderContext, ITexture* target, int width, int height)
+					: ctx(renderContext)
+				{
+					if (!ctx || !target)
+						return;
+
+					if (hkPushRenderTargetAndViewport.fOriginal && hkPopRenderTargetAndViewport.fOriginal)
+					{
+						hkPushRenderTargetAndViewport.fOriginal(ctx, target, nullptr, 0, 0, width, height);
+						pushed = true;
+						return;
+					}
+
+					oldRT = ctx->GetRenderTarget();
+					if (hkGetViewport.fOriginal && hkViewport.fOriginal)
+					{
+						hkGetViewport.fOriginal(ctx, oldX, oldY, oldW, oldH);
+						hasViewport = true;
+					}
+					ctx->SetRenderTarget(target);
+					if (hkViewport.fOriginal)
+						hkViewport.fOriginal(ctx, 0, 0, width, height);
+				}
+
+				~EyeRenderTargetScope()
+				{
+					if (!ctx)
+						return;
+					if (pushed)
+					{
+						hkPopRenderTargetAndViewport.fOriginal(ctx);
+						return;
+					}
+					ctx->SetRenderTarget(oldRT);
+					if (hasViewport && hkViewport.fOriginal)
+						hkViewport.fOriginal(ctx, oldX, oldY, oldW, oldH);
+				}
+			};
+			struct EyeSharedCenterScope
+			{
+				int& pass;
+				bool& valid;
+				Vector& center;
+				Vector& eyeOrigin;
+				int oldPass = 0;
+				bool oldValid = false;
+				Vector oldCenter{};
+				Vector oldEyeOrigin{};
+
+				EyeSharedCenterScope(int& passRef, bool& validRef, Vector& centerRef, Vector& eyeOriginRef,
+					int eyeIndex, const Vector& newCenter, const Vector& newEyeOrigin)
+					: pass(passRef), valid(validRef), center(centerRef), eyeOrigin(eyeOriginRef)
+				{
+					oldPass = pass;
+					oldValid = valid;
+					oldCenter = center;
+					oldEyeOrigin = eyeOrigin;
+					pass = eyeIndex;
+					valid = true;
+					center = newCenter;
+					eyeOrigin = newEyeOrigin;
+				}
+
+				~EyeSharedCenterScope()
+				{
+					pass = oldPass;
+					valid = oldValid;
+					center = oldCenter;
+					eyeOrigin = oldEyeOrigin;
+				}
+			};
+
+			EyeRenderTargetScope eyeRtScope(
+				rndrContext,
+				eyeTexture,
+				static_cast<int>(m_VR->m_RenderWidth),
+				static_cast<int>(m_VR->m_RenderHeight));
+			EyeSharedCenterScope sharedCenterScope(
+				s_vrEyeRenderPass,
+				s_vrSharedCenterValid,
+				s_vrSharedCenterOrigin,
+				s_vrSharedEyeOrigin,
+				eyeIndex,
+				sharedCenterOrigin,
+				eyeView.origin);
+			ScopedReShadeVRCompatD3D9StateGuard reshadeGuard(m_VR, reshadeSurface);
+			if (drawPreViewLaser && m_VR->m_IsVREnabled)
+				m_VR->RenderDrawGameLaserSight(localPlayer);
+			callOriginalRenderView(eyeView, eyeHud, nClearFlags, whatToDraw);
+		};
+
 	{
 		if (submitSpecialInfectedArrowsFromEyePass)
 			m_VR->ScanSpecialInfectedEntitiesFromClientList();
 
-		rndrContext->SetRenderTarget(m_VR->m_LeftEyeTexture);
-		if (hkViewport.fOriginal)
-			hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
-		ScopedReShadeVRCompatD3D9StateGuard reshadeGuard(m_VR, m_VR->m_D9LeftEyeSurface);
-		if (m_VR->m_IsVREnabled)
-			m_VR->RenderDrawGameLaserSight(localPlayer);
-		callOriginalRenderView(leftEyeView, hudLeft, nClearFlags, whatToDraw);
+		renderEyeScene(1, m_VR->m_LeftEyeTexture, m_VR->m_D9LeftEyeSurface, leftEyeView, hudLeft, true);
 		if (desktopMirrorHidePluginOverlaysSingleCopyActive && m_VR->m_DesktopMirrorEye == 0)
 			m_VR->CopyEyeToDesktopMirrorTexture(0);
 		if (m_VR->m_IsVREnabled)
@@ -1905,11 +2272,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		if (submitSpecialInfectedArrowsFromEyePass)
 			m_VR->ScanSpecialInfectedEntitiesFromClientList();
 
-		rndrContext->SetRenderTarget(m_VR->m_RightEyeTexture);
-		if (hkViewport.fOriginal)
-			hkViewport.fOriginal(rndrContext, 0, 0, static_cast<int>(m_VR->m_RenderWidth), static_cast<int>(m_VR->m_RenderHeight));
-		ScopedReShadeVRCompatD3D9StateGuard reshadeGuard(m_VR, m_VR->m_D9RightEyeSurface);
-		callOriginalRenderView(rightEyeView, hudRight, nClearFlags, whatToDraw);
+		renderEyeScene(2, m_VR->m_RightEyeTexture, m_VR->m_D9RightEyeSurface, rightEyeView, hudRight, false);
 		if (desktopMirrorHidePluginOverlaysSingleCopyActive && m_VR->m_DesktopMirrorEye != 0)
 			m_VR->CopyEyeToDesktopMirrorTexture(1);
 		if (m_VR->m_IsVREnabled)

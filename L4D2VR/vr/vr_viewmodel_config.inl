@@ -1550,8 +1550,8 @@ void VR::ParseConfigFile()
     const bool desktopMirrorTexturesReady = m_CreatedVRTextures.load(std::memory_order_acquire);
     const bool desktopMirrorCleanTargetReady = (m_DesktopMirrorTexture != nullptr);
     m_DesktopMirrorHidePluginOverlays =
-        m_DesktopMirrorHidePluginOverlaysRequested && desktopMirrorCleanTargetReady;
-    if (m_DesktopMirrorHidePluginOverlaysRequested && desktopMirrorTexturesReady && !m_DesktopMirrorTexture)
+        m_DesktopMirrorEnabled && m_DesktopMirrorHidePluginOverlaysRequested && desktopMirrorCleanTargetReady;
+    if (m_DesktopMirrorEnabled && m_DesktopMirrorHidePluginOverlaysRequested && desktopMirrorTexturesReady && !m_DesktopMirrorTexture)
     {
         std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
         m_CreatedVRTextures.store(false, std::memory_order_release);
@@ -2014,7 +2014,7 @@ void VR::ApplyShadowEntityOverrides(bool forceRefresh)
     }
 }
 
-void VR::ApplyShadowSettingsIfNeeded(bool forceApply, bool forceEnable)
+void VR::ApplyShadowSettingsIfNeeded(bool forceApply)
 {
     const bool dirty = m_ShadowSettingsDirty.exchange(false, std::memory_order_acq_rel);
     const bool wantsEntityRefresh = false;
@@ -2037,9 +2037,7 @@ void VR::ApplyShadowSettingsIfNeeded(bool forceApply, bool forceEnable)
     if (!dirty && !forceApply)
         return;
 
-    const bool shadowTweaksActive = m_ShadowTweaksEnabled || forceEnable;
-
-    if (!shadowTweaksActive)
+    if (!m_ShadowTweaksEnabled)
     {
         if (m_ShadowTweaksApplied)
         {
