@@ -821,7 +821,7 @@ void VR::UpdateHandHudOverlays()
     if (m_SpecialInfectedIntentSenseEnabled && m_SpecialInfectedIntentSenseHudEnabled &&
         m_Game && m_Game->m_ClientEntityList)
     {
-        ScanSpecialInfectedEntitiesFromClientListImpl();
+        ScanSpecialInfectedEntitiesFromClientList();
     }
 
     {
