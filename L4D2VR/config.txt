@@ -227,6 +227,8 @@ AutoFastMeleeUseWeaponSwitch=true
 AutoFastMeleePushWaitTicks=2
 AutoFastMeleePostWaitTicks=29
 LazyScopeRearMirrorRTT=true
+DesktopRearMirrorWindowEnabled=false
+DesktopIntentSenseHudWindowEnabled=false
 DebugVASLog=false
 
 HitSoundEnabled=false

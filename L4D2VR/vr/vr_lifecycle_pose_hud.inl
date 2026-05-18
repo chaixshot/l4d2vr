@@ -734,6 +734,7 @@ void VR::UpdateHandHudOverlays()
         rightVisible = false;
         if (m_SpecialInfectedIntentSenseHudHandle != vr::k_ulOverlayHandleInvalid)
             vr::VROverlay()->HideOverlay(m_SpecialInfectedIntentSenseHudHandle);
+        UpdateDesktopIntentSenseHudWindow(nullptr, 0, 0, false);
         m_LastSpecialInfectedIntentSenseHudVisible = false;
         m_LastSpecialInfectedIntentSenseHudUploadTime = {};
         DestroyWorldQuadTextures();
@@ -753,6 +754,7 @@ void VR::UpdateHandHudOverlays()
         rightVisible = false;
         if (m_SpecialInfectedIntentSenseHudHandle != vr::k_ulOverlayHandleInvalid)
             vr::VROverlay()->HideOverlay(m_SpecialInfectedIntentSenseHudHandle);
+        UpdateDesktopIntentSenseHudWindow(nullptr, 0, 0, false);
         m_LastSpecialInfectedIntentSenseHudVisible = false;
         m_LastSpecialInfectedIntentSenseHudUploadTime = {};
         DestroyWorldQuadTextures();
@@ -774,6 +776,7 @@ void VR::UpdateHandHudOverlays()
         rightVisible = false;
         if (m_SpecialInfectedIntentSenseHudHandle != vr::k_ulOverlayHandleInvalid)
             vr::VROverlay()->HideOverlay(m_SpecialInfectedIntentSenseHudHandle);
+        UpdateDesktopIntentSenseHudWindow(nullptr, 0, 0, false);
         m_LastSpecialInfectedIntentSenseHudVisible = false;
         m_LastSpecialInfectedIntentSenseHudUploadTime = {};
         DestroyWorldQuadTextures();
@@ -818,7 +821,11 @@ void VR::UpdateHandHudOverlays()
             ov->SetOverlayCurvature(m_SpecialInfectedIntentSenseHudHandle, 0.0f);
             return true;
         };
-    if (m_SpecialInfectedIntentSenseEnabled && m_SpecialInfectedIntentSenseHudEnabled &&
+    const bool wantsIntentSenseHudOutput =
+        (m_SpecialInfectedIntentSenseEnabled && m_SpecialInfectedIntentSenseHudEnabled) ||
+        m_DesktopIntentSenseHudWindowEnabled;
+
+    if (wantsIntentSenseHudOutput &&
         m_Game && m_Game->m_ClientEntityList)
     {
         ScanSpecialInfectedEntitiesFromClientList();
@@ -827,7 +834,7 @@ void VR::UpdateHandHudOverlays()
     {
         std::vector<SpecialInfectedIntentSenseHudLine> intentLines;
         int intentRevision = 0;
-        if (m_SpecialInfectedIntentSenseEnabled && m_SpecialInfectedIntentSenseHudEnabled)
+        if (wantsIntentSenseHudOutput)
         {
             std::lock_guard<std::mutex> lock(m_SpecialInfectedIntentSenseHudMutex);
             intentLines = m_SpecialInfectedIntentSenseHudLines;
@@ -843,6 +850,7 @@ void VR::UpdateHandHudOverlays()
                 if (vr::IVROverlay* ov = vr::VROverlay())
                     ov->HideOverlay(m_SpecialInfectedIntentSenseHudHandle);
             }
+            UpdateDesktopIntentSenseHudWindow(nullptr, 0, 0, false);
             m_LastSpecialInfectedIntentSenseHudVisible = false;
             m_LastSpecialInfectedIntentSenseHudUploadTime = {};
         }
@@ -913,9 +921,11 @@ void VR::UpdateHandHudOverlays()
                 m_LastSpecialInfectedIntentSenseHudRevisionDrawn = intentRevision;
                 m_LastSpecialInfectedIntentSenseHudUploadTime = intentHudNow;
                 m_LastSpecialInfectedIntentSenseHudVisible = (showErr == vr::VROverlayError_None);
+                UpdateDesktopIntentSenseHudWindow(pixels.data(), w, h, true);
             }
             else
             {
+                UpdateDesktopIntentSenseHudWindow(nullptr, 0, 0, false);
                 DestroyIntentSenseHudTexture();
                 if (textureErr == vr::VROverlayError_InvalidHandle || textureErr == vr::VROverlayError_UnknownOverlay)
                     m_SpecialInfectedIntentSenseHudHandle = vr::k_ulOverlayHandleInvalid;

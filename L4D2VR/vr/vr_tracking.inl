@@ -1085,7 +1085,7 @@ void VR::UpdateTracking()
 
     UpdateScopeAimLineState();
 
-    if (m_RearMirrorEnabled)
+    if (m_RearMirrorEnabled || m_DesktopRearMirrorWindowEnabled)
     {
         m_RearMirrorCameraPosAbs =
             m_HmdPosAbs

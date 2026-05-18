@@ -15,6 +15,27 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	static thread_local bool s_vrSharedCenterValid = false;
 	static thread_local Vector s_vrSharedCenterOrigin{};
 	static thread_local Vector s_vrSharedEyeOrigin{};
+	struct SharedShadowDepthRenderKey
+	{
+		ITexture* texture = nullptr;
+		int width = 0;
+		int height = 0;
+		int unscaledWidth = 0;
+		int unscaledHeight = 0;
+		int clearFlags = 0;
+		int drawFlags = 0;
+		int originX = 0;
+		int originY = 0;
+		int originZ = 0;
+		int pitch = 0;
+		int yaw = 0;
+		int roll = 0;
+	};
+	static thread_local uint32_t s_vrSharedStereoSerial = 0;
+	static thread_local uint32_t s_vrSharedActiveSerial = 0;
+	static thread_local int s_vrShadowDepthKeyCount = 0;
+	static thread_local SharedShadowDepthRenderKey s_vrShadowDepthKeys[96]{};
+
 	auto rtNameContainsI = [](const char* haystack, const char* needle) -> bool
 		{
 			if (!haystack || !needle || !*needle)
@@ -106,6 +127,71 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			return nullptr;
 		};
 
+	auto quantizeSharedRtValue = [](float value) -> int
+		{
+			const float scaled = value * 16.0f;
+			return static_cast<int>(scaled + (scaled >= 0.0f ? 0.5f : -0.5f));
+		};
+
+	auto makeShadowDepthRenderKey = [&](ITexture* texture, const CViewSetup& view, int clearFlags, int drawFlags)
+		{
+			SharedShadowDepthRenderKey key{};
+			key.texture = texture;
+			key.width = view.width;
+			key.height = view.height;
+			key.unscaledWidth = view.m_nUnscaledWidth;
+			key.unscaledHeight = view.m_nUnscaledHeight;
+			key.clearFlags = clearFlags;
+			key.drawFlags = drawFlags;
+			key.originX = quantizeSharedRtValue(view.origin.x);
+			key.originY = quantizeSharedRtValue(view.origin.y);
+			key.originZ = quantizeSharedRtValue(view.origin.z);
+			key.pitch = quantizeSharedRtValue(view.angles.x);
+			key.yaw = quantizeSharedRtValue(view.angles.y);
+			key.roll = quantizeSharedRtValue(view.angles.z);
+			return key;
+		};
+
+	auto shadowDepthRenderKeyEquals = [](const SharedShadowDepthRenderKey& a, const SharedShadowDepthRenderKey& b)
+		{
+			return a.texture == b.texture &&
+				a.width == b.width &&
+				a.height == b.height &&
+				a.unscaledWidth == b.unscaledWidth &&
+				a.unscaledHeight == b.unscaledHeight &&
+				a.clearFlags == b.clearFlags &&
+				a.drawFlags == b.drawFlags &&
+				a.originX == b.originX &&
+				a.originY == b.originY &&
+				a.originZ == b.originZ &&
+				a.pitch == b.pitch &&
+				a.yaw == b.yaw &&
+				a.roll == b.roll;
+		};
+
+	auto findShadowDepthRenderKey = [&](const SharedShadowDepthRenderKey& key) -> bool
+		{
+			if (s_vrSharedActiveSerial == 0)
+				return false;
+
+			for (int i = 0; i < s_vrShadowDepthKeyCount; ++i)
+			{
+				if (shadowDepthRenderKeyEquals(s_vrShadowDepthKeys[i], key))
+					return true;
+			}
+			return false;
+		};
+
+	auto recordShadowDepthRenderKey = [&](const SharedShadowDepthRenderKey& key)
+		{
+			if (s_vrSharedActiveSerial == 0 || findShadowDepthRenderKey(key))
+				return;
+
+			const int capacity = static_cast<int>(sizeof(s_vrShadowDepthKeys) / sizeof(s_vrShadowDepthKeys[0]));
+			if (s_vrShadowDepthKeyCount < capacity)
+				s_vrShadowDepthKeys[s_vrShadowDepthKeyCount++] = key;
+		};
+
 	if (s_originalRenderViewDepth > 0)
 	{
 		if (s_vrEyeRenderPass != 0 && s_vrSharedCenterValid && m_Game && m_Game->m_MaterialSystem)
@@ -120,6 +206,31 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				CViewSetup sharedHud = hudViewSetup;
 				sharedView.origin += eyeToCenter;
 				sharedHud.origin += eyeToCenter;
+
+				const bool shadowDepthRt = std::strcmp(sharedRtReason, "shadow-depth") == 0;
+				if (shadowDepthRt && s_vrSharedActiveSerial != 0)
+				{
+					const SharedShadowDepthRenderKey key = makeShadowDepthRenderKey(nestedRt, sharedView, nClearFlags, whatToDraw);
+					if (s_vrEyeRenderPass > 1 && findShadowDepthRenderKey(key))
+					{
+						if (m_VR->m_RenderPipelineDebugLog)
+						{
+							static thread_local std::chrono::steady_clock::time_point s_lastSharedShadowSkipLog{};
+							if (!ShouldThrottleLog(s_lastSharedShadowSkipLog, m_VR->m_RenderPipelineDebugLogHz))
+							{
+								Game::logMsg("[VR][RenderView][SharedRTReuse] reason=shadow-depth eye=%d tid=%lu rt=%s setup=%dx%d clear=0x%X draw=0x%X",
+									s_vrEyeRenderPass,
+									GetCurrentThreadId(),
+									DebugTextureName(nestedRt),
+									sharedView.width, sharedView.height,
+									nClearFlags, whatToDraw);
+							}
+						}
+						return;
+					}
+
+					recordShadowDepthRenderKey(key);
+				}
 
 				if (m_VR->m_RenderPipelineDebugLog)
 				{
@@ -2147,6 +2258,36 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		(leftEyeView.origin.x + rightEyeView.origin.x) * 0.5f,
 		(leftEyeView.origin.y + rightEyeView.origin.y) * 0.5f,
 		(leftEyeView.origin.z + rightEyeView.origin.z) * 0.5f);
+
+	struct SharedStereoRenderFrameScope
+	{
+		uint32_t& activeSerial;
+		uint32_t& nextSerial;
+		int& keyCount;
+		uint32_t oldActiveSerial = 0;
+		int oldKeyCount = 0;
+
+		SharedStereoRenderFrameScope(uint32_t& activeRef, uint32_t& nextRef, int& keyCountRef)
+			: activeSerial(activeRef), nextSerial(nextRef), keyCount(keyCountRef)
+		{
+			oldActiveSerial = activeSerial;
+			oldKeyCount = keyCount;
+			const uint32_t newSerial = ++nextSerial;
+			activeSerial = (newSerial != 0) ? newSerial : ++nextSerial;
+			keyCount = 0;
+		}
+
+		~SharedStereoRenderFrameScope()
+		{
+			activeSerial = oldActiveSerial;
+			keyCount = oldKeyCount;
+		}
+	};
+
+	SharedStereoRenderFrameScope sharedStereoRenderFrameScope(
+		s_vrSharedActiveSerial,
+		s_vrSharedStereoSerial,
+		s_vrShadowDepthKeyCount);
 
 	auto renderEyeScene = [&](int eyeIndex, ITexture* eyeTexture, LPDIRECT3DSURFACE9 reshadeSurface,
 		CViewSetup& eyeView, CViewSetup& eyeHud, bool drawPreViewLaser)

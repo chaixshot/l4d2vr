@@ -1381,6 +1381,7 @@ void VR::ParseConfigFile()
 
     // Rear mirror
     m_RearMirrorEnabled = getBool("RearMirrorEnabled", m_RearMirrorEnabled);
+    m_DesktopRearMirrorWindowEnabled = getBool("DesktopRearMirrorWindowEnabled", m_DesktopRearMirrorWindowEnabled);
     m_RearMirrorShowOnlyOnSpecialWarning = getBool("RearMirrorShowOnlyOnSpecialWarning", m_RearMirrorShowOnlyOnSpecialWarning);
     m_RearMirrorSpecialShowHoldSeconds = std::max(0.0f, getFloat("RearMirrorSpecialShowHoldSeconds", m_RearMirrorSpecialShowHoldSeconds));
     m_RearMirrorRTTSize = std::clamp(getInt("RearMirrorRTTSize", m_RearMirrorRTTSize), 128, 4096);
@@ -1570,6 +1571,7 @@ void VR::ParseConfigFile()
     m_SpecialInfectedBlindSpotDistance = std::max(0.0f, getFloat("SpecialInfectedBlindSpotDistance", m_SpecialInfectedBlindSpotDistance));
     m_SpecialInfectedIntentSenseEnabled = getBool("SpecialInfectedIntentSenseEnabled", m_SpecialInfectedIntentSenseEnabled);
     m_SpecialInfectedIntentSenseHudEnabled = getBool("SpecialInfectedIntentSenseHudEnabled", m_SpecialInfectedIntentSenseHudEnabled);
+    m_DesktopIntentSenseHudWindowEnabled = getBool("DesktopIntentSenseHudWindowEnabled", m_DesktopIntentSenseHudWindowEnabled);
     m_SpecialInfectedIntentSenseHapticsEnabled = getBool("SpecialInfectedIntentSenseHapticsEnabled", m_SpecialInfectedIntentSenseHapticsEnabled);
     m_SpecialInfectedIntentSenseUseLookFallback = getBool("SpecialInfectedIntentSenseUseLookFallback", m_SpecialInfectedIntentSenseUseLookFallback);
     m_SpecialInfectedIntentSenseWarnFront = getBool("SpecialInfectedIntentSenseWarnFront", m_SpecialInfectedIntentSenseWarnFront);

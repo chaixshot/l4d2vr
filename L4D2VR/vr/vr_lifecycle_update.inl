@@ -1216,6 +1216,7 @@ void VR::ReleaseVRRenderTargetsForDeviceReset()
     SafeReleaseD3D(m_D9HUDSurface);
     SafeReleaseD3D(m_D9ScopeSurface);
     SafeReleaseD3D(m_D9RearMirrorSurface);
+    SafeReleaseD3D(m_D9DesktopCompanionRearMirrorReadback);
     SafeReleaseD3D(m_D9DesktopMirrorSurface);
     SafeReleaseD3D(m_D9BlankSurface);
 
@@ -1373,7 +1374,7 @@ void VR::CreateVRTextures()
     // Optional RTTs: scope + rear-mirror can be extremely expensive in 32-bit VAS
     // when their sizes are set high. Only pre-create them if requested.
     const bool wantScope = (!m_LazyScopeRearMirrorRTT) || m_ScopeEnabled;
-    const bool wantRearMirror = (!m_LazyScopeRearMirrorRTT) || m_RearMirrorEnabled;
+    const bool wantRearMirror = (!m_LazyScopeRearMirrorRTT) || m_RearMirrorEnabled || m_DesktopRearMirrorWindowEnabled;
 
     if (wantScope)
     {
@@ -1440,7 +1441,7 @@ void VR::EnsureOpticsRTTTextures()
         return;
 
     const bool needScope = (m_ScopeEnabled && !m_ScopeTexture);
-    const bool needRearMirror = (m_RearMirrorEnabled && !m_RearMirrorTexture);
+    const bool needRearMirror = ((m_RearMirrorEnabled || m_DesktopRearMirrorWindowEnabled) && !m_RearMirrorTexture);
     if (!needScope && !needRearMirror)
         return;
 
@@ -1526,6 +1527,7 @@ void VR::SubmitVRTextures()
             vr::VROverlay()->HideOverlay(overlay);
         vr::VROverlay()->HideOverlay(m_ScopeHandle);
         vr::VROverlay()->HideOverlay(m_RearMirrorHandle);
+        UpdateDesktopRearMirrorWindow(false);
         vr::VROverlay()->HideOverlay(m_LeftWristHudHandle);
         vr::VROverlay()->HideOverlay(m_RightAmmoHudHandle);
         m_CompositorNeedsHandoff = false;
@@ -1912,6 +1914,7 @@ void VR::SubmitVRTextures()
         hideHudOverlays();
         vr::VROverlay()->HideOverlay(m_ScopeHandle);
         vr::VROverlay()->HideOverlay(m_RearMirrorHandle);
+        UpdateDesktopRearMirrorWindow(false);
         vr::VROverlay()->HideOverlay(m_LeftWristHudHandle);
         vr::VROverlay()->HideOverlay(m_RightAmmoHudHandle);
 
@@ -1976,13 +1979,16 @@ void VR::SubmitVRTextures()
         vr::VROverlay()->HideOverlay(m_ScopeHandle);
     }
 
-    if (m_RearMirrorTexture && m_RearMirrorEnabled)
+    if (m_RearMirrorTexture && (m_RearMirrorEnabled || m_DesktopRearMirrorWindowEnabled))
     {
-        applyRearMirrorTexture(m_RearMirrorHandle);
-        vr::VROverlay()->SetOverlayAlpha(m_RearMirrorHandle, std::clamp(m_RearMirrorAlpha, 0.0f, 1.0f));
+        if (m_RearMirrorEnabled)
+        {
+            applyRearMirrorTexture(m_RearMirrorHandle);
+            vr::VROverlay()->SetOverlayAlpha(m_RearMirrorHandle, std::clamp(m_RearMirrorAlpha, 0.0f, 1.0f));
 
-        // Body-anchored rear mirror: update absolute transform every frame.
-        UpdateRearMirrorOverlayTransform();
+            // Body-anchored rear mirror: update absolute transform every frame.
+            UpdateRearMirrorOverlayTransform();
+        }
 
         // Keep the "special warning" enlarge hint bounded even if the mirror RTT pass
         // is temporarily not running (e.g., pop-up mode).
@@ -2145,14 +2151,18 @@ void VR::SubmitVRTextures()
                 return false;
             };
 
-        if (ShouldRenderRearMirror() && !shouldHideRearMirrorDueToAimLine())
+        const bool rearMirrorContentVisible = ShouldRenderRearMirror();
+        const bool showVrRearMirror = m_RearMirrorEnabled && rearMirrorContentVisible && !shouldHideRearMirrorDueToAimLine();
+        if (showVrRearMirror)
             vr::VROverlay()->ShowOverlay(m_RearMirrorHandle);
         else
             vr::VROverlay()->HideOverlay(m_RearMirrorHandle);
+        UpdateDesktopRearMirrorWindow(m_DesktopRearMirrorWindowEnabled && rearMirrorContentVisible);
     }
     else
     {
         vr::VROverlay()->HideOverlay(m_RearMirrorHandle);
+        UpdateDesktopRearMirrorWindow(false);
     }
 
     UpdateHandHudOverlays();
@@ -2460,7 +2470,7 @@ void VR::UpdateScopeOverlayTransform()
 
 bool VR::ShouldRenderRearMirror() const
 {
-    if (!m_RearMirrorEnabled)
+    if (!m_RearMirrorEnabled && !m_DesktopRearMirrorWindowEnabled)
         return false;
 
     // Default behavior: always render/show when enabled.

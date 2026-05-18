@@ -1112,6 +1112,24 @@ public:
 	int m_LastSpecialInfectedIntentSenseHudRevisionDrawn = 0;
 	std::chrono::steady_clock::time_point m_LastSpecialInfectedIntentSenseHudUploadTime{};
 
+	// Standalone desktop companion windows. They mirror selected plugin HUD surfaces to
+	// normal desktop windows instead of drawing them into the game backbuffer.
+	HWND m_DesktopRearMirrorWindow = nullptr;
+	HWND m_DesktopIntentSenseHudWindow = nullptr;
+	IDirect3DSurface9* m_D9DesktopCompanionRearMirrorReadback = nullptr;
+	std::mutex m_DesktopCompanionHudMutex{};
+	std::vector<uint8_t> m_DesktopCompanionRearMirrorBgra{};
+	std::vector<uint8_t> m_DesktopCompanionIntentHudBgra{};
+	int m_DesktopCompanionRearMirrorW = 0;
+	int m_DesktopCompanionRearMirrorH = 0;
+	int m_DesktopCompanionIntentHudW = 0;
+	int m_DesktopCompanionIntentHudH = 0;
+	bool m_DesktopRearMirrorWindowEnabled = false;
+	bool m_DesktopIntentSenseHudWindowEnabled = false;
+	bool m_DesktopRearMirrorWindowShown = false;
+	bool m_DesktopIntentSenseHudWindowShown = false;
+	std::chrono::steady_clock::time_point m_LastDesktopCompanionRearMirrorCopyTime{};
+
 	std::vector<uint8_t> m_RightAmmoHudBgCache{};
 	int m_RightAmmoHudBgCacheW = 0;
 	int m_RightAmmoHudBgCacheH = 0;
@@ -2070,7 +2088,7 @@ public:
 	bool m_SpecialInfectedIntentSenseHudEnabled = true;
 	bool m_SpecialInfectedIntentSenseHapticsEnabled = true;
 	bool m_SpecialInfectedIntentSenseUseLookFallback = true;
-	// If false, suppress front/front-left/front-right alerts. Side/back alerts still show.
+	// If false, suppress front/front-left/front-right alerts except selected high-priority intent threats.
 	bool m_SpecialInfectedIntentSenseWarnFront = false;
 	float m_SpecialInfectedIntentSenseDistance = 1200.0f;
 	float m_SpecialInfectedIntentSenseLookDot = 0.88f;
@@ -2535,6 +2553,11 @@ public:
 	bool EnsureKillIndicatorOverlayTexture(int materialIndex, int width, int height);
 	bool UploadKillIndicatorOverlayTexture(int materialIndex, const uint8_t* rgba, int width, int height, uint32_t frameIndex = 0, bool fromDecodedFrames = false);
 	void DestroyItemLabelOverlayTexture();
+	void PumpDesktopCompanionWindows();
+	void UpdateDesktopRearMirrorWindow(bool visible);
+	void UpdateDesktopIntentSenseHudWindow(const uint8_t* rgba, int width, int height, bool visible);
+	void DestroyDesktopCompanionWindows();
+	static LRESULT CALLBACK DesktopCompanionWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 	void TrimExpiredKillIndicators(std::chrono::steady_clock::time_point now, bool clearAll = false);
 	void MaybeTrimExpiredKillIndicators(std::chrono::steady_clock::time_point now, bool force = false);
 	void MaybeLogKillIndicatorStats(std::chrono::steady_clock::time_point now);

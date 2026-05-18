@@ -8039,6 +8039,400 @@ void VR::DestroyItemLabelOverlayTexture()
     m_ItemLabelTextureCache.clear();
 }
 
+LRESULT CALLBACK VR::DesktopCompanionWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    VR* vr = reinterpret_cast<VR*>(GetWindowLongPtrA(hwnd, GWLP_USERDATA));
+    if (msg == WM_NCCREATE)
+    {
+        const CREATESTRUCTA* cs = reinterpret_cast<const CREATESTRUCTA*>(lParam);
+        vr = reinterpret_cast<VR*>(cs ? cs->lpCreateParams : nullptr);
+        SetWindowLongPtrA(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(vr));
+    }
+
+    if (msg == WM_ERASEBKGND)
+        return 1;
+
+    if (msg == WM_PAINT && vr)
+    {
+        PAINTSTRUCT ps{};
+        HDC dc = BeginPaint(hwnd, &ps);
+        RECT rc{};
+        GetClientRect(hwnd, &rc);
+        const int clientW = (std::max)(1, static_cast<int>(rc.right - rc.left));
+        const int clientH = (std::max)(1, static_cast<int>(rc.bottom - rc.top));
+
+        HDC paintDc = dc;
+        HDC memDc = CreateCompatibleDC(dc);
+        HBITMAP memBitmap = memDc ? CreateCompatibleBitmap(dc, clientW, clientH) : nullptr;
+        HGDIOBJ oldBitmap = nullptr;
+        if (memDc && memBitmap)
+        {
+            oldBitmap = SelectObject(memDc, memBitmap);
+            paintDc = memDc;
+        }
+
+        RECT fillRc{ 0, 0, clientW, clientH };
+        FillRect(paintDc, &fillRc, reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+
+        std::vector<uint8_t> pixels;
+        int w = 0;
+        int h = 0;
+        {
+            std::lock_guard<std::mutex> lock(vr->m_DesktopCompanionHudMutex);
+            if (hwnd == vr->m_DesktopRearMirrorWindow)
+            {
+                pixels = vr->m_DesktopCompanionRearMirrorBgra;
+                w = vr->m_DesktopCompanionRearMirrorW;
+                h = vr->m_DesktopCompanionRearMirrorH;
+            }
+            else if (hwnd == vr->m_DesktopIntentSenseHudWindow)
+            {
+                pixels = vr->m_DesktopCompanionIntentHudBgra;
+                w = vr->m_DesktopCompanionIntentHudW;
+                h = vr->m_DesktopCompanionIntentHudH;
+            }
+        }
+
+        if (!pixels.empty() && w > 0 && h > 0)
+        {
+            BITMAPINFO bmi{};
+            bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+            bmi.bmiHeader.biWidth = w;
+            bmi.bmiHeader.biHeight = -h;
+            bmi.bmiHeader.biPlanes = 1;
+            bmi.bmiHeader.biBitCount = 32;
+            bmi.bmiHeader.biCompression = BI_RGB;
+
+            const float sx = static_cast<float>(clientW) / static_cast<float>(w);
+            const float sy = static_cast<float>(clientH) / static_cast<float>(h);
+            const float scale = (std::min)(sx, sy);
+            const int drawW = (std::max)(1, static_cast<int>(std::round(w * scale)));
+            const int drawH = (std::max)(1, static_cast<int>(std::round(h * scale)));
+            const int drawX = (clientW - drawW) / 2;
+            const int drawY = (clientH - drawH) / 2;
+
+            SetStretchBltMode(paintDc, HALFTONE);
+            StretchDIBits(paintDc, drawX, drawY, drawW, drawH,
+                0, 0, w, h, pixels.data(), &bmi, DIB_RGB_COLORS, SRCCOPY);
+        }
+
+        if (paintDc != dc)
+            BitBlt(dc, 0, 0, clientW, clientH, paintDc, 0, 0, SRCCOPY);
+        if (oldBitmap)
+            SelectObject(memDc, oldBitmap);
+        if (memBitmap)
+            DeleteObject(memBitmap);
+        if (memDc)
+            DeleteDC(memDc);
+
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+
+    if (msg == WM_CLOSE)
+    {
+        ShowWindow(hwnd, SW_HIDE);
+        if (vr)
+        {
+            if (hwnd == vr->m_DesktopRearMirrorWindow)
+                vr->m_DesktopRearMirrorWindowShown = false;
+            else if (hwnd == vr->m_DesktopIntentSenseHudWindow)
+                vr->m_DesktopIntentSenseHudWindowShown = false;
+        }
+        return 0;
+    }
+
+    if (msg == WM_SIZE)
+    {
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return 0;
+    }
+
+    if (msg == WM_GETMINMAXINFO)
+    {
+        MINMAXINFO* info = reinterpret_cast<MINMAXINFO*>(lParam);
+        if (info)
+        {
+            info->ptMinTrackSize.x = 160;
+            info->ptMinTrackSize.y = 90;
+        }
+        return 0;
+    }
+
+    return DefWindowProcA(hwnd, msg, wParam, lParam);
+}
+
+void VR::PumpDesktopCompanionWindows()
+{
+    MSG msg{};
+    while (m_DesktopRearMirrorWindow && PeekMessageA(&msg, m_DesktopRearMirrorWindow, 0, 0, PM_REMOVE))
+    {
+        TranslateMessage(&msg);
+        DispatchMessageA(&msg);
+    }
+    while (m_DesktopIntentSenseHudWindow && PeekMessageA(&msg, m_DesktopIntentSenseHudWindow, 0, 0, PM_REMOVE))
+    {
+        TranslateMessage(&msg);
+        DispatchMessageA(&msg);
+    }
+}
+
+static HWND EnsureDesktopCompanionWindow(VR* vr, HWND& hwnd, const char* className, const char* title, int width, int height)
+{
+    if (hwnd)
+        return hwnd;
+
+    HINSTANCE instance = GetModuleHandleA(nullptr);
+    WNDCLASSEXA wc{};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = VR::DesktopCompanionWindowProc;
+    wc.hInstance = instance;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = reinterpret_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+    wc.lpszClassName = className;
+    RegisterClassExA(&wc);
+
+    RECT rect{ 0, 0, (std::max)(64, width), (std::max)(64, height) };
+    const DWORD style = WS_OVERLAPPEDWINDOW;
+    const DWORD exStyle = WS_EX_TOOLWINDOW | WS_EX_TOPMOST;
+    AdjustWindowRectEx(&rect, style, FALSE, exStyle);
+
+    hwnd = CreateWindowExA(
+        exStyle,
+        className,
+        title,
+        style,
+        CW_USEDEFAULT,
+        CW_USEDEFAULT,
+        rect.right - rect.left,
+        rect.bottom - rect.top,
+        nullptr,
+        nullptr,
+        instance,
+        vr);
+    return hwnd;
+}
+
+static void RefreshDesktopCompanionZOrder(HWND rearMirrorWindow, bool rearMirrorShown, HWND intentHudWindow, bool intentHudShown)
+{
+    if (rearMirrorWindow && rearMirrorShown)
+    {
+        SetWindowPos(rearMirrorWindow, HWND_TOPMOST, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
+    if (intentHudWindow && intentHudShown)
+    {
+        SetWindowPos(intentHudWindow, HWND_TOPMOST, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
+}
+
+void VR::UpdateDesktopIntentSenseHudWindow(const uint8_t* rgba, int width, int height, bool visible)
+{
+    PumpDesktopCompanionWindows();
+
+    if (!m_DesktopIntentSenseHudWindowEnabled)
+    {
+        if (m_DesktopIntentSenseHudWindow && m_DesktopIntentSenseHudWindowShown)
+            ShowWindow(m_DesktopIntentSenseHudWindow, SW_HIDE);
+        m_DesktopIntentSenseHudWindowShown = false;
+        return;
+    }
+
+    int windowW = width;
+    int windowH = height;
+    if (windowW <= 0 || windowH <= 0)
+    {
+        std::lock_guard<std::mutex> lock(m_DesktopCompanionHudMutex);
+        windowW = m_DesktopCompanionIntentHudW > 0 ? m_DesktopCompanionIntentHudW : (std::max)(128, m_SpecialInfectedIntentSenseHudTexW);
+        windowH = m_DesktopCompanionIntentHudH > 0 ? m_DesktopCompanionIntentHudH : (std::max)(64, m_SpecialInfectedIntentSenseHudTexH);
+    }
+
+    HWND hwnd = EnsureDesktopCompanionWindow(this, m_DesktopIntentSenseHudWindow,
+        "L4D2VRDesktopIntentSenseHudWindow", "L4D2VR Intent Sense HUD", windowW, windowH);
+    if (!hwnd)
+        return;
+
+    if (!m_DesktopIntentSenseHudWindowShown)
+    {
+        ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        m_DesktopIntentSenseHudWindowShown = true;
+        RefreshDesktopCompanionZOrder(m_DesktopRearMirrorWindow, m_DesktopRearMirrorWindowShown,
+            m_DesktopIntentSenseHudWindow, m_DesktopIntentSenseHudWindowShown);
+    }
+
+    if (!visible || !rgba || width <= 0 || height <= 0)
+    {
+        std::lock_guard<std::mutex> lock(m_DesktopCompanionHudMutex);
+        const int clearW = windowW > 0 ? windowW : 128;
+        const int clearH = windowH > 0 ? windowH : 64;
+        m_DesktopCompanionIntentHudW = clearW;
+        m_DesktopCompanionIntentHudH = clearH;
+        m_DesktopCompanionIntentHudBgra.assign((size_t)clearW * (size_t)clearH * 4, 0);
+        InvalidateRect(hwnd, nullptr, FALSE);
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_DesktopCompanionHudMutex);
+        if (m_DesktopCompanionIntentHudW != width || m_DesktopCompanionIntentHudH != height)
+        {
+            m_DesktopCompanionIntentHudW = width;
+            m_DesktopCompanionIntentHudH = height;
+        }
+
+        m_DesktopCompanionIntentHudBgra.resize((size_t)width * (size_t)height * 4);
+        for (int y = 0; y < height; ++y)
+        {
+            const uint8_t* src = rgba + (size_t)y * (size_t)width * 4;
+            uint8_t* dst = m_DesktopCompanionIntentHudBgra.data() + (size_t)y * (size_t)width * 4;
+            for (int x = 0; x < width; ++x)
+            {
+                dst[x * 4 + 0] = src[x * 4 + 2];
+                dst[x * 4 + 1] = src[x * 4 + 1];
+                dst[x * 4 + 2] = src[x * 4 + 0];
+                dst[x * 4 + 3] = src[x * 4 + 3];
+            }
+        }
+    }
+
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void VR::UpdateDesktopRearMirrorWindow(bool visible)
+{
+    PumpDesktopCompanionWindows();
+
+    if (!m_DesktopRearMirrorWindowEnabled || !visible || !m_D9RearMirrorSurface || !g_D3DVR9)
+    {
+        if (m_DesktopRearMirrorWindow && m_DesktopRearMirrorWindowShown)
+            ShowWindow(m_DesktopRearMirrorWindow, SW_HIDE);
+        m_DesktopRearMirrorWindowShown = false;
+        return;
+    }
+
+    if (ShouldThrottle(m_LastDesktopCompanionRearMirrorCopyTime, (std::max)(1.0f, (std::min)(m_RearMirrorRTTMaxHz, 30.0f))))
+        return;
+
+    D3DSURFACE_DESC desc{};
+    if (FAILED(m_D9RearMirrorSurface->GetDesc(&desc)) || desc.Width == 0 || desc.Height == 0)
+        return;
+    if (desc.Format != D3DFMT_A8R8G8B8 && desc.Format != D3DFMT_X8R8G8B8)
+        return;
+
+    IDirect3DDevice9* device = nullptr;
+    if (FAILED(m_D9RearMirrorSurface->GetDevice(&device)) || !device)
+        return;
+
+    g_D3DVR9->LockDevice();
+
+    if (m_D9DesktopCompanionRearMirrorReadback)
+    {
+        D3DSURFACE_DESC oldDesc{};
+        if (FAILED(m_D9DesktopCompanionRearMirrorReadback->GetDesc(&oldDesc)) ||
+            oldDesc.Width != desc.Width || oldDesc.Height != desc.Height || oldDesc.Format != desc.Format)
+        {
+            m_D9DesktopCompanionRearMirrorReadback->Release();
+            m_D9DesktopCompanionRearMirrorReadback = nullptr;
+        }
+    }
+
+    if (!m_D9DesktopCompanionRearMirrorReadback)
+    {
+        const HRESULT createHr = device->CreateOffscreenPlainSurface(
+            desc.Width,
+            desc.Height,
+            desc.Format,
+            D3DPOOL_SYSTEMMEM,
+            &m_D9DesktopCompanionRearMirrorReadback,
+            nullptr);
+        if (FAILED(createHr))
+        {
+            g_D3DVR9->UnlockDevice();
+            device->Release();
+            return;
+        }
+    }
+
+    const HRESULT copyHr = device->GetRenderTargetData(m_D9RearMirrorSurface, m_D9DesktopCompanionRearMirrorReadback);
+    D3DLOCKED_RECT lr{};
+    const HRESULT lockHr = SUCCEEDED(copyHr)
+        ? m_D9DesktopCompanionRearMirrorReadback->LockRect(&lr, nullptr, D3DLOCK_READONLY)
+        : E_FAIL;
+
+    if (SUCCEEDED(lockHr) && lr.pBits)
+    {
+        const int width = static_cast<int>(desc.Width);
+        const int height = static_cast<int>(desc.Height);
+        HWND hwnd = EnsureDesktopCompanionWindow(this, m_DesktopRearMirrorWindow,
+            "L4D2VRDesktopRearMirrorWindow", "L4D2VR Rear Mirror", width, height);
+        if (hwnd)
+        {
+            {
+                std::lock_guard<std::mutex> lock(m_DesktopCompanionHudMutex);
+                if (m_DesktopCompanionRearMirrorW != width || m_DesktopCompanionRearMirrorH != height)
+                {
+                    m_DesktopCompanionRearMirrorW = width;
+                    m_DesktopCompanionRearMirrorH = height;
+                }
+
+                m_DesktopCompanionRearMirrorBgra.resize((size_t)width * (size_t)height * 4);
+                const uint8_t* src0 = reinterpret_cast<const uint8_t*>(lr.pBits);
+                for (int y = 0; y < height; ++y)
+                {
+                    const uint8_t* src = src0 + (size_t)y * (size_t)lr.Pitch;
+                    uint8_t* dst = m_DesktopCompanionRearMirrorBgra.data() + (size_t)y * (size_t)width * 4;
+                    std::memcpy(dst, src, (size_t)width * 4);
+                }
+            }
+
+            if (!m_DesktopRearMirrorWindowShown)
+            {
+                ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                m_DesktopRearMirrorWindowShown = true;
+                RefreshDesktopCompanionZOrder(m_DesktopRearMirrorWindow, m_DesktopRearMirrorWindowShown,
+                    m_DesktopIntentSenseHudWindow, m_DesktopIntentSenseHudWindowShown);
+            }
+            InvalidateRect(hwnd, nullptr, FALSE);
+        }
+
+        m_D9DesktopCompanionRearMirrorReadback->UnlockRect();
+    }
+
+    g_D3DVR9->UnlockDevice();
+    device->Release();
+}
+
+void VR::DestroyDesktopCompanionWindows()
+{
+    if (m_DesktopRearMirrorWindow)
+    {
+        DestroyWindow(m_DesktopRearMirrorWindow);
+        m_DesktopRearMirrorWindow = nullptr;
+    }
+    if (m_DesktopIntentSenseHudWindow)
+    {
+        DestroyWindow(m_DesktopIntentSenseHudWindow);
+        m_DesktopIntentSenseHudWindow = nullptr;
+    }
+    m_DesktopRearMirrorWindowShown = false;
+    m_DesktopIntentSenseHudWindowShown = false;
+
+    if (m_D9DesktopCompanionRearMirrorReadback)
+    {
+        m_D9DesktopCompanionRearMirrorReadback->Release();
+        m_D9DesktopCompanionRearMirrorReadback = nullptr;
+    }
+
+    std::lock_guard<std::mutex> lock(m_DesktopCompanionHudMutex);
+    m_DesktopCompanionRearMirrorBgra.clear();
+    m_DesktopCompanionIntentHudBgra.clear();
+    m_DesktopCompanionRearMirrorW = 0;
+    m_DesktopCompanionRearMirrorH = 0;
+    m_DesktopCompanionIntentHudW = 0;
+    m_DesktopCompanionIntentHudH = 0;
+}
+
 IDirect3DTexture9* VR::GetOrCreateProjectedItemLabelTexture(
     IDirect3DDevice9* device,
     const std::string& text,
@@ -9447,9 +9841,10 @@ void VR::ScanSpecialInfectedEntitiesFromClientList()
         m_SpecialInfectedArrowEnabled ||
         m_SpecialInfectedArrowDebugLog ||
         m_SpecialInfectedIntentSenseEnabled ||
+        m_DesktopIntentSenseHudWindowEnabled ||
         (m_SpecialInfectedBlindSpotDistance > 0.0f) ||
         (m_SpecialInfectedPreWarningDistance > 0.0f && m_SpecialInfectedPreWarningAutoAimEnabled) ||
-        (m_RearMirrorEnabled && m_RearMirrorShowOnlyOnSpecialWarning
+        ((m_RearMirrorEnabled || m_DesktopRearMirrorWindowEnabled) && m_RearMirrorShowOnlyOnSpecialWarning
             && m_RearMirrorSpecialShowHoldSeconds > 0.0f && m_RearMirrorSpecialWarningDistance > 0.0f);
     if (!wantsEntityScan)
         return;
