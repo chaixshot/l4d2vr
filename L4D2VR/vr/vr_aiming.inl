@@ -1512,14 +1512,13 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
     const bool queued = (queueMode != 0);
     const bool scopeOverlayNeedsDebugAimLine = ShouldRenderScope();
     // Source DebugOverlay primitives are global. When desktop mirror overlay hiding is
-    // active, skip DebugOverlay aim primitives and draw the VR-only line through the
-    // post-mirror D3D path instead. That D3D path must still share the normal aim-line
-    // occlusion result, otherwise first-person lines can pass through walls while
-    // third-person appears correct because its converge point was already traced.
+    // active, keep the DebugOverlay aim primitive suppressed. D3D aim-line drawing is
+    // controlled only by D3DAimLineOverlayEnabled, while the aim-ray/cache still updates
+    // for hit tests and occlusion.
     const bool deferDebugAimOverlayForCleanMirror =
         !queued && m_DesktopMirrorHidePluginOverlays && m_DesktopMirrorEnabled && !m_ScopeRenderingPass;
     const bool d3dAimLineNeedsVisibleSegment =
-        !queued && !scopeOverlayNeedsDebugAimLine && (m_D3DAimLineOverlayEnabled || deferDebugAimOverlayForCleanMirror);
+        !queued && !scopeOverlayNeedsDebugAimLine && m_D3DAimLineOverlayEnabled;
 
 
     C_WeaponCSBase* activeWeapon = nullptr;
@@ -2807,7 +2806,7 @@ bool VR::ShouldShowAimLine(C_WeaponCSBase* weapon) const
     case C_WeaponCSBase::MELEE:
     case C_WeaponCSBase::CHAINSAW:
         return m_MeleeAimLineEnabled;
-        // Firearms and throwables use the main aim-line toggle.
+        // Firearms and throwables keep aim-ray processing alive for helpers even when the visual line is hidden.
     case C_WeaponCSBase::PISTOL:
     case C_WeaponCSBase::MAGNUM:
     case C_WeaponCSBase::UZI:
@@ -2830,7 +2829,11 @@ bool VR::ShouldShowAimLine(C_WeaponCSBase* weapon) const
     case C_WeaponCSBase::MOLOTOV:
     case C_WeaponCSBase::PIPE_BOMB:
     case C_WeaponCSBase::VOMITJAR:
-        return m_AimLineEnabled;
+        return m_AimLineEnabled
+            || m_D3DAimLineOverlayEnabled
+            || m_BlockFireOnFriendlyAimEnabled
+            || m_EffectiveAttackRangeIndicatorEnabled
+            || m_EffectiveAttackRangeAutoFireEnabled;
     default:
         return false;
     }
@@ -3196,7 +3199,14 @@ void VR::UpdateD3DAimLineOverlayForView(C_BasePlayer* localPlayer, const CViewSe
 
     const int queueMode = m_Game ? m_Game->GetMatQueueMode() : 0;
     const bool scopeOverlayNeedsDebugAimLine = ShouldRenderScope();
-    if (!m_D3DAimLineOverlayEnabled || queueMode != 0 || !m_AimLineEnabled || !m_IsVREnabled || !localPlayer || scopeOverlayNeedsDebugAimLine)
+    if (!m_D3DAimLineOverlayEnabled || queueMode != 0 || !m_IsVREnabled || !localPlayer || scopeOverlayNeedsDebugAimLine)
+    {
+        clearEye();
+        return;
+    }
+
+    C_WeaponCSBase* activeWeapon = static_cast<C_WeaponCSBase*>(localPlayer->GetActiveWeapon());
+    if (!ShouldShowAimLine(activeWeapon) || !ShouldDrawAimLine(activeWeapon))
     {
         clearEye();
         return;

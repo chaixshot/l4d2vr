@@ -9254,7 +9254,7 @@ void VR::DrawPostMirrorPluginOverlays(IMatRenderContext* renderContext, C_BasePl
     // This function normally uses raw D3D9 draws after Source's RenderView. In queued/multicore
     // mode those post-mirror D3D draws can race DXVK's queued command stream, so this
     // function keeps only the DebugOverlay item-label fallback alive and skips the raw
-    // D3D overlay draws for aim lines / special-infected arrows.
+    // D3D overlay draws for special-infected arrows and the optional D3D aim line.
     if (m_Game && m_Game->GetMatQueueMode() != 0)
     {
         DrawProjectedItemLabels(renderContext, view);
@@ -9266,7 +9266,7 @@ void VR::DrawPostMirrorPluginOverlays(IMatRenderContext* renderContext, C_BasePl
 
     if (!m_DesktopMirrorHidePluginOverlays || !m_DesktopMirrorEnabled)
         return;
-    if (!localPlayer || !m_AimLineEnabled || !m_IsVREnabled)
+    if (!localPlayer || !m_D3DAimLineOverlayEnabled || !m_IsVREnabled)
         return;
     if (view.width <= 0 || view.height <= 0 || view.fov <= 1.0f)
         return;
