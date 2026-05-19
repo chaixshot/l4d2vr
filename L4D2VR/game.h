@@ -140,7 +140,6 @@ public:
     static void BeginConVarWritePermit();
     static void EndConVarWritePermit();
     static bool HasConVarWritePermit();
-    bool SampleLightAtPoint(const Vector& point, int& outR, int& outG, int& outB) const;
     int GetEntityEffects(const C_BaseEntity* entity, int fallback = 0) const;
 
     // === Logging ===

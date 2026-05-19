@@ -1,30 +1,20 @@
 namespace
 {
     constexpr int kEffectDimLight = 0x4; // Source EF_DIMLIGHT
-    const Vector kAutoFlashlightWorldUp = { 0.0f, 0.0f, 1.0f };
-    constexpr float kAutoFlashlightTraceInset = 2.0f;
-    constexpr float kAutoFlashlightFallbackWeightScale = 0.2f;
-    constexpr float kAutoFlashlightReliableWeight = 1.75f;
-    constexpr int kAutoFlashlightReliableTraceSamples = 2;
+    constexpr int kAutoFlashlightReadbackWidth = 32;
+    constexpr int kAutoFlashlightReadbackHeight = 18;
+    constexpr float kAutoFlashlightSampleIntervalSeconds = 0.25f;
+    constexpr float kAutoFlashlightDarkHoldSeconds = 0.60f;
+    constexpr float kAutoFlashlightBrightHoldSeconds = 1.50f;
+    constexpr float kAutoFlashlightMinOnSeconds = 2.00f;
+    constexpr float kAutoFlashlightMinOffSeconds = 0.80f;
+    constexpr float kAutoFlashlightManualOverrideSeconds = 6.0f;
 
-    struct AutoFlashlightProbe
+    // Avoid referencing the external IID_IDirect3DTexture9 symbol.
+    static const GUID kAutoFlashlightIID_IDirect3DTexture9 =
     {
-        Vector point;
-        float weight;
-    };
-
-    struct AutoFlashlightProbeSetResult
-    {
-        bool valid = false;
-        int successfulSamples = 0;
-        int tracedSamples = 0;
-        int fallbackSamples = 0;
-        int averageR = 0;
-        int averageG = 0;
-        int averageB = 0;
-        float tracedWeight = 0.0f;
-        float fallbackWeight = 0.0f;
-        float rawLuma = 0.0f;
+        0x85c31227, 0x3de5, 0x4f00,
+        { 0x9b, 0x3a, 0xf1, 0x1a, 0xc3, 0x8c, 0x18, 0xb5 }
     };
 
     inline float ComputePerceivedLuma(float r, float g, float b)
@@ -34,20 +24,24 @@ namespace
             0.0722f * b;
     }
 
-    inline float ComputePerceivedLuma(int r, int g, int b)
+    inline float ComputePerceivedLumaFromArgb(uint32_t argb)
     {
-        return ComputePerceivedLuma(
-            static_cast<float>(r),
-            static_cast<float>(g),
-            static_cast<float>(b));
+        const float r = static_cast<float>((argb >> 16) & 0xFFu);
+        const float g = static_cast<float>((argb >> 8) & 0xFFu);
+        const float b = static_cast<float>(argb & 0xFFu);
+        return ComputePerceivedLuma(r, g, b);
     }
 
-    inline float ComputeSmoothingAlpha(float deltaSeconds, float smoothingTime)
+    inline float ComputePercentile(std::vector<float> values, float percentile)
     {
-        if (smoothingTime <= 0.0f || deltaSeconds <= 0.0f)
-            return 1.0f;
+        if (values.empty())
+            return 255.0f;
 
-        return std::clamp(1.0f - std::exp(-deltaSeconds / smoothingTime), 0.0f, 1.0f);
+        percentile = std::clamp(percentile, 0.0f, 1.0f);
+        const size_t index = (std::min)(values.size() - 1,
+            static_cast<size_t>(std::lround(percentile * static_cast<float>(values.size() - 1))));
+        std::nth_element(values.begin(), values.begin() + index, values.end());
+        return values[index];
     }
 
     struct FocusWindowSearchContext
@@ -226,97 +220,6 @@ namespace
         --state.restoreFrames;
     }
 
-    inline void BuildYawOnlyFlashlightBasis(const QAngle& viewAngles, Vector& forward, Vector& right)
-    {
-        Vector viewForward;
-        Vector viewRight;
-        Vector viewUp;
-        QAngle::AngleVectors(viewAngles, &viewForward, &viewRight, &viewUp);
-
-        forward = { viewForward.x, viewForward.y, 0.0f };
-        if (VectorNormalize(forward) == 0.0f)
-            forward = { 1.0f, 0.0f, 0.0f };
-
-        right = { viewRight.x, viewRight.y, 0.0f };
-        if (VectorNormalize(right) == 0.0f)
-        {
-            right = CrossProduct(forward, kAutoFlashlightWorldUp);
-            if (VectorNormalize(right) == 0.0f)
-                right = { 0.0f, 1.0f, 0.0f };
-        }
-    }
-
-    inline void UpdateSmoothedLuma(
-        float rawLuma,
-        const std::chrono::steady_clock::time_point& now,
-        float sampleInterval,
-        float smoothingTime,
-        bool& hasSmoothedLuma,
-        float& smoothedLuma,
-        std::chrono::steady_clock::time_point& lastSampleTime)
-    {
-        if (!hasSmoothedLuma)
-        {
-            smoothedLuma = rawLuma;
-            hasSmoothedLuma = true;
-        }
-        else
-        {
-            const float deltaSeconds =
-                (lastSampleTime.time_since_epoch().count() == 0)
-                ? sampleInterval
-                : std::chrono::duration<float>(now - lastSampleTime).count();
-            const float alpha = ComputeSmoothingAlpha(deltaSeconds, smoothingTime);
-            smoothedLuma += (rawLuma - smoothedLuma) * alpha;
-        }
-
-        lastSampleTime = now;
-    }
-
-    inline bool TraceAutoFlashlightProbe(
-        IEngineTrace* engineTrace,
-        IHandleEntity* skipEntity,
-        const Vector& origin,
-        const Vector& target,
-        Vector& outSamplePoint,
-        bool& outTraced)
-    {
-        outSamplePoint = target;
-        outTraced = false;
-
-        if (!engineTrace)
-            return true;
-
-        Ray_t ray;
-        ray.Init(origin, target);
-
-        CTraceFilterSkipNPCsAndPlayers filter(skipEntity, 0);
-        trace_t tr{};
-        __try
-        {
-            engineTrace->TraceRay(ray, STANDARD_TRACE_MASK, &filter, &tr);
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER)
-        {
-            return false;
-        }
-
-        if (tr.startsolid || tr.allsolid)
-            return false;
-
-        if (tr.fraction < 0.999f)
-        {
-            Vector rayDir = target - origin;
-            if (VectorNormalize(rayDir) != 0.0f)
-                outSamplePoint = tr.endpos - rayDir * kAutoFlashlightTraceInset;
-            else
-                outSamplePoint = tr.endpos;
-            outTraced = true;
-        }
-
-        return true;
-    }
-
     inline bool SafeScanItemModelLabelEntities(VR* vr)
     {
         if (!vr)
@@ -341,17 +244,15 @@ namespace
 
 void VR::ResetAutoFlashlightState()
 {
-    m_AutoFlashlightHasSmoothedForwardLuma = false;
-    m_AutoFlashlightSmoothedForwardLuma = 255.0f;
-    m_AutoFlashlightHasSmoothedAmbientLuma = false;
-    m_AutoFlashlightSmoothedAmbientLuma = 255.0f;
+    m_AutoFlashlightHasScreenLuma = false;
+    m_AutoFlashlightCenterMedianLuma = 255.0f;
+    m_AutoFlashlightCenterLowLuma = 255.0f;
+    m_AutoFlashlightPeripheralMedianLuma = 255.0f;
     m_AutoFlashlightHasKnownState = false;
     m_AutoFlashlightLastKnownOn = false;
     m_AutoFlashlightDarkDecisionSamples = 0;
     m_AutoFlashlightBrightDecisionSamples = 0;
     m_AutoFlashlightNextSampleTime = {};
-    m_AutoFlashlightLastForwardSampleTime = {};
-    m_AutoFlashlightLastAmbientSampleTime = {};
     m_AutoFlashlightLastToggleTime = {};
     m_AutoFlashlightManualOverrideUntil = {};
 }
@@ -385,11 +286,11 @@ void VR::IssueFlashlightToggle(bool manual)
     m_AutoFlashlightDarkDecisionSamples = 0;
     m_AutoFlashlightBrightDecisionSamples = 0;
 
-    if (manual && m_AutoFlashlightManualOverrideSeconds > 0.0f)
+    if (manual)
     {
         m_AutoFlashlightManualOverrideUntil =
             now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                std::chrono::duration<float>(m_AutoFlashlightManualOverrideSeconds));
+                std::chrono::duration<float>(kAutoFlashlightManualOverrideSeconds));
     }
 }
 
@@ -528,6 +429,363 @@ namespace
     }
 }
 
+bool VR::SampleAutoFlashlightScreenLuma(float& outCenterMedianLuma, float& outCenterLowLuma, float& outPeripheralMedianLuma, float& outMeanLuma)
+{
+    outCenterMedianLuma = 255.0f;
+    outCenterLowLuma = 255.0f;
+    outPeripheralMedianLuma = 255.0f;
+    outMeanLuma = 255.0f;
+
+    if (!g_D3DVR9 || !m_CreatedVRTextures.load(std::memory_order_acquire))
+        return false;
+
+    IDirect3DSurface9* src = nullptr;
+    int sourceEyeIndex = 0;
+    {
+        std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
+        if (m_CreatingTextureID != Texture_None)
+            return false;
+
+        // Sample the raw eye RT and apply its SteamVR bounds during the GPU downsample.
+        // The raw eye RT is the stable source in both normal and ReShade-compat paths.
+        if (m_D9LeftEyeSurface)
+        {
+            src = m_D9LeftEyeSurface;
+            sourceEyeIndex = 0;
+        }
+        else if (m_D9RightEyeSurface)
+        {
+            src = m_D9RightEyeSurface;
+            sourceEyeIndex = 1;
+        }
+        if (!src)
+            return false;
+        src->AddRef();
+    }
+
+    auto releaseSrc = [&]()
+        {
+            if (src)
+            {
+                src->Release();
+                src = nullptr;
+            }
+        };
+
+    IDirect3DDevice9* device = nullptr;
+    HRESULT hr = src->GetDevice(&device);
+    if (FAILED(hr) || !device)
+    {
+        releaseSrc();
+        return false;
+    }
+
+    auto releaseDevice = [&]()
+        {
+            if (device)
+            {
+                device->Release();
+                device = nullptr;
+            }
+        };
+
+    g_D3DVR9->LockDevice();
+    bool locked = true;
+    auto unlockDevice = [&]()
+        {
+            if (locked)
+            {
+                g_D3DVR9->UnlockDevice();
+                locked = false;
+            }
+        };
+
+    const HRESULT cooperativeHr = device->TestCooperativeLevel();
+    if (cooperativeHr == D3DERR_DEVICELOST || cooperativeHr == D3DERR_DEVICENOTRESET || cooperativeHr == D3DERR_DRIVERINTERNALERROR)
+    {
+        unlockDevice();
+        releaseDevice();
+        releaseSrc();
+        return false;
+    }
+
+    D3DSURFACE_DESC srcDesc{};
+    if (FAILED(src->GetDesc(&srcDesc)) || srcDesc.Width == 0 || srcDesc.Height == 0)
+    {
+        unlockDevice();
+        releaseDevice();
+        releaseSrc();
+        return false;
+    }
+
+    auto releaseAutoFlashlightSurfaces = [&]()
+        {
+            if (m_D9AutoFlashlightReadbackSurface)
+            {
+                m_D9AutoFlashlightReadbackSurface->Release();
+                m_D9AutoFlashlightReadbackSurface = nullptr;
+            }
+            if (m_D9AutoFlashlightLumaSurface)
+            {
+                m_D9AutoFlashlightLumaSurface->Release();
+                m_D9AutoFlashlightLumaSurface = nullptr;
+            }
+            if (m_D9AutoFlashlightLumaTexture)
+            {
+                m_D9AutoFlashlightLumaTexture->Release();
+                m_D9AutoFlashlightLumaTexture = nullptr;
+            }
+            m_AutoFlashlightReadbackWidth = 0;
+            m_AutoFlashlightReadbackHeight = 0;
+        };
+
+    if (m_AutoFlashlightReadbackWidth != kAutoFlashlightReadbackWidth ||
+        m_AutoFlashlightReadbackHeight != kAutoFlashlightReadbackHeight ||
+        !m_D9AutoFlashlightLumaTexture || !m_D9AutoFlashlightLumaSurface || !m_D9AutoFlashlightReadbackSurface)
+    {
+        releaseAutoFlashlightSurfaces();
+
+        hr = device->CreateTexture(
+            kAutoFlashlightReadbackWidth,
+            kAutoFlashlightReadbackHeight,
+            1,
+            D3DUSAGE_RENDERTARGET,
+            D3DFMT_A8R8G8B8,
+            D3DPOOL_DEFAULT,
+            &m_D9AutoFlashlightLumaTexture,
+            nullptr);
+        if (FAILED(hr) || !m_D9AutoFlashlightLumaTexture)
+        {
+            releaseAutoFlashlightSurfaces();
+            unlockDevice();
+            releaseDevice();
+            releaseSrc();
+            return false;
+        }
+
+        hr = m_D9AutoFlashlightLumaTexture->GetSurfaceLevel(0, &m_D9AutoFlashlightLumaSurface);
+        if (FAILED(hr) || !m_D9AutoFlashlightLumaSurface)
+        {
+            releaseAutoFlashlightSurfaces();
+            unlockDevice();
+            releaseDevice();
+            releaseSrc();
+            return false;
+        }
+
+        hr = device->CreateOffscreenPlainSurface(
+            kAutoFlashlightReadbackWidth,
+            kAutoFlashlightReadbackHeight,
+            D3DFMT_A8R8G8B8,
+            D3DPOOL_SYSTEMMEM,
+            &m_D9AutoFlashlightReadbackSurface,
+            nullptr);
+        if (FAILED(hr) || !m_D9AutoFlashlightReadbackSurface)
+        {
+            releaseAutoFlashlightSurfaces();
+            unlockDevice();
+            releaseDevice();
+            releaseSrc();
+            return false;
+        }
+
+        m_AutoFlashlightReadbackWidth = kAutoFlashlightReadbackWidth;
+        m_AutoFlashlightReadbackHeight = kAutoFlashlightReadbackHeight;
+    }
+
+    IDirect3DTexture9* srcTexture = nullptr;
+    hr = src->GetContainer(kAutoFlashlightIID_IDirect3DTexture9, reinterpret_cast<void**>(&srcTexture));
+    if (FAILED(hr) || !srcTexture)
+    {
+        unlockDevice();
+        releaseDevice();
+        releaseSrc();
+        return false;
+    }
+
+    IDirect3DSurface9* oldRenderTarget = nullptr;
+    const HRESULT oldRtHr = device->GetRenderTarget(0, &oldRenderTarget);
+    D3DVIEWPORT9 oldViewport{};
+    const bool haveOldViewport = SUCCEEDED(device->GetViewport(&oldViewport));
+
+    IDirect3DStateBlock9* stateBlock = nullptr;
+    if (SUCCEEDED(device->CreateStateBlock(D3DSBT_ALL, &stateBlock)) && stateBlock)
+        stateBlock->Capture();
+
+    float u0 = std::clamp(m_TextureBounds[sourceEyeIndex].uMin, 0.0f, 1.0f);
+    float v0 = std::clamp(m_TextureBounds[sourceEyeIndex].vMin, 0.0f, 1.0f);
+    float u1 = std::clamp(m_TextureBounds[sourceEyeIndex].uMax, 0.0f, 1.0f);
+    float v1 = std::clamp(m_TextureBounds[sourceEyeIndex].vMax, 0.0f, 1.0f);
+    if (u1 <= u0 || v1 <= v0)
+    {
+        u0 = 0.0f;
+        v0 = 0.0f;
+        u1 = 1.0f;
+        v1 = 1.0f;
+    }
+
+    struct AutoFlashlightReadbackVertex
+    {
+        float x;
+        float y;
+        float z;
+        float rhw;
+        D3DCOLOR color;
+        float u;
+        float v;
+    };
+    static constexpr DWORD kAutoFlashlightReadbackFvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1;
+
+    const float left = -0.5f;
+    const float top = -0.5f;
+    const float right = static_cast<float>(kAutoFlashlightReadbackWidth) - 0.5f;
+    const float bottom = static_cast<float>(kAutoFlashlightReadbackHeight) - 0.5f;
+    const AutoFlashlightReadbackVertex quad[4] =
+    {
+        { left,  top,    0.0f, 1.0f, 0xFFFFFFFFu, u0, v0 },
+        { right, top,    0.0f, 1.0f, 0xFFFFFFFFu, u1, v0 },
+        { left,  bottom, 0.0f, 1.0f, 0xFFFFFFFFu, u0, v1 },
+        { right, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, u1, v1 }
+    };
+
+    D3DVIEWPORT9 viewport{};
+    viewport.X = 0;
+    viewport.Y = 0;
+    viewport.Width = kAutoFlashlightReadbackWidth;
+    viewport.Height = kAutoFlashlightReadbackHeight;
+    viewport.MinZ = 0.0f;
+    viewport.MaxZ = 1.0f;
+
+    bool ok = true;
+    hr = device->SetRenderTarget(0, m_D9AutoFlashlightLumaSurface);
+    ok = ok && SUCCEEDED(hr);
+    if (ok)
+    {
+        device->SetViewport(&viewport);
+        device->SetVertexShader(nullptr);
+        device->SetPixelShader(nullptr);
+        device->SetFVF(kAutoFlashlightReadbackFvf);
+        device->SetTexture(0, srcTexture);
+        device->SetRenderState(D3DRS_ZENABLE, FALSE);
+        device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+        device->SetRenderState(D3DRS_LIGHTING, FALSE);
+        device->SetRenderState(D3DRS_FOGENABLE, FALSE);
+        device->SetRenderState(D3DRS_COLORWRITEENABLE,
+            D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE | D3DCOLORWRITEENABLE_ALPHA);
+        device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+        device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+        device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+        device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+
+        hr = device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(AutoFlashlightReadbackVertex));
+        ok = ok && SUCCEEDED(hr);
+    }
+
+    if (ok)
+    {
+        hr = device->GetRenderTargetData(m_D9AutoFlashlightLumaSurface, m_D9AutoFlashlightReadbackSurface);
+        ok = SUCCEEDED(hr);
+    }
+
+    if (stateBlock)
+    {
+        stateBlock->Apply();
+        stateBlock->Release();
+    }
+    else
+    {
+        device->SetTexture(0, nullptr);
+    }
+    if (SUCCEEDED(oldRtHr) && oldRenderTarget)
+        device->SetRenderTarget(0, oldRenderTarget);
+    if (haveOldViewport)
+        device->SetViewport(&oldViewport);
+    if (oldRenderTarget)
+        oldRenderTarget->Release();
+
+    srcTexture->Release();
+
+    if (!ok)
+    {
+        unlockDevice();
+        releaseDevice();
+        releaseSrc();
+        return false;
+    }
+
+    D3DLOCKED_RECT lockedRect{};
+    hr = m_D9AutoFlashlightReadbackSurface->LockRect(&lockedRect, nullptr, D3DLOCK_READONLY);
+    if (FAILED(hr))
+    {
+        unlockDevice();
+        releaseDevice();
+        releaseSrc();
+        return false;
+    }
+
+    std::vector<float> centerLumas;
+    std::vector<float> peripheralLumas;
+    centerLumas.reserve(kAutoFlashlightReadbackWidth * kAutoFlashlightReadbackHeight);
+    peripheralLumas.reserve(kAutoFlashlightReadbackWidth * kAutoFlashlightReadbackHeight);
+    float totalLuma = 0.0f;
+    int totalPixels = 0;
+
+    const int centerX0 = kAutoFlashlightReadbackWidth / 4;
+    const int centerX1 = (kAutoFlashlightReadbackWidth * 3) / 4;
+    const int centerY0 = kAutoFlashlightReadbackHeight / 4;
+    const int centerY1 = (kAutoFlashlightReadbackHeight * 13) / 18;
+    const int sideX0 = (kAutoFlashlightReadbackWidth * 7) / 32;
+    const int sideX1 = (kAutoFlashlightReadbackWidth * 25) / 32;
+    const int sideY0 = kAutoFlashlightReadbackHeight / 4;
+    const int sideY1 = (kAutoFlashlightReadbackHeight * 13) / 18;
+    const int topBandY0 = kAutoFlashlightReadbackHeight / 6;
+    const int topBandY1 = kAutoFlashlightReadbackHeight / 3;
+
+    const uint8_t* base = static_cast<const uint8_t*>(lockedRect.pBits);
+    for (int y = 0; y < kAutoFlashlightReadbackHeight; ++y)
+    {
+        const uint32_t* row = reinterpret_cast<const uint32_t*>(base + y * lockedRect.Pitch);
+        for (int x = 0; x < kAutoFlashlightReadbackWidth; ++x)
+        {
+            const float luma = ComputePerceivedLumaFromArgb(row[x]);
+            totalLuma += luma;
+            ++totalPixels;
+
+            const bool center = (x >= centerX0 && x < centerX1 && y >= centerY0 && y < centerY1);
+            const bool sidePeripheral = ((x < sideX0 || x >= sideX1) && y >= sideY0 && y < sideY1);
+            const bool topPeripheral = (x >= centerX0 && x < centerX1 && y >= topBandY0 && y < topBandY1);
+            if (center)
+                centerLumas.push_back(luma);
+            if (sidePeripheral || topPeripheral)
+                peripheralLumas.push_back(luma);
+        }
+    }
+
+    m_D9AutoFlashlightReadbackSurface->UnlockRect();
+    unlockDevice();
+    releaseDevice();
+    releaseSrc();
+
+    if (centerLumas.empty() || peripheralLumas.empty() || totalPixels <= 0)
+        return false;
+
+    outCenterMedianLuma = ComputePercentile(centerLumas, 0.50f);
+    outCenterLowLuma = ComputePercentile(centerLumas, 0.30f);
+    outPeripheralMedianLuma = ComputePercentile(peripheralLumas, 0.50f);
+    outMeanLuma = totalLuma / static_cast<float>(totalPixels);
+    return true;
+}
+
 void VR::UpdateAutoFlashlight(C_BasePlayer* localPlayer)
 {
     const auto now = std::chrono::steady_clock::now();
@@ -612,7 +870,7 @@ void VR::UpdateAutoFlashlight(C_BasePlayer* localPlayer)
 
     m_AutoFlashlightNextSampleTime =
         now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-            std::chrono::duration<float>(m_AutoFlashlightSampleInterval));
+            std::chrono::duration<float>(kAutoFlashlightSampleIntervalSeconds));
 
     bool flashlightOn = false;
     const bool stateValid = QueryFlashlightState(localPlayer, flashlightOn);
@@ -627,192 +885,48 @@ void VR::UpdateAutoFlashlight(C_BasePlayer* localPlayer)
         flashlightOn = m_AutoFlashlightLastKnownOn;
     }
 
-    const Vector eye = localPlayer->EyePosition();
-    Vector forward;
-    Vector right;
-    BuildYawOnlyFlashlightBasis(m_SetupAngles, forward, right);
-
-    const Vector probeOrigin = eye + kAutoFlashlightWorldUp * m_AutoFlashlightVerticalOffset;
-    const Vector nearCenter = probeOrigin + forward * m_AutoFlashlightForwardNearDistance;
-    const Vector farCenter = probeOrigin + forward * m_AutoFlashlightForwardFarDistance;
-    const float sideOffset = m_AutoFlashlightLateralOffset;
-    const float farSideOffset = sideOffset * 0.75f;
-    const float ambientBackDistance = std::max(24.0f, m_AutoFlashlightForwardNearDistance * 0.5f);
-    const float ambientSideOffset = std::max(12.0f, sideOffset * 0.75f);
-    const Vector ambientBackCenter = probeOrigin - forward * ambientBackDistance;
-
-    auto sampleProbeSet = [this, localPlayer, probeOrigin](std::initializer_list<AutoFlashlightProbe> probes)
-        {
-            AutoFlashlightProbeSetResult result;
-            float weightedR = 0.0f;
-            float weightedG = 0.0f;
-            float weightedB = 0.0f;
-            float totalWeight = 0.0f;
-
-            for (const AutoFlashlightProbe& probe : probes)
-            {
-                if (probe.weight <= 0.0f)
-                    continue;
-
-                Vector samplePoint = probe.point;
-                bool traced = false;
-                if (!TraceAutoFlashlightProbe(
-                    m_Game ? m_Game->m_EngineTrace : nullptr,
-                    reinterpret_cast<IHandleEntity*>(localPlayer),
-                    probeOrigin,
-                    probe.point,
-                    samplePoint,
-                    traced))
-                {
-                    continue;
-                }
-
-                float effectiveWeight = probe.weight;
-                bool lowConfidenceFallback = false;
-                if (!traced && m_Game && m_Game->m_EngineTrace)
-                {
-                    effectiveWeight *= kAutoFlashlightFallbackWeightScale;
-                    if (effectiveWeight <= 0.0f)
-                        continue;
-                    lowConfidenceFallback = true;
-                }
-
-                int sampleR = 0;
-                int sampleG = 0;
-                int sampleB = 0;
-                if (!m_Game->SampleLightAtPoint(samplePoint, sampleR, sampleG, sampleB))
-                    continue;
-
-                if (traced)
-                {
-                    ++result.tracedSamples;
-                    result.tracedWeight += effectiveWeight;
-                }
-                else if (lowConfidenceFallback)
-                {
-                    ++result.fallbackSamples;
-                    result.fallbackWeight += effectiveWeight;
-                }
-
-                weightedR += static_cast<float>(sampleR) * effectiveWeight;
-                weightedG += static_cast<float>(sampleG) * effectiveWeight;
-                weightedB += static_cast<float>(sampleB) * effectiveWeight;
-                totalWeight += effectiveWeight;
-                ++result.successfulSamples;
-            }
-
-            if (result.successfulSamples == 0 || totalWeight <= 0.0f)
-                return result;
-
-            const float averageR = weightedR / totalWeight;
-            const float averageG = weightedG / totalWeight;
-            const float averageB = weightedB / totalWeight;
-            result.valid = true;
-            result.averageR = static_cast<int>(std::lround(averageR));
-            result.averageG = static_cast<int>(std::lround(averageG));
-            result.averageB = static_cast<int>(std::lround(averageB));
-            result.rawLuma = ComputePerceivedLuma(averageR, averageG, averageB);
-            return result;
-        };
-
-    const AutoFlashlightProbeSetResult forwardSample = sampleProbeSet({
-        { probeOrigin, 0.3f },
-        { nearCenter, 1.4f },
-        { farCenter, 1.2f },
-        { nearCenter + right * sideOffset, 1.0f },
-        { nearCenter - right * sideOffset, 1.0f },
-        { farCenter + right * farSideOffset, 0.8f },
-        { farCenter - right * farSideOffset, 0.8f },
-        });
-
-    const AutoFlashlightProbeSetResult ambientSample = sampleProbeSet({
-        { probeOrigin, 1.5f },
-        { probeOrigin + right * ambientSideOffset, 1.1f },
-        { probeOrigin - right * ambientSideOffset, 1.1f },
-        { ambientBackCenter, 1.2f },
-        { ambientBackCenter + right * ambientSideOffset, 0.9f },
-        { ambientBackCenter - right * ambientSideOffset, 0.9f },
-        });
-
-    if (!forwardSample.valid || !ambientSample.valid)
+    float centerMedian = 255.0f;
+    float centerLow = 255.0f;
+    float peripheralMedian = 255.0f;
+    float meanLuma = 255.0f;
+    if (!SampleAutoFlashlightScreenLuma(centerMedian, centerLow, peripheralMedian, meanLuma))
     {
-        debugLog("[VR][AutoFlashlight] skip: light sample failed forward=%d ambient=%d",
-            forwardSample.successfulSamples, ambientSample.successfulSamples);
+        debugLog("[VR][AutoFlashlight] skip: screen luma readback failed");
         return;
     }
 
-    UpdateSmoothedLuma(
-        forwardSample.rawLuma,
-        now,
-        m_AutoFlashlightSampleInterval,
-        m_AutoFlashlightSmoothingTime,
-        m_AutoFlashlightHasSmoothedForwardLuma,
-        m_AutoFlashlightSmoothedForwardLuma,
-        m_AutoFlashlightLastForwardSampleTime);
-    UpdateSmoothedLuma(
-        ambientSample.rawLuma,
-        now,
-        m_AutoFlashlightSampleInterval,
-        m_AutoFlashlightSmoothingTime,
-        m_AutoFlashlightHasSmoothedAmbientLuma,
-        m_AutoFlashlightSmoothedAmbientLuma,
-        m_AutoFlashlightLastAmbientSampleTime);
+    m_AutoFlashlightHasScreenLuma = true;
+    m_AutoFlashlightCenterMedianLuma = centerMedian;
+    m_AutoFlashlightCenterLowLuma = centerLow;
+    m_AutoFlashlightPeripheralMedianLuma = peripheralMedian;
 
-    bool shouldToggle = false;
-    const float smoothedForwardLuma = m_AutoFlashlightSmoothedForwardLuma;
-    const float smoothedAmbientLuma = m_AutoFlashlightSmoothedAmbientLuma;
-    const bool forwardReliable =
-        forwardSample.tracedSamples >= kAutoFlashlightReliableTraceSamples ||
-        forwardSample.tracedWeight >= kAutoFlashlightReliableWeight;
-    const bool ambientReliable =
-        ambientSample.tracedSamples >= kAutoFlashlightReliableTraceSamples ||
-        ambientSample.tracedWeight >= kAutoFlashlightReliableWeight;
-
-    float darkGateLuma = std::max(smoothedForwardLuma, smoothedAmbientLuma);
-    bool darkGateHighConfidence = forwardReliable || ambientReliable;
-    if (!forwardReliable && ambientReliable)
-        darkGateLuma = smoothedAmbientLuma;
-
-    float brightGateLuma = smoothedAmbientLuma;
-    bool brightGateHighConfidence = ambientReliable;
-    if (!ambientReliable && forwardReliable)
-    {
-        brightGateLuma = std::max(smoothedAmbientLuma, smoothedForwardLuma);
-        brightGateHighConfidence = true;
-    }
-
-    const int darkSamplesRequired =
-        darkGateHighConfidence ? m_AutoFlashlightHighConfidenceSamples : m_AutoFlashlightLowConfidenceSamples;
-    const int brightSamplesRequired =
-        brightGateHighConfidence ? m_AutoFlashlightHighConfidenceSamples : m_AutoFlashlightLowConfidenceSamples;
-    const char* decision = "hold";
+    const float darkGateLuma = std::min(centerMedian, centerLow + 10.0f);
+    const float brightGateLuma = peripheralMedian;
+    const int darkSamplesRequired = (std::max)(1, static_cast<int>(std::ceil(kAutoFlashlightDarkHoldSeconds / kAutoFlashlightSampleIntervalSeconds)));
+    const int brightSamplesRequired = (std::max)(1, static_cast<int>(std::ceil(kAutoFlashlightBrightHoldSeconds / kAutoFlashlightSampleIntervalSeconds)));
     const float elapsedSinceToggle =
         (m_AutoFlashlightLastToggleTime.time_since_epoch().count() == 0)
         ? 9999.0f
         : std::chrono::duration<float>(now - m_AutoFlashlightLastToggleTime).count();
+
+    bool shouldToggle = false;
+    const char* decision = "hold";
 
     if (!flashlightOn)
     {
         m_AutoFlashlightBrightDecisionSamples = 0;
         if (darkGateLuma <= m_AutoFlashlightDarkThreshold)
         {
-            m_AutoFlashlightDarkDecisionSamples =
-                (std::min)(m_AutoFlashlightDarkDecisionSamples + 1, 1024);
-            if (elapsedSinceToggle >= m_AutoFlashlightMinOffTime)
+            m_AutoFlashlightDarkDecisionSamples = (std::min)(m_AutoFlashlightDarkDecisionSamples + 1, 1024);
+            if (elapsedSinceToggle >= kAutoFlashlightMinOffSeconds &&
+                m_AutoFlashlightDarkDecisionSamples >= darkSamplesRequired)
             {
-                if (m_AutoFlashlightDarkDecisionSamples >= darkSamplesRequired)
-                {
-                    shouldToggle = true;
-                    decision = darkGateHighConfidence ? "toggle_on" : "toggle_on_low_conf";
-                }
-                else
-                {
-                    decision = darkGateHighConfidence ? "dark_wait_streak" : "dark_wait_streak_low_conf";
-                }
+                shouldToggle = true;
+                decision = "toggle_on";
             }
             else
             {
-                decision = "dark_wait_min_off";
+                decision = (elapsedSinceToggle < kAutoFlashlightMinOffSeconds) ? "dark_wait_min_off" : "dark_wait_streak";
             }
         }
         else
@@ -826,23 +940,16 @@ void VR::UpdateAutoFlashlight(C_BasePlayer* localPlayer)
         m_AutoFlashlightDarkDecisionSamples = 0;
         if (brightGateLuma >= m_AutoFlashlightBrightThreshold)
         {
-            m_AutoFlashlightBrightDecisionSamples =
-                (std::min)(m_AutoFlashlightBrightDecisionSamples + 1, 1024);
-            if (elapsedSinceToggle >= m_AutoFlashlightMinOnTime)
+            m_AutoFlashlightBrightDecisionSamples = (std::min)(m_AutoFlashlightBrightDecisionSamples + 1, 1024);
+            if (elapsedSinceToggle >= kAutoFlashlightMinOnSeconds &&
+                m_AutoFlashlightBrightDecisionSamples >= brightSamplesRequired)
             {
-                if (m_AutoFlashlightBrightDecisionSamples >= brightSamplesRequired)
-                {
-                    shouldToggle = true;
-                    decision = brightGateHighConfidence ? "toggle_off" : "toggle_off_low_conf";
-                }
-                else
-                {
-                    decision = brightGateHighConfidence ? "bright_wait_streak" : "bright_wait_streak_low_conf";
-                }
+                shouldToggle = true;
+                decision = "toggle_off";
             }
             else
             {
-                decision = "bright_wait_min_on";
+                decision = (elapsedSinceToggle < kAutoFlashlightMinOnSeconds) ? "bright_wait_min_on" : "bright_wait_streak";
             }
         }
         else
@@ -852,27 +959,24 @@ void VR::UpdateAutoFlashlight(C_BasePlayer* localPlayer)
         }
     }
 
-    debugLog("[VR][AutoFlashlight] sample fwd=%d trace=%d fallback=%d tw=%.2f fw=%.2f rgb=(%d %d %d) raw=%.1f smooth=%.1f reliable=%d ambient=%d trace=%d fallback=%d tw=%.2f fw=%.2f rgb=(%d %d %d) raw=%.1f smooth=%.1f reliable=%d darkGate=%.1f highConf=%d darkStreak=%d/%d brightGate=%.1f highConf=%d brightStreak=%d/%d on=%d stateValid=%d dark<=%.1f bright>=%.1f elapsed=%.2fs decision=%s",
-        forwardSample.successfulSamples, forwardSample.tracedSamples, forwardSample.fallbackSamples, forwardSample.tracedWeight, forwardSample.fallbackWeight,
-        forwardSample.averageR, forwardSample.averageG, forwardSample.averageB,
-        forwardSample.rawLuma, smoothedForwardLuma, forwardReliable ? 1 : 0,
-        ambientSample.successfulSamples, ambientSample.tracedSamples, ambientSample.fallbackSamples, ambientSample.tracedWeight, ambientSample.fallbackWeight,
-        ambientSample.averageR, ambientSample.averageG, ambientSample.averageB,
-        ambientSample.rawLuma, smoothedAmbientLuma, ambientReliable ? 1 : 0,
-        darkGateLuma, darkGateHighConfidence ? 1 : 0, m_AutoFlashlightDarkDecisionSamples, darkSamplesRequired,
-        brightGateLuma, brightGateHighConfidence ? 1 : 0, m_AutoFlashlightBrightDecisionSamples, brightSamplesRequired,
+    debugLog("[VR][AutoFlashlight] screen centerMed=%.1f centerLow=%.1f peripheralMed=%.1f mean=%.1f darkGate=%.1f brightGate=%.1f darkStreak=%d/%d brightStreak=%d/%d on=%d stateValid=%d dark<=%.1f bright>=%.1f elapsed=%.2fs decision=%s",
+        centerMedian, centerLow, peripheralMedian, meanLuma,
+        darkGateLuma, brightGateLuma,
+        m_AutoFlashlightDarkDecisionSamples, darkSamplesRequired,
+        m_AutoFlashlightBrightDecisionSamples, brightSamplesRequired,
         flashlightOn ? 1 : 0, stateValid ? 1 : 0,
-        m_AutoFlashlightDarkThreshold, m_AutoFlashlightBrightThreshold, elapsedSinceToggle, decision);
+        m_AutoFlashlightDarkThreshold, m_AutoFlashlightBrightThreshold,
+        elapsedSinceToggle, decision);
 
     if (shouldToggle)
     {
         IssueFlashlightToggle(false);
         if (m_AutoFlashlightDebugLog)
-            Game::logMsg("[VR][AutoFlashlight] toggled %s at fwdRaw=%.1f fwdSmooth=%.1f ambientRaw=%.1f ambientSmooth=%.1f gate=%.1f",
+        {
+            Game::logMsg("[VR][AutoFlashlight] toggled %s centerMed=%.1f centerLow=%.1f peripheralMed=%.1f darkGate=%.1f brightGate=%.1f",
                 flashlightOn ? "off" : "on",
-                forwardSample.rawLuma, smoothedForwardLuma,
-                ambientSample.rawLuma, smoothedAmbientLuma,
-                darkGateLuma);
+                centerMedian, centerLow, peripheralMedian, darkGateLuma, brightGateLuma);
+        }
     }
 }
 
@@ -1195,6 +1299,12 @@ void VR::ReleaseVRRenderTargetsForDeviceReset()
         m_D3DAimLineOverlayBackupValid[eyeIndex] = false;
         SafeReleaseD3D(m_D3DAimLineOverlayBackupSurfaces[eyeIndex]);
     }
+
+    SafeReleaseD3D(m_D9AutoFlashlightReadbackSurface);
+    SafeReleaseD3D(m_D9AutoFlashlightLumaSurface);
+    SafeReleaseD3D(m_D9AutoFlashlightLumaTexture);
+    m_AutoFlashlightReadbackWidth = 0;
+    m_AutoFlashlightReadbackHeight = 0;
 
     DestroyHandHudWorldQuadTextures();
     for (size_t i = 0; i < m_D9SpecialInfectedIntentSenseHudDynTex.size(); ++i)
