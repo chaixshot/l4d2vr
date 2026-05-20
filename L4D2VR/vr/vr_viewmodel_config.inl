@@ -180,6 +180,10 @@ void VR::ResetPosition()
     m_HeightOffset += m_SetupOrigin.z - m_HmdPosAbs.z;
     m_Roomscale1To1PrevValid = false;
     m_Roomscale1To1PrevCorrectedAbs = {};
+    m_Roomscale1To1LastEngineEyeValid = false;
+    m_Roomscale1To1LastEngineEye = {};
+    m_Roomscale1To1PendingVisualWorldDeltaValid = false;
+    m_Roomscale1To1PendingVisualWorldDelta = {};
     m_Roomscale1To1StandingHmdZValid = false;
     m_Roomscale1To1PhysicalCrouchActive = false;
 }
@@ -459,12 +463,6 @@ void VR::SaveViewmodelAdjustments()
 
 void VR::ParseConfigFile()
 {
-    std::ifstream configStream("VR\\config.txt");
-    if (!configStream) {
-        //  Ҳ    ͱ  ֹ   ʱ  Ĭ  ֵ
-        return;
-    }
-
     //  򵥵  trim
     auto ltrim = [](std::string& s) {
         s.erase(s.begin(), std::find_if(s.begin(), s.end(),
@@ -477,44 +475,59 @@ void VR::ParseConfigFile()
     auto trim = [&](std::string& s) { ltrim(s); rtrim(s); };
 
     std::unordered_map<std::string, std::string> userConfig;
-    std::string line;
     size_t parsedEntryCount = 0;
-    while (std::getline(configStream, line))
-    {
-        // ȥ  ע  
-        size_t cut = std::string::npos;
-        size_t p1 = line.find("//");
-        size_t p2 = line.find('#');
-        size_t p3 = line.find(';');
-        if (p1 != std::string::npos) cut = p1;
-        if (p2 != std::string::npos) cut = (cut == std::string::npos) ? p2 : std::min(cut, p2);
-        if (p3 != std::string::npos) cut = (cut == std::string::npos) ? p3 : std::min(cut, p3);
-        if (cut != std::string::npos) line.erase(cut);
 
-        trim(line);
-        if (line.empty()) continue;
-
-        //      key=value
-        size_t eq = line.find('=');
-        if (eq == std::string::npos) continue;
-
-        std::string key = line.substr(0, eq);
-        std::string value = line.substr(eq + 1);
-        trim(key); trim(value);
-        if (key.size() >= 3 &&
-            static_cast<unsigned char>(key[0]) == 0xEF &&
-            static_cast<unsigned char>(key[1]) == 0xBB &&
-            static_cast<unsigned char>(key[2]) == 0xBF)
+    auto parseConfigPath = [&](const char* path)->bool
         {
-            key.erase(0, 3);
-            trim(key);
-        }
-        if (!key.empty())
-        {
-            userConfig[key] = value;
-            ++parsedEntryCount;
-        }
-    }
+            std::ifstream configStream(path);
+            if (!configStream)
+                return false;
+
+            std::string line;
+            while (std::getline(configStream, line))
+            {
+                // ȥ  ע  
+                size_t cut = std::string::npos;
+                size_t p1 = line.find("//");
+                size_t p2 = line.find('#');
+                size_t p3 = line.find(';');
+                if (p1 != std::string::npos) cut = p1;
+                if (p2 != std::string::npos) cut = (cut == std::string::npos) ? p2 : std::min(cut, p2);
+                if (p3 != std::string::npos) cut = (cut == std::string::npos) ? p3 : std::min(cut, p3);
+                if (cut != std::string::npos) line.erase(cut);
+
+                trim(line);
+                if (line.empty()) continue;
+
+                //      key=value
+                size_t eq = line.find('=');
+                if (eq == std::string::npos) continue;
+
+                std::string key = line.substr(0, eq);
+                std::string value = line.substr(eq + 1);
+                trim(key); trim(value);
+                if (key.size() >= 3 &&
+                    static_cast<unsigned char>(key[0]) == 0xEF &&
+                    static_cast<unsigned char>(key[1]) == 0xBB &&
+                    static_cast<unsigned char>(key[2]) == 0xBF)
+                {
+                    key.erase(0, 3);
+                    trim(key);
+                }
+                if (!key.empty())
+                {
+                    userConfig[key] = value;
+                    ++parsedEntryCount;
+                }
+            }
+
+            return true;
+        };
+
+    const bool loadedConfig = parseConfigPath("VR\\config.txt");
+    const bool loadedConfig2 = parseConfigPath("VR\\config2.txt");
+    if (!loadedConfig && !loadedConfig2)
+        return;
 
     // С   ߣ   Ĭ  ֵ İ ȫ  ȡ
     auto getBool = [&](const char* k, bool defVal)->bool {
@@ -3000,32 +3013,47 @@ void VR::WaitForConfigUpdate()
     HANDLE fileChangeHandle = FindFirstChangeNotificationA(configDir, false, FILE_NOTIFY_CHANGE_LAST_WRITE);
 
     FILETIME configLastModified{};
+    FILETIME config2LastModified{};
     FILETIME hapticsLastModified{};
     FILETIME localVScriptLastModified{};
     bool localVScriptMissing = false;
     while (1)
     {
         WIN32_FILE_ATTRIBUTE_DATA fileAttributes{};
-        if (!GetFileAttributesExA("VR\\config.txt", GetFileExInfoStandard, &fileAttributes))
+        WIN32_FILE_ATTRIBUTE_DATA config2Attributes{};
+        const bool hasConfig = GetFileAttributesExA("VR\\config.txt", GetFileExInfoStandard, &fileAttributes) != FALSE;
+        const bool hasConfig2 = GetFileAttributesExA("VR\\config2.txt", GetFileExInfoStandard, &config2Attributes) != FALSE;
+        if (!hasConfig && !hasConfig2)
         {
-            m_Game->errorMsg("config.txt not found.");
+            m_Game->errorMsg("config.txt/config2.txt not found.");
             return;
         }
 
-        if (CompareFileTime(&fileAttributes.ftLastWriteTime, &configLastModified) != 0)
+        bool configReloadNeeded = false;
+        if (hasConfig && CompareFileTime(&fileAttributes.ftLastWriteTime, &configLastModified) != 0)
         {
             configLastModified = fileAttributes.ftLastWriteTime;
+            configReloadNeeded = true;
+        }
+        if (hasConfig2 && CompareFileTime(&config2Attributes.ftLastWriteTime, &config2LastModified) != 0)
+        {
+            config2LastModified = config2Attributes.ftLastWriteTime;
+            configReloadNeeded = true;
+        }
+
+        if (configReloadNeeded)
+        {
             try
             {
                 ParseConfigFile();
             }
             catch (const std::invalid_argument&)
             {
-                m_Game->errorMsg("Failed to parse config.txt");
+                m_Game->errorMsg("Failed to parse config.txt/config2.txt");
             }
             catch (...)
             {
-                m_Game->errorMsg("Failed to parse config.txt");
+                m_Game->errorMsg("Failed to parse config.txt/config2.txt");
             }
         }
 
@@ -3034,9 +3062,9 @@ void VR::WaitForConfigUpdate()
         {
             if (CompareFileTime(&hapticsAttributes.ftLastWriteTime, &hapticsLastModified) != 0)
             {
-                const bool configAlsoChanged = CompareFileTime(&fileAttributes.ftLastWriteTime, &configLastModified) == 0;
+                const bool configDidNotReloadThisLoop = !configReloadNeeded;
                 hapticsLastModified = hapticsAttributes.ftLastWriteTime;
-                if (configAlsoChanged)
+                if (configDidNotReloadThisLoop)
                 {
                     try
                     {

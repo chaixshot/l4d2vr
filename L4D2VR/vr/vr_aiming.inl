@@ -1027,9 +1027,7 @@ void VR::UpdateNonVRAimSolution(C_BasePlayer* localPlayer, bool forceFresh)
 
     Vector originBase = controllerPosAbs;
     // Keep non-3P codepath identical to legacy behavior; only use the new render-center delta in 3P.
-    Vector camDelta = m_IsThirdPersonCamera
-        ? (m_ThirdPersonRenderCenter - m_SetupOrigin)
-        : (m_ThirdPersonViewOrigin - m_SetupOrigin);
+    Vector camDelta = GetAimRenderCameraDelta();
     if (m_IsThirdPersonCamera && camDelta.LengthSqr() > (5.0f * 5.0f))
         originBase += camDelta;
 
@@ -1176,9 +1174,7 @@ bool VR::UpdateFriendlyFireAimHit(C_BasePlayer* localPlayer)
 
     Vector gunOriginBase = gunOrigin;
     // Keep non-3P codepath identical to legacy behavior; only use the new render-center delta in 3P.
-    Vector camDelta = m_IsThirdPersonCamera
-        ? (m_ThirdPersonRenderCenter - m_SetupOrigin)
-        : (m_ThirdPersonViewOrigin - m_SetupOrigin);
+    Vector camDelta = GetAimRenderCameraDelta();
     if (!frontViewEyeAim && !frontViewControllerEyeOrigin && m_IsThirdPersonCamera && camDelta.LengthSqr() > (5.0f * 5.0f))
         gunOriginBase += camDelta;
 
@@ -1669,9 +1665,7 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
             + (m_HmdUp * (anchor.z * m_VRScale));
     }
     // Keep non-3P codepath identical to legacy behavior; only use the new render-center delta in 3P.
-    Vector camDelta = m_IsThirdPersonCamera
-        ? (m_ThirdPersonRenderCenter - m_SetupOrigin)
-        : (m_ThirdPersonViewOrigin - m_SetupOrigin);
+    Vector camDelta = GetAimRenderCameraDelta();
     if (!frontViewEyeAim && !frontViewControllerEyeOrigin && m_IsThirdPersonCamera && camDelta.LengthSqr() > (5.0f * 5.0f))
         originBase += camDelta;
 
@@ -3056,7 +3050,7 @@ bool VR::BuildRenderAimLineSegment(C_BasePlayer* localPlayer, Vector& start, Vec
         {
             // In third-person, the VR render camera is moved away from the player eye.
             // The local VR hand/viewmodel visuals are shifted by the same delta; apply it so the aim line stays on the hand.
-            const Vector camDelta = (m_ThirdPersonRenderCenter - m_SetupOrigin);
+            const Vector camDelta = GetAimRenderCameraDelta();
             if (camDelta.LengthSqr() > (5.0f * 5.0f))
                 originBase += camDelta;
         }

@@ -1,3 +1,17 @@
+Vector VR::GetAimRenderCameraDelta() const
+{
+    if (!m_IsThirdPersonCamera)
+        return m_ThirdPersonViewOrigin - m_SetupOrigin;
+
+    // 1:1 roomscale decoupled camera already makes controller/viewmodel positions live in the
+    // current VR camera anchor space. Adding the third-person render-center delta again makes
+    // aim/debug/D3D lines drift away from the physical controller until ResetPosition recenters.
+    if (m_Roomscale1To1Movement && m_Roomscale1To1DecoupleCamera && !m_ForceNonVRServerMovement)
+        return Vector{ 0.0f, 0.0f, 0.0f };
+
+    return m_ThirdPersonRenderCenter - m_SetupOrigin;
+}
+
 void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool controlLocomotionActive)
 {
     const Vector cur = m_HmdPosCorrectedPrev;
@@ -7,6 +21,9 @@ void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool contr
             m_Roomscale1To1PrevCorrectedAbs = cur;
             m_Roomscale1To1PrevValid = true;
         };
+
+    m_Roomscale1To1PendingVisualWorldDelta = {};
+    m_Roomscale1To1PendingVisualWorldDeltaValid = false;
 
     if (!cmd || !m_Roomscale1To1Movement)
     {
@@ -90,6 +107,9 @@ void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool contr
     dt = std::clamp(dt, 1.0f / 240.0f, 1.0f / 15.0f);
 
     const Vector gameDeltaM(deltaM.x * movementScale, deltaM.y * movementScale, 0.0f);
+    m_Roomscale1To1PendingVisualWorldDelta = Vector(deltaM.x * m_VRScale, deltaM.y * m_VRScale, 0.0f);
+    m_Roomscale1To1PendingVisualWorldDeltaValid = true;
+
     Vector roomWorldVelocity(gameDeltaM.x * m_VRScale / dt, gameDeltaM.y * m_VRScale / dt, 0.0f);
     const float roomSpeed = std::sqrt((roomWorldVelocity.x * roomWorldVelocity.x) + (roomWorldVelocity.y * roomWorldVelocity.y));
     const float maxCmdSpeed = m_AdjustingViewmodel ? 25.0f : 250.0f;

@@ -1391,16 +1391,68 @@ namespace
         return !input.bad();
     }
 
-    bool TryExtractConfigParameterKey(const std::string& rawLine, std::string& outKey)
+    std::string TrimAsciiLeftWhitespace(const std::string& value)
     {
-        std::string line = rawLine;
+        size_t start = 0;
+        while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start])))
+            ++start;
+        return value.substr(start);
+    }
+
+    bool IsValidConfigParameterKey(const std::string& key)
+    {
+        if (key.empty())
+            return false;
+
+        for (const char ch : key)
+        {
+            const unsigned char c = static_cast<unsigned char>(ch);
+            if (!std::isalnum(c) && ch != '_' && ch != '.' && ch != '-')
+                return false;
+        }
+
+        return true;
+    }
+
+    size_t FindConfigCommentStart(const std::string& line)
+    {
         size_t cut = std::string::npos;
         const size_t p1 = line.find("//");
         const size_t p2 = line.find('#');
         const size_t p3 = line.find(';');
-        if (p1 != std::string::npos) cut = p1;
-        if (p2 != std::string::npos) cut = (cut == std::string::npos) ? p2 : (std::min)(cut, p2);
-        if (p3 != std::string::npos) cut = (cut == std::string::npos) ? p3 : (std::min)(cut, p3);
+        if (p1 != std::string::npos)
+            cut = p1;
+        if (p2 != std::string::npos)
+            cut = (cut == std::string::npos) ? p2 : (std::min)(cut, p2);
+        if (p3 != std::string::npos)
+            cut = (cut == std::string::npos) ? p3 : (std::min)(cut, p3);
+        return cut;
+    }
+
+    bool TryExtractConfigParameterAssignment(const std::string& rawLine, std::string& outKey, std::string& outValue, bool allowLeadingHash)
+    {
+        std::string line = rawLine;
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+
+        line = TrimAsciiLeftWhitespace(line);
+        if (line.empty())
+            return false;
+
+        if (line.rfind("//", 0) == 0 || line[0] == ';')
+            return false;
+
+        if (line[0] == '#')
+        {
+            if (!allowLeadingHash)
+                return false;
+
+            line = TrimAsciiLeftWhitespace(line.substr(1));
+            if (line.empty() || line.rfind("//", 0) == 0 || line[0] == '#' || line[0] == ';')
+                return false;
+        }
+
+        const size_t cut = FindConfigCommentStart(line);
         if (cut != std::string::npos)
             line.erase(cut);
 
@@ -1413,10 +1465,60 @@ namespace
             return false;
 
         outKey = TrimAsciiWhitespace(line.substr(0, eq));
-        return !outKey.empty();
+        outValue = TrimAsciiWhitespace(line.substr(eq + 1));
+        return IsValidConfigParameterKey(outKey);
     }
 
-    std::unordered_set<std::string> ExtractConfigParameterKeys(const std::string& text)
+    bool TryExtractConfigParameterKey(const std::string& rawLine, std::string& outKey)
+    {
+        std::string value;
+        return TryExtractConfigParameterAssignment(rawLine, outKey, value, false);
+    }
+
+    bool TryUncommentConfigSampleParameterLine(const std::string& rawLine, std::string& outLine)
+    {
+        std::string line = rawLine;
+        if (!line.empty() && line.back() == '\r')
+            line.pop_back();
+
+        size_t firstNonWhitespace = 0;
+        while (firstNonWhitespace < line.size() && std::isspace(static_cast<unsigned char>(line[firstNonWhitespace])))
+            ++firstNonWhitespace;
+
+        if (firstNonWhitespace >= line.size() || line[firstNonWhitespace] != '#')
+            return false;
+
+        const std::string afterHash = TrimAsciiLeftWhitespace(line.substr(firstNonWhitespace + 1));
+        std::string key;
+        std::string value;
+        if (!TryExtractConfigParameterAssignment(afterHash, key, value, false))
+            return false;
+
+        outLine = line.substr(0, firstNonWhitespace) + afterHash;
+        return true;
+    }
+
+    std::string BuildConfigTextFromSampleForNewInstall(const std::string& sampleText)
+    {
+        std::istringstream sampleStream(sampleText);
+        std::ostringstream output;
+        std::string line;
+        while (std::getline(sampleStream, line))
+        {
+            if (!line.empty() && line.back() == '\r')
+                line.pop_back();
+
+            std::string uncommentedLine;
+            if (TryUncommentConfigSampleParameterLine(line, uncommentedLine))
+                line = uncommentedLine;
+
+            output << line << '\n';
+        }
+
+        return output.str();
+    }
+
+    std::unordered_set<std::string> ExtractConfigParameterKeys(const std::string& text, bool allowLeadingHash)
     {
         std::unordered_set<std::string> keys;
         std::istringstream stream(text);
@@ -1424,10 +1526,57 @@ namespace
         while (std::getline(stream, line))
         {
             std::string key;
-            if (TryExtractConfigParameterKey(line, key))
+            std::string value;
+            if (TryExtractConfigParameterAssignment(line, key, value, allowLeadingHash))
                 keys.insert(key);
         }
         return keys;
+    }
+
+    bool ConfigParameterKeyExists(const std::string& text, const std::string& targetKey)
+    {
+        if (targetKey.empty())
+            return false;
+
+        std::istringstream input(text);
+        std::string line;
+        while (std::getline(input, line))
+        {
+            std::string key;
+            if (TryExtractConfigParameterKey(line, key) && key == targetKey)
+                return true;
+        }
+
+        return false;
+    }
+
+    bool RemoveConfigParametersNotInSample(std::string& text, const std::unordered_set<std::string>& sampleKeys)
+    {
+        std::istringstream input(text);
+        std::ostringstream output;
+        std::string line;
+        bool changed = false;
+        bool wroteAnyLine = false;
+
+        while (std::getline(input, line))
+        {
+            std::string key;
+            if (TryExtractConfigParameterKey(line, key) && sampleKeys.find(key) == sampleKeys.end())
+            {
+                changed = true;
+                continue;
+            }
+
+            output << line << '\n';
+            wroteAnyLine = true;
+        }
+
+        if (changed)
+        {
+            text = wroteAnyLine ? output.str() : std::string();
+        }
+
+        return changed;
     }
 
     bool SetConfigParameterValue(std::string& text, const std::string& targetKey, const std::string& targetValue)
@@ -2395,37 +2544,42 @@ namespace
         if (!ReadAsciiFile(samplePath, sampleText))
             return;
 
-        std::string configText;
-        ReadAsciiFile(configPath, configText);
+        if (!FileExistsNoThrow(configPath))
+        {
+            WriteAsciiFile(configPath, BuildConfigTextFromSampleForNewInstall(sampleText));
+            return;
+        }
 
-        std::unordered_set<std::string> existingKeys = ExtractConfigParameterKeys(configText);
-        std::vector<std::string> missingLines;
+        std::string configText;
+        if (!ReadAsciiFile(configPath, configText))
+            return;
+
+        bool configChanged = false;
+        const std::unordered_set<std::string> sampleKeys = ExtractConfigParameterKeys(sampleText, true);
+        configChanged |= RemoveConfigParametersNotInSample(configText, sampleKeys);
 
         std::istringstream sampleStream(sampleText);
         std::string line;
         while (std::getline(sampleStream, line))
         {
             std::string key;
-            if (!TryExtractConfigParameterKey(line, key))
+            std::string value;
+            if (TryExtractConfigParameterAssignment(line, key, value, false))
+            {
+                if (SetConfigParameterValue(configText, key, value))
+                    configChanged = true;
                 continue;
-            if (!existingKeys.insert(key).second)
+            }
+
+            if (!TryExtractConfigParameterAssignment(line, key, value, true))
                 continue;
 
-            missingLines.push_back(line);
+            if (!ConfigParameterKeyExists(configText, key) && SetConfigParameterValue(configText, key, value))
+                configChanged = true;
         }
 
-        if (missingLines.empty())
-            return;
-
-        std::ostringstream output;
-        output << configText;
-        if (!configText.empty() && configText.back() != '\n')
-            output << '\n';
-
-        for (const std::string& missingLine : missingLines)
-            output << missingLine << '\n';
-
-        WriteAsciiFile(configPath, output.str());
+        if (configChanged)
+            WriteAsciiFile(configPath, configText);
     }
 
     void EnsureUiFontFixVpkAndConfig()

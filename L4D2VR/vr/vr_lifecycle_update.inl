@@ -2138,9 +2138,7 @@ void VR::SubmitVRTextures()
 
                 Vector rayStart = m_RightControllerPosAbs;
                 // Keep non-3P codepath identical to legacy behavior; only use the new render-center delta in 3P.
-                Vector camDelta = m_IsThirdPersonCamera
-                    ? (m_ThirdPersonRenderCenter - m_SetupOrigin)
-                    : (m_ThirdPersonViewOrigin - m_SetupOrigin);
+                Vector camDelta = GetAimRenderCameraDelta();
                 if (m_IsThirdPersonCamera && camDelta.LengthSqr() > (5.0f * 5.0f))
                     rayStart += camDelta;
 

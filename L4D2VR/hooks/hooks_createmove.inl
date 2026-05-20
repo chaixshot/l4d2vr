@@ -1266,6 +1266,65 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			m_VR->m_PushingThumbstick;
 		m_VR->m_LocomotionActive = controlLocomotionActive;
 
+		if (m_VR->m_IsVREnabled &&
+			m_VR->m_Roomscale1To1Movement &&
+			m_VR->m_Roomscale1To1DecoupleCamera)
+		{
+			const bool roomscaleMayDriveMovement =
+				!controlLocomotionActive || !m_VR->m_Roomscale1To1DisableWhileThumbstick;
+
+			const int lpIdx = (m_Game && m_Game->m_EngineClient) ? m_Game->m_EngineClient->GetLocalPlayer() : -1;
+			C_BasePlayer* lp = (lpIdx > 0 && m_Game) ? (C_BasePlayer*)m_Game->GetClientEntity(lpIdx) : nullptr;
+			const int lifeState = lp ? (int)ReadNetvar<uint8_t>(lp, VR::kLifeStateOffset) : 1;
+			const int observerMode = lp ? (int)ReadNetvar<int>(lp, VR::kObserverModeOffset) : 1;
+			const bool liveLocalPlayer = lp && lifeState == 0 && observerMode == 0;
+
+			if (roomscaleMayDriveMovement && liveLocalPlayer)
+			{
+				Vector engineEye = lp->EyePosition();
+				engineEye.z = 0.0f;
+
+				if (m_VR->m_Roomscale1To1LastEngineEyeValid)
+				{
+					Vector acceptedWorldDelta = engineEye - m_VR->m_Roomscale1To1LastEngineEye;
+					acceptedWorldDelta.z = 0.0f;
+
+					const float acceptedLen = acceptedWorldDelta.Length();
+					if (m_VR->m_Roomscale1To1PendingVisualWorldDeltaValid &&
+						std::isfinite(acceptedLen) && acceptedLen < 96.0f &&
+						m_VR->m_Roomscale1To1PrevValid && std::fabs(m_VR->m_VRScale) > 0.001f)
+					{
+						Vector visualWorldDelta = m_VR->m_Roomscale1To1PendingVisualWorldDelta;
+						visualWorldDelta.z = 0.0f;
+
+						Vector correctionWorld = acceptedWorldDelta - visualWorldDelta;
+						correctionWorld.z = 0.0f;
+
+						const float correctionLen = correctionWorld.Length();
+						if (std::isfinite(correctionLen) && correctionLen > 0.01f && correctionLen < 96.0f)
+						{
+							const Vector correctionLocal = correctionWorld / m_VR->m_VRScale;
+							m_VR->m_HmdPosCorrectedPrev += correctionLocal;
+							m_VR->m_Roomscale1To1PrevCorrectedAbs += correctionLocal;
+						}
+					}
+				}
+
+				m_VR->m_Roomscale1To1LastEngineEye = engineEye;
+				m_VR->m_Roomscale1To1LastEngineEyeValid = true;
+			}
+			else
+			{
+				m_VR->m_Roomscale1To1LastEngineEyeValid = false;
+				m_VR->m_Roomscale1To1PendingVisualWorldDeltaValid = false;
+			}
+		}
+		else
+		{
+			m_VR->m_Roomscale1To1LastEngineEyeValid = false;
+			m_VR->m_Roomscale1To1PendingVisualWorldDeltaValid = false;
+		}
+
 		m_VR->ApplyRoomscale1To1Move(cmd, flInputSampleTime, controlLocomotionActive);
 	}
 	return result;

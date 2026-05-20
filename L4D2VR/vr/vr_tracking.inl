@@ -489,7 +489,18 @@ void VR::UpdateTracking()
     // - 1:1 server roomscale (ForceNonVRServerMovement=false): optionally keep the camera fully decoupled from the tick-rate player origin
     //   so HMD motion stays smooth at headset refresh rate.
     const bool want1to1DecoupledCamera =
-        m_Roomscale1To1Movement && !m_ForceNonVRServerMovement && m_Roomscale1To1DecoupleCamera && !m_LocomotionActive && !usingMountedGunNow;
+        m_Roomscale1To1Movement &&
+        !m_ForceNonVRServerMovement &&
+        m_Roomscale1To1DecoupleCamera &&
+        !m_IsThirdPersonCamera &&
+        !m_LocomotionActive &&
+        !usingMountedGunNow;
+
+    if (m_IsThirdPersonCamera && m_Roomscale1To1Movement && m_Roomscale1To1DecoupleCamera)
+    {
+        m_Roomscale1To1LastEngineEyeValid = false;
+        m_Roomscale1To1PendingVisualWorldDeltaValid = false;
+    }
 
     if (inEyeObserver)
     {

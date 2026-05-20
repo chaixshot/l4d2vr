@@ -1416,6 +1416,10 @@ public:
 
 	Vector m_Roomscale1To1PrevCorrectedAbs = {};
 	bool m_Roomscale1To1PrevValid = false;
+	Vector m_Roomscale1To1LastEngineEye = {};
+	bool m_Roomscale1To1LastEngineEyeValid = false;
+	Vector m_Roomscale1To1PendingVisualWorldDelta = {};
+	bool m_Roomscale1To1PendingVisualWorldDeltaValid = false;
 	float m_Roomscale1To1StandingHmdZ = 0.0f;
 	bool m_Roomscale1To1StandingHmdZValid = false;
 	bool m_Roomscale1To1PhysicalCrouchActive = false;
@@ -2527,6 +2531,8 @@ public:
 	void DrawCachedSpecialInfectedArrowsDebugOverlay();
 	void DrawProjectedSpecialInfectedArrows(IMatRenderContext* renderContext, const CViewSetup& view);
 	void DrawPostMirrorPluginOverlays(IMatRenderContext* renderContext, C_BasePlayer* localPlayer, const CViewSetup& view);
+	bool PrepareLeftEyeSurvivorGlowCopy();
+	bool CopyLeftEyeSurvivorGlowToRightEye();
 	bool CopyEyeToDesktopMirrorTexture(int eyeIndex);
 	IDirect3DTexture9* GetOrCreateProjectedItemLabelTexture(
 		IDirect3DDevice9* device,
@@ -2616,6 +2622,7 @@ public:
 	bool IsSpecialInfectedInBlindSpot(const Vector& infectedOrigin) const;
 	void UpdateSpecialInfectedWarningState();
 	void UpdateSpecialInfectedPreWarningState();
+	Vector GetAimRenderCameraDelta() const;
 	void ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool controlLocomotionActive);
 	void OnPredictionRunCommand(CUserCmd* cmd);
 	void OnPrimaryAttackServerDecision(CUserCmd* cmd, bool fromSecondaryPrediction);
