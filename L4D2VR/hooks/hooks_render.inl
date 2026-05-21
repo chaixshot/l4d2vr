@@ -962,6 +962,78 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			uint32_t poseSeq = 0;
 			bool havePoses = m_VR->ReadPoseWaiterSnapshot(renderPoses.data(), &poseSeq);
 
+			// Pose snapshot reuse tracking (render-thread local). Used to keep queued rendering
+			// from producing multiple stereo frames from one HMD pose.
+			static thread_local uint32_t s_lastPoseSeq = 0;
+			static thread_local uint32_t s_lastWaitAttemptSeq = 0;
+			static thread_local int s_poseReuseCount = 0;
+
+			auto waitForNewPoseSnapshot = [&](uint32_t oldSeq, DWORD timeoutMs) -> bool
+				{
+					if (!m_VR->m_PoseWaiterEvent || oldSeq == 0 || timeoutMs == 0)
+						return false;
+
+					const DWORD startTicks = GetTickCount();
+					DWORD remaining = timeoutMs;
+					while (remaining > 0)
+					{
+						const DWORD wr = WaitForSingleObject(m_VR->m_PoseWaiterEvent, remaining);
+						if (wr != WAIT_OBJECT_0)
+							break;
+
+						uint32_t poseSeq2 = 0;
+						if (m_VR->ReadPoseWaiterSnapshot(renderPoses.data(), &poseSeq2) && poseSeq2 != 0 && poseSeq2 != oldSeq)
+						{
+							poseSeq = poseSeq2;
+							havePoses = true;
+							return true;
+						}
+
+						const DWORD elapsed = GetTickCount() - startTicks;
+						if (elapsed >= timeoutMs)
+							break;
+						remaining = timeoutMs - elapsed;
+					}
+					return false;
+				};
+
+			const bool strictRenderPosePacing =
+				(queueMode != 0) &&
+				m_VR->m_QueuedSubmitUseRenderPoseToken &&
+				havePoses &&
+				poseSeq != 0 &&
+				poseSeq == s_lastPoseSeq;
+			bool strictRenderPosePacingAttempted = false;
+			if (strictRenderPosePacing)
+			{
+				float hmdHz = m_VR->GetHmdDisplayFrequencyHz();
+				if (!(hmdHz > 1.0f))
+					hmdHz = 90.0f;
+				const DWORD strictWaitMs = static_cast<DWORD>(std::clamp((int)std::ceil(1000.0f / hmdHz) + 4, 6, 30));
+
+				strictRenderPosePacingAttempted = true;
+				const bool gotFreshPose = waitForNewPoseSnapshot(poseSeq, strictWaitMs);
+				if (gotFreshPose)
+				{
+					s_poseReuseCount = 0;
+				}
+				else if (m_VR->m_RenderPipelineDebugLog)
+				{
+					static thread_local std::chrono::steady_clock::time_point s_lastStrictPosePaceTimeoutLog{};
+					if (!ShouldThrottleLog(s_lastStrictPosePaceTimeoutLog, m_VR->m_RenderPipelineDebugLogHz))
+					{
+						Game::logMsg("[VR][Queued][RenderPosePaceTimeout] tid=%lu q=%d waitMs=%lu poseSeq=%u lastPoseSeq=%u submitPose=%u lastSubmitted=%u",
+							GetCurrentThreadId(),
+							queueMode,
+							static_cast<unsigned long>(strictWaitMs),
+							poseSeq,
+							s_lastPoseSeq,
+							m_VR->m_SubmitPoseToken.load(std::memory_order_acquire),
+							m_VR->m_LastSubmittedPoseToken.load(std::memory_order_acquire));
+					}
+				}
+			}
+
 			// Heuristic: treat fast HMD rotation as "active" (helps decide whether to nudge pose waiting).
 			bool headTurningNow = false;
 			if (havePoses && renderPoses[vr::k_unTrackedDeviceIndex_Hmd].bPoseIsValid)
@@ -984,11 +1056,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			int waitMs = waitMsCfg;
 
 			const int maxAheadCfg = std::clamp(m_VR->m_QueuedRenderMaxFramesAhead, -1, 6);
-
-			// Pose snapshot reuse tracking (render-thread local). Used by MaxFramesAhead and smart FPS pacing.
-			static thread_local uint32_t s_lastPoseSeq = 0;
-			static thread_local uint32_t s_lastWaitAttemptSeq = 0;
-			static thread_local int s_poseReuseCount = 0;
 
 			const bool motionNow = (locomotionNow || headTurningNow);
 
@@ -1077,7 +1144,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				// If we already consumed this snapshot, optionally wait for the next one.
 				if (havePoses && poseSeq != 0 && poseSeq == s_lastPoseSeq && effectiveTimeoutMs > 0)
 				{
-					const bool shouldWaitNext = exceededAhead || (timeoutMs > 0 && poseSeq != s_lastWaitAttemptSeq);
+					const bool shouldWaitNext = !strictRenderPosePacingAttempted && (exceededAhead || (timeoutMs > 0 && poseSeq != s_lastWaitAttemptSeq));
 					if (shouldWaitNext)
 					{
 						// If the user didn't opt into waiting but we're moving/turning and reusing the same pose,
