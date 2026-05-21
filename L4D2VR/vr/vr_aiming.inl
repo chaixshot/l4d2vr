@@ -3278,11 +3278,19 @@ void VR::RenderDrawAimLineQueued(C_BasePlayer* localPlayer)
     // This render-thread path recomputes the visual ray from the current render-frame snapshot and draws a
     // single-frame-duration overlay so it stays crisp without accumulating ghosts.
 
-    if (!m_AimLineEnabled || !m_Game || !m_Game->m_DebugOverlay)
+    if (!m_Game || !m_Game->m_DebugOverlay)
         return;
 
     const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
     if (queueMode == 0)
+        return;
+
+    // In queued/multicore rendering the visible aim line is drawn here instead of the
+    // single-core D3D overlay path. Keep the same user-facing visual switch:
+    // D3DAimLineOverlayEnabled controls visibility only. UpdateAimingLaser() still
+    // keeps m_HasAimLine / m_AimLineStart / m_AimLineEnd updated for hit tests,
+    // friendly-fire blocking, target HUD, and bullet convergence.
+    if (!m_D3DAimLineOverlayEnabled)
         return;
     const bool scopeOnlyAimLine = m_ScopeAimLineOnlyInScope
         && m_ThirdPersonFrontViewEnabled

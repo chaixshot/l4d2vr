@@ -194,6 +194,39 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 	if (s_originalRenderViewDepth > 0)
 	{
+		if (m_VR && m_VR->m_RenderPipelineDebugLog && m_Game && m_Game->m_MaterialSystem)
+		{
+			static std::atomic<int> s_nestedRenderViewProbeBudget{ 160 };
+			const int probeIndex = s_nestedRenderViewProbeBudget.fetch_sub(1, std::memory_order_acq_rel);
+			if (probeIndex > 0)
+			{
+				IMatRenderContext* probeContext = m_Game->m_MaterialSystem->GetRenderContext();
+				ITexture* probeRt = DebugCurrentRenderTarget(probeContext);
+				int rtMapW = 0;
+				int rtMapH = 0;
+				int rtActualW = 0;
+				int rtActualH = 0;
+				DebugTextureFullSize(probeRt, rtMapW, rtMapH, rtActualW, rtActualH);
+				int vpX = 0;
+				int vpY = 0;
+				int vpW = 0;
+				int vpH = 0;
+				const bool haveVp = DebugGetViewport(probeContext, vpX, vpY, vpW, vpH);
+				const int nestedQueueMode = m_Game ? m_Game->GetMatQueueMode() : 0;
+				Game::logMsg("[VR][RenderView][ProbeNested] left=%d depth=%d eye=%d q=%d tid=%lu rt=%s(map=%dx%d actual=%dx%d) setup=%dx%d unscaled=%dx%d hud=%dx%d vp=%d,%d %dx%d haveVp=%d clear=0x%X draw=0x%X",
+					probeIndex,
+					s_originalRenderViewDepth,
+					s_vrEyeRenderPass,
+					nestedQueueMode,
+					GetCurrentThreadId(),
+					DebugTextureName(probeRt), rtMapW, rtMapH, rtActualW, rtActualH,
+					setup.width, setup.height, setup.m_nUnscaledWidth, setup.m_nUnscaledHeight,
+					hudViewSetup.width, hudViewSetup.height,
+					vpX, vpY, vpW, vpH, haveVp ? 1 : 0,
+					nClearFlags, whatToDraw);
+			}
+		}
+
 		if (s_vrEyeRenderPass != 0 && s_vrSharedCenterValid && m_Game && m_Game->m_MaterialSystem)
 		{
 			IMatRenderContext* nestedContext = m_Game->m_MaterialSystem->GetRenderContext();
@@ -346,18 +379,16 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	const bool inGameForWindowState =
 		m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame();
 	const bool vrWindowDrawable = DebugIsCurrentProcessMainWindowDrawable();
-	const bool vrWindowForeground = DebugIsCurrentProcessForeground();
-	if (queueMode != 0 && inGameForWindowState && (!vrWindowDrawable || !vrWindowForeground))
+	if (queueMode != 0 && inGameForWindowState && !vrWindowDrawable)
 	{
 		if (m_VR->m_RenderPipelineDebugLog)
 		{
 			static thread_local std::chrono::steady_clock::time_point s_lastInactiveWindowPassLog{};
 			if (!ShouldThrottleLog(s_lastInactiveWindowPassLog, m_VR->m_RenderPipelineDebugLogHz))
 			{
-				Game::logMsg("[VR][RenderView][PassThrough] reason=inactive-window tid=%lu drawable=%d foreground=%d rt=%s setup=%dx%d clear=0x%X draw=0x%X",
+				Game::logMsg("[VR][RenderView][PassThrough] reason=window-not-drawable tid=%lu drawable=%d rt=%s setup=%dx%d clear=0x%X draw=0x%X",
 					GetCurrentThreadId(),
 					vrWindowDrawable ? 1 : 0,
-					vrWindowForeground ? 1 : 0,
 					DebugTextureName(renderContextStateGuard.rt),
 					setup.width, setup.height,
 					nClearFlags, whatToDraw);
@@ -474,6 +505,75 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		passThroughReason = "water-reflection";
 	else
 		isQueuedOffscreenRenderView(passThroughReason);
+
+	if (m_VR->m_RenderPipelineDebugLog && queueMode != 0)
+	{
+		static std::atomic<int> s_topRenderViewProbeBudget{ 260 };
+		const int probeIndex = s_topRenderViewProbeBudget.fetch_sub(1, std::memory_order_acq_rel);
+		if (probeIndex > 0)
+		{
+			int rtMapW = 0;
+			int rtMapH = 0;
+			int rtActualW = 0;
+			int rtActualH = 0;
+			DebugTextureFullSize(renderContextStateGuard.rt, rtMapW, rtMapH, rtActualW, rtActualH);
+			int backBufferW = 0;
+			int backBufferH = 0;
+			int windowW = 0;
+			int windowH = 0;
+			DebugBackBufferDimensions(m_Game ? m_Game->m_MaterialSystem : nullptr, backBufferW, backBufferH);
+			DebugRenderContextWindowSize(rndrContext, windowW, windowH);
+			const char* rtName = DebugTextureName(renderContextStateGuard.rt);
+			const bool hasNamedRt = rtName && *rtName && rtName[0] != '<';
+			const bool nameLooksShadow =
+				hasNamedRt &&
+				(rtNameContainsI(rtName, "shadow") ||
+					rtNameContainsI(rtName, "flashlight") ||
+					rtNameContainsI(rtName, "depth"));
+			const ImageFormat rtFormat = getTextureFormatSafe(renderContextStateGuard.rt);
+			const bool depthFormat = isDepthFormat(rtFormat);
+			const bool vrManagedRt = isVRManagedRenderTarget(renderContextStateGuard.rt);
+			const bool waterRt = isWaterReflectionRenderTarget(renderContextStateGuard.rt);
+			auto nearSize = [&](int w, int h, int targetW, int targetH) -> bool
+				{
+					return viewSizeMatches(w, h, targetW, targetH);
+				};
+			const bool setupMain =
+				nearSize(setup.width, setup.height, backBufferW, backBufferH) ||
+				nearSize(setup.m_nUnscaledWidth, setup.m_nUnscaledHeight, backBufferW, backBufferH) ||
+				nearSize(setup.width, setup.height, windowW, windowH) ||
+				nearSize(setup.m_nUnscaledWidth, setup.m_nUnscaledHeight, windowW, windowH) ||
+				(renderContextStateGuard.hasViewport &&
+					(nearSize(renderContextStateGuard.w, renderContextStateGuard.h, backBufferW, backBufferH) ||
+						nearSize(renderContextStateGuard.w, renderContextStateGuard.h, windowW, windowH)));
+			const bool rtMain =
+				nearSize(rtMapW, rtMapH, backBufferW, backBufferH) ||
+				nearSize(rtActualW, rtActualH, backBufferW, backBufferH) ||
+				nearSize(rtMapW, rtMapH, windowW, windowH) ||
+				nearSize(rtActualW, rtActualH, windowW, windowH);
+
+			Game::logMsg("[VR][RenderView][ProbeTop] left=%d decision=%s reason=%s tid=%lu q=%d rt=%s(map=%dx%d actual=%dx%d fmt=%d vr=%d water=%d shadowName=%d depthFmt=%d) setup=%dx%d unscaled=%dx%d hud=%dx%d vp=%d,%d %dx%d haveVp=%d win=%dx%d bb=%dx%d setupMain=%d rtMain=%d clear=0x%X draw=0x%X",
+				probeIndex,
+				passThroughReason ? "pass-through" : "vr-hijack",
+				passThroughReason ? passThroughReason : "none",
+				GetCurrentThreadId(),
+				queueMode,
+				rtName, rtMapW, rtMapH, rtActualW, rtActualH,
+				static_cast<int>(rtFormat),
+				vrManagedRt ? 1 : 0,
+				waterRt ? 1 : 0,
+				nameLooksShadow ? 1 : 0,
+				depthFormat ? 1 : 0,
+				setup.width, setup.height, setup.m_nUnscaledWidth, setup.m_nUnscaledHeight,
+				hudViewSetup.width, hudViewSetup.height,
+				renderContextStateGuard.x, renderContextStateGuard.y, renderContextStateGuard.w, renderContextStateGuard.h,
+				renderContextStateGuard.hasViewport ? 1 : 0,
+				windowW, windowH, backBufferW, backBufferH,
+				setupMain ? 1 : 0,
+				rtMain ? 1 : 0,
+				nClearFlags, whatToDraw);
+		}
+	}
 
 	if (passThroughReason != nullptr)
 	{

@@ -310,29 +310,6 @@ static inline void DebugClientRectSize(int& width, int& height)
 	}
 }
 
-static inline bool DebugIsCurrentProcessForeground()
-{
-	HWND foreground = GetForegroundWindow();
-	if (!foreground)
-		return true;
-
-	DWORD foregroundProcessId = 0;
-	GetWindowThreadProcessId(foreground, &foregroundProcessId);
-	if (foregroundProcessId == GetCurrentProcessId())
-		return true;
-
-	HWND owner = GetWindow(foreground, GW_OWNER);
-	if (owner)
-	{
-		DWORD ownerProcessId = 0;
-		GetWindowThreadProcessId(owner, &ownerProcessId);
-		if (ownerProcessId == GetCurrentProcessId())
-			return true;
-	}
-
-	return false;
-}
-
 static inline bool DebugIsCurrentProcessMainWindowDrawable()
 {
 	HWND hwnd = DebugFindCurrentProcessMainWindow();
