@@ -372,10 +372,12 @@ namespace
 
         vr->m_RenderedNewFrame.store(false, std::memory_order_release);
         vr->m_RenderCompletedPoseToken.store(0, std::memory_order_release);
+        vr->m_RenderCompletedDuplicatePoseFrameId.store(0, std::memory_order_release);
         vr->m_ReShadeVRCompatResolvedFrameId.store(0, std::memory_order_release);
         vr->m_ReShadeVRCompatPendingRenderReady.store(0, std::memory_order_release);
         vr->m_ReShadeVRCompatPendingRenderPoseToken.store(0, std::memory_order_release);
         vr->m_ReShadeVRCompatPendingRenderFrameSeq.store(0, std::memory_order_release);
+        vr->m_ReShadeVRCompatPendingDuplicatePose.store(0, std::memory_order_release);
         vr->m_LastSubmittedPoseToken.store(0, std::memory_order_release);
         vr->m_SubmitInFlight.store(false, std::memory_order_release);
         vr->m_QueuedSubmitStaleStreak.store(0, std::memory_order_release);
@@ -1043,9 +1045,11 @@ void VR::Update()
         {
             m_LastSubmittedFrameId.store(completedFrameId, std::memory_order_release);
             m_RenderCompletedPoseToken.store(0, std::memory_order_release);
+            m_RenderCompletedDuplicatePoseFrameId.store(0, std::memory_order_release);
             m_ReShadeVRCompatPendingRenderReady.store(0, std::memory_order_release);
             m_ReShadeVRCompatPendingRenderPoseToken.store(0, std::memory_order_release);
             m_ReShadeVRCompatPendingRenderFrameSeq.store(0, std::memory_order_release);
+            m_ReShadeVRCompatPendingDuplicatePose.store(0, std::memory_order_release);
             m_RenderedNewFrame.store(false, std::memory_order_release);
             m_SubmitInFlight.store(false, std::memory_order_release);
             m_QueuedSubmitStaleStreak.store(0, std::memory_order_release);
@@ -1280,10 +1284,12 @@ void VR::ReleaseVRRenderTargetsForDeviceReset()
 
     m_RenderCompletedFrameId.store(0, std::memory_order_release);
     m_RenderCompletedPoseToken.store(0, std::memory_order_release);
+    m_RenderCompletedDuplicatePoseFrameId.store(0, std::memory_order_release);
     m_ReShadeVRCompatResolvedFrameId.store(0, std::memory_order_release);
     m_ReShadeVRCompatPendingRenderReady.store(0, std::memory_order_release);
     m_ReShadeVRCompatPendingRenderPoseToken.store(0, std::memory_order_release);
     m_ReShadeVRCompatPendingRenderFrameSeq.store(0, std::memory_order_release);
+    m_ReShadeVRCompatPendingDuplicatePose.store(0, std::memory_order_release);
     m_LastSubmittedFrameId.store(0, std::memory_order_release);
     m_SubmitPoseToken.store(0, std::memory_order_release);
     m_LastSubmittedPoseToken.store(0, std::memory_order_release);
@@ -1528,10 +1534,12 @@ void VR::CreateVRTextures()
     // New textures should not inherit old render/submit bookkeeping.
     m_RenderCompletedFrameId.store(0, std::memory_order_release);
     m_RenderCompletedPoseToken.store(0, std::memory_order_release);
+    m_RenderCompletedDuplicatePoseFrameId.store(0, std::memory_order_release);
     m_ReShadeVRCompatResolvedFrameId.store(0, std::memory_order_release);
     m_ReShadeVRCompatPendingRenderReady.store(0, std::memory_order_release);
     m_ReShadeVRCompatPendingRenderPoseToken.store(0, std::memory_order_release);
     m_ReShadeVRCompatPendingRenderFrameSeq.store(0, std::memory_order_release);
+    m_ReShadeVRCompatPendingDuplicatePose.store(0, std::memory_order_release);
     m_LastSubmittedFrameId.store(0, std::memory_order_release);
     m_SubmitPoseToken.store(0, std::memory_order_release);
     m_LastSubmittedPoseToken.store(0, std::memory_order_release);
@@ -1812,18 +1820,33 @@ void VR::SubmitVRTextures()
         renderPoseToken = m_RenderCompletedPoseToken.load(std::memory_order_acquire);
         uint32_t effectivePoseToken = (renderPoseToken != 0) ? renderPoseToken : poseToken;
         const uint32_t lastSubmittedToken = m_LastSubmittedPoseToken.load(std::memory_order_acquire);
-        if (effectivePoseToken == lastSubmittedToken && poseToken != lastSubmittedToken && m_RenderFrameReadyEvent)
+        const uint32_t poseCheckCompletedFrameId = m_RenderCompletedFrameId.load(std::memory_order_acquire);
+        const uint32_t poseCheckLastSubmittedFrameId = m_LastSubmittedFrameId.load(std::memory_order_acquire);
+        const uint32_t duplicatePoseFrameId = m_RenderCompletedDuplicatePoseFrameId.load(std::memory_order_acquire);
+        const bool haveUnsubmittedRenderFrame =
+            poseCheckCompletedFrameId != 0 &&
+            poseCheckCompletedFrameId != poseCheckLastSubmittedFrameId;
+        bool allowDuplicatePoseSubmit =
+            haveUnsubmittedRenderFrame &&
+            duplicatePoseFrameId == poseCheckCompletedFrameId;
+
+        if (effectivePoseToken == lastSubmittedToken && poseToken != lastSubmittedToken && !allowDuplicatePoseSubmit && m_RenderFrameReadyEvent)
         {
             const DWORD duplicatePoseWaitMs = static_cast<DWORD>(std::clamp(std::max(m_QueuedSubmitWaitMs, 2), 0, 20));
             if (duplicatePoseWaitMs > 0)
             {
                 const DWORD duplicateWaitResult = WaitForSingleObject(m_RenderFrameReadyEvent, duplicatePoseWaitMs);
                 const uint32_t waitedRenderPoseToken = m_RenderCompletedPoseToken.load(std::memory_order_acquire);
+                const uint32_t waitedCompletedFrameId = m_RenderCompletedFrameId.load(std::memory_order_acquire);
                 if (waitedRenderPoseToken != 0)
                 {
                     renderPoseToken = waitedRenderPoseToken;
                     effectivePoseToken = waitedRenderPoseToken;
                 }
+                allowDuplicatePoseSubmit =
+                    waitedCompletedFrameId != 0 &&
+                    waitedCompletedFrameId != m_LastSubmittedFrameId.load(std::memory_order_acquire) &&
+                    m_RenderCompletedDuplicatePoseFrameId.load(std::memory_order_acquire) == waitedCompletedFrameId;
 
                 if (m_RenderPipelineDebugLog)
                 {
@@ -1845,7 +1868,7 @@ void VR::SubmitVRTextures()
             }
         }
 
-        if (effectivePoseToken == 0 || effectivePoseToken == lastSubmittedToken)
+        if (effectivePoseToken == 0 || (effectivePoseToken == lastSubmittedToken && !allowDuplicatePoseSubmit))
         {
             if (m_RenderPipelineDebugLog)
             {
@@ -1863,6 +1886,21 @@ void VR::SubmitVRTextures()
                 }
             }
             return;
+        }
+        if (effectivePoseToken == lastSubmittedToken && allowDuplicatePoseSubmit && m_RenderPipelineDebugLog)
+        {
+            static std::chrono::steady_clock::time_point s_lastQueuedSubmitDuplicatePoseLog{};
+            if (!ShouldThrottle(s_lastQueuedSubmitDuplicatePoseLog, m_RenderPipelineDebugLogHz))
+            {
+                Game::logMsg("[VR][Queued][SubmitDuplicatePose] tid=%lu currentPose=%u renderPose=%u lastPose=%u completed=%u submitted=%u duplicateFrame=%u",
+                    GetCurrentThreadId(),
+                    poseToken,
+                    renderPoseToken,
+                    lastSubmittedToken,
+                    m_RenderCompletedFrameId.load(std::memory_order_acquire),
+                    m_LastSubmittedFrameId.load(std::memory_order_acquire),
+                    m_RenderCompletedDuplicatePoseFrameId.load(std::memory_order_acquire));
+            }
         }
         poseToken = effectivePoseToken;
     }

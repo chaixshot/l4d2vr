@@ -28,11 +28,13 @@ void __fastcall Hooks::dEndFrame(void* ecx, void* edx)
 		{
 			uint32_t renderPoseToken = m_VR->m_ReShadeVRCompatPendingRenderPoseToken.exchange(0, std::memory_order_acq_rel);
 			const uint32_t pendingFrameSeq = m_VR->m_ReShadeVRCompatPendingRenderFrameSeq.exchange(0, std::memory_order_acq_rel);
+			const uint32_t pendingDuplicatePose = m_VR->m_ReShadeVRCompatPendingDuplicatePose.exchange(0, std::memory_order_acq_rel);
 			if (renderPoseToken == 0)
 				renderPoseToken = m_VR->m_SubmitPoseToken.load(std::memory_order_acquire);
 
 			const uint32_t completedFrameId = m_VR->m_RenderCompletedFrameId.fetch_add(1, std::memory_order_acq_rel) + 1;
 			m_VR->m_RenderCompletedPoseToken.store(renderPoseToken, std::memory_order_release);
+			m_VR->m_RenderCompletedDuplicatePoseFrameId.store(pendingDuplicatePose != 0 ? completedFrameId : 0u, std::memory_order_release);
 			m_VR->m_RenderedNewFrame.store(true, std::memory_order_release);
 			if (m_VR->m_RenderFrameReadyEvent)
 				SetEvent(m_VR->m_RenderFrameReadyEvent);

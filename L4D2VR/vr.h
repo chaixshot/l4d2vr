@@ -358,6 +358,9 @@ public:
 	// adaptive wait during real HMD motion to avoid reusing the same pose sample. -1 = strong sync
 	// (wait up to ~50ms).
 	int m_QueuedRenderPoseWaitMs = 0;
+	// Percentage of repeated-pose render frames allowed to bypass the strict fresh-pose wait and submit.
+	// 0 = fully strict; 100 = submit every repeated pose.
+	int m_QueuedRenderPoseRelaxPercent = 20;
 
 	// Queued rendering: optional render-thread FPS cap, expressed as a percentage of the HMD refresh rate.
 	// 0 = unlimited, 100 = match HMD refresh, 80 = 80% of HMD refresh, etc.
@@ -687,6 +690,7 @@ public:
 	// when a full stereo frame is rendered into eye textures.
 	std::atomic<uint32_t> m_RenderCompletedFrameId{ 0 };
 	std::atomic<uint32_t> m_RenderCompletedPoseToken{ 0 };
+	std::atomic<uint32_t> m_RenderCompletedDuplicatePoseFrameId{ 0 };
 	std::atomic<uint32_t> m_LastSubmittedFrameId{ 0 };
 	HANDLE m_RenderFrameReadyEvent = NULL;
 	// Present-side wait budget (ms) for a fresh rendered frame in mat_queue_mode!=0.
@@ -1327,6 +1331,7 @@ public:
 	std::atomic<uint32_t> m_ReShadeVRCompatPendingRenderReady{ 0 };
 	std::atomic<uint32_t> m_ReShadeVRCompatPendingRenderPoseToken{ 0 };
 	std::atomic<uint32_t> m_ReShadeVRCompatPendingRenderFrameSeq{ 0 };
+	std::atomic<uint32_t> m_ReShadeVRCompatPendingDuplicatePose{ 0 };
 
 
 	bool m_FlashlightEnhancementEnabled = false;
