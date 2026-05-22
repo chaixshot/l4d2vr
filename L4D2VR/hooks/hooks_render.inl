@@ -2842,7 +2842,19 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	}
 
 	if (scopeLensPostProcessPending)
-		m_VR->ApplyScopeLensPostProcess();
+	{
+		if (queueMode != 0)
+		{
+			// Source queued rendering can execute the RenderView command stream after this
+			// hook returns. Running the lens pass here can be overwritten by the
+			// queued square RTT draw, so defer it to the post-present update path.
+			m_VR->m_QueuedScopeLensPostProcessPending.store(1u, std::memory_order_release);
+		}
+		else
+		{
+			m_VR->ApplyScopeLensPostProcess();
+		}
+	}
 
 	// Restore engine angles immediately after our stereo render (single-threaded only).
 	if (touchedEngineAngles && m_Game && m_Game->m_EngineClient)

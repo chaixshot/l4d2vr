@@ -471,6 +471,8 @@ namespace
 
         ClearRenderTargetColorForMenuTransition(vr, ctx, vr->m_ScopeTexture,
             static_cast<int>(vr->m_ScopeRTTSize), static_cast<int>(vr->m_ScopeRTTSize), 255);
+        vr->m_QueuedScopeLensPostProcessPending.store(0, std::memory_order_release);
+        vr->m_ScopeLensOverlayReady.store(0, std::memory_order_release);
         ClearRenderTargetColorForMenuTransition(vr, ctx, vr->m_RearMirrorTexture,
             static_cast<int>(vr->m_RearMirrorRTTSize), static_cast<int>(vr->m_RearMirrorRTTSize), 255);
         ClearRenderTargetColorForMenuTransition(vr, ctx, vr->m_BlankTexture, 0, 0, 255);
@@ -1131,6 +1133,7 @@ void VR::Update()
     UpdateFocusShadowRecovery(this, inGameAtUpdateStart);
 
     const bool queuedAtFrameStart = (m_Game && (m_Game->GetMatQueueMode() != 0));
+
     const uint32_t updateThreadId = static_cast<uint32_t>(::GetCurrentThreadId());
     const uint32_t renderThreadIdAtUpdate = m_RenderThreadId.load(std::memory_order_acquire);
     const bool suppressQueuedReShadeSubmitOnRenderThread =
@@ -1187,6 +1190,34 @@ void VR::Update()
     if (queuedAtFrameStart && !suppressQueuedReShadeSubmitOnRenderThread)
     {
         SubmitVRTextures();
+
+        // Scope lens GPU post-process is delayed until after the eye submit in queued rendering.
+        // This keeps the processed overlay texture from racing Source's material queue.
+        if (m_QueuedScopeLensPostProcessPending.load(std::memory_order_acquire) != 0u)
+        {
+            float lensHz = GetHmdDisplayFrequencyHz();
+            if (!std::isfinite(lensHz) || lensHz <= 1.0f)
+                lensHz = 90.0f;
+            lensHz = std::clamp(lensHz, 1.0f, 240.0f);
+
+            if (!ShouldThrottle(m_LastScopeLensPostProcessTime, lensHz) &&
+                m_QueuedScopeLensPostProcessPending.exchange(0u, std::memory_order_acq_rel) != 0u)
+            {
+                const bool scopeLensOk = ApplyScopeLensPostProcess();
+                if (m_RenderPipelineDebugLog)
+                {
+                    static std::chrono::steady_clock::time_point s_lastScopeLensAfterSubmitLog{};
+                    if (!ShouldThrottle(s_lastScopeLensAfterSubmitLog, m_RenderPipelineDebugLogHz))
+                    {
+                        Game::logMsg("[VR][ScopeLens][QueuedAfterSubmit] tid=%lu q=%d hz=%.1f ok=%d",
+                            GetCurrentThreadId(),
+                            m_Game ? m_Game->GetMatQueueMode() : -1,
+                            lensHz,
+                            scopeLensOk ? 1 : 0);
+                    }
+                }
+            }
+        }
     }
     else if (suppressQueuedReShadeSubmitOnRenderThread && m_RenderPipelineDebugLog)
     {
@@ -1439,10 +1470,15 @@ void VR::ReleaseVRRenderTargetsForDeviceReset()
     SafeReleaseD3D(m_D9LeftEyeSubmitSurface);
     SafeReleaseD3D(m_D9RightEyeSubmitSurface);
     SafeReleaseD3D(m_D9HUDSurface);
+    SafeReleaseD3D(m_D9ScopeLensSurface);
+    SafeReleaseD3D(m_D9ScopeLensTexture);
     SafeReleaseD3D(m_D9ScopeLensScratchSurface);
     SafeReleaseD3D(m_D9ScopeLensScratchTexture);
     m_D9ScopeLensScratchW = 0;
     m_D9ScopeLensScratchH = 0;
+    m_D9ScopeLensScratchFormat = 0;
+    m_QueuedScopeLensPostProcessPending.store(0, std::memory_order_release);
+    m_ScopeLensOverlayReady.store(0, std::memory_order_release);
     SafeReleaseD3D(m_D9ScopeSurface);
     SafeReleaseD3D(m_D9RearMirrorSurface);
     SafeReleaseD3D(m_D9DesktopCompanionRearMirrorReadback);
@@ -1463,6 +1499,7 @@ void VR::ReleaseVRRenderTargetsForDeviceReset()
     std::memset(&m_VKRightEye, 0, sizeof(m_VKRightEye));
     std::memset(&m_VKHUD, 0, sizeof(m_VKHUD));
     std::memset(&m_VKScope, 0, sizeof(m_VKScope));
+    std::memset(&m_VKScopeLens, 0, sizeof(m_VKScopeLens));
     std::memset(&m_VKRearMirror, 0, sizeof(m_VKRearMirror));
     std::memset(&m_VKBlankTexture, 0, sizeof(m_VKBlankTexture));
     std::memset(&m_VKBackBuffer, 0, sizeof(m_VKBackBuffer));
@@ -2113,12 +2150,19 @@ void VR::SubmitVRTextures()
             vr::VROverlay()->SetOverlayTexture(overlay, &m_VKHUD.m_VRTexture);
         };
 
-    auto applyScopeTexture = [&](vr::VROverlayHandle_t overlay)
+    auto applyScopeTexture = [&](vr::VROverlayHandle_t overlay) -> bool
         {
             static const vr::VRTextureBounds_t full{ 0.0f, 0.0f, 1.0f, 1.0f };
             vr::VROverlay()->SetOverlayTextureBounds(overlay, &full);
             std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
-            vr::VROverlay()->SetOverlayTexture(overlay, &m_VKScope.m_VRTexture);
+            if (m_ScopeLensOverlayReady.load(std::memory_order_acquire) == 0 ||
+                !m_VKScopeLens.m_VRTexture.handle)
+            {
+                return false;
+            }
+
+            const vr::EVROverlayError texErr = vr::VROverlay()->SetOverlayTexture(overlay, &m_VKScopeLens.m_VRTexture);
+            return texErr == vr::VROverlayError_None;
         };
     auto applyRearMirrorTexture = [&](vr::VROverlayHandle_t overlay)
         {
@@ -2227,7 +2271,7 @@ void VR::SubmitVRTextures()
     // Scope overlay independent of HUD cursor mode
     if (m_ScopeTexture && m_ScopeEnabled)
     {
-        applyScopeTexture(m_ScopeHandle);
+        const bool scopeOverlayTextureReady = applyScopeTexture(m_ScopeHandle);
         const float alpha = IsScopeActive() ? 1.0f : std::clamp(m_ScopeOverlayIdleAlpha, 0.0f, 1.0f);
         vr::VROverlay()->SetOverlayAlpha(m_ScopeHandle, alpha);
 
@@ -2244,7 +2288,8 @@ void VR::SubmitVRTextures()
         if (m_MouseModeEnabled || useThirdPersonBodyAnchor)
             UpdateScopeOverlayTransform();
 
-        const bool canShowScope = ShouldRenderScope()
+        const bool canShowScope = scopeOverlayTextureReady
+            && ShouldRenderScope()
             && (m_MouseModeEnabled || useThirdPersonBodyAnchor || gunControllerIndex != vr::k_unTrackedDeviceIndexInvalid);
         if (canShowScope)
             vr::VROverlay()->ShowOverlay(m_ScopeHandle);
@@ -2785,8 +2830,14 @@ void VR::NotifyRearMirrorSpecialWarning()
 
 bool VR::ShouldUpdateScopeRTT()
 {
-    // Throttle the expensive offscreen render pass; leaving the last rendered texture in place is fine.
-    return !ShouldThrottle(m_LastScopeRTTRenderTime, m_ScopeRTTMaxHz);
+    // Keep the scope RTT pacing aligned with the HMD refresh rate.
+    // This avoids exposing another manual config knob while still preventing multiple scope updates per HMD frame.
+    float effectiveMaxHz = GetHmdDisplayFrequencyHz();
+    if (!std::isfinite(effectiveMaxHz) || effectiveMaxHz <= 1.0f)
+        effectiveMaxHz = 90.0f;
+    effectiveMaxHz = std::clamp(effectiveMaxHz, 1.0f, 240.0f);
+
+    return !ShouldThrottle(m_LastScopeRTTRenderTime, effectiveMaxHz);
 }
 bool VR::ShouldUpdateRearMirrorRTT()
 {

@@ -661,10 +661,15 @@ public:
 	IDirect3DSurface9* m_D9RightEyeSubmitSurface = nullptr;
 	IDirect3DSurface9* m_D9HUDSurface = nullptr;
 	IDirect3DSurface9* m_D9ScopeSurface = nullptr;
-	IDirect3DTexture9* m_D9ScopeLensScratchTexture = nullptr;
+	// GPU-side scope lens post-process surfaces. The raw scope RTT is copied and masked into
+	// a separate processed overlay texture so SteamVR never samples the square RTT directly.
+	IDirect3DTexture9* m_D9ScopeLensScratchTexture = nullptr; // GPU render-target copy of the raw scope RTT
 	IDirect3DSurface9* m_D9ScopeLensScratchSurface = nullptr;
+	IDirect3DTexture9* m_D9ScopeLensTexture = nullptr;        // processed circular scope overlay texture
+	IDirect3DSurface9* m_D9ScopeLensSurface = nullptr;        // processed circular scope overlay surface
 	uint32_t m_D9ScopeLensScratchW = 0;
 	uint32_t m_D9ScopeLensScratchH = 0;
+	uint32_t m_D9ScopeLensScratchFormat = 0;
 	IDirect3DSurface9* m_D9RearMirrorSurface = nullptr;
 	IDirect3DSurface9* m_D9DesktopMirrorSurface = nullptr;
 	IDirect3DSurface9* m_D9BlankSurface = nullptr;
@@ -674,6 +679,7 @@ public:
 	SharedTextureHolder m_VKBackBuffer;
 	SharedTextureHolder m_VKHUD;
 	SharedTextureHolder m_VKScope;
+	SharedTextureHolder m_VKScopeLens;
 	SharedTextureHolder m_VKRearMirror;
 	SharedTextureHolder m_VKBlankTexture;
 	bool m_BackBufferTextureValid = false;
@@ -2240,7 +2246,6 @@ public:
 	// ----------------------------
 	bool  m_ScopeEnabled = false;
 	int   m_ScopeRTTSize = 512;               // square RTT size in pixels
-	float m_ScopeRTTMaxHz = 90.0f;
 	std::chrono::steady_clock::time_point m_LastScopeRTTRenderTime{};
 	float m_ScopeFov = 20.0f;                  // smaller = more zoom
 	float m_ScopeZNear = 2.0f;                 // game units
@@ -2261,6 +2266,9 @@ public:
 	bool  m_ScopeAimLineOnlyInScope = true;
 	// Alpha scale for the scope lens reticle drawn into the RTT. 0 = hidden, 1 = default opacity.
 	float m_ScopeReticleAlpha = 1.0f;
+	std::atomic<uint32_t> m_QueuedScopeLensPostProcessPending{ 0 };
+	std::atomic<uint32_t> m_ScopeLensOverlayReady{ 0 };
+	std::chrono::steady_clock::time_point m_LastScopeLensPostProcessTime{};
 	// If true, hide the local player model while rendering scope RTT (prevents head/body obstruction).
 	bool  m_ScopeHideLocalPlayerModelInScope = true;
 

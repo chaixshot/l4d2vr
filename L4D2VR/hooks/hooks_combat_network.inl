@@ -21,6 +21,12 @@ void __fastcall Hooks::dEndFrame(void* ecx, void* edx)
 
 	hkEndFrame.fOriginal(ecx);
 
+	// Do not run scope lens CPU/GPU post-processing from IMaterialSystem::EndFrame in
+	// queued rendering. Source can return from EndFrame while the material worker is
+	// still issuing DXVK D3D9 draw commands; touching the scope surface here can race
+	// D3D9DeviceEx::BindTexture/EmitCs. The pending flag is consumed from VR::Update(),
+	// which is called by the DXVK Present path after its queued-render idle point.
+
 	if (m_VR && m_Game && m_Game->GetMatQueueMode() != 0 && m_VR->m_ReShadeVRCompat)
 	{
 		const uint32_t pendingReady = m_VR->m_ReShadeVRCompatPendingRenderReady.exchange(0, std::memory_order_acq_rel);

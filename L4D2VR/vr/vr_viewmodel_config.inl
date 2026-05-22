@@ -1306,7 +1306,6 @@ void VR::ParseConfigFile()
     // Gun-mounted scope
     m_ScopeEnabled = getBool("ScopeEnabled", m_ScopeEnabled);
     m_ScopeRTTSize = std::clamp(getInt("ScopeRTTSize", m_ScopeRTTSize), 128, 4096);
-    m_ScopeRTTMaxHz = std::clamp(getFloat("ScopeRTTMaxHz", m_ScopeRTTMaxHz), 0.0f, 240.0f);
     m_ScopeFov = std::clamp(getFloat("ScopeFov", m_ScopeFov), 1.0f, 179.0f);
     m_ScopeZNear = std::clamp(getFloat("ScopeZNear", m_ScopeZNear), 0.1f, 64.0f);
     {

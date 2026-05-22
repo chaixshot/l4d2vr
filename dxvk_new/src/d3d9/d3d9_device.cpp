@@ -9770,7 +9770,9 @@ namespace dxvk {
         // We do not flush empty chunks, so if we are tracking a resource
         // immediately after a flush, we need to use the sequence number
         // of the previously submitted chunk to prevent deadlocks.
-        return m_csChunk->empty() ? m_csSeqNum : m_csSeqNum + 1;
+        // Be defensive for L4D2VR queued rendering timing where m_csChunk may
+        // temporarily be null after a moved chunk.
+        return (!m_csChunk || m_csChunk->empty()) ? m_csSeqNum : m_csSeqNum + 1;
     }
 
 

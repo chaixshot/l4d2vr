@@ -9556,6 +9556,26 @@ namespace
         // A small lower stadia mark makes it read more like an optic instead of a flat crosshair.
         ScopeAddThickLine(out, cx - radius * 0.055f, cy + tick0, cx + radius * 0.055f, cy + tick0, std::max(1.0f, px * 1.1f), reticle);
     }
+
+
+    static void ScopeReleaseSurface(IDirect3DSurface9*& surface)
+    {
+        if (surface)
+        {
+            surface->Release();
+            surface = nullptr;
+        }
+    }
+
+    static void ScopeReleaseTexture(IDirect3DTexture9*& texture)
+    {
+        if (texture)
+        {
+            texture->Release();
+            texture = nullptr;
+        }
+    }
+
 }
 
 bool VR::ApplyScopeLensPostProcess()
@@ -9580,31 +9600,36 @@ bool VR::ApplyScopeLensPostProcess()
 
     auto releaseRefs = [&]()
         {
+            ScopeReleaseSurface(oldRenderTarget);
+            ScopeReleaseSurface(oldDepthStencil);
             if (stateBlock)
             {
                 stateBlock->Release();
                 stateBlock = nullptr;
-            }
-            if (oldRenderTarget)
-            {
-                oldRenderTarget->Release();
-                oldRenderTarget = nullptr;
-            }
-            if (oldDepthStencil)
-            {
-                oldDepthStencil->Release();
-                oldDepthStencil = nullptr;
             }
             if (device)
             {
                 device->Release();
                 device = nullptr;
             }
-            if (scopeSurface)
-            {
-                scopeSurface->Release();
-                scopeSurface = nullptr;
-            }
+            ScopeReleaseSurface(scopeSurface);
+        };
+
+    auto destroyScopeLensOutput = [&]()
+        {
+            ScopeReleaseSurface(m_D9ScopeLensSurface);
+            ScopeReleaseTexture(m_D9ScopeLensTexture);
+            std::memset(&m_VKScopeLens, 0, sizeof(m_VKScopeLens));
+            m_ScopeLensOverlayReady.store(0u, std::memory_order_release);
+        };
+
+    auto destroyScopeLensScratch = [&]()
+        {
+            ScopeReleaseSurface(m_D9ScopeLensScratchSurface);
+            ScopeReleaseTexture(m_D9ScopeLensScratchTexture);
+            m_D9ScopeLensScratchW = 0;
+            m_D9ScopeLensScratchH = 0;
+            m_D9ScopeLensScratchFormat = 0;
         };
 
     HRESULT hr = scopeSurface->GetDevice(&device);
@@ -9633,43 +9658,20 @@ bool VR::ApplyScopeLensPostProcess()
             }
         };
 
-    bool scratchMismatch = false;
-    if (m_D9ScopeLensScratchSurface && !m_D9ScopeLensScratchTexture)
-    {
-        scratchMismatch = true;
-    }
-    else if (m_D9ScopeLensScratchSurface)
-    {
-        D3DSURFACE_DESC scratchDesc{};
-        if (FAILED(m_D9ScopeLensScratchSurface->GetDesc(&scratchDesc)) ||
-            scratchDesc.Width != desc.Width || scratchDesc.Height != desc.Height || scratchDesc.Format != desc.Format)
-        {
-            scratchMismatch = true;
-        }
-    }
-    else if (m_D9ScopeLensScratchTexture)
-    {
-        scratchMismatch = true;
-    }
+    const bool resourceMismatch =
+        !m_D9ScopeLensScratchTexture ||
+        !m_D9ScopeLensScratchSurface ||
+        !m_D9ScopeLensTexture ||
+        !m_D9ScopeLensSurface ||
+        m_D9ScopeLensScratchW != desc.Width ||
+        m_D9ScopeLensScratchH != desc.Height ||
+        m_D9ScopeLensScratchFormat != static_cast<uint32_t>(desc.Format);
 
-    if (scratchMismatch)
+    if (resourceMismatch)
     {
-        if (m_D9ScopeLensScratchSurface)
-        {
-            m_D9ScopeLensScratchSurface->Release();
-            m_D9ScopeLensScratchSurface = nullptr;
-        }
-        if (m_D9ScopeLensScratchTexture)
-        {
-            m_D9ScopeLensScratchTexture->Release();
-            m_D9ScopeLensScratchTexture = nullptr;
-        }
-        m_D9ScopeLensScratchW = 0;
-        m_D9ScopeLensScratchH = 0;
-    }
+        destroyScopeLensOutput();
+        destroyScopeLensScratch();
 
-    if (!m_D9ScopeLensScratchTexture)
-    {
         hr = device->CreateTexture(
             desc.Width,
             desc.Height,
@@ -9682,20 +9684,39 @@ bool VR::ApplyScopeLensPostProcess()
         if (SUCCEEDED(hr) && m_D9ScopeLensScratchTexture)
             hr = m_D9ScopeLensScratchTexture->GetSurfaceLevel(0, &m_D9ScopeLensScratchSurface);
 
-        if (FAILED(hr) || !m_D9ScopeLensScratchTexture || !m_D9ScopeLensScratchSurface)
+        if (SUCCEEDED(hr))
         {
-            if (m_D9ScopeLensScratchSurface)
+            hr = device->CreateTexture(
+                desc.Width,
+                desc.Height,
+                1,
+                D3DUSAGE_RENDERTARGET,
+                D3DFMT_A8R8G8B8,
+                D3DPOOL_DEFAULT,
+                &m_D9ScopeLensTexture,
+                nullptr);
+        }
+        if (SUCCEEDED(hr) && m_D9ScopeLensTexture)
+            hr = m_D9ScopeLensTexture->GetSurfaceLevel(0, &m_D9ScopeLensSurface);
+
+        if (SUCCEEDED(hr) && m_D9ScopeLensSurface)
+        {
+            D3D9_TEXTURE_VR_DESC vrDesc{};
+            hr = g_D3DVR9->GetVRDesc(m_D9ScopeLensSurface, &vrDesc);
+            if (SUCCEEDED(hr))
             {
-                m_D9ScopeLensScratchSurface->Release();
-                m_D9ScopeLensScratchSurface = nullptr;
+                std::memcpy(&m_VKScopeLens.m_VulkanData, &vrDesc, sizeof(vr::VRVulkanTextureData_t));
+                m_VKScopeLens.m_VRTexture.handle = &m_VKScopeLens.m_VulkanData;
+                m_VKScopeLens.m_VRTexture.eColorSpace = vr::ColorSpace_Auto;
+                m_VKScopeLens.m_VRTexture.eType = vr::TextureType_Vulkan;
             }
-            if (m_D9ScopeLensScratchTexture)
-            {
-                m_D9ScopeLensScratchTexture->Release();
-                m_D9ScopeLensScratchTexture = nullptr;
-            }
-            m_D9ScopeLensScratchW = 0;
-            m_D9ScopeLensScratchH = 0;
+        }
+
+        if (FAILED(hr) || !m_D9ScopeLensScratchTexture || !m_D9ScopeLensScratchSurface ||
+            !m_D9ScopeLensTexture || !m_D9ScopeLensSurface || !m_VKScopeLens.m_VRTexture.handle)
+        {
+            destroyScopeLensOutput();
+            destroyScopeLensScratch();
             unlockDevice();
             releaseRefs();
             return false;
@@ -9703,6 +9724,7 @@ bool VR::ApplyScopeLensPostProcess()
 
         m_D9ScopeLensScratchW = desc.Width;
         m_D9ScopeLensScratchH = desc.Height;
+        m_D9ScopeLensScratchFormat = static_cast<uint32_t>(desc.Format);
     }
 
     hr = device->StretchRect(scopeSurface, nullptr, m_D9ScopeLensScratchSurface, nullptr, D3DTEXF_LINEAR);
@@ -9729,7 +9751,7 @@ bool VR::ApplyScopeLensPostProcess()
     viewport.MaxZ = 1.0f;
 
     bool ok = true;
-    ok = ok && SUCCEEDED(device->SetRenderTarget(0, scopeSurface));
+    ok = ok && SUCCEEDED(device->SetRenderTarget(0, m_D9ScopeLensSurface));
     if (ok)
     {
         device->SetDepthStencilSurface(nullptr);
@@ -9811,6 +9833,14 @@ bool VR::ApplyScopeLensPostProcess()
         device->SetDepthStencilSurface(oldDepthStencil);
     if (haveOldViewport)
         device->SetViewport(&oldViewport);
+
+    if (ok)
+    {
+        hr = g_D3DVR9->TransferSurface(m_D9ScopeLensSurface, FALSE);
+        ok = SUCCEEDED(hr);
+    }
+
+    m_ScopeLensOverlayReady.store(ok ? 1u : 0u, std::memory_order_release);
 
     unlockDevice();
     releaseRefs();
