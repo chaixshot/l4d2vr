@@ -1051,6 +1051,8 @@ void VR::ParseConfigFile()
     m_MotionGestureCooldown = std::max(0.0f, getFloat("MotionGestureCooldown", m_MotionGestureCooldown));
     m_MotionGestureHoldDuration = std::max(0.0f, getFloat("MotionGestureHoldDuration", m_MotionGestureHoldDuration));
     m_ViewmodelAdjustEnabled = getBool("ViewmodelAdjustEnabled", m_ViewmodelAdjustEnabled);
+    m_ViewmodelAdjustMoveSpeed = std::clamp(getFloat("ViewmodelAdjustMoveSpeed", m_ViewmodelAdjustMoveSpeed), 0.1f, 5.0f);
+    m_ViewmodelAdjustRotateSpeed = std::clamp(getFloat("ViewmodelAdjustRotateSpeed", m_ViewmodelAdjustRotateSpeed), 0.1f, 5.0f);
     m_AimLineThickness = std::max(0.0f, getFloat("AimLineThickness", m_AimLineThickness));
     m_AimLineEnabled = getBool("AimLineEnabled", m_AimLineEnabled);
     m_AimLineOnlyWhenLaserSight = getBool("AimLineOnlyWhenLaserSight", m_AimLineOnlyWhenLaserSight);

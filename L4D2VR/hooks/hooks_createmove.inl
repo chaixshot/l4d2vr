@@ -278,8 +278,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		float walkNx = 0.f, walkNy = 0.f; 
 		float walkMaxSpeed = 0.f;
 		float ax = 0.f, ay = 0.f;
-		if (m_VR->GetWalkAxis(ax, ay)) {
-			// 死区 + 归一化（和平滑转向一致的 0.2 死区）
+		if (!m_VR->m_AdjustingViewmodel && m_VR->GetWalkAxis(ax, ay)) {
+			// Deadzone + normalization. In viewmodel adjustment mode this axis is reserved for rotation.
 			const float dz = 0.2f;
 			auto norm = [&](float v) {
 				float a = fabsf(v);
@@ -295,8 +295,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			// Third-person front-view mode: keep left/right as-is.
 			// Forward/back follows current camera-aligned basis (no extra sign flip).
 
-			// 最大移动速度：给一个安全常数；服务器会按自身规则再夹紧
-			const float maxSpeed = m_VR->m_AdjustingViewmodel ? 25.f : 250.f;
+			// Safe command speed; the server will still apply its own movement limits.
+			const float maxSpeed = 250.f;
 			hadWalkAxis = true;
 			walkNx = moveNx;
 			walkNy = moveNy;
@@ -308,7 +308,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			// Stick locomotion is applied later once the final cmd->viewangles basis is known.
 			// That keeps keyboard movement and stick movement in the same basis.
 
-			// 可选：也把方向按钮位设置一下，增加兼容性
+			// Also set direction button bits for compatibility.
 			// IN_FORWARD=1<<3, IN_BACK=1<<4, IN_MOVELEFT=1<<9, IN_MOVERIGHT=1<<10
 			if (moveNy > 0.5f)      cmd->buttons |= (1 << 3);
 			else if (moveNy < -0.5f)cmd->buttons |= (1 << 4);

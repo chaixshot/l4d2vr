@@ -1047,6 +1047,7 @@ void VR::ProcessInput()
         m_AdjustStartLeftAng = m_LeftControllerAngAbs;
         m_AdjustStartViewmodelPos = m_ViewmodelPosAdjust;
         m_AdjustStartViewmodelAng = m_ViewmodelAngAdjust;
+        m_AdjustStickViewmodelAng = { 0.0f, 0.0f, 0.0f };
         m_AdjustStartViewmodelForward = m_ViewmodelForward;
         m_AdjustStartViewmodelRight = m_ViewmodelRight;
         m_AdjustStartViewmodelUp = m_ViewmodelUp;

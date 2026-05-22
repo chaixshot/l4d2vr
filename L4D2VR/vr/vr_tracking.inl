@@ -1134,6 +1134,7 @@ void VR::UpdateTracking()
             m_AdjustStartLeftAng = m_LeftControllerAngAbs;
             m_AdjustStartViewmodelPos = m_ViewmodelPosAdjust;
             m_AdjustStartViewmodelAng = m_ViewmodelAngAdjust;
+            m_AdjustStickViewmodelAng = { 0.0f, 0.0f, 0.0f };
             m_AdjustStartViewmodelForward = m_ViewmodelForward;
             m_AdjustStartViewmodelRight = m_ViewmodelRight;
             m_AdjustStartViewmodelUp = m_ViewmodelUp;
@@ -1154,12 +1155,42 @@ void VR::UpdateTracking()
             wrapDelta(m_LeftControllerAngAbs.z - m_AdjustStartLeftAng.z)
         };
 
-        m_ViewmodelPosAdjust = m_AdjustStartViewmodelPos + viewmodelDelta;
+        const float moveSpeed = std::clamp(m_ViewmodelAdjustMoveSpeed, 0.1f, 5.0f);
+        const float rotateSpeed = std::clamp(m_ViewmodelAdjustRotateSpeed, 0.1f, 5.0f);
+
+        float stickX = 0.0f;
+        float stickY = 0.0f;
+        if (GetWalkAxis(stickX, stickY))
+        {
+            const float deadzone = 0.2f;
+            auto normalizeStick = [deadzone](float value)
+            {
+                const float absValue = std::fabs(value);
+                if (absValue <= deadzone)
+                    return 0.0f;
+                const float normalized = (absValue - deadzone) / (1.0f - deadzone);
+                return value < 0.0f ? -normalized : normalized;
+            };
+
+            const float nx = normalizeStick(stickX);
+            const float ny = normalizeStick(stickY);
+            if (std::fabs(nx) > 0.0001f || std::fabs(ny) > 0.0001f)
+            {
+                const float dtSeconds = std::clamp(m_LastFrameDuration, 0.0f, 0.1f);
+                const float degreesPerSecond = 90.0f * rotateSpeed;
+                m_AdjustStickViewmodelAng.x += -ny * degreesPerSecond * dtSeconds;
+                m_AdjustStickViewmodelAng.y += nx * degreesPerSecond * dtSeconds;
+                m_AdjustStickViewmodelAng.x -= 360.0f * std::floor((m_AdjustStickViewmodelAng.x + 180.0f) / 360.0f);
+                m_AdjustStickViewmodelAng.y -= 360.0f * std::floor((m_AdjustStickViewmodelAng.y + 180.0f) / 360.0f);
+            }
+        }
+
+        m_ViewmodelPosAdjust = m_AdjustStartViewmodelPos + (viewmodelDelta * moveSpeed);
         m_ViewmodelAngAdjust =
         {
-            m_AdjustStartViewmodelAng.x + deltaAng.x,
-            m_AdjustStartViewmodelAng.y + deltaAng.y,
-            m_AdjustStartViewmodelAng.z + deltaAng.z
+            m_AdjustStartViewmodelAng.x + (deltaAng.x * rotateSpeed) + m_AdjustStickViewmodelAng.x,
+            m_AdjustStartViewmodelAng.y + (deltaAng.y * rotateSpeed) + m_AdjustStickViewmodelAng.y,
+            m_AdjustStartViewmodelAng.z + (deltaAng.z * rotateSpeed) + m_AdjustStickViewmodelAng.z
         };
         m_ViewmodelAdjustments[m_CurrentViewmodelKey] = { m_ViewmodelPosAdjust, m_ViewmodelAngAdjust };
         m_ViewmodelAdjustmentsDirty = true;

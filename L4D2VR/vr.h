@@ -462,6 +462,8 @@ public:
 	bool m_ViewmodelAdjustmentsDirty = false;
 	std::string m_ViewmodelAdjustmentSavePath;
 	bool m_ViewmodelAdjustEnabled = false;
+	float m_ViewmodelAdjustMoveSpeed = 1.0f;
+	float m_ViewmodelAdjustRotateSpeed = 1.0f;
 
 	bool m_AdjustingViewmodel = false;
 	std::string m_AdjustingKey;
@@ -469,6 +471,7 @@ public:
 	QAngle m_AdjustStartLeftAng = { 0,0,0 };
 	Vector m_AdjustStartViewmodelPos = { 0,0,0 };
 	QAngle m_AdjustStartViewmodelAng = { 0,0,0 };
+	QAngle m_AdjustStickViewmodelAng = { 0,0,0 };
 	Vector m_AdjustStartViewmodelForward = { 0,0,0 };
 	Vector m_AdjustStartViewmodelRight = { 0,0,0 };
 	Vector m_AdjustStartViewmodelUp = { 0,0,0 };
