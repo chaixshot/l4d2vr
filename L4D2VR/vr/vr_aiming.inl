@@ -2942,6 +2942,10 @@ void VR::DrawAimLine(const Vector& start, const Vector& end)
     if (scopeOnlyAimLine && !m_ScopeRenderingPass)
         return;
 
+    m_AimLineMaxHz = GetHmdDisplayFrequencyHz();
+    if (ShouldThrottle(m_LastAimLineDrawTime, m_AimLineMaxHz))
+        return;
+
     // Draw every frame with ~single-frame lifetime. DebugOverlay primitives persist for "duration" seconds;
     // if duration spans multiple frames while we also draw every frame, you get visible "ghost" trails.
     // Keeping duration close to the current frame interval avoids both ghosting and flicker.
@@ -3199,6 +3203,10 @@ void VR::UpdateD3DAimLineOverlayForView(C_BasePlayer* localPlayer, const CViewSe
         return;
     }
 
+    m_AimLineMaxHz = GetHmdDisplayFrequencyHz();
+    if (ShouldThrottle(m_LastD3DAimLineOverlayUpdateTime[eyeIndex], m_AimLineMaxHz))
+        return;
+
     C_WeaponCSBase* activeWeapon = static_cast<C_WeaponCSBase*>(localPlayer->GetActiveWeapon());
     if (!ShouldShowAimLine(activeWeapon) || !ShouldDrawAimLine(activeWeapon))
     {
@@ -3297,6 +3305,10 @@ void VR::RenderDrawAimLineQueued(C_BasePlayer* localPlayer)
         && m_IsThirdPersonCamera
         && m_ScopeWeaponIsFirearm;
     if (scopeOnlyAimLine && !m_ScopeRenderingPass)
+        return;
+
+    m_AimLineMaxHz = GetHmdDisplayFrequencyHz();
+    if (ShouldThrottle(m_LastAimLineDrawTime, m_AimLineMaxHz))
         return;
 
     Vector start{};
@@ -3399,6 +3411,7 @@ void VR::DrawThrowArcFromCache(float duration)
         return;
 
     // Throttle throw arc drawing; it's a lot of overlay primitives.
+    m_ThrowArcMaxHz = GetHmdDisplayFrequencyHz();
     if (ShouldThrottle(m_LastThrowArcDrawTime, m_ThrowArcMaxHz))
         return;
 

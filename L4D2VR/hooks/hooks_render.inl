@@ -2059,8 +2059,46 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	// camera that does NOT match the HMD eye origin and can appear "too high" in VR.
 	// So: only borrow setup.origin.z when the player has no active view-entity override.
 	m_VR->m_SetupOrigin = eyeOrigin;
-	if (!renderThirdPerson && !hasViewEntityOverride && !usingMountedGun)
-		m_VR->m_SetupOrigin.z = setup.origin.z;
+	{
+		static bool s_stepZSmoothValid = false;
+		static float s_stepZSmooth = 0.0f;
+		static std::chrono::steady_clock::time_point s_stepZSmoothLastT{};
+		const bool useEngineStepZ = !renderThirdPerson && !hasViewEntityOverride && !usingMountedGun;
+		if (useEngineStepZ)
+		{
+			const float rawStepZ = setup.origin.z;
+			const int smoothMs = std::max(0, m_VR->m_StairStepCameraSmoothMs);
+			if (smoothMs <= 0)
+			{
+				s_stepZSmooth = rawStepZ;
+				s_stepZSmoothValid = true;
+			}
+			else if (!s_stepZSmoothValid || std::fabs(rawStepZ - s_stepZSmooth) > 48.0f)
+			{
+				s_stepZSmooth = rawStepZ;
+				s_stepZSmoothValid = true;
+				s_stepZSmoothLastT = std::chrono::steady_clock::now();
+			}
+			else
+			{
+				const auto now = std::chrono::steady_clock::now();
+				float dt = 0.0f;
+				if (s_stepZSmoothLastT.time_since_epoch().count() != 0)
+					dt = std::chrono::duration<float>(now - s_stepZSmoothLastT).count();
+				s_stepZSmoothLastT = now;
+				dt = std::clamp(dt, 0.0f, 0.050f);
+				const float tau = static_cast<float>(smoothMs) / 1000.0f;
+				const float alpha = (tau > 0.0f) ? std::clamp(1.0f - std::exp(-dt / tau), 0.0f, 1.0f) : 1.0f;
+				s_stepZSmooth += (rawStepZ - s_stepZSmooth) * alpha;
+			}
+			m_VR->m_SetupOrigin.z = s_stepZSmooth;
+		}
+		else
+		{
+			s_stepZSmoothValid = false;
+			s_stepZSmoothLastT = {};
+		}
+	}
 	m_VR->m_SetupAngles.Init(setup.angles.x, setup.angles.y, setup.angles.z);
 
 	Vector leftOrigin, rightOrigin;

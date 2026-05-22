@@ -1173,7 +1173,7 @@ void VR::ParseConfigFile()
     m_D3DAimLineOverlayOutlineColorA = d3dAimOutlineColor[3];
     m_AimLinePersistence = std::max(0.0f, getFloat("AimLinePersistence", m_AimLinePersistence));
     m_AimLineFrameDurationMultiplier = std::max(0.0f, getFloat("AimLineFrameDurationMultiplier", m_AimLineFrameDurationMultiplier));
-    m_AimLineMaxHz = std::max(0.0f, getFloat("AimLineMaxHz", m_AimLineMaxHz));
+    m_AimLineMaxHz = GetHmdDisplayFrequencyHz();
     m_GameLaserSightBeamEnabled = getBool("GameLaserSightBeamEnabled", m_GameLaserSightBeamEnabled);
     m_GameLaserSightReplaceParticle = getBool("GameLaserSightReplaceParticle", m_GameLaserSightReplaceParticle);
     m_GameLaserSightThickness = std::clamp(getFloat("GameLaserSightThickness", m_GameLaserSightThickness), 0.0f, 8.0f);
@@ -1187,7 +1187,7 @@ void VR::ParseConfigFile()
     m_GameLaserSightEndOffset.y = std::clamp(m_GameLaserSightEndOffset.y, -256.0f, 256.0f);
     m_GameLaserSightEndOffset.z = std::clamp(m_GameLaserSightEndOffset.z, -256.0f, 256.0f);
     m_ThrowArcLandingOffset = std::max(-10000.0f, std::min(10000.0f, getFloat("ThrowArcLandingOffset", m_ThrowArcLandingOffset)));
-    m_ThrowArcMaxHz = std::max(0.0f, getFloat("ThrowArcMaxHz", m_ThrowArcMaxHz));
+    m_ThrowArcMaxHz = GetHmdDisplayFrequencyHz();
     // Debug / memory
     const bool prevVASLog = m_DebugVASLog;
     m_DebugVASLog = getBool("DebugVASLog", m_DebugVASLog);
@@ -1232,6 +1232,9 @@ void VR::ParseConfigFile()
     // Queued rendering: render-thread smoothing time constant (ms) for cameraAnchor/rotationOffset.
     // 0 = off, 20~80 typical, higher = smoother but more latency.
     m_QueuedRenderViewSmoothMs = std::clamp(getInt("QueuedRenderViewSmoothMs", m_QueuedRenderViewSmoothMs), 0, 250);
+    // First-person stair/step smoothing: damp the engine's vertical step camera before it drives
+    // the VR world anchor. 0 disables; higher = steadier stairs but slower vertical catch-up.
+    m_StairStepCameraSmoothMs = std::clamp(getInt("StairStepCameraSmoothMs", m_StairStepCameraSmoothMs), 0, 300);
 
     // Queued rendering: HMD pose smoothing time constant (ms) for visual stability.
     // 0 = off. Higher values can soften stale-pose stepping a bit, but they do not produce fresher

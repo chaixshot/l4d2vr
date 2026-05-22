@@ -1138,28 +1138,17 @@ void VR::UpdateTracking()
             m_AdjustStartViewmodelForward = m_ViewmodelForward;
             m_AdjustStartViewmodelRight = m_ViewmodelRight;
             m_AdjustStartViewmodelUp = m_ViewmodelUp;
+            m_AdjustSuppressControllerUntil = {};
+            m_AdjustControllerSuppressed = false;
             m_AdjustingKey = m_CurrentViewmodelKey;
         }
-
-        Vector deltaPos = m_LeftControllerPosAbs - m_AdjustStartLeftPos;
-        Vector viewmodelDelta =
-        {
-            -DotProduct(deltaPos, m_AdjustStartViewmodelForward),
-            -DotProduct(deltaPos, m_AdjustStartViewmodelRight),
-            -DotProduct(deltaPos, m_AdjustStartViewmodelUp)
-        };
-        QAngle deltaAng =
-        {
-            wrapDelta(m_LeftControllerAngAbs.x - m_AdjustStartLeftAng.x),
-            wrapDelta(m_LeftControllerAngAbs.y - m_AdjustStartLeftAng.y),
-            wrapDelta(m_LeftControllerAngAbs.z - m_AdjustStartLeftAng.z)
-        };
 
         const float moveSpeed = std::clamp(m_ViewmodelAdjustMoveSpeed, 0.1f, 5.0f);
         const float rotateSpeed = std::clamp(m_ViewmodelAdjustRotateSpeed, 0.1f, 5.0f);
 
         float stickX = 0.0f;
         float stickY = 0.0f;
+        bool stickAdjustActive = false;
         if (GetWalkAxis(stickX, stickY))
         {
             const float deadzone = 0.2f;
@@ -1176,6 +1165,7 @@ void VR::UpdateTracking()
             const float ny = normalizeStick(stickY);
             if (std::fabs(nx) > 0.0001f || std::fabs(ny) > 0.0001f)
             {
+                stickAdjustActive = true;
                 const float dtSeconds = std::clamp(m_LastFrameDuration, 0.0f, 0.1f);
                 const float degreesPerSecond = 90.0f * rotateSpeed;
                 m_AdjustStickViewmodelAng.x += -ny * degreesPerSecond * dtSeconds;
@@ -1184,6 +1174,41 @@ void VR::UpdateTracking()
                 m_AdjustStickViewmodelAng.y -= 360.0f * std::floor((m_AdjustStickViewmodelAng.y + 180.0f) / 360.0f);
             }
         }
+
+        const auto adjustNow = std::chrono::steady_clock::now();
+        if (stickAdjustActive)
+            m_AdjustSuppressControllerUntil = adjustNow + std::chrono::seconds(1);
+
+        const bool suppressControllerAdjust = adjustNow < m_AdjustSuppressControllerUntil;
+        if (suppressControllerAdjust != m_AdjustControllerSuppressed)
+        {
+            m_AdjustStartLeftPos = m_LeftControllerPosAbs;
+            m_AdjustStartLeftAng = m_LeftControllerAngAbs;
+            m_AdjustStartViewmodelPos = m_ViewmodelPosAdjust;
+            m_AdjustStartViewmodelAng =
+            {
+                m_ViewmodelAngAdjust.x - m_AdjustStickViewmodelAng.x,
+                m_ViewmodelAngAdjust.y - m_AdjustStickViewmodelAng.y,
+                m_ViewmodelAngAdjust.z - m_AdjustStickViewmodelAng.z
+            };
+            m_AdjustControllerSuppressed = suppressControllerAdjust;
+        }
+
+        const Vector controllerPosForAdjust = suppressControllerAdjust ? m_AdjustStartLeftPos : m_LeftControllerPosAbs;
+        const QAngle controllerAngForAdjust = suppressControllerAdjust ? m_AdjustStartLeftAng : m_LeftControllerAngAbs;
+        Vector deltaPos = controllerPosForAdjust - m_AdjustStartLeftPos;
+        Vector viewmodelDelta =
+        {
+            -DotProduct(deltaPos, m_AdjustStartViewmodelForward),
+            -DotProduct(deltaPos, m_AdjustStartViewmodelRight),
+            -DotProduct(deltaPos, m_AdjustStartViewmodelUp)
+        };
+        QAngle deltaAng =
+        {
+            wrapDelta(controllerAngForAdjust.x - m_AdjustStartLeftAng.x),
+            wrapDelta(controllerAngForAdjust.y - m_AdjustStartLeftAng.y),
+            wrapDelta(controllerAngForAdjust.z - m_AdjustStartLeftAng.z)
+        };
 
         m_ViewmodelPosAdjust = m_AdjustStartViewmodelPos + (viewmodelDelta * moveSpeed);
         m_ViewmodelAngAdjust =

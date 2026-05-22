@@ -421,6 +421,9 @@ public:
 	// Queued rendering: render-thread smoothing time constant (ms) for cameraAnchor/rotationOffset.
 	// 0 = off (follow snapshot exactly), 20~80 = typical. Higher = smoother but more latency.
 	int m_QueuedRenderViewSmoothMs = 25;
+	// First-person stair/step smoothing: Source's step-smoothed setup.origin.z is flat-screen camera
+	// motion. Low-pass it before it becomes the VR world anchor so stairs do not yank the whole view.
+	int m_StairStepCameraSmoothMs = 90;
 
 	// Queued rendering: HMD pose smoothing time constant (ms) for visual stability.
 	// 0 = off. Higher values can soften visible stepping from stale pose reuse, but they do not fetch
@@ -475,6 +478,8 @@ public:
 	Vector m_AdjustStartViewmodelForward = { 0,0,0 };
 	Vector m_AdjustStartViewmodelRight = { 0,0,0 };
 	Vector m_AdjustStartViewmodelUp = { 0,0,0 };
+	std::chrono::steady_clock::time_point m_AdjustSuppressControllerUntil{};
+	bool m_AdjustControllerSuppressed = false;
 
 	Vector m_AimLineStart = { 0,0,0 };
 	Vector m_AimLineEnd = { 0,0,0 };
@@ -607,13 +612,16 @@ public:
 	// --- Spike control / throttling ---
 	// Heavy work can happen many times per frame (notably from dDrawModelExecute).
 	// These knobs cap how often we do expensive debug-overlay primitives and trace tests.
-	float m_AimLineMaxHz = 100.0f;              // caps DrawLineWithThickness calls
-	float m_ThrowArcMaxHz = 100.0f;             // caps throw arc overlay calls
+	float m_AimLineMaxHz = 100.0f;              // runtime cap follows HMD refresh rate
+	float m_ThrowArcMaxHz = 100.0f;             // runtime cap follows HMD refresh rate
 	float m_SpecialInfectedOverlayMaxHz = 20.0f; // caps arrow drawing + prewarning refresh per entity
 	float m_SpecialInfectedTraceMaxHz = 15.0f;   // caps TraceRay per entity
 
 	std::chrono::steady_clock::time_point m_LastAimLineDrawTime{};
 	std::chrono::steady_clock::time_point m_LastThrowArcDrawTime{};
+	std::chrono::steady_clock::time_point m_LastPostMirrorAimLineDrawTime{};
+	std::chrono::steady_clock::time_point m_LastPostMirrorThrowArcDrawTime{};
+	std::array<std::chrono::steady_clock::time_point, 2> m_LastD3DAimLineOverlayUpdateTime{};
 	mutable std::unordered_map<int, std::chrono::steady_clock::time_point> m_LastSpecialInfectedOverlayTime{};
 	mutable std::unordered_map<int, std::chrono::steady_clock::time_point> m_LastSpecialInfectedTraceTime{};
 	mutable std::unordered_map<int, bool> m_LastSpecialInfectedTraceResult{};

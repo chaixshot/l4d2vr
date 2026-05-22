@@ -24,6 +24,7 @@ QueuedRenderMaxFpsSmart=true
 QueuedRenderMaxFps=0
 QueuedRenderMaxFramesAhead=1
 QueuedRenderViewSmoothMs=25
+StairStepCameraSmoothMs=90
 QueuedRenderHmdSmoothMs=0
 QueuedViewmodelStabilize=true
 QueuedViewmodelStabilizeDebugLog=false
@@ -173,8 +174,6 @@ CustomAction3Command=
 CustomAction4Command=
 CustomAction5Command=
 
-AimLineMaxHz=100
-ThrowArcMaxHz=100
 
 ScopeEnabled=false
 ScopeRTTSize=512

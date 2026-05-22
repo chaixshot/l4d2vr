@@ -1098,8 +1098,7 @@ namespace
             return CfgHitKillIndicatorsEnabled(s);
 
         if (std::strcmp(key, "AimLineThickness") == 0 ||
-            std::strcmp(key, "AimLineColor") == 0 ||
-            std::strcmp(key, "AimLineMaxHz") == 0)
+            std::strcmp(key, "AimLineColor") == 0)
             return CfgIsEnabled(s, "AimLineEnabled", true);
 
 

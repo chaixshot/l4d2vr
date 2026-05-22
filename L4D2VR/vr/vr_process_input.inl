@@ -1051,12 +1051,16 @@ void VR::ProcessInput()
         m_AdjustStartViewmodelForward = m_ViewmodelForward;
         m_AdjustStartViewmodelRight = m_ViewmodelRight;
         m_AdjustStartViewmodelUp = m_ViewmodelUp;
+        m_AdjustSuppressControllerUntil = {};
+        m_AdjustControllerSuppressed = false;
         m_AdjustingKey = m_CurrentViewmodelKey;
     }
     else if (!adjustViewmodelActive && m_AdjustingViewmodel)
     {
         m_AdjustingViewmodel = false;
         m_AdjustingKey.clear();
+        m_AdjustSuppressControllerUntil = {};
+        m_AdjustControllerSuppressed = false;
         if (m_ViewmodelAdjustmentsDirty)
         {
             SaveViewmodelAdjustments();

@@ -9271,6 +9271,19 @@ void VR::DrawPostMirrorPluginOverlays(IMatRenderContext* renderContext, C_BasePl
     if (view.width <= 0 || view.height <= 0 || view.fov <= 1.0f)
         return;
 
+    if (m_HasThrowArc)
+    {
+        m_ThrowArcMaxHz = GetHmdDisplayFrequencyHz();
+        if (ShouldThrottle(m_LastPostMirrorThrowArcDrawTime, m_ThrowArcMaxHz))
+            return;
+    }
+    else
+    {
+        m_AimLineMaxHz = GetHmdDisplayFrequencyHz();
+        if (ShouldThrottle(m_LastPostMirrorAimLineDrawTime, m_AimLineMaxHz))
+            return;
+    }
+
     QAngle viewAngles(view.angles.x, view.angles.y, view.angles.z);
     Vector forward{}, right{}, up{};
     QAngle::AngleVectors(viewAngles, &forward, &right, &up);
