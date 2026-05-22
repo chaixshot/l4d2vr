@@ -932,10 +932,12 @@ public:
 	bool m_HideArms = false;
 	bool m_SplitArmsToControllers = false;
 	float m_HudDistance = 1.3f;
+	float m_FixedHudXOffset = 0.0f;
 	float m_FixedHudYOffset = 0.25f;
 	float m_FixedHudDistanceOffset = 0.25f;
 	float m_HudSize = 1.3f;
 	float m_TopHudCurvature = 0.2f;
+	bool m_HudFollowHmdMovement = false;
 	bool m_HudAlwaysVisible = false;
 	bool m_HudToggleState = false;
 	std::chrono::steady_clock::time_point m_HudChatVisibleUntil{};

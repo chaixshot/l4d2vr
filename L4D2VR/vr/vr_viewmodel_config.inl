@@ -954,7 +954,10 @@ void VR::ParseConfigFile()
     m_SplitArmsToControllers = getBool("SplitArmsToControllers", m_SplitArmsToControllers);
     m_HudDistance = getFloat("HudDistance", m_HudDistance);
     m_HudSize = getFloat("HudSize", m_HudSize);
+    m_FixedHudXOffset = std::clamp(getFloat("FixedHudXOffset", m_FixedHudXOffset), -2.0f, 2.0f);
+    m_FixedHudYOffset = std::clamp(getFloat("FixedHudYOffset", m_FixedHudYOffset), -2.0f, 2.0f);
     m_TopHudCurvature = std::clamp(getFloat("TopHudCurvature", m_TopHudCurvature), 0.0f, 1.0f);
+    m_HudFollowHmdMovement = getBool("HudFollowHmdMovement", m_HudFollowHmdMovement);
     m_HudAlwaysVisible = getBool("HudAlwaysVisible", m_HudAlwaysVisible);
     m_HudToggleState = m_HudAlwaysVisible;
 
@@ -1025,7 +1028,6 @@ void VR::ParseConfigFile()
     m_HandHudDebugLogHz = std::clamp(getFloat("HandHudDebugLogHz", m_HandHudDebugLogHz), 0.0f, 240.0f);
 
     m_AntiAliasing = static_cast<uint32_t>(std::max(0, getInt("AntiAliasing", 0)));
-    m_FixedHudYOffset = getFloat("FixedHudYOffset", m_FixedHudYOffset);
     m_FixedHudDistanceOffset = getFloat("FixedHudDistanceOffset", m_FixedHudDistanceOffset);
     float controllerSmoothingValue = m_ControllerSmoothing;
     const bool hasControllerSmoothing = userConfig.find("ControllerSmoothing") != userConfig.end();

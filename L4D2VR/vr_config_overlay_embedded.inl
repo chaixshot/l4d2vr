@@ -136,6 +136,10 @@ namespace
         { "ShadowTweaksEnabled", CfgOptionType::Bool, "\xE6\x80\xA7\xE8\x83\xBD", "\xE9\x98\xB4\xE5\xBD\xB1\xE4\xBC\x98\xE5\x8C\x96", 0.0f, 0.0f, "false" },
         { "HudDistance", CfgOptionType::Float, "HUD\xEF\xBC\x88\xE4\xB8\xBB\xE7\x95\x8C\xE9\x9D\xA2\xEF\xBC\x89", "HUD \xE8\xB7\x9D\xE7\xA6\xBB", 0.5f, 3.0f, "1.3" },
         { "HudSize", CfgOptionType::Float, "HUD\xEF\xBC\x88\xE4\xB8\xBB\xE7\x95\x8C\xE9\x9D\xA2\xEF\xBC\x89", "HUD \xE5\xB0\xBA\xE5\xAF\xB8", 0.8f, 3.0f, "1.3" },
+        { "FixedHudXOffset", CfgOptionType::Float, "HUD\357\274\210\344\270\273\347\225\214\351\235\242\357\274\211", "HUD \345\267\246\345\217\263\345\201\217\347\247\273", -1.0f, 1.0f, "0.0" },
+        { "FixedHudYOffset", CfgOptionType::Float, "HUD\357\274\210\344\270\273\347\225\214\351\235\242\357\274\211", "HUD \344\270\212\344\270\213\345\201\217\347\247\273", -1.0f, 1.0f, "0.25" },
+        { "TopHudCurvature", CfgOptionType::Float, "HUD\357\274\210\344\270\273\347\225\214\351\235\242\357\274\211", "HUD \346\233\262\347\216\207", 0.0f, 1.0f, "0.2" },
+        { "HudFollowHmdMovement", CfgOptionType::Bool, "HUD\357\274\210\344\270\273\347\225\214\351\235\242\357\274\211", "HUD \350\267\237\351\232\217HMD\344\270\212\344\270\213", 0.0f, 0.0f, "false" },
         { "HudAlwaysVisible", CfgOptionType::Bool, "HUD\xEF\xBC\x88\xE4\xB8\xBB\xE7\x95\x8C\xE9\x9D\xA2\xEF\xBC\x89", "HUD \xE6\x80\xBB\xE6\x98\xAF\xE5\x8F\xAF\xE8\xA7\x81", 0.0f, 0.0f, "false" },
         { "LeftWristHudEnabled", CfgOptionType::Bool, "HUD\xEF\xBC\x88\xE6\x89\x8B\xE6\x9F\x84\xEF\xBC\x89", "\xE5\x90\xAF\xE7\x94\xA8\xE7\x8A\xB6\xE6\x80\x81HUD\xEF\xBC\x88\xE5\x89\xAF\xE6\x89\x8B\xEF\xBC\x89", 0.0f, 0.0f, "false" },
         { "LeftWristHudWidthMeters", CfgOptionType::Float, "HUD\xEF\xBC\x88\xE6\x89\x8B\xE6\x9F\x84\xEF\xBC\x89", "\xE7\x8A\xB6\xE6\x80\x81HUD\xE5\xAE\xBD\xE5\xBA\xA6\xEF\xBC\x88\xE7\xB1\xB3\xEF\xBC\x89", 0.01f, 0.4f, "0.1" },
@@ -286,6 +290,10 @@ namespace
         { "ShadowTweaksEnabled", "Performance", "\346\200\247\350\203\275", "Shadow Tweaks", "\351\230\264\345\275\261\344\274\230\345\214\226", "Applies the configured shadow cvar profile while playing.", "\345\234\250\346\270\270\346\210\217\344\270\255\345\272\224\347\224\250\351\205\215\347\275\256\347\232\204\351\230\264\345\275\261 cvar \346\226\271\346\241\210\343\200\202", "Turn this on only when you want the custom shadow profile to override the game's defaults.", "\345\217\252\345\234\250\351\234\200\350\246\201\350\207\252\345\256\232\344\271\211\351\230\264\345\275\261\346\226\271\346\241\210\350\246\206\347\233\226\346\270\270\346\210\217\351\273\230\350\256\244\345\200\274\346\227\266\345\274\200\345\220\257\343\200\202" },
         { "HudDistance", "HUD (Main)", "HUD\357\274\210\344\270\273\347\225\214\351\235\242\357\274\211", "HUD Distance", "HUD \350\267\235\347\246\273", "Distance from the head to the main HUD plane.", "\345\244\264\351\203\250\345\210\260\344\270\273HUD\345\271\263\351\235\242\347\232\204\350\267\235\347\246\273\343\200\202", "Closer feels larger; farther reduces eye strain.", "\350\266\212\350\277\221\350\266\212\345\244\247\357\274\214\350\266\212\350\277\234\350\266\212\346\212\244\347\234\274\343\200\202" },
         { "HudSize", "HUD (Main)", "HUD\357\274\210\344\270\273\347\225\214\351\235\242\357\274\211", "HUD Size", "HUD \345\260\272\345\257\270", "Overall scale of the main HUD.", "\344\270\273HUD\346\225\264\344\275\223\347\274\251\346\224\276\343\200\202", "1.2~2.0 fits most users.", "1.2~2.0 \351\200\202\345\220\210\345\244\247\345\244\232\346\225\260\344\272\272\343\200\202" },
+        { "FixedHudXOffset", "HUD (Main)", "HUD\357\274\210\344\270\273\347\225\214\351\235\242\357\274\211", "HUD Horizontal Offset", "HUD \345\267\246\345\217\263\345\201\217\347\247\273", "Moves the main HUD left/right on its own plane, in meters.", "\346\214\211\344\270\273 HUD \345\271\263\351\235\242\347\232\204\345\267\246\345\217\263\346\226\271\345\220\221\347\247\273\345\212\250\357\274\214\345\215\225\344\275\215\344\270\272\347\261\263\343\200\202", "Negative moves left, positive moves right.", "\350\264\237\346\225\260\345\220\221\345\267\246\357\274\214\346\255\243\346\225\260\345\220\221\345\217\263\343\200\202" },
+        { "FixedHudYOffset", "HUD (Main)", "HUD\357\274\210\344\270\273\347\225\214\351\235\242\357\274\211", "HUD Vertical Offset", "HUD \344\270\212\344\270\213\345\201\217\347\247\273", "Moves the main HUD up/down on its own plane, in meters.", "\346\214\211\344\270\273 HUD \345\271\263\351\235\242\347\232\204\344\270\212\344\270\213\346\226\271\345\220\221\347\247\273\345\212\250\357\274\214\345\215\225\344\275\215\344\270\272\347\261\263\343\200\202", "The default 0.25 cancels the built-in -0.25m vertical shift.", "\351\273\230\350\256\244 0.25 \344\274\232\346\212\265\346\266\210\345\206\205\347\275\256\347\232\204 -0.25 \347\261\263\351\253\230\345\272\246\344\277\256\346\255\243\343\200\202" },
+        { "TopHudCurvature", "HUD (Main)", "HUD\357\274\210\344\270\273\347\225\214\351\235\242\357\274\211", "HUD Curvature", "HUD \346\233\262\347\216\207", "Controls the curvature of the main SteamVR HUD overlay.", "\346\216\247\345\210\266\344\270\273 HUD \347\232\204 SteamVR \350\246\206\347\233\226\345\261\202\346\233\262\347\216\207\343\200\202", "0 is flat; higher values bend the panel more.", "0 \344\270\272\345\271\263\351\235\242\357\274\214\346\225\260\345\200\274\350\266\212\345\244\247\345\274\257\346\233\262\350\266\212\346\230\216\346\230\276\343\200\202" },
+        { "HudFollowHmdMovement", "HUD (Main)", "HUD\357\274\210\344\270\273\347\225\214\351\235\242\357\274\211", "HUD Follow HMD Movement", "HUD \350\267\237\351\232\217HMD\344\270\212\344\270\213", "When enabled, the main HUD uses the full HMD pose instead of yaw-only placement.", "\345\274\200\345\220\257\345\220\216\344\270\273 HUD \344\275\277\347\224\250\345\256\214\346\225\264 HMD \345\247\277\346\200\201\357\274\214\344\270\215\345\206\215\345\217\252\350\267\237\351\232\217\345\267\246\345\217\263\346\226\271\345\220\221\343\200\202", "Use this if you want the HUD to follow head pitch and vertical movement.", "\346\203\263\350\256\251 HUD \350\267\237\351\232\217\346\212\254\345\244\264\344\275\216\345\244\264\345\222\214\344\270\212\344\270\213\347\247\273\345\212\250\346\227\266\345\274\200\345\220\257\343\200\202" },
         { "HudAlwaysVisible", "HUD (Main)", "HUD\357\274\210\344\270\273\347\225\214\351\235\242\357\274\211", "HUD Always Visible", "HUD \346\200\273\346\230\257\345\217\257\350\247\201", "Keep HUD visible even when not toggled by gameplay.", "\345\215\263\344\275\277\346\234\252\350\242\253\346\270\270\346\210\217\351\200\273\350\276\221\346\230\276\347\244\272\344\271\237\345\247\213\347\273\210\346\230\276\347\244\272HUD\343\200\202", "Disable if you prefer a minimal view.", "\350\213\245\346\203\263\346\236\201\347\256\200\350\247\206\351\207\216\345\217\257\345\205\263\351\227\255\343\200\202" },
         { "LeftWristHudEnabled", "HUD (Hand)", "HUD\357\274\210\346\211\213\346\237\204\357\274\211", "Enable Status HUD (Off-hand)", "\345\220\257\347\224\250\347\212\266\346\200\201HUD\357\274\210\345\211\257\346\211\213\357\274\211", "Shows a small wrist-style HUD on the off-hand controller using a SteamVR overlay.", "\345\234\250\345\211\257\346\211\213\346\211\213\346\237\204\344\270\212\347\224\250SteamVR\350\246\206\347\233\226\345\261\202\346\230\276\347\244\272\344\270\200\344\270\252\350\205\225\350\241\250\345\274\217\345\260\217HUD\343\200\202", "Displays HP and quick item status (throwable/med/pills or adrenaline).", "\346\230\276\347\244\272\347\224\237\345\221\275\345\200\274\344\270\216\345\205\263\351\224\256\347\211\251\345\223\201\347\212\266\346\200\201\357\274\210\346\212\225\346\216\267\347\211\251/\345\214\273\347\226\227\346\247\275/\350\215\257\347\211\207\346\210\226\350\202\276\344\270\212\350\205\272\347\264\240\357\274\211\343\200\202" },
         { "LeftWristHudWidthMeters", "HUD (Hand)", "HUD\357\274\210\346\211\213\346\237\204\357\274\211", "Status HUD Width (meters)", "\347\212\266\346\200\201HUD\345\256\275\345\272\246\357\274\210\347\261\263\357\274\211", "Physical width of the Status HUD overlay quad (meters).", "\347\212\266\346\200\201HUD\350\246\206\347\233\226\345\261\202\345\271\263\351\235\242\347\232\204\347\211\251\347\220\206\345\256\275\345\272\246\357\274\210\347\261\263\357\274\211\343\200\202", "Bigger = easier to read, but can feel intrusive.", "\350\266\212\345\244\247\350\266\212\345\256\271\346\230\223\347\234\213\346\270\205\357\274\214\344\275\206\344\271\237\346\233\264\346\230\276\347\234\274\343\200\202" },
@@ -1912,7 +1920,36 @@ namespace
         out.m[2][3] = position.z;
     }
 
-    static bool CfgBuildYawOnlyHmdFacingTransform(float distanceMeters, float yOffsetMeters,
+    static void CfgSetHmdFollowTransform(vr::HmdMatrix34_t& out, const Vector& position, const vr::HmdMatrix34_t& hmdAbs)
+    {
+        out = {};
+        out.m[0][0] = hmdAbs.m[0][0];
+        out.m[0][1] = hmdAbs.m[0][1];
+        out.m[0][2] = hmdAbs.m[0][2];
+        out.m[0][3] = position.x;
+        out.m[1][0] = hmdAbs.m[1][0];
+        out.m[1][1] = hmdAbs.m[1][1];
+        out.m[1][2] = hmdAbs.m[1][2];
+        out.m[1][3] = position.y;
+        out.m[2][0] = hmdAbs.m[2][0];
+        out.m[2][1] = hmdAbs.m[2][1];
+        out.m[2][2] = hmdAbs.m[2][2];
+        out.m[2][3] = position.z;
+    }
+
+    static bool CfgNormalizeVector(Vector& v)
+    {
+        const float len = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+        if (!(len > 0.0001f) || !std::isfinite(len))
+            return false;
+
+        v.x /= len;
+        v.y /= len;
+        v.z /= len;
+        return true;
+    }
+
+    static bool CfgBuildHmdFacingTransform(float distanceMeters, float xOffsetMeters, float yOffsetMeters, bool followHmdMovement,
         vr::ETrackingUniverseOrigin& origin, vr::HmdMatrix34_t& out)
     {
         origin = vr::TrackingUniverseStanding;
@@ -1921,25 +1958,41 @@ namespace
             return false;
 
         Vector hmdPosition = { hmdAbs.m[0][3], hmdAbs.m[1][3], hmdAbs.m[2][3] };
-        Vector hmdForward = { -hmdAbs.m[0][2], 0.0f, -hmdAbs.m[2][2] };
-        const float len = std::sqrt(hmdForward.x * hmdForward.x + hmdForward.z * hmdForward.z);
-        if (len > 0.0001f && std::isfinite(len))
-        {
-            hmdForward.x /= len;
-            hmdForward.z /= len;
-        }
-        else
-        {
-            hmdForward = { 0.0f, 0.0f, -1.0f };
-        }
+        Vector hmdForwardYaw = { -hmdAbs.m[0][2], 0.0f, -hmdAbs.m[2][2] };
+        if (!CfgNormalizeVector(hmdForwardYaw))
+            hmdForwardYaw = { 0.0f, 0.0f, -1.0f };
 
-        Vector position = hmdPosition + hmdForward * distanceMeters;
-        position.y += yOffsetMeters;
+        Vector hmdForwardFull = { -hmdAbs.m[0][2], -hmdAbs.m[1][2], -hmdAbs.m[2][2] };
+        Vector hmdRightFull = { hmdAbs.m[0][0], hmdAbs.m[1][0], hmdAbs.m[2][0] };
+        Vector hmdUpFull = { hmdAbs.m[0][1], hmdAbs.m[1][1], hmdAbs.m[2][1] };
 
-        // Use only yaw. Pitch/roll from the HMD are deliberately discarded so the panel stays vertical.
         const float yawRadians = std::atan2(hmdAbs.m[0][2], hmdAbs.m[2][2]);
-        CfgSetYawOnlyTransform(out, position, yawRadians);
+        const float c = std::cos(yawRadians);
+        const float sn = std::sin(yawRadians);
+        Vector forward = followHmdMovement ? hmdForwardFull : hmdForwardYaw;
+        Vector right = followHmdMovement ? hmdRightFull : Vector(c, 0.0f, -sn);
+        Vector up = followHmdMovement ? hmdUpFull : Vector(0.0f, 1.0f, 0.0f);
+
+        if (!CfgNormalizeVector(forward))
+            forward = hmdForwardYaw;
+        CfgNormalizeVector(right);
+        CfgNormalizeVector(up);
+
+        Vector position = hmdPosition + forward * distanceMeters;
+        position += right * xOffsetMeters;
+        position += up * yOffsetMeters;
+
+        if (followHmdMovement)
+            CfgSetHmdFollowTransform(out, position, hmdAbs);
+        else
+            CfgSetYawOnlyTransform(out, position, yawRadians);
         return true;
+    }
+
+    static bool CfgBuildYawOnlyHmdFacingTransform(float distanceMeters, float yOffsetMeters,
+        vr::ETrackingUniverseOrigin& origin, vr::HmdMatrix34_t& out)
+    {
+        return CfgBuildHmdFacingTransform(distanceMeters, 0.0f, yOffsetMeters, false, origin, out);
     }
 
     static bool CfgBuildCurrentPauseHudTransform(vr::ETrackingUniverseOrigin& origin, vr::HmdMatrix34_t& out,
@@ -1950,8 +2003,9 @@ namespace
 
         VR* vrState = g_Game->m_VR;
         const float distanceMeters = vrState->m_HudDistance + vrState->m_FixedHudDistanceOffset;
+        const float xOffsetMeters = vrState->m_FixedHudXOffset;
         const float yOffsetMeters = -0.25f + vrState->m_FixedHudYOffset;
-        if (!CfgBuildYawOnlyHmdFacingTransform(distanceMeters, yOffsetMeters, origin, out))
+        if (!CfgBuildHmdFacingTransform(distanceMeters, xOffsetMeters, yOffsetMeters, vrState->m_HudFollowHmdMovement, origin, out))
             return false;
 
         int windowWidth = 0;

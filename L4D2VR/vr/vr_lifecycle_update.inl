@@ -319,6 +319,115 @@ namespace
         ctx->OverrideAlphaWriteEnable(false, true);
     }
 
+    static bool ClearD3D9BlankTextureForMenuSubmit(VR* vr, const char* reason)
+    {
+        if (!vr || !g_D3DVR9)
+            return false;
+
+        IDirect3DSurface9* blankSurface = nullptr;
+        {
+            std::lock_guard<TextureStateMutex> textureLock(vr->m_TextureMutex);
+            if (vr->m_CreatingTextureID != VR::Texture_None ||
+                !vr->m_D9BlankSurface ||
+                !vr->m_VKBlankTexture.m_VRTexture.handle)
+            {
+                return false;
+            }
+
+            blankSurface = vr->m_D9BlankSurface;
+            blankSurface->AddRef();
+        }
+
+        IDirect3DDevice9* device = nullptr;
+        HRESULT hr = blankSurface->GetDevice(&device);
+        if (FAILED(hr) || !device)
+        {
+            blankSurface->Release();
+            return false;
+        }
+
+        D3DSURFACE_DESC desc{};
+        hr = blankSurface->GetDesc(&desc);
+        if (FAILED(hr) || desc.Width == 0 || desc.Height == 0)
+        {
+            device->Release();
+            blankSurface->Release();
+            return false;
+        }
+
+        g_D3DVR9->LockDevice();
+        bool locked = true;
+        auto unlockDevice = [&]()
+            {
+                if (locked)
+                {
+                    g_D3DVR9->UnlockDevice();
+                    locked = false;
+                }
+            };
+
+        const HRESULT cooperativeHr = device->TestCooperativeLevel();
+        if (cooperativeHr == D3DERR_DEVICELOST || cooperativeHr == D3DERR_DEVICENOTRESET || cooperativeHr == D3DERR_DRIVERINTERNALERROR)
+        {
+            unlockDevice();
+            if (vr->m_RenderPipelineDebugLog)
+            {
+                Game::logMsg("[VR][MenuBlank] skip D3D clear during device transition reason=%s hr=0x%08X",
+                    reason ? reason : "unknown", static_cast<unsigned int>(cooperativeHr));
+            }
+            device->Release();
+            blankSurface->Release();
+            return false;
+        }
+
+        IDirect3DSurface9* oldRenderTarget = nullptr;
+        const HRESULT oldRtHr = device->GetRenderTarget(0, &oldRenderTarget);
+
+        D3DVIEWPORT9 oldViewport{};
+        const bool haveOldViewport = SUCCEEDED(device->GetViewport(&oldViewport));
+
+        D3DVIEWPORT9 viewport{};
+        viewport.X = 0;
+        viewport.Y = 0;
+        viewport.Width = desc.Width;
+        viewport.Height = desc.Height;
+        viewport.MinZ = 0.0f;
+        viewport.MaxZ = 1.0f;
+
+        HRESULT clearHr = device->SetRenderTarget(0, blankSurface);
+        if (SUCCEEDED(clearHr))
+            clearHr = device->SetViewport(&viewport);
+        if (SUCCEEDED(clearHr))
+            clearHr = device->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_ARGB(255, 0, 0, 0), 1.0f, 0);
+
+        HRESULT transferHr = clearHr;
+        if (SUCCEEDED(clearHr))
+            transferHr = g_D3DVR9->TransferSurface(blankSurface, TRUE);
+
+        if (SUCCEEDED(oldRtHr))
+            device->SetRenderTarget(0, oldRenderTarget);
+        if (haveOldViewport)
+            device->SetViewport(&oldViewport);
+        if (oldRenderTarget)
+            oldRenderTarget->Release();
+
+        unlockDevice();
+
+        if (vr->m_RenderPipelineDebugLog)
+        {
+            Game::logMsg("[VR][MenuBlank] D3D-cleared blank texture reason=%s clear=0x%08X transfer=0x%08X size=%ux%u",
+                reason ? reason : "unknown",
+                static_cast<unsigned int>(clearHr),
+                static_cast<unsigned int>(transferHr),
+                static_cast<unsigned int>(desc.Width),
+                static_cast<unsigned int>(desc.Height));
+        }
+
+        device->Release();
+        blankSurface->Release();
+        return SUCCEEDED(clearHr) && SUCCEEDED(transferHr);
+    }
+
     static void ClearVRMenuTransitionResiduals(VR* vr, const char* reason)
     {
         if (!vr || !vr->m_Game || !vr->m_Game->m_MaterialSystem)
@@ -2068,6 +2177,9 @@ void VR::SubmitVRTextures()
 
         if (!sceneReadyForStaleResubmit)
         {
+            if (!ClearD3D9BlankTextureForMenuSubmit(this, "Submit main menu blank"))
+                return;
+
             submitStereoPair(&m_VKBlankTexture.m_VRTexture, nullptr,
                 &m_VKBlankTexture.m_VRTexture, nullptr);
             if (successfulSubmit)
@@ -2667,7 +2779,10 @@ void VR::RepositionOverlays()
     vr::TrackedDevicePose_t hmdPose = m_Poses[vr::k_unTrackedDeviceIndex_Hmd];
     vr::HmdMatrix34_t hmdMat = hmdPose.mDeviceToAbsoluteTracking;
     Vector hmdPosition = { hmdMat.m[0][3], hmdMat.m[1][3], hmdMat.m[2][3] };
-    Vector hmdForward = { -hmdMat.m[0][2], 0, -hmdMat.m[2][2] };
+    Vector hmdForwardYaw = { -hmdMat.m[0][2], 0.0f, -hmdMat.m[2][2] };
+    Vector hmdForwardFull = { -hmdMat.m[0][2], -hmdMat.m[1][2], -hmdMat.m[2][2] };
+    Vector hmdRightFull = { hmdMat.m[0][0], hmdMat.m[1][0], hmdMat.m[2][0] };
+    Vector hmdUpFull = { hmdMat.m[0][1], hmdMat.m[1][1], hmdMat.m[2][1] };
 
     int windowWidth, windowHeight;
     m_Game->m_MaterialSystem->GetRenderContext()->GetWindowSize(windowWidth, windowHeight);
@@ -2695,10 +2810,10 @@ void VR::RepositionOverlays()
     menuTransform.m[0][0] *= widthRatio;
     menuTransform.m[1][1] *= heightRatio;
 
-    hmdForward[1] = 0;
-    VectorNormalize(hmdForward);
+    hmdForwardYaw[1] = 0.0f;
+    VectorNormalize(hmdForwardYaw);
 
-    Vector menuDistance = hmdForward * 3;
+    Vector menuDistance = hmdForwardYaw * 3;
     Vector menuNewPos = menuDistance + hmdPosition;
 
     menuTransform.m[0][3] = menuNewPos.x;
@@ -2735,13 +2850,36 @@ void VR::RepositionOverlays()
             return transform;
         };
 
-    // Reposition HUD overlays
-    Vector hudDistance = hmdForward * (m_HudDistance + m_FixedHudDistanceOffset);
-    Vector hudNewPos = hudDistance + hmdPosition;
-    hudNewPos.y -= 0.25f;
-    hudNewPos.y += m_FixedHudYOffset;
+    auto buildHmdFollowTransform = [&](const Vector& position)
+        {
+            vr::HmdMatrix34_t transform =
+            {
+                hmdMat.m[0][0], hmdMat.m[0][1], hmdMat.m[0][2], position.x,
+                hmdMat.m[1][0], hmdMat.m[1][1], hmdMat.m[1][2], position.y,
+                hmdMat.m[2][0], hmdMat.m[2][1], hmdMat.m[2][2], position.z
+            };
+            return transform;
+        };
 
-    vr::HmdMatrix34_t hudTopTransform = buildFacingTransform(hudNewPos);
+    const bool hudFollowHmdMovement = m_HudFollowHmdMovement;
+    Vector hudForward = hudFollowHmdMovement ? hmdForwardFull : hmdForwardYaw;
+    if (VectorNormalize(hudForward) == 0.0f)
+        hudForward = hmdForwardYaw;
+
+    const float cosYaw = cosf(hmdRotationDegrees);
+    const float sinYaw = sinf(hmdRotationDegrees);
+    Vector hudRight = hudFollowHmdMovement ? hmdRightFull : Vector(cosYaw, 0.0f, -sinYaw);
+    Vector hudUp = hudFollowHmdMovement ? hmdUpFull : Vector(0.0f, 1.0f, 0.0f);
+    VectorNormalize(hudRight);
+    VectorNormalize(hudUp);
+
+    // Reposition HUD overlays
+    Vector hudDistance = hudForward * (m_HudDistance + m_FixedHudDistanceOffset);
+    Vector hudNewPos = hudDistance + hmdPosition;
+    hudNewPos += hudRight * m_FixedHudXOffset;
+    hudNewPos += hudUp * (-0.25f + m_FixedHudYOffset);
+
+    vr::HmdMatrix34_t hudTopTransform = hudFollowHmdMovement ? buildHmdFollowTransform(hudNewPos) : buildFacingTransform(hudNewPos);
 
     vr::VROverlay()->SetOverlayTransformAbsolute(m_HUDTopHandle, trackingOrigin, &hudTopTransform);
     vr::VROverlay()->SetOverlayWidthInMeters(m_HUDTopHandle, m_HudSize);
@@ -2756,15 +2894,11 @@ void VR::RepositionOverlays()
         const float panelWidth = std::clamp(m_SpecialInfectedIntentSenseHudWidthMeters, 0.10f, 1.50f);
         const float panelHeight = panelWidth * ((std::max)(1, m_SpecialInfectedIntentSenseHudTexH) / (float)(std::max)(1, m_SpecialInfectedIntentSenseHudTexW));
 
-        const float cosYaw = cosf(hmdRotationDegrees);
-        const float sinYaw = sinf(hmdRotationDegrees);
-        const Vector hudRight(cosYaw, 0.0f, -sinYaw);
-        const Vector hudUp(0.0f, 1.0f, 0.0f);
         const float hudHeightMeters = m_HudSize * hudAspect;
         const float xOff = (m_HudSize * 0.5f) - (panelWidth * 0.5f) - m_SpecialInfectedIntentSenseHudMarginXMeters;
         const float yOff = (hudHeightMeters * 0.5f) - (panelHeight * 0.5f) - m_SpecialInfectedIntentSenseHudMarginYMeters;
         Vector panelPos = hudNewPos + hudRight * xOff + hudUp * yOff;
-        vr::HmdMatrix34_t intentHudTransform = buildFacingTransform(panelPos);
+        vr::HmdMatrix34_t intentHudTransform = hudFollowHmdMovement ? buildHmdFollowTransform(panelPos) : buildFacingTransform(panelPos);
         vr::VROverlay()->SetOverlayTransformAbsolute(m_SpecialInfectedIntentSenseHudHandle, trackingOrigin, &intentHudTransform);
         vr::VROverlay()->SetOverlayWidthInMeters(m_SpecialInfectedIntentSenseHudHandle, panelWidth);
         // Intent-sense HUD is an independent flat overlay. Do not inherit the main game HUD curvature.
