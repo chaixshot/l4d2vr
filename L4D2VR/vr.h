@@ -690,6 +690,9 @@ public:
 	// Main menu only needs one blank stereo submit to clear the last scene frame.
 	// After that, keep driving the menu with IVROverlay to avoid hammering the compositor.
 	bool m_MenuBlankSubmitted = false;
+	// Cold startup has no previous VR scene to clear. Avoid submitting the menu blank texture
+	// until at least one real eye frame has reached the compositor.
+	bool m_HasSubmittedSceneFrame = false;
 	// Guard against duplicate compositor submits in the same pose frame.
 	// Updated by UpdatePosesAndActions(), consumed by SubmitVRTextures().
 	std::atomic<uint32_t> m_SubmitPoseToken{ 0 };

@@ -2147,6 +2147,8 @@ void VR::SubmitVRTextures()
 
             submitStereoPair(&m_VKLeftEye.m_VRTexture, leftEyeSubmitBounds,
                 &m_VKRightEye.m_VRTexture, rightEyeSubmitBounds);
+            if (successfulSubmit)
+                m_HasSubmittedSceneFrame = true;
 
             if (successfulSubmit && m_CompositorExplicitTiming)
             {
@@ -2156,9 +2158,6 @@ void VR::SubmitVRTextures()
 
             return;
         }
-
-        if (!m_BlankTexture)
-            CreateVRTextures();
 
         if (!RefreshBackBufferTexture(false))
             return;
@@ -2177,13 +2176,27 @@ void VR::SubmitVRTextures()
 
         if (!sceneReadyForStaleResubmit)
         {
-            if (!ClearD3D9BlankTextureForMenuSubmit(this, "Submit main menu blank"))
-                return;
-
-            submitStereoPair(&m_VKBlankTexture.m_VRTexture, nullptr,
-                &m_VKBlankTexture.m_VRTexture, nullptr);
-            if (successfulSubmit)
+            if (!m_HasSubmittedSceneFrame)
+            {
+                m_Compositor->ClearLastSubmittedFrame();
                 m_MenuBlankSubmitted = true;
+                m_CompositorNeedsHandoff = false;
+                return;
+            }
+
+            if (!m_BlankTexture)
+                CreateVRTextures();
+
+            if (m_BlankTexture)
+            {
+                if (!ClearD3D9BlankTextureForMenuSubmit(this, "Submit main menu blank"))
+                    return;
+
+                submitStereoPair(&m_VKBlankTexture.m_VRTexture, nullptr,
+                    &m_VKBlankTexture.m_VRTexture, nullptr);
+                if (successfulSubmit)
+                    m_MenuBlankSubmitted = true;
+            }
         }
 
         if (successfulSubmit && m_CompositorExplicitTiming)
@@ -2427,6 +2440,8 @@ void VR::SubmitVRTextures()
 
     submitStereoPair(&m_VKLeftEye.m_VRTexture, leftEyeSubmitBounds,
         &m_VKRightEye.m_VRTexture, rightEyeSubmitBounds);
+    if (successfulSubmit)
+        m_HasSubmittedSceneFrame = true;
 
     if (successfulSubmit && m_CompositorExplicitTiming)
     {
