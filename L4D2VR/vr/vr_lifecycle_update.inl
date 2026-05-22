@@ -1439,6 +1439,10 @@ void VR::ReleaseVRRenderTargetsForDeviceReset()
     SafeReleaseD3D(m_D9LeftEyeSubmitSurface);
     SafeReleaseD3D(m_D9RightEyeSubmitSurface);
     SafeReleaseD3D(m_D9HUDSurface);
+    SafeReleaseD3D(m_D9ScopeLensScratchSurface);
+    SafeReleaseD3D(m_D9ScopeLensScratchTexture);
+    m_D9ScopeLensScratchW = 0;
+    m_D9ScopeLensScratchH = 0;
     SafeReleaseD3D(m_D9ScopeSurface);
     SafeReleaseD3D(m_D9RearMirrorSurface);
     SafeReleaseD3D(m_D9DesktopCompanionRearMirrorReadback);
@@ -1610,7 +1614,7 @@ void VR::CreateVRTextures()
             static_cast<int>(m_ScopeRTTSize),
             static_cast<int>(m_ScopeRTTSize),
             RT_SIZE_NO_CHANGE,
-            m_Game->m_MaterialSystem->GetBackBufferFormat(),
+            IMAGE_FORMAT_BGRA8888,
             MATERIAL_RT_DEPTH_SEPARATE,
             TEXTUREFLAGS_NOMIP);
     }
@@ -1686,7 +1690,7 @@ void VR::EnsureOpticsRTTTextures()
             static_cast<int>(m_ScopeRTTSize),
             static_cast<int>(m_ScopeRTTSize),
             RT_SIZE_NO_CHANGE,
-            m_Game->m_MaterialSystem->GetBackBufferFormat(),
+            IMAGE_FORMAT_BGRA8888,
             MATERIAL_RT_DEPTH_SEPARATE,
             TEXTUREFLAGS_NOMIP);
     }

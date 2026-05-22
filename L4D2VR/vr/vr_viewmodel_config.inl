@@ -1385,6 +1385,7 @@ void VR::ParseConfigFile()
     m_ScopeOverlayZOffset = getFloat("ScopeOverlayZOffset", m_ScopeOverlayZOffset);
     { Vector tmp = getVector3("ScopeOverlayAngleOffset", Vector{ m_ScopeOverlayAngleOffset.x, m_ScopeOverlayAngleOffset.y, m_ScopeOverlayAngleOffset.z }); m_ScopeOverlayAngleOffset = QAngle{ tmp.x, tmp.y, tmp.z }; }
     m_ScopeAimLineOnlyInScope = getBool("ScopeAimLineOnlyInScope", m_ScopeAimLineOnlyInScope);
+    m_ScopeReticleAlpha = std::clamp(getFloat("ScopeReticleAlpha", m_ScopeReticleAlpha), 0.0f, 1.0f);
     m_ScopeHideLocalPlayerModelInScope = getBool("ScopeHideLocalPlayerModelInScope", m_ScopeHideLocalPlayerModelInScope);
 
     m_ScopeOverlayAlwaysVisible = getBool("ScopeOverlayAlwaysVisible", m_ScopeOverlayAlwaysVisible);

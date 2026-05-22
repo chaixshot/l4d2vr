@@ -1514,7 +1514,7 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
     const bool deferDebugAimOverlayForCleanMirror =
         !queued && m_DesktopMirrorHidePluginOverlays && m_DesktopMirrorEnabled && !m_ScopeRenderingPass;
     const bool d3dAimLineNeedsVisibleSegment =
-        !queued && !scopeOverlayNeedsDebugAimLine && m_D3DAimLineOverlayEnabled;
+        !queued && m_D3DAimLineOverlayEnabled;
 
 
     C_WeaponCSBase* activeWeapon = nullptr;
@@ -2854,24 +2854,9 @@ void VR::UpdateScopeAimLineState()
         return;
     }
 
-    if (!m_ScopeEnabled)
-    {
-        if (m_ScopeForcingAimLine)
-        {
-            m_AimLineEnabled = false;
-            m_HasAimLine = false;
-            m_ScopeForcingAimLine = false;
-        }
-        return;
-    }
-
-    const bool scopeActive = IsScopeActive();
-    if (scopeActive && !m_AimLineEnabled)
-    {
-        m_AimLineEnabled = true;
-        m_ScopeForcingAimLine = true;
-    }
-    else if (!scopeActive && m_ScopeForcingAimLine)
+    // Scope RTT has its own reticle now. Do not auto-enable the gameplay aim line
+    // just because the player is looking through the scope.
+    if (m_ScopeForcingAimLine)
     {
         m_AimLineEnabled = false;
         m_HasAimLine = false;
@@ -2931,32 +2916,12 @@ void VR::DrawAimLine(const Vector& start, const Vector& end)
     if (!m_AimLineEnabled || !m_Game || !m_Game->m_DebugOverlay)
         return;
 
-    const bool scopeOverlayNeedsDebugAimLine = ShouldRenderScope();
-    if (!m_ScopeRenderingPass && !scopeOverlayNeedsDebugAimLine)
-        return;
-
-    const bool scopeOnlyAimLine = m_ScopeAimLineOnlyInScope
-        && m_ThirdPersonFrontViewEnabled
-        && m_IsThirdPersonCamera
-        && m_ScopeWeaponIsFirearm;
-    if (scopeOnlyAimLine && !m_ScopeRenderingPass)
-        return;
-
-    m_AimLineMaxHz = GetHmdDisplayFrequencyHz();
-    if (ShouldThrottle(m_LastAimLineDrawTime, m_AimLineMaxHz))
-        return;
-
-    // Draw every frame with ~single-frame lifetime. DebugOverlay primitives persist for "duration" seconds;
-    // if duration spans multiple frames while we also draw every frame, you get visible "ghost" trails.
-    // Keeping duration close to the current frame interval avoids both ghosting and flicker.
-    float dt = std::clamp(m_LastFrameDuration, 1.0f / 240.0f, 1.0f / 20.0f);
-
-    float duration = dt * 0.99f;
-    duration = std::clamp(duration, 0.001f, 0.050f);
-    if (scopeOnlyAimLine && m_ScopeRenderingPass)
-        duration = 0.0f;
-
-    DrawLineWithThickness(start, end, duration);
+    // The Source DebugOverlay is global and would be captured by the scope RTT.
+    // Normal eye aim-line visibility is handled by the D3D eye overlay; the scope lens
+    // uses its own reticle drawn in ApplyScopeLensPostProcess().
+    (void)start;
+    (void)end;
+    return;
 }
 
 
@@ -3196,8 +3161,7 @@ void VR::UpdateD3DAimLineOverlayForView(C_BasePlayer* localPlayer, const CViewSe
         };
 
     const int queueMode = m_Game ? m_Game->GetMatQueueMode() : 0;
-    const bool scopeOverlayNeedsDebugAimLine = ShouldRenderScope();
-    if (!m_D3DAimLineOverlayEnabled || queueMode != 0 || !m_IsVREnabled || !localPlayer || scopeOverlayNeedsDebugAimLine)
+    if (!m_D3DAimLineOverlayEnabled || queueMode != 0 || !m_IsVREnabled || !localPlayer)
     {
         clearEye();
         return;
@@ -3298,7 +3262,7 @@ void VR::RenderDrawAimLineQueued(C_BasePlayer* localPlayer)
     // D3DAimLineOverlayEnabled controls visibility only. UpdateAimingLaser() still
     // keeps m_HasAimLine / m_AimLineStart / m_AimLineEnd updated for hit tests,
     // friendly-fire blocking, target HUD, and bullet convergence.
-    if (!m_D3DAimLineOverlayEnabled)
+    if (!m_D3DAimLineOverlayEnabled || m_ScopeRenderingPass || ShouldRenderScope())
         return;
     const bool scopeOnlyAimLine = m_ScopeAimLineOnlyInScope
         && m_ThirdPersonFrontViewEnabled

@@ -2673,9 +2673,9 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	auto renderToTexture_SetRT = [&](ITexture* target, int texW, int texH, QAngle passAngles,
 		CViewSetup& view, CViewSetup& hud)
 		{
-			if (queueMode != 0)
-				return;
-
+			// Scope/rear-mirror RTTs are allowed in queued rendering. Do not touch
+			// EngineClient viewangles in queueMode!=0; CViewSetup already carries
+			// the offscreen camera pose for the render thread.
 			IMatRenderContext* rc = m_Game->m_MaterialSystem->GetRenderContext();
 			if (!rc)
 			{
@@ -2738,6 +2738,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			m_VR->m_SuppressHudCapture = prevSuppress;
 		};
 
+	bool scopeLensPostProcessPending = false;
+
 	// ----------------------------
 	// Scope RTT pass: render from scope camera into vrScope RTT
 	// ----------------------------
@@ -2769,29 +2771,12 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		hudScope.angles = scopeView.angles;
 
 		m_VR->m_ScopeRenderingPass = true;
-		// Scope-only aim line mode: draw the line only right before scope RTT rendering.
-		if (m_VR->m_ScopeAimLineOnlyInScope
-			&& m_VR->m_ThirdPersonFrontViewEnabled
-			&& m_VR->m_IsThirdPersonCamera
-			&& m_VR->m_ScopeWeaponIsFirearm
-			&& m_VR->ShouldRenderScope())
-		{
-			if (queueMode != 0)
-			{
-				m_VR->RenderDrawAimLineQueued(localPlayer);
-			}
-			else if (m_VR->m_HasAimLine)
-			{
-				m_VR->DrawAimLine(m_VR->m_AimLineStart, m_VR->m_AimLineEnd);
-			}
-		}
-		if (m_VR->m_IsVREnabled)
-			m_VR->RenderDrawGameLaserSight(localPlayer);
 
 		renderToTexture_SetRT(m_VR->m_ScopeTexture,
 			m_VR->m_ScopeRTTSize, m_VR->m_ScopeRTTSize,
 			scopeAngles, scopeView, hudScope);
 		m_VR->m_ScopeRenderingPass = false;
+		scopeLensPostProcessPending = true;
 	}
 
 	// ----------------------------
@@ -2855,6 +2840,9 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			m_VR->m_RearMirrorSpecialEnlargeActive = false;
 		}
 	}
+
+	if (scopeLensPostProcessPending)
+		m_VR->ApplyScopeLensPostProcess();
 
 	// Restore engine angles immediately after our stereo render (single-threaded only).
 	if (touchedEngineAngles && m_Game && m_Game->m_EngineClient)

@@ -661,6 +661,10 @@ public:
 	IDirect3DSurface9* m_D9RightEyeSubmitSurface = nullptr;
 	IDirect3DSurface9* m_D9HUDSurface = nullptr;
 	IDirect3DSurface9* m_D9ScopeSurface = nullptr;
+	IDirect3DTexture9* m_D9ScopeLensScratchTexture = nullptr;
+	IDirect3DSurface9* m_D9ScopeLensScratchSurface = nullptr;
+	uint32_t m_D9ScopeLensScratchW = 0;
+	uint32_t m_D9ScopeLensScratchH = 0;
 	IDirect3DSurface9* m_D9RearMirrorSurface = nullptr;
 	IDirect3DSurface9* m_D9DesktopMirrorSurface = nullptr;
 	IDirect3DSurface9* m_D9BlankSurface = nullptr;
@@ -2255,6 +2259,8 @@ public:
 	QAngle m_ScopeOverlayAngleOffset = { -45.0f, -5.0f, -5.0f };
 	// If true, when scoped-in the aim line is rendered only during the scope RTT pass.
 	bool  m_ScopeAimLineOnlyInScope = true;
+	// Alpha scale for the scope lens reticle drawn into the RTT. 0 = hidden, 1 = default opacity.
+	float m_ScopeReticleAlpha = 1.0f;
 	// If true, hide the local player model while rendering scope RTT (prevents head/body obstruction).
 	bool  m_ScopeHideLocalPlayerModelInScope = true;
 
@@ -2317,6 +2323,7 @@ public:
 			&& (m_ScopeOverlayAlwaysVisible || IsScopeActive() || forceScopeForThirdPersonFrontView);
 	}
 	bool   ShouldUpdateScopeRTT();
+	bool   ApplyScopeLensPostProcess();
 	void   ToggleMouseModeScope();
 	void   CycleScopeMagnification();
 	void   UpdateScopeAimLineState();

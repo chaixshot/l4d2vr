@@ -9353,6 +9353,468 @@ namespace
         0x85c31227, 0x3de5, 0x4f00,
         { 0x9b, 0x3a, 0xf1, 0x1a, 0xc3, 0x8c, 0x18, 0xb5 }
     };
+
+    struct ScopeLensVertex
+    {
+        float x;
+        float y;
+        float z;
+        float rhw;
+        D3DCOLOR color;
+        float u;
+        float v;
+    };
+
+    struct ScopeLensColorVertex
+    {
+        float x;
+        float y;
+        float z;
+        float rhw;
+        D3DCOLOR color;
+    };
+
+    static constexpr DWORD kScopeLensTexturedFvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1;
+    static constexpr DWORD kScopeLensColorFvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE;
+
+    static inline float ScopeClamp01(float v)
+    {
+        return std::clamp(v, 0.0f, 1.0f);
+    }
+
+    static inline D3DCOLOR ScopeColor(int a, int r, int g, int b)
+    {
+        return D3DCOLOR_ARGB(std::clamp(a, 0, 255), std::clamp(r, 0, 255), std::clamp(g, 0, 255), std::clamp(b, 0, 255));
+    }
+
+    static void ScopeAddTexturedVertex(std::vector<ScopeLensVertex>& out, float cx, float cy, float radius, float nx, float ny)
+    {
+        const float r2 = nx * nx + ny * ny;
+        const float r = std::sqrt(std::max(0.0f, r2));
+        const float rClamped = ScopeClamp01(r);
+
+        // Inverse barrel mapping: the destination circle stays round, while the sampled image
+        // bends near the edge like glass. Keep the sample inside the source texture to avoid hard clamps.
+        const float barrel = 1.0f + 0.22f * rClamped * rClamped + 0.08f * rClamped * rClamped * rClamped * rClamped;
+        float sx = nx / barrel;
+        float sy = ny / barrel;
+
+        // A tiny center magnification keeps the reticle area readable and makes the lens feel less flat.
+        const float centerLift = 1.0f - 0.035f * (1.0f - rClamped) * (1.0f - rClamped);
+        sx *= centerLift;
+        sy *= centerLift;
+
+        sx = std::clamp(sx, -0.995f, 0.995f);
+        sy = std::clamp(sy, -0.995f, 0.995f);
+
+        const float edge = ScopeClamp01((rClamped - 0.68f) / 0.32f);
+        const float shade = 1.0f - 0.48f * edge * edge;
+        const int c = static_cast<int>(std::lround(255.0f * shade));
+
+        out.push_back(ScopeLensVertex{
+            cx + nx * radius - 0.5f,
+            cy + ny * radius - 0.5f,
+            0.0f,
+            1.0f,
+            ScopeColor(255, c, c, c),
+            0.5f + sx * 0.5f,
+            0.5f + sy * 0.5f
+        });
+    }
+
+    static void ScopeAddTexturedTri(std::vector<ScopeLensVertex>& out, float cx, float cy, float radius,
+        float ax, float ay, float bx, float by, float cxn, float cyn)
+    {
+        ScopeAddTexturedVertex(out, cx, cy, radius, ax, ay);
+        ScopeAddTexturedVertex(out, cx, cy, radius, bx, by);
+        ScopeAddTexturedVertex(out, cx, cy, radius, cxn, cyn);
+    }
+
+    static void ScopeAddThickLine(std::vector<ScopeLensColorVertex>& out,
+        float x0, float y0, float x1, float y1, float width, D3DCOLOR color)
+    {
+        const float dx = x1 - x0;
+        const float dy = y1 - y0;
+        const float len = std::sqrt(dx * dx + dy * dy);
+        if (!(len > 0.001f) || !(width > 0.0f))
+            return;
+
+        const float px = (-dy / len) * (width * 0.5f);
+        const float py = ( dx / len) * (width * 0.5f);
+
+        const ScopeLensColorVertex v0{ x0 + px - 0.5f, y0 + py - 0.5f, 0.0f, 1.0f, color };
+        const ScopeLensColorVertex v1{ x1 + px - 0.5f, y1 + py - 0.5f, 0.0f, 1.0f, color };
+        const ScopeLensColorVertex v2{ x1 - px - 0.5f, y1 - py - 0.5f, 0.0f, 1.0f, color };
+        const ScopeLensColorVertex v3{ x0 - px - 0.5f, y0 - py - 0.5f, 0.0f, 1.0f, color };
+
+        out.push_back(v0); out.push_back(v1); out.push_back(v2);
+        out.push_back(v0); out.push_back(v2); out.push_back(v3);
+    }
+
+    static void ScopeAddRing(std::vector<ScopeLensColorVertex>& out,
+        float cx, float cy, float radius, float width, int segments, D3DCOLOR color)
+    {
+        constexpr float kTwoPi = 6.2831853071795864769f;
+        segments = std::max(12, segments);
+        for (int i = 0; i < segments; ++i)
+        {
+            const float a0 = (static_cast<float>(i) / static_cast<float>(segments)) * kTwoPi;
+            const float a1 = (static_cast<float>(i + 1) / static_cast<float>(segments)) * kTwoPi;
+            ScopeAddThickLine(out,
+                cx + std::cos(a0) * radius,
+                cy + std::sin(a0) * radius,
+                cx + std::cos(a1) * radius,
+                cy + std::sin(a1) * radius,
+                width,
+                color);
+        }
+    }
+
+    static void ScopeBuildLensMesh(std::vector<ScopeLensVertex>& out, float cx, float cy, float radius)
+    {
+        constexpr int kSegments = 96;
+        constexpr int kRings = 24;
+        constexpr float kTwoPi = 6.2831853071795864769f;
+        out.clear();
+        out.reserve(static_cast<size_t>(kSegments) * static_cast<size_t>(kRings) * 6u);
+
+        for (int ring = 0; ring < kRings; ++ring)
+        {
+            const float r0 = static_cast<float>(ring) / static_cast<float>(kRings);
+            const float r1 = static_cast<float>(ring + 1) / static_cast<float>(kRings);
+            for (int seg = 0; seg < kSegments; ++seg)
+            {
+                const float a0 = (static_cast<float>(seg) / static_cast<float>(kSegments)) * kTwoPi;
+                const float a1 = (static_cast<float>(seg + 1) / static_cast<float>(kSegments)) * kTwoPi;
+
+                const float x00 = std::cos(a0) * r0;
+                const float y00 = std::sin(a0) * r0;
+                const float x10 = std::cos(a1) * r0;
+                const float y10 = std::sin(a1) * r0;
+                const float x01 = std::cos(a0) * r1;
+                const float y01 = std::sin(a0) * r1;
+                const float x11 = std::cos(a1) * r1;
+                const float y11 = std::sin(a1) * r1;
+
+                ScopeAddTexturedTri(out, cx, cy, radius, x00, y00, x01, y01, x11, y11);
+                ScopeAddTexturedTri(out, cx, cy, radius, x00, y00, x11, y11, x10, y10);
+            }
+        }
+    }
+
+    static void ScopeBuildReticleMesh(std::vector<ScopeLensColorVertex>& out, float cx, float cy, float radius, float reticleAlphaScale)
+    {
+        out.clear();
+        out.reserve(4096);
+
+        reticleAlphaScale = ScopeClamp01(reticleAlphaScale);
+        auto scaledAlpha = [&](int alpha)
+            {
+                return std::clamp(static_cast<int>(std::lround(static_cast<float>(alpha) * reticleAlphaScale)), 0, 255);
+            };
+
+        const float px = std::max(1.0f, radius / 240.0f);
+        const D3DCOLOR outerRing = ScopeColor(230, 7, 8, 7);
+        const D3DCOLOR innerRing = ScopeColor(110, 220, 255, 210);
+        const D3DCOLOR reticleShadow = ScopeColor(scaledAlpha(145), 0, 0, 0);
+        const D3DCOLOR reticle = ScopeColor(scaledAlpha(235), 80, 255, 145);
+        const D3DCOLOR reticleHot = ScopeColor(scaledAlpha(245), 210, 255, 220);
+
+        ScopeAddRing(out, cx, cy, radius * 0.998f, std::max(4.0f, px * 5.5f), 128, outerRing);
+        ScopeAddRing(out, cx, cy, radius * 0.965f, std::max(1.0f, px * 1.2f), 128, innerRing);
+
+        const float postNear = radius * 0.075f;
+        const float postFar = radius * 0.42f;
+        const float postWidth = std::max(1.4f, px * 1.8f);
+        const float shadowWidth = postWidth + std::max(1.0f, px * 1.5f);
+
+        ScopeAddThickLine(out, cx - postFar, cy, cx - postNear, cy, shadowWidth, reticleShadow);
+        ScopeAddThickLine(out, cx + postNear, cy, cx + postFar, cy, shadowWidth, reticleShadow);
+        ScopeAddThickLine(out, cx, cy - postFar, cx, cy - postNear, shadowWidth, reticleShadow);
+        ScopeAddThickLine(out, cx, cy + postNear, cx, cy + postFar, shadowWidth, reticleShadow);
+
+        ScopeAddThickLine(out, cx - postFar, cy, cx - postNear, cy, postWidth, reticle);
+        ScopeAddThickLine(out, cx + postNear, cy, cx + postFar, cy, postWidth, reticle);
+        ScopeAddThickLine(out, cx, cy - postFar, cx, cy - postNear, postWidth, reticle);
+        ScopeAddThickLine(out, cx, cy + postNear, cx, cy + postFar, postWidth, reticle);
+
+        ScopeAddRing(out, cx, cy, radius * 0.105f, std::max(1.1f, px * 1.3f), 64, reticle);
+        ScopeAddRing(out, cx, cy, radius * 0.018f, std::max(1.0f, px * 1.2f), 32, reticleHot);
+
+        const float tick0 = radius * 0.19f;
+        const float tick1 = radius * 0.23f;
+        const float tickHalf = radius * 0.018f;
+        for (int signIdx = 0; signIdx < 2; ++signIdx)
+        {
+            const int sign = (signIdx == 0) ? -1 : 1;
+            const float x = cx + static_cast<float>(sign) * tick1;
+            ScopeAddThickLine(out, x, cy - tickHalf, x, cy + tickHalf, std::max(1.0f, px * 1.2f), reticle);
+            const float y = cy + static_cast<float>(sign) * tick1;
+            ScopeAddThickLine(out, cx - tickHalf, y, cx + tickHalf, y, std::max(1.0f, px * 1.2f), reticle);
+        }
+
+        // A small lower stadia mark makes it read more like an optic instead of a flat crosshair.
+        ScopeAddThickLine(out, cx - radius * 0.055f, cy + tick0, cx + radius * 0.055f, cy + tick0, std::max(1.0f, px * 1.1f), reticle);
+    }
+}
+
+bool VR::ApplyScopeLensPostProcess()
+{
+    if (!g_D3DVR9 || !m_CreatedVRTextures.load(std::memory_order_acquire))
+        return false;
+
+    IDirect3DSurface9* scopeSurface = nullptr;
+    IDirect3DDevice9* device = nullptr;
+    IDirect3DStateBlock9* stateBlock = nullptr;
+    IDirect3DSurface9* oldRenderTarget = nullptr;
+    IDirect3DSurface9* oldDepthStencil = nullptr;
+    D3DVIEWPORT9 oldViewport{};
+    bool haveOldViewport = false;
+
+    std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
+    if (m_CreatingTextureID != Texture_None || !m_D9ScopeSurface)
+        return false;
+
+    scopeSurface = m_D9ScopeSurface;
+    scopeSurface->AddRef();
+
+    auto releaseRefs = [&]()
+        {
+            if (stateBlock)
+            {
+                stateBlock->Release();
+                stateBlock = nullptr;
+            }
+            if (oldRenderTarget)
+            {
+                oldRenderTarget->Release();
+                oldRenderTarget = nullptr;
+            }
+            if (oldDepthStencil)
+            {
+                oldDepthStencil->Release();
+                oldDepthStencil = nullptr;
+            }
+            if (device)
+            {
+                device->Release();
+                device = nullptr;
+            }
+            if (scopeSurface)
+            {
+                scopeSurface->Release();
+                scopeSurface = nullptr;
+            }
+        };
+
+    HRESULT hr = scopeSurface->GetDevice(&device);
+    if (FAILED(hr) || !device)
+    {
+        releaseRefs();
+        return false;
+    }
+
+    D3DSURFACE_DESC desc{};
+    hr = scopeSurface->GetDesc(&desc);
+    if (FAILED(hr) || desc.Width == 0 || desc.Height == 0)
+    {
+        releaseRefs();
+        return false;
+    }
+
+    g_D3DVR9->LockDevice();
+    bool locked = true;
+    auto unlockDevice = [&]()
+        {
+            if (locked)
+            {
+                g_D3DVR9->UnlockDevice();
+                locked = false;
+            }
+        };
+
+    bool scratchMismatch = false;
+    if (m_D9ScopeLensScratchSurface && !m_D9ScopeLensScratchTexture)
+    {
+        scratchMismatch = true;
+    }
+    else if (m_D9ScopeLensScratchSurface)
+    {
+        D3DSURFACE_DESC scratchDesc{};
+        if (FAILED(m_D9ScopeLensScratchSurface->GetDesc(&scratchDesc)) ||
+            scratchDesc.Width != desc.Width || scratchDesc.Height != desc.Height || scratchDesc.Format != desc.Format)
+        {
+            scratchMismatch = true;
+        }
+    }
+    else if (m_D9ScopeLensScratchTexture)
+    {
+        scratchMismatch = true;
+    }
+
+    if (scratchMismatch)
+    {
+        if (m_D9ScopeLensScratchSurface)
+        {
+            m_D9ScopeLensScratchSurface->Release();
+            m_D9ScopeLensScratchSurface = nullptr;
+        }
+        if (m_D9ScopeLensScratchTexture)
+        {
+            m_D9ScopeLensScratchTexture->Release();
+            m_D9ScopeLensScratchTexture = nullptr;
+        }
+        m_D9ScopeLensScratchW = 0;
+        m_D9ScopeLensScratchH = 0;
+    }
+
+    if (!m_D9ScopeLensScratchTexture)
+    {
+        hr = device->CreateTexture(
+            desc.Width,
+            desc.Height,
+            1,
+            D3DUSAGE_RENDERTARGET,
+            desc.Format,
+            D3DPOOL_DEFAULT,
+            &m_D9ScopeLensScratchTexture,
+            nullptr);
+        if (SUCCEEDED(hr) && m_D9ScopeLensScratchTexture)
+            hr = m_D9ScopeLensScratchTexture->GetSurfaceLevel(0, &m_D9ScopeLensScratchSurface);
+
+        if (FAILED(hr) || !m_D9ScopeLensScratchTexture || !m_D9ScopeLensScratchSurface)
+        {
+            if (m_D9ScopeLensScratchSurface)
+            {
+                m_D9ScopeLensScratchSurface->Release();
+                m_D9ScopeLensScratchSurface = nullptr;
+            }
+            if (m_D9ScopeLensScratchTexture)
+            {
+                m_D9ScopeLensScratchTexture->Release();
+                m_D9ScopeLensScratchTexture = nullptr;
+            }
+            m_D9ScopeLensScratchW = 0;
+            m_D9ScopeLensScratchH = 0;
+            unlockDevice();
+            releaseRefs();
+            return false;
+        }
+
+        m_D9ScopeLensScratchW = desc.Width;
+        m_D9ScopeLensScratchH = desc.Height;
+    }
+
+    hr = device->StretchRect(scopeSurface, nullptr, m_D9ScopeLensScratchSurface, nullptr, D3DTEXF_LINEAR);
+    if (FAILED(hr))
+    {
+        unlockDevice();
+        releaseRefs();
+        return false;
+    }
+
+    const HRESULT oldRtHr = device->GetRenderTarget(0, &oldRenderTarget);
+    const HRESULT oldDepthHr = device->GetDepthStencilSurface(&oldDepthStencil);
+    haveOldViewport = SUCCEEDED(device->GetViewport(&oldViewport));
+
+    if (SUCCEEDED(device->CreateStateBlock(D3DSBT_ALL, &stateBlock)) && stateBlock)
+        stateBlock->Capture();
+
+    D3DVIEWPORT9 viewport{};
+    viewport.X = 0;
+    viewport.Y = 0;
+    viewport.Width = desc.Width;
+    viewport.Height = desc.Height;
+    viewport.MinZ = 0.0f;
+    viewport.MaxZ = 1.0f;
+
+    bool ok = true;
+    ok = ok && SUCCEEDED(device->SetRenderTarget(0, scopeSurface));
+    if (ok)
+    {
+        device->SetDepthStencilSurface(nullptr);
+        device->SetViewport(&viewport);
+        device->Clear(0, nullptr, D3DCLEAR_TARGET, ScopeColor(0, 0, 0, 0), 1.0f, 0);
+
+        device->SetVertexShader(nullptr);
+        device->SetPixelShader(nullptr);
+        device->SetFVF(kScopeLensTexturedFvf);
+        device->SetTexture(0, m_D9ScopeLensScratchTexture);
+        device->SetRenderState(D3DRS_ZENABLE, FALSE);
+        device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+        device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+        device->SetRenderState(D3DRS_LIGHTING, FALSE);
+        device->SetRenderState(D3DRS_FOGENABLE, FALSE);
+        device->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_COLORWRITEENABLE,
+            D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE | D3DCOLORWRITEENABLE_ALPHA);
+        device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+        device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        device->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+        device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
+        device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+        device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+        device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+        device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+
+        static thread_local std::vector<ScopeLensVertex> lensVerts;
+        const float size = static_cast<float>(std::min(desc.Width, desc.Height));
+        const float cx = static_cast<float>(desc.Width) * 0.5f;
+        const float cy = static_cast<float>(desc.Height) * 0.5f;
+        const float radius = size * 0.492f;
+        ScopeBuildLensMesh(lensVerts, cx, cy, radius);
+        if (!lensVerts.empty())
+        {
+            hr = device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,
+                static_cast<UINT>(lensVerts.size() / 3u),
+                lensVerts.data(),
+                sizeof(ScopeLensVertex));
+            ok = ok && SUCCEEDED(hr);
+        }
+
+        device->SetTexture(0, nullptr);
+        device->SetFVF(kScopeLensColorFvf);
+        device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+        device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+        device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+        device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
+        device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_DIFFUSE);
+
+        static thread_local std::vector<ScopeLensColorVertex> reticleVerts;
+        ScopeBuildReticleMesh(reticleVerts, cx, cy, radius, m_ScopeReticleAlpha);
+        if (!reticleVerts.empty())
+        {
+            hr = device->DrawPrimitiveUP(D3DPT_TRIANGLELIST,
+                static_cast<UINT>(reticleVerts.size() / 3u),
+                reticleVerts.data(),
+                sizeof(ScopeLensColorVertex));
+            ok = ok && SUCCEEDED(hr);
+        }
+    }
+
+    if (stateBlock)
+        stateBlock->Apply();
+    else
+        device->SetTexture(0, nullptr);
+
+    if (SUCCEEDED(oldRtHr) && oldRenderTarget)
+        device->SetRenderTarget(0, oldRenderTarget);
+    if (SUCCEEDED(oldDepthHr))
+        device->SetDepthStencilSurface(oldDepthStencil);
+    if (haveOldViewport)
+        device->SetViewport(&oldViewport);
+
+    unlockDevice();
+    releaseRefs();
+    return ok;
 }
 
 bool VR::CopyEyeToDesktopMirrorTexture(int eyeIndex)
