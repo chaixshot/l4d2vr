@@ -659,103 +659,6 @@ namespace
         appendFile << "\ncrosshair 1\n";
     }
 
-    void EnsureNoHmdVideoCfgDesktopResolution()
-    {
-        wchar_t exePath[MAX_PATH] = {};
-        if (GetModuleFileNameW(nullptr, exePath, MAX_PATH) == 0)
-            return;
-
-        DEVMODEW dm = {};
-        dm.dmSize = sizeof(dm);
-        int width = 0;
-        int height = 0;
-        if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm))
-        {
-            width = static_cast<int>(dm.dmPelsWidth);
-            height = static_cast<int>(dm.dmPelsHeight);
-        }
-        else
-        {
-            width = GetSystemMetrics(SM_CXSCREEN);
-            height = GetSystemMetrics(SM_CYSCREEN);
-        }
-
-        if (width <= 0 || height <= 0)
-            return;
-
-        const std::wstring widthValue = std::to_wstring(width);
-        const std::wstring heightValue = std::to_wstring(height);
-
-        std::filesystem::path videoCfgPath(exePath);
-        videoCfgPath = videoCfgPath.parent_path() / L"left4dead2" / L"cfg" / L"video.txt";
-        if (!std::filesystem::exists(videoCfgPath))
-            return;
-
-        std::wifstream input(videoCfgPath);
-        if (!input.is_open())
-            return;
-
-        std::vector<std::wstring> lines;
-        lines.reserve(64);
-
-        std::wstring line;
-        bool changed = false;
-        bool foundRes = false;
-        bool foundHeight = false;
-
-        while (std::getline(input, line))
-        {
-            if (line.find(L"\"setting.defaultres\"") != std::wstring::npos)
-                foundRes = true;
-            if (line.find(L"\"setting.defaultresheight\"") != std::wstring::npos)
-                foundHeight = true;
-
-            changed |= ReplaceConfigValueInLine(line, L"\"setting.defaultres\"", widthValue.c_str());
-            changed |= ReplaceConfigValueInLine(line, L"\"setting.defaultresheight\"", heightValue.c_str());
-            lines.push_back(line);
-        }
-        input.close();
-
-        auto insertLineBeforeClosingBrace = [&lines](const std::wstring& text)
-            {
-                for (auto it = lines.begin(); it != lines.end(); ++it)
-                {
-                    if (TrimWhitespace(*it) == L"}")
-                    {
-                        lines.insert(it, text);
-                        return;
-                    }
-                }
-                lines.push_back(text);
-            };
-
-        if (!foundRes)
-        {
-            insertLineBeforeClosingBrace(L"\t\"setting.defaultres\"\t\t\"" + widthValue + L"\"");
-            changed = true;
-        }
-
-        if (!foundHeight)
-        {
-            insertLineBeforeClosingBrace(L"\t\"setting.defaultresheight\"\t\t\"" + heightValue + L"\"");
-            changed = true;
-        }
-
-        if (!changed)
-            return;
-
-        std::wofstream output(videoCfgPath, std::ios::trunc);
-        if (!output.is_open())
-            return;
-
-        for (size_t i = 0; i < lines.size(); ++i)
-        {
-            output << lines[i];
-            if (i + 1 < lines.size())
-                output << L'\n';
-        }
-    }
-
     bool TryGetCurrentDisplayResolution(int& width, int& height)
     {
         width = 0;
@@ -2442,7 +2345,7 @@ namespace
 
     constexpr OneShotConfigMigration kOneShotConfigMigrations[] =
     {
-        { "2026-05-15_queued_render_pose_wait_ms_default_9", "QueuedRenderPoseWaitMs", "9" },
+        { "2026-05-22_auto_mat_queue_mode_default_true", "AutoMatQueueMode", "true" },
     };
 
     std::unordered_set<std::string> ReadAppliedConfigMigrationIds(const std::filesystem::path& statePath)
@@ -2649,7 +2552,6 @@ DWORD WINAPI InitL4D2VR(HMODULE hModule)
 
     if (IsNoHmdLaunchArgPresent())
     {
-        EnsureNoHmdVideoCfgDesktopResolution();
         EnsureNoHmdAutoexecCrosshair();
         return 0;
     }
