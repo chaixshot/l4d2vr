@@ -1555,6 +1555,138 @@ namespace
         return value;
     }
 
+    bool ContainsAsciiNoCase(const std::string& value, const char* needle)
+    {
+        if (!needle || !*needle)
+            return false;
+
+        const std::string loweredValue = ToLowerAscii(value);
+        const std::string loweredNeedle = ToLowerAscii(needle);
+        return loweredValue.find(loweredNeedle) != std::string::npos;
+    }
+
+    enum class HmdAutoMatQueueClass
+    {
+        Unknown,
+        NativeSteamVR,
+        Other
+    };
+
+    std::string GetOpenVrHmdString(vr::IVRSystem* system, vr::ETrackedDeviceProperty prop)
+    {
+        if (!system)
+            return {};
+
+        char buffer[512] = {};
+        vr::ETrackedPropertyError propError = vr::TrackedProp_Success;
+        const uint32_t written = system->GetStringTrackedDeviceProperty(
+            vr::k_unTrackedDeviceIndex_Hmd, prop, buffer, static_cast<uint32_t>(sizeof(buffer)), &propError);
+
+        if (propError != vr::TrackedProp_Success || written == 0 || buffer[0] == '\0')
+            return {};
+
+        return std::string(buffer);
+    }
+
+    bool LooksLikeStreamingOrBridgeHmd(const std::string& combined)
+    {
+        return ContainsAsciiNoCase(combined, "alvr") ||
+            ContainsAsciiNoCase(combined, "virtual desktop") ||
+            ContainsAsciiNoCase(combined, "steam link") ||
+            ContainsAsciiNoCase(combined, "oculus") ||
+            ContainsAsciiNoCase(combined, "meta quest") ||
+            ContainsAsciiNoCase(combined, "windows mixed reality") ||
+            ContainsAsciiNoCase(combined, "wmr");
+    }
+
+    bool LooksLikeNativeSteamVrHmd(const std::string& manufacturer, const std::string& model,
+        const std::string& trackingSystem, const std::string& actualTrackingSystem,
+        const std::string& registeredDeviceType)
+    {
+        const std::string combined = manufacturer + " " + model + " " + trackingSystem + " " +
+            actualTrackingSystem + " " + registeredDeviceType;
+
+        if (LooksLikeStreamingOrBridgeHmd(combined))
+            return false;
+
+        if (ContainsAsciiNoCase(manufacturer, "valve") || ContainsAsciiNoCase(model, "index"))
+            return true;
+
+        if ((ContainsAsciiNoCase(manufacturer, "htc") || ContainsAsciiNoCase(combined, "vive")) &&
+            ContainsAsciiNoCase(combined, "vive"))
+        {
+            return true;
+        }
+
+        if (ContainsAsciiNoCase(manufacturer, "bigscreen") || ContainsAsciiNoCase(model, "beyond") ||
+            ContainsAsciiNoCase(registeredDeviceType, "bigscreen"))
+        {
+            return true;
+        }
+
+        if (ContainsAsciiNoCase(trackingSystem, "lighthouse") ||
+            ContainsAsciiNoCase(actualTrackingSystem, "lighthouse"))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    HmdAutoMatQueueClass DetectHmdAutoMatQueueClass()
+    {
+        static bool cached = false;
+        static HmdAutoMatQueueClass cachedValue = HmdAutoMatQueueClass::Unknown;
+        if (cached)
+            return cachedValue;
+
+        auto finish = [](HmdAutoMatQueueClass value)
+            {
+                cachedValue = value;
+                cached = true;
+                return value;
+            };
+
+        if (IsNoHmdLaunchArgPresent())
+            return finish(HmdAutoMatQueueClass::Unknown);
+
+        if (!vr::VR_IsRuntimeInstalled() || !vr::VR_IsHmdPresent())
+            return finish(HmdAutoMatQueueClass::Unknown);
+
+        vr::HmdError error = vr::VRInitError_None;
+        vr::IVRSystem* system = vr::VR_Init(&error, vr::VRApplication_Background);
+        bool initializedOpenVr = (error == vr::VRInitError_None && system != nullptr);
+
+        if (!initializedOpenVr)
+        {
+            error = vr::VRInitError_None;
+            system = vr::VR_Init(&error, vr::VRApplication_Scene);
+            initializedOpenVr = (error == vr::VRInitError_None && system != nullptr);
+        }
+
+        if (!initializedOpenVr)
+            return finish(HmdAutoMatQueueClass::Unknown);
+
+        const std::string manufacturer = GetOpenVrHmdString(system, vr::Prop_ManufacturerName_String);
+        const std::string model = GetOpenVrHmdString(system, vr::Prop_ModelNumber_String);
+        const std::string trackingSystem = GetOpenVrHmdString(system, vr::Prop_TrackingSystemName_String);
+        const std::string actualTrackingSystem = GetOpenVrHmdString(system, vr::Prop_ActualTrackingSystemName_String);
+        const std::string registeredDeviceType = GetOpenVrHmdString(system, vr::Prop_RegisteredDeviceType_String);
+
+        vr::VR_Shutdown();
+
+        if (manufacturer.empty() && model.empty() && trackingSystem.empty() &&
+            actualTrackingSystem.empty() && registeredDeviceType.empty())
+        {
+            return finish(HmdAutoMatQueueClass::Unknown);
+        }
+
+        if (LooksLikeNativeSteamVrHmd(manufacturer, model, trackingSystem, actualTrackingSystem, registeredDeviceType))
+            return finish(HmdAutoMatQueueClass::NativeSteamVR);
+
+        return finish(HmdAutoMatQueueClass::Other);
+    }
+
     bool IsHexSha256(const std::string& value)
     {
         if (value.size() != 64)
@@ -2336,17 +2468,58 @@ namespace
         return true;
     }
 
+    enum class OneShotConfigMigrationMode
+    {
+        FixedValue,
+        AutoMatQueueModeDefaultTrueUnlessNativeSteamVr,
+        AutoMatQueueModeForceFalseForNativeSteamVr
+    };
+
     struct OneShotConfigMigration
     {
         const char* id = nullptr;
         const char* key = nullptr;
         const char* value = nullptr;
+        OneShotConfigMigrationMode mode = OneShotConfigMigrationMode::FixedValue;
     };
 
     constexpr OneShotConfigMigration kOneShotConfigMigrations[] =
     {
-        { "2026-05-22_auto_mat_queue_mode_default_true", "AutoMatQueueMode", "true" },
+        { "2026-05-22_auto_mat_queue_mode_default_true", "AutoMatQueueMode", "true", OneShotConfigMigrationMode::AutoMatQueueModeDefaultTrueUnlessNativeSteamVr },
+        { "2026-05-23_native_steamvr_hmd_auto_mat_queue_mode_false", "AutoMatQueueMode", "false", OneShotConfigMigrationMode::AutoMatQueueModeForceFalseForNativeSteamVr },
     };
+
+    std::string ResolveOneShotConfigMigrationValue(const OneShotConfigMigration& migration, bool& shouldWriteValue, bool& shouldMarkApplied)
+    {
+        shouldWriteValue = true;
+        shouldMarkApplied = true;
+
+        if (migration.mode == OneShotConfigMigrationMode::FixedValue)
+            return migration.value ? migration.value : "";
+
+        const HmdAutoMatQueueClass hmdClass = DetectHmdAutoMatQueueClass();
+        if (hmdClass == HmdAutoMatQueueClass::Unknown)
+        {
+            shouldWriteValue = false;
+            shouldMarkApplied = false;
+            return {};
+        }
+
+        if (migration.mode == OneShotConfigMigrationMode::AutoMatQueueModeDefaultTrueUnlessNativeSteamVr)
+            return (hmdClass == HmdAutoMatQueueClass::NativeSteamVR) ? "false" : "true";
+
+        if (migration.mode == OneShotConfigMigrationMode::AutoMatQueueModeForceFalseForNativeSteamVr)
+        {
+            if (hmdClass != HmdAutoMatQueueClass::NativeSteamVR)
+            {
+                shouldWriteValue = false;
+                return {};
+            }
+            return "false";
+        }
+
+        return migration.value ? migration.value : "";
+    }
 
     std::unordered_set<std::string> ReadAppliedConfigMigrationIds(const std::filesystem::path& statePath)
     {
@@ -2416,8 +2589,15 @@ namespace
             if (appliedIds.find(migration.id) != appliedIds.end())
                 continue;
 
+            bool shouldWriteValue = true;
+            bool shouldMarkApplied = true;
+            const std::string resolvedValue = ResolveOneShotConfigMigrationValue(migration, shouldWriteValue, shouldMarkApplied);
+
+            if (!shouldMarkApplied)
+                continue;
+
             anyPendingMigration = true;
-            if (SetConfigParameterValue(configText, migration.key, migration.value))
+            if (shouldWriteValue && SetConfigParameterValue(configText, migration.key, resolvedValue))
                 configChanged = true;
             appliedIds.insert(migration.id);
         }

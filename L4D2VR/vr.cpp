@@ -9387,28 +9387,34 @@ namespace
         return D3DCOLOR_ARGB(std::clamp(a, 0, 255), std::clamp(r, 0, 255), std::clamp(g, 0, 255), std::clamp(b, 0, 255));
     }
 
+    static inline float ScopeSmoothStep01(float v)
+    {
+        v = ScopeClamp01(v);
+        return v * v * (3.0f - 2.0f * v);
+    }
+
     static void ScopeAddTexturedVertex(std::vector<ScopeLensVertex>& out, float cx, float cy, float radius, float nx, float ny)
     {
         const float r2 = nx * nx + ny * ny;
         const float r = std::sqrt(std::max(0.0f, r2));
         const float rClamped = ScopeClamp01(r);
 
-        // Inverse barrel mapping: the destination circle stays round, while the sampled image
-        // bends near the edge like glass. Keep the sample inside the source texture to avoid hard clamps.
-        const float barrel = 1.0f + 0.22f * rClamped * rClamped + 0.08f * rClamped * rClamped * rClamped * rClamped;
-        float sx = nx / barrel;
-        float sy = ny / barrel;
+        // Rifle scopes are corrected optics. The center should stay almost perfectly rectilinear;
+        // only the last outer band gets a very small radial compression so the edge reads as glass,
+        // not as a fish-eye lens.
+        const float edgeWarp = ScopeSmoothStep01((rClamped - 0.78f) / 0.22f);
+        const float radialScale = 1.0f - 0.018f * edgeWarp * edgeWarp;
+        float sx = nx * radialScale;
+        float sy = ny * radialScale;
 
-        // A tiny center magnification keeps the reticle area readable and makes the lens feel less flat.
-        const float centerLift = 1.0f - 0.035f * (1.0f - rClamped) * (1.0f - rClamped);
-        sx *= centerLift;
-        sy *= centerLift;
+        sx = std::clamp(sx, -0.998f, 0.998f);
+        sy = std::clamp(sy, -0.998f, 0.998f);
 
-        sx = std::clamp(sx, -0.995f, 0.995f);
-        sy = std::clamp(sy, -0.995f, 0.995f);
-
-        const float edge = ScopeClamp01((rClamped - 0.68f) / 0.32f);
-        const float shade = 1.0f - 0.48f * edge * edge;
+        // Mild optical vignetting: clear center, darker rim. This is what makes it look like a scope
+        // without bending the whole image.
+        const float vignette = ScopeSmoothStep01((rClamped - 0.58f) / 0.42f);
+        const float rim = ScopeSmoothStep01((rClamped - 0.90f) / 0.10f);
+        const float shade = std::clamp(1.0f - 0.20f * vignette * vignette - 0.32f * rim, 0.46f, 1.0f);
         const int c = static_cast<int>(std::lround(255.0f * shade));
 
         out.push_back(ScopeLensVertex{
