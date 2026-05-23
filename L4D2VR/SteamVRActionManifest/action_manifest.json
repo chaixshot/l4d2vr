@@ -166,6 +166,11 @@
 			"requirement": "optional"
 		},
 		{
+			"name": "/actions/main/in/ScopeToggle",
+			"type": "boolean",
+			"requirement": "optional"
+		},
+		{
 			"name": "/actions/main/in/ScopeMagnificationToggle",
 			"type": "boolean",
 			"requirement": "optional"
@@ -236,6 +241,7 @@
 			"/actions/main/in/CustomAction3": "Custom Action 3",
 			"/actions/main/in/CustomAction4": "Custom Action 4",
 			"/actions/main/in/CustomAction5": "Custom Action 5",
+			"/actions/main/in/ScopeToggle": "Toggle Scope",
 			"/actions/main/in/ScopeMagnificationToggle": "Toggle Scope Magnification",
 			"/actions/main/in/FriendlyFireBlockToggle": "Friendly Fire Block Toggle",
 			"/actions/main/in/InventoryQuickSwitch": "Inventory Quick Switch",

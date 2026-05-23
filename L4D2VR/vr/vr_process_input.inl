@@ -330,6 +330,11 @@ void VR::ProcessInput()
     bool nonVrServerMovementToggleJustPressed = false;
     [[maybe_unused]] bool nonVrServerMovementToggleDataValid = getActionState(&m_NonVRServerMovementAngleToggle, nonVrServerMovementToggleActionData, nonVrServerMovementToggleDown, nonVrServerMovementToggleJustPressed);
 
+    vr::InputDigitalActionData_t scopeToggleActionData{};
+    [[maybe_unused]] bool scopeToggleDown = false;
+    bool scopeToggleJustPressed = false;
+    [[maybe_unused]] bool scopeToggleDataValid = getActionState(&m_ActionScopeToggle, scopeToggleActionData, scopeToggleDown, scopeToggleJustPressed);
+
     vr::InputDigitalActionData_t scopeMagnificationToggleActionData{};
     [[maybe_unused]] bool scopeMagnificationToggleDown = false;
     bool scopeMagnificationToggleJustPressed = false;
@@ -935,6 +940,11 @@ void VR::ProcessInput()
     if (nonVrServerMovementToggleJustPressed)
     {
         m_NonVRServerMovementAngleOverride = !m_NonVRServerMovementAngleOverride;
+    }
+
+    if (scopeToggleJustPressed)
+    {
+        ToggleScope();
     }
 
     if (scopeMagnificationToggleJustPressed)

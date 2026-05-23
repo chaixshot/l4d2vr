@@ -2864,6 +2864,22 @@ void VR::UpdateScopeAimLineState()
     }
 }
 
+void VR::ToggleScope()
+{
+    if (!m_ScopeEnabled || !m_ScopeWeaponIsFirearm)
+    {
+        m_ScopeToggleActive = false;
+        return;
+    }
+
+    m_ScopeToggleActive = !m_ScopeToggleActive;
+
+    // Rebase smoothing/sensitivity state on the first frame after the toggle.
+    m_ScopeAimSensitivityInit = false;
+    m_ScopeStabilizationInit = false;
+    m_ScopeStabilizationLastTime = {};
+}
+
 void VR::ToggleMouseModeScope()
 {
     if (!m_MouseModeEnabled)

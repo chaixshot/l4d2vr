@@ -763,10 +763,11 @@ void VR::UpdateTracking()
     const bool scopeFromEyeInFrontView = forceScopeForThirdPersonFrontView
         && m_ThirdPersonFrontScopeFromEye
         && (localPlayer != nullptr);
+    const bool steamVRScopeToggleActive = m_ScopeWeaponIsFirearm && m_ScopeToggleActive;
     if (m_MouseModeEnabled && m_ScopeEnabled)
     {
-        // Mouse mode: scope activation is driven by a keyboard toggle (not look-through).
-        m_ScopeActive = (m_ScopeWeaponIsFirearm && m_MouseModeScopeToggleActive) || forceScopeForThirdPersonFrontView;
+        // Mouse mode: scope activation is driven by a toggle (not look-through).
+        m_ScopeActive = (m_ScopeWeaponIsFirearm && (m_MouseModeScopeToggleActive || m_ScopeToggleActive)) || forceScopeForThirdPersonFrontView;
         if (m_ScopeActive)
         {
             if (scopeFromEyeInFrontView)
@@ -895,6 +896,10 @@ void VR::UpdateTracking()
         {
             m_ScopeActive = true;
         }
+        else if (steamVRScopeToggleActive)
+        {
+            m_ScopeActive = true;
+        }
         else if (m_ScopeRequireLookThrough)
         {
             const float maxDist = std::max(0.0f, m_ScopeLookThroughDistanceMeters) * m_VRScale;
@@ -921,7 +926,7 @@ void VR::UpdateTracking()
         }
         else
         {
-            m_ScopeActive = true;
+            m_ScopeActive = false;
         }
 
         // Keep a working copy of the pose used for rendering. Look-through activation above is based on raw pose.

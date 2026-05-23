@@ -849,6 +849,7 @@ public:
 	vr::VRActionHandle_t m_CustomAction3;
 	vr::VRActionHandle_t m_CustomAction4;
 	vr::VRActionHandle_t m_CustomAction5;
+	vr::VRActionHandle_t m_ActionScopeToggle;
 	vr::VRActionHandle_t m_ActionScopeMagnificationToggle;
 	bool m_WeaponHapticsEnabled = true;
 	std::unordered_map<std::string, WeaponHapticsProfile> m_WeaponHapticsOverrides;
@@ -2298,6 +2299,7 @@ public:
 	Vector m_ScopeCameraPosAbs = { 0.0f, 0.0f, 0.0f };
 	QAngle m_ScopeCameraAngAbs = { 0.0f, 0.0f, 0.0f };
 	bool   m_ScopeActive = false;
+	bool   m_ScopeToggleActive = false;
 
 	bool   m_ScopeWeaponIsFirearm = false;
 
@@ -2312,6 +2314,7 @@ public:
 	Vector GetScopeCameraAbsPos() const { return m_ScopeCameraPosAbs; }
 	QAngle GetScopeCameraAbsAngle() const { return m_ScopeCameraAngAbs; }
 	bool   IsMouseModeScopeActive() const { return m_MouseModeEnabled && m_ScopeEnabled && m_ScopeWeaponIsFirearm && m_MouseModeScopeToggleActive; }
+	bool   IsSteamVRScopeToggleActive() const { return m_ScopeEnabled && m_ScopeWeaponIsFirearm && m_ScopeToggleActive; }
 	float  GetMouseModeScopeSensitivityScale() const
 	{
 		if (!IsMouseModeScopeActive())
@@ -2322,7 +2325,7 @@ public:
 		const int clamped = std::min(idx, (int)m_MouseModeScopeSensitivityScales.size() - 1);
 		return std::clamp(m_MouseModeScopeSensitivityScales[clamped] / 100.0f, 0.05f, 2.0f);
 	}
-	bool   IsScopeActive() const { return m_ScopeEnabled && (m_ScopeActive || IsMouseModeScopeActive()); }
+	bool   IsScopeActive() const { return m_ScopeEnabled && (m_ScopeActive || IsMouseModeScopeActive() || IsSteamVRScopeToggleActive()); }
 	bool   ShouldRenderScope() const
 	{
 		const bool forceScopeForThirdPersonFrontView = m_ThirdPersonFrontViewEnabled && m_IsThirdPersonCamera;
@@ -2332,6 +2335,7 @@ public:
 	}
 	bool   ShouldUpdateScopeRTT();
 	bool   ApplyScopeLensPostProcess();
+	void   ToggleScope();
 	void   ToggleMouseModeScope();
 	void   CycleScopeMagnification();
 	void   UpdateScopeAimLineState();

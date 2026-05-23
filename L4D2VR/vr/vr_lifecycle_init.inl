@@ -1047,6 +1047,7 @@ int VR::SetActionManifest(const char* fileName)
     m_Input->GetActionHandle("/actions/main/in/ShowHUD", &m_ToggleHUD);
     m_Input->GetActionHandle("/actions/main/in/Pause", &m_Pause);
     m_Input->GetActionHandle("/actions/main/in/NonVRServerMovementAngleToggle", &m_NonVRServerMovementAngleToggle);
+    m_Input->GetActionHandle("/actions/main/in/ScopeToggle", &m_ActionScopeToggle);
     m_Input->GetActionHandle("/actions/main/in/ScopeMagnificationToggle", &m_ActionScopeMagnificationToggle);
     // Aim-line friendly-fire guard toggle (bindable in SteamVR)
     m_Input->GetActionHandle("/actions/main/in/FriendlyFireBlockToggle", &m_ActionFriendlyFireBlockToggle);
@@ -1091,6 +1092,14 @@ void VR::UpdateAutoMatQueueMode()
     {
         m_Game->SetConVarInt("crosshair", 0);
         m_Game->SetConVarFloat("mat_grain_scale_override", 0.0f);
+        // Source motion blur uses global view history. Extra scope RTT RenderView passes can
+        // poison the next stereo eye, so keep motion blur disabled for VR.
+        m_Game->SetConVarInt("mat_motion_blur_enabled", 0);
+        m_Game->SetConVarInt("mat_motion_blur_forward_enabled", 0);
+        m_Game->SetConVarFloat("mat_motion_blur_strength", 0.0f);
+        m_Game->SetConVarFloat("mat_motion_blur_percent_of_screen_max", 0.0f);
+        m_Game->SetConVarFloat("mat_motion_blur_rotation_intensity", 0.0f);
+        m_Game->SetConVarFloat("mat_motion_blur_falling_intensity", 0.0f);
         m_MainMenuOneShotVisualCvarsInjected = true;
     }
 

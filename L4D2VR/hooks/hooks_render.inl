@@ -1481,49 +1481,70 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				Vector vmPosAbs = m_VR->GetRecommendedViewmodelAbsPos();
 				QAngle vmAngAbs = m_VR->GetRecommendedViewmodelAbsAngle();
 
+				auto buildRenderControllerBasis = [&](const vr::TrackedDevicePose_t& pose, Vector& posLocal, Vector& ctrlF, Vector& ctrlR, Vector& ctrlU) -> bool
+				{
+					if (!pose.bPoseIsValid)
+						return false;
+
+					const vr::HmdMatrix34_t& mat = pose.mDeviceToAbsoluteTracking;
+					posLocal.x = -mat.m[2][3];
+					posLocal.y = -mat.m[0][3];
+					posLocal.z = mat.m[1][3];
+
+					// Build the controller basis directly from the OpenVR pose matrix.
+					// The old queued path converted matrix -> Euler -> basis every render frame.
+					// Near Source QAngle singularities, tiny runtime pose noise can become large
+					// yaw/roll flips, which moves the viewmodel even when the controller is still.
+					ctrlF = Vector(mat.m[2][2], mat.m[0][2], -mat.m[1][2]);
+					ctrlR = Vector(-mat.m[2][0], -mat.m[0][0], mat.m[1][0]);
+					ctrlU = Vector(-mat.m[2][1], -mat.m[0][1], mat.m[1][1]);
+
+					if (VectorNormalize(ctrlF) == 0.0f || VectorNormalize(ctrlR) == 0.0f || VectorNormalize(ctrlU) == 0.0f)
+						return false;
+
+					if (std::fabs(extrapRot) > 0.0001f)
+					{
+						const Vector worldUp(0.0f, 0.0f, 1.0f);
+						ctrlF = VectorRotate(ctrlF, worldUp, extrapRot);
+						ctrlR = VectorRotate(ctrlR, worldUp, extrapRot);
+						ctrlU = VectorRotate(ctrlU, worldUp, extrapRot);
+					}
+
+					return true;
+				};
+
 				if (leftIdx != vr::k_unTrackedDeviceIndexInvalid && leftIdx < vr::k_unMaxTrackedDeviceCount && renderPoses[leftIdx].bPoseIsValid)
 				{
-					TrackedDevicePoseData leftPose{};
-					m_VR->GetPoseData(renderPoses[leftIdx], leftPose);
-					Vector ctrlPosLocal = leftPose.TrackedDevicePos;
-					QAngle ctrlAngLocal = leftPose.TrackedDeviceAng;
+					Vector ctrlPosLocal{}, ctrlF{}, ctrlR{}, ctrlU{};
+					if (buildRenderControllerBasis(renderPoses[leftIdx], ctrlPosLocal, ctrlF, ctrlR, ctrlU))
+					{
+						Vector hmdToCtrl = ctrlPosLocal - hmdPosLocal;
+						Vector ctrlPosCorrected = hmdPosCorrected + hmdToCtrl;
+						VectorPivotXY(ctrlPosCorrected, hmdPosCorrected, extrapRot);
 
-					Vector hmdToCtrl = ctrlPosLocal - hmdPosLocal;
-					Vector ctrlPosCorrected = hmdPosCorrected + hmdToCtrl;
-					VectorPivotXY(ctrlPosCorrected, hmdPosCorrected, extrapRot);
-					ctrlAngLocal.y += extrapRot;
-					ctrlAngLocal.y -= 360.0f * std::floor((ctrlAngLocal.y + 180.0f) / 360.0f);
+						ctrlF = VectorRotate(ctrlF, ctrlR, -45.0);
+						ctrlU = VectorRotate(ctrlU, ctrlR, -45.0);
 
-					Vector ctrlF, ctrlR, ctrlU;
-					QAngle::AngleVectors(ctrlAngLocal, &ctrlF, &ctrlR, &ctrlU);
-					ctrlF = VectorRotate(ctrlF, ctrlR, -45.0);
-					ctrlU = VectorRotate(ctrlU, ctrlR, -45.0);
-
-					leftCtrlPosAbs = cameraAnchor - Vector(0, 0, 64) + (ctrlPosCorrected * vp.vrScale);
-					QAngle::VectorAngles(ctrlF, ctrlU, leftCtrlAngAbs);
+						leftCtrlPosAbs = cameraAnchor - Vector(0, 0, 64) + (ctrlPosCorrected * vp.vrScale);
+						QAngle::VectorAngles(ctrlF, ctrlU, leftCtrlAngAbs);
+					}
 				}
 
 				if (rightIdx != vr::k_unTrackedDeviceIndexInvalid && rightIdx < vr::k_unMaxTrackedDeviceCount && renderPoses[rightIdx].bPoseIsValid)
 				{
-					TrackedDevicePoseData rightPose{};
-					m_VR->GetPoseData(renderPoses[rightIdx], rightPose);
-					Vector ctrlPosLocal = rightPose.TrackedDevicePos;
-					QAngle ctrlAngLocal = rightPose.TrackedDeviceAng;
+					Vector ctrlPosLocal{}, ctrlF{}, ctrlR{}, ctrlU{};
+					if (buildRenderControllerBasis(renderPoses[rightIdx], ctrlPosLocal, ctrlF, ctrlR, ctrlU))
+					{
+						Vector hmdToCtrl = ctrlPosLocal - hmdPosLocal;
+						Vector ctrlPosCorrected = hmdPosCorrected + hmdToCtrl;
+						VectorPivotXY(ctrlPosCorrected, hmdPosCorrected, extrapRot);
 
-					Vector hmdToCtrl = ctrlPosLocal - hmdPosLocal;
-					Vector ctrlPosCorrected = hmdPosCorrected + hmdToCtrl;
-					VectorPivotXY(ctrlPosCorrected, hmdPosCorrected, extrapRot);
-					ctrlAngLocal.y += extrapRot;
-					ctrlAngLocal.y -= 360.0f * std::floor((ctrlAngLocal.y + 180.0f) / 360.0f);
+						// 45° downward tilt, matches main tracking path.
+						ctrlF = VectorRotate(ctrlF, ctrlR, -45.0);
+						ctrlU = VectorRotate(ctrlU, ctrlR, -45.0);
 
-					Vector ctrlF, ctrlR, ctrlU;
-					QAngle::AngleVectors(ctrlAngLocal, &ctrlF, &ctrlR, &ctrlU);
-					// 45° downward tilt, matches main tracking path.
-					ctrlF = VectorRotate(ctrlF, ctrlR, -45.0);
-					ctrlU = VectorRotate(ctrlU, ctrlR, -45.0);
-
-					rightCtrlPosAbs = cameraAnchor - Vector(0, 0, 64) + (ctrlPosCorrected * vp.vrScale);
-					QAngle::VectorAngles(ctrlF, ctrlU, rightCtrlAngAbs);
+						rightCtrlPosAbs = cameraAnchor - Vector(0, 0, 64) + (ctrlPosCorrected * vp.vrScale);
+						QAngle::VectorAngles(ctrlF, ctrlU, rightCtrlAngAbs);
 
 					// Viewmodel basis from controller + per-weapon offsets.
 					vmForward = ctrlF;
@@ -1543,7 +1564,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 						- (vmForward * vp.viewmodelPosOffset.x)
 						- (vmRight * vp.viewmodelPosOffset.y)
 						- (vmUp * vp.viewmodelPosOffset.z);
-					QAngle::VectorAngles(vmForward, vmUp, vmAngAbs);
+						QAngle::VectorAngles(vmForward, vmUp, vmAngAbs);
+					}
 				}
 
 				// Publish render-frame snapshot with a seqlock.
@@ -2683,37 +2705,69 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				return;
 			}
 
-			// If viewport hooks aren't available, fall back (less ideal).
-			if (!hkGetViewport.fOriginal || !hkViewport.fOriginal)
-			{
-				hkPushRenderTargetAndViewport.fOriginal(rc, target, nullptr, 0, 0, texW, texH);
-
-				QAngle oldEngineAngles;
-				bool touchedAngles = false;
-				if (queueMode == 0 && m_Game && m_Game->m_EngineClient)
-				{
-					m_Game->m_EngineClient->GetViewAngles(oldEngineAngles);
-					m_Game->m_EngineClient->SetViewAngles(passAngles);
-					touchedAngles = true;
-				}
-
-				callOriginalRenderView(view, hud, nClearFlags, whatToDraw);
-
-				if (touchedAngles && m_Game && m_Game->m_EngineClient)
-					m_Game->m_EngineClient->SetViewAngles(oldEngineAngles);
-				hkPopRenderTargetAndViewport.fOriginal(rc);
-				return;
-			}
-
 			const bool prevSuppress = m_VR->m_SuppressHudCapture;
 			m_VR->m_SuppressHudCapture = true;
 
-			int oldX = 0, oldY = 0, oldW = 0, oldH = 0;
-			hkGetViewport.fOriginal(rc, oldX, oldY, oldW, oldH);
-			ITexture* oldRT = rc->GetRenderTarget();
+			struct SuppressHudCaptureGuard
+			{
+				VR* vr = nullptr;
+				bool previous = false;
+				~SuppressHudCaptureGuard()
+				{
+					if (vr)
+						vr->m_SuppressHudCapture = previous;
+				}
+			} suppressGuard{ m_VR, prevSuppress };
 
-			rc->SetRenderTarget(target);
-			hkViewport.fOriginal(rc, 0, 0, texW, texH);
+			struct OffscreenRenderTargetScope
+			{
+				IMatRenderContext* ctx = nullptr;
+				ITexture* oldRT = nullptr;
+				int oldX = 0;
+				int oldY = 0;
+				int oldW = 0;
+				int oldH = 0;
+				bool hasViewport = false;
+				bool pushed = false;
+
+				OffscreenRenderTargetScope(IMatRenderContext* renderContext, ITexture* renderTarget, int width, int height)
+					: ctx(renderContext)
+				{
+					if (!ctx || !renderTarget)
+						return;
+
+					if (hkPushRenderTargetAndViewport.fOriginal && hkPopRenderTargetAndViewport.fOriginal)
+					{
+						hkPushRenderTargetAndViewport.fOriginal(ctx, renderTarget, nullptr, 0, 0, width, height);
+						pushed = true;
+						return;
+					}
+
+					oldRT = ctx->GetRenderTarget();
+					if (hkGetViewport.fOriginal && hkViewport.fOriginal)
+					{
+						hkGetViewport.fOriginal(ctx, oldX, oldY, oldW, oldH);
+						hasViewport = true;
+					}
+					ctx->SetRenderTarget(renderTarget);
+					if (hkViewport.fOriginal)
+						hkViewport.fOriginal(ctx, 0, 0, width, height);
+				}
+
+				~OffscreenRenderTargetScope()
+				{
+					if (!ctx)
+						return;
+					if (pushed)
+					{
+						hkPopRenderTargetAndViewport.fOriginal(ctx);
+						return;
+					}
+					ctx->SetRenderTarget(oldRT);
+					if (hasViewport && hkViewport.fOriginal)
+						hkViewport.fOriginal(ctx, oldX, oldY, oldW, oldH);
+				}
+			} offscreenRtScope(rc, target, texW, texH);
 
 			rc->ClearColor4ub(0, 0, 0, 255);
 			rc->ClearBuffers(true, true, true);
@@ -2731,11 +2785,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 			if (touchedAngles && m_Game && m_Game->m_EngineClient)
 				m_Game->m_EngineClient->SetViewAngles(oldEngineAngles);
-
-			rc->SetRenderTarget(oldRT);
-			hkViewport.fOriginal(rc, oldX, oldY, oldW, oldH);
-
-			m_VR->m_SuppressHudCapture = prevSuppress;
 		};
 
 	bool scopeLensPostProcessPending = false;
