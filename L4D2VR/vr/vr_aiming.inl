@@ -1514,7 +1514,7 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
     const bool deferDebugAimOverlayForCleanMirror =
         !queued && m_DesktopMirrorHidePluginOverlays && m_DesktopMirrorEnabled && !m_ScopeRenderingPass;
     const bool d3dAimLineNeedsVisibleSegment =
-        !queued && m_D3DAimLineOverlayEnabled;
+        m_D3DAimLineOverlayEnabled;
 
 
     C_WeaponCSBase* activeWeapon = nullptr;
@@ -2975,9 +2975,9 @@ bool VR::BuildRenderAimLineSegment(C_BasePlayer* localPlayer, Vector& start, Vec
         }
     } tlsGuard;
 
-    // If update-side aiming has no valid ray this frame, don't guess here.
-    if (!m_HasAimLine && m_LastAimDirection.IsZero())
-        return false;
+    // In queued rendering this may run on the render thread, where no C_BasePlayer
+    // pointer is safe to use. Build the visual segment from the render-frame snapshot
+    // directly instead of requiring UpdateAimingLaser() to have produced m_HasAimLine.
 
     const bool useMouse = m_MouseModeEnabled;
     const bool frontViewEyeAim = m_ThirdPersonFrontViewEnabled
@@ -3140,7 +3140,13 @@ bool VR::ApplyD3DAimLineOcclusionFromAimLine(C_BasePlayer* localPlayer, Vector& 
     }
 
     // Fallback for the first frame after enabling the D3D path, or when the cache was cleared.
-    // This keeps every D3D aim-line route from inventing a separate no-occlusion behavior.
+    // In queued rendering the cache is produced from UpdateAimingLaser; avoid running a fresh
+    // engine trace from the render thread.
+    const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
+    if (queueMode != 0)
+        return true;
+
+    // This keeps every single-threaded D3D aim-line route from inventing a separate no-occlusion behavior.
     if (!localPlayer || !m_Game || !m_Game->m_EngineTrace || !m_Game->m_EngineClient || !m_Game->m_EngineClient->IsInGame())
         return true;
 
@@ -3176,8 +3182,10 @@ void VR::UpdateD3DAimLineOverlayForView(C_BasePlayer* localPlayer, const CViewSe
             m_D3DAimLineOverlayEyes[eyeIndex] = {};
         };
 
-    const int queueMode = m_Game ? m_Game->GetMatQueueMode() : 0;
-    if (!m_D3DAimLineOverlayEnabled || queueMode != 0 || !m_IsVREnabled || !localPlayer)
+    const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
+    const bool queued = (queueMode != 0);
+
+    if (!m_D3DAimLineOverlayEnabled || !m_IsVREnabled || (!queued && !localPlayer))
     {
         clearEye();
         return;
@@ -3187,11 +3195,27 @@ void VR::UpdateD3DAimLineOverlayForView(C_BasePlayer* localPlayer, const CViewSe
     if (ShouldThrottle(m_LastD3DAimLineOverlayUpdateTime[eyeIndex], m_AimLineMaxHz))
         return;
 
-    C_WeaponCSBase* activeWeapon = static_cast<C_WeaponCSBase*>(localPlayer->GetActiveWeapon());
-    if (!ShouldShowAimLine(activeWeapon) || !ShouldDrawAimLine(activeWeapon))
+    if (queued)
     {
-        clearEye();
-        return;
+        // dRenderView runs on Source's material/render thread in mat_queue_mode!=0.
+        // Do not dereference C_BasePlayer or weapon objects here; use the update-thread
+        // snapshot published by UpdateTracking(). The previous code required localPlayer
+        // and therefore cleared both eye caches every queued frame.
+        if (m_RenderHasLocalPlayer.load(std::memory_order_relaxed) == 0 ||
+            m_RenderAimLineShow.load(std::memory_order_relaxed) == 0)
+        {
+            clearEye();
+            return;
+        }
+    }
+    else
+    {
+        C_WeaponCSBase* activeWeapon = static_cast<C_WeaponCSBase*>(localPlayer->GetActiveWeapon());
+        if (!ShouldShowAimLine(activeWeapon) || !ShouldDrawAimLine(activeWeapon))
+        {
+            clearEye();
+            return;
+        }
     }
 
     const bool scopeOnlyAimLine = m_ScopeAimLineOnlyInScope
@@ -3273,12 +3297,10 @@ void VR::RenderDrawAimLineQueued(C_BasePlayer* localPlayer)
     if (queueMode == 0)
         return;
 
-    // In queued/multicore rendering the visible aim line is drawn here instead of the
-    // single-core D3D overlay path. Keep the same user-facing visual switch:
-    // D3DAimLineOverlayEnabled controls visibility only. UpdateAimingLaser() still
-    // keeps m_HasAimLine / m_AimLineStart / m_AimLineEnd updated for hit tests,
-    // friendly-fire blocking, target HUD, and bullet convergence.
-    if (!m_D3DAimLineOverlayEnabled || m_ScopeRenderingPass || ShouldRenderScope())
+    // If the D3D overlay is enabled, queued/multicore visibility is handled by the
+    // per-eye D3D path. Do not also enqueue Source DebugOverlay geometry, otherwise
+    // stale one-frame lines can remain visible beside the D3D line.
+    if (!m_AimLineEnabled || m_D3DAimLineOverlayEnabled || m_ScopeRenderingPass || ShouldRenderScope())
         return;
     const bool scopeOnlyAimLine = m_ScopeAimLineOnlyInScope
         && m_ThirdPersonFrontViewEnabled

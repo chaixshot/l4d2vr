@@ -282,7 +282,8 @@ namespace dxvk {
             D3D9DeviceEx* device,
             VR* vr,
             int eyeIndex,
-            IDirect3DSurface9* target) {
+            IDirect3DSurface9* target,
+            bool backupTarget) {
             if (!device || !vr || !target)
                 return;
 
@@ -294,7 +295,7 @@ namespace dxvk {
             if (FAILED(target->GetDesc(&desc)) || desc.Width == 0 || desc.Height == 0)
                 return;
 
-            if (!VrAimLineBackupTarget(device, vr, eyeIndex, target, desc))
+            if (backupTarget && !VrAimLineBackupTarget(device, vr, eyeIndex, target, desc))
                 return;
 
             if (FAILED(device->BeginScene()))
@@ -375,6 +376,60 @@ namespace dxvk {
 
             device->EndScene();
         }
+
+        static void VrAimLineLogQueuedSubmitTargets(
+            VR* vr,
+            IDirect3DSurface9* leftTarget,
+            IDirect3DSurface9* rightTarget) {
+            if (!vr)
+                return;
+
+            static DWORD s_lastLogMs = 0;
+            const DWORD nowMs = ::GetTickCount();
+            if (nowMs - s_lastLogMs < 1000)
+                return;
+            s_lastLogMs = nowMs;
+
+            D3DAimLineOverlayEyeState leftLine{};
+            D3DAimLineOverlayEyeState rightLine{};
+            const bool leftValid = vr->GetD3DAimLineOverlayEye(0, leftLine);
+            const bool rightValid = vr->GetD3DAimLineOverlayEye(1, rightLine);
+            Game::logMsg("[VR][D3DAimLine][QueuedSubmit] left=%d right=%d leftTarget=%p rightTarget=%p leftSubmit=%d rightSubmit=%d L=(%.1f,%.1f)->(%.1f,%.1f) R=(%.1f,%.1f)->(%.1f,%.1f)",
+                leftValid ? 1 : 0,
+                rightValid ? 1 : 0,
+                static_cast<void*>(leftTarget),
+                static_cast<void*>(rightTarget),
+                vr->m_D9LeftEyeSubmitSurface ? 1 : 0,
+                vr->m_D9RightEyeSubmitSurface ? 1 : 0,
+                leftLine.x0, leftLine.y0, leftLine.x1, leftLine.y1,
+                rightLine.x0, rightLine.y0, rightLine.x1, rightLine.y1);
+        }
+
+        static void VrAimLineDrawOverlaysToEyeSurfaces(D3D9DeviceEx* device, VR* vr, bool backupTarget) {
+            if (!device || !vr || !vr->m_D3DAimLineOverlayEnabled)
+                return;
+
+            if (vr->m_D9LeftEyeSurface)
+                VrAimLineDrawOverlayToSurface(device, vr, 0, vr->m_D9LeftEyeSurface, backupTarget);
+            if (vr->m_D9RightEyeSurface)
+                VrAimLineDrawOverlayToSurface(device, vr, 1, vr->m_D9RightEyeSurface, backupTarget);
+        }
+
+        static void VrAimLineDrawOverlaysToSubmitTargets(D3D9DeviceEx* device, VR* vr) {
+            if (!device || !vr || !vr->m_D3DAimLineOverlayEnabled)
+                return;
+
+            IDirect3DSurface9* leftTarget = vr->m_D9LeftEyeSubmitSurface ? vr->m_D9LeftEyeSubmitSurface : vr->m_D9LeftEyeSurface;
+            IDirect3DSurface9* rightTarget = vr->m_D9RightEyeSubmitSurface ? vr->m_D9RightEyeSubmitSurface : vr->m_D9RightEyeSurface;
+
+            VrAimLineLogQueuedSubmitTargets(vr, leftTarget, rightTarget);
+
+            if (leftTarget)
+                VrAimLineDrawOverlayToSurface(device, vr, 0, leftTarget, false);
+            if (rightTarget)
+                VrAimLineDrawOverlayToSurface(device, vr, 1, rightTarget, false);
+        }
+
         static bool VrTextureBoundsToSourceRect(
             const vr::VRTextureBounds_t* bounds,
             const D3DSURFACE_DESC& desc,
@@ -5097,22 +5152,20 @@ namespace dxvk {
                 // The desktop swapchain is presented below. Do all eye-surface resolve and optional
                 // right/left-eye desktop mirroring before Present(), otherwise the window shows the old
                 // backbuffer for this frame.
-                if (!inGame) {
-                    vr->ClearD3DAimLineOverlay();
-                }
-                else if (vr->m_D3DAimLineOverlayEnabled && !queued) {
-                    if (vr->m_D9LeftEyeSurface)
-                        VrAimLineDrawOverlayToSurface(this, vr, 0, vr->m_D9LeftEyeSurface);
-                    if (vr->m_D9RightEyeSurface)
-                        VrAimLineDrawOverlayToSurface(this, vr, 1, vr->m_D9RightEyeSurface);
-                }
-
                 // ReShade + Source queued rendering must not resolve eye -> submit before Present.
                 // In complex scenes the queued render worker can still be writing the eye RTs here;
                 // copying at this point produces half-written frames that later get submitted to VR.
                 // Defer the resolve until after the swapchain Present and an explicit DXVK idle wait.
                 const bool deferEyeSubmitResolve =
                     inGame && VrIsReShadeQueuedRiskWindow(vr, inGame, queued) && VrHasEyeSubmitSurfaces(vr);
+
+                if (!inGame) {
+                    vr->ClearD3DAimLineOverlay();
+                }
+                else if (!queued && !deferEyeSubmitResolve) {
+                    VrAimLineDrawOverlaysToEyeSurfaces(this, vr, true);
+                }
+
                 if (deferEyeSubmitResolve) {
                     postPresentVR = vr;
                     postPresentResolveEyeSubmit = true;
@@ -5206,6 +5259,7 @@ namespace dxvk {
                     // state and surface mutex are the ownership signal; enqueue the eye->submit copy,
                     // then make that copy visible before VR::Update submits to OpenVR/ALVR.
                     VrResolveEyeSurfacesToSubmit(this, postPresentVR);
+                    VrAimLineDrawOverlaysToSubmitTargets(this, postPresentVR);
                     postPresentVR->m_ReShadeVRCompatResolvedFrameId.store(completedFrameId, std::memory_order_release);
                     if (g_D3DVR9)
                         g_D3DVR9->WaitDeviceIdle();
@@ -5215,10 +5269,21 @@ namespace dxvk {
                 g_D3DVR9->WaitDeviceIdle();
             }
 
+            if (!skipPostPresentVRWork && !deferredReShadeResolve && g_Game && g_Game->m_VR) {
+                VR* vr = g_Game->m_VR;
+                const bool inGame = (g_Game->m_EngineClient && g_Game->m_EngineClient->IsInGame());
+                const bool queued = (g_Game->GetMatQueueMode() != 0);
+                if (inGame && queued) {
+                    VrAimLineDrawOverlaysToSubmitTargets(this, vr);
+                    if (g_D3DVR9)
+                        g_D3DVR9->WaitDeviceIdle();
+                }
+            }
+
             if (!skipPostPresentVRWork && g_Game && g_Game->m_VR)
                 g_Game->m_VR->Update();
 
-            if (g_Game && g_Game->m_VR)
+            if (g_Game && g_Game->m_VR && g_Game->GetMatQueueMode() == 0)
                 VrAimLineRestoreOverlayBackups(this, g_Game->m_VR);
 
             if (skipPostPresentVRWork && postPresentVR && postPresentVR->m_RenderPipelineDebugLog) {
