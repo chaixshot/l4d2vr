@@ -146,11 +146,12 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
 		// ------------------------------------------------------------
 		// Multi-core queued path (mat_queue_mode 2)
 		//
-		// queued 渲染下 CalcViewModelView 可能跑在 material/queue 线程。
-		// 这里把它当“纯渲染期”逻辑：
-		//  1) 先用真实 eye 输入跑一遍 engine 内部状态（避免把 controller 当 eye
-		//     导致 bob/lag 状态被污染）；
-		//  2) 再用 controller 目标位姿做一次 best-effort 覆盖（视觉稳定）。
+		// Use the render-frame viewmodel target as the CalcViewModelView input.
+		// The previous queued path called the original function with engine eye
+		// origin/angles first, then moved the finished model to the controller target.
+		// That left Source viewmodel bob/lag/animation bones based on a different
+		// frame basis from the final DrawModelExecute bone delta, which can jitter
+		// on some queued-render schedules even when the controller is still.
 		// ------------------------------------------------------------
 		struct RenderSnapshotTLSGuard
 		{
@@ -172,15 +173,21 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
 			}
 		} tlsGuard(true);
 
-		// Call engine logic (keeps internal viewmodel state up to date).
-		CallCalcViewModelViewOriginal(ecx, owner, eyePosition, eyeAngles);
-
-		if (m_VR->m_QueuedViewmodelStabilize || forceDisableMoveBob)
+		if (!m_VR->m_QueuedViewmodelStabilize && !forceDisableMoveBob)
 		{
-			const Vector targetOrigin = m_VR->GetRecommendedViewmodelAbsPos();
-			const QAngle targetAngles = m_VR->GetRecommendedViewmodelAbsAngle();
+			CallCalcViewModelViewOriginal(ecx, owner, eyePosition, eyeAngles);
+			return;
+		}
 
-			// Capture what the engine produced (before we override) for debug.
+		const Vector targetOrigin = m_VR->GetRecommendedViewmodelAbsPos();
+		const QAngle targetAngles = m_VR->GetRecommendedViewmodelAbsAngle();
+
+		// Call engine viewmodel logic around the same controller/render-frame basis
+		// that DrawModelExecute will later use.
+		CallCalcViewModelViewOriginal(ecx, owner, targetOrigin, targetAngles);
+
+		{
+			// Capture what the engine produced (before we force exact entity state) for debug.
 			Vector engineOrigin = {};
 			QAngle engineAngles = {};
 			if (ecx)
@@ -190,9 +197,6 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
 				engineAngles = ent->GetAbsAngles();
 			}
 
-			// Hard-override viewmodel transform (best-effort).
-			// NOTE: queued 渲染下尽量别写 entity 状态，但为了让枪口 attachment/FX
-			// 更贴近 controller，这里保留你当前工程的覆盖逻辑。
 			bool originSet = false;
 			if (m_Game && m_Game->m_Offsets && m_Game->m_Offsets->CBaseEntity_SetAbsOrigin_Client.address && ecx)
 			{
