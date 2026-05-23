@@ -2708,66 +2708,18 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			const bool prevSuppress = m_VR->m_SuppressHudCapture;
 			m_VR->m_SuppressHudCapture = true;
 
-			struct SuppressHudCaptureGuard
+			int oldX = 0, oldY = 0, oldW = 0, oldH = 0;
+			bool hasOldViewport = false;
+			if (hkGetViewport.fOriginal)
 			{
-				VR* vr = nullptr;
-				bool previous = false;
-				~SuppressHudCaptureGuard()
-				{
-					if (vr)
-						vr->m_SuppressHudCapture = previous;
-				}
-			} suppressGuard{ m_VR, prevSuppress };
+				hkGetViewport.fOriginal(rc, oldX, oldY, oldW, oldH);
+				hasOldViewport = true;
+			}
+			ITexture* oldRT = rc->GetRenderTarget();
 
-			struct OffscreenRenderTargetScope
-			{
-				IMatRenderContext* ctx = nullptr;
-				ITexture* oldRT = nullptr;
-				int oldX = 0;
-				int oldY = 0;
-				int oldW = 0;
-				int oldH = 0;
-				bool hasViewport = false;
-				bool pushed = false;
-
-				OffscreenRenderTargetScope(IMatRenderContext* renderContext, ITexture* renderTarget, int width, int height)
-					: ctx(renderContext)
-				{
-					if (!ctx || !renderTarget)
-						return;
-
-					if (hkPushRenderTargetAndViewport.fOriginal && hkPopRenderTargetAndViewport.fOriginal)
-					{
-						hkPushRenderTargetAndViewport.fOriginal(ctx, renderTarget, nullptr, 0, 0, width, height);
-						pushed = true;
-						return;
-					}
-
-					oldRT = ctx->GetRenderTarget();
-					if (hkGetViewport.fOriginal && hkViewport.fOriginal)
-					{
-						hkGetViewport.fOriginal(ctx, oldX, oldY, oldW, oldH);
-						hasViewport = true;
-					}
-					ctx->SetRenderTarget(renderTarget);
-					if (hkViewport.fOriginal)
-						hkViewport.fOriginal(ctx, 0, 0, width, height);
-				}
-
-				~OffscreenRenderTargetScope()
-				{
-					if (!ctx)
-						return;
-					if (pushed)
-					{
-						hkPopRenderTargetAndViewport.fOriginal(ctx);
-						return;
-					}
-					ctx->SetRenderTarget(oldRT);
-					if (hasViewport && hkViewport.fOriginal)
-						hkViewport.fOriginal(ctx, oldX, oldY, oldW, oldH);
-				}
-			} offscreenRtScope(rc, target, texW, texH);
+			rc->SetRenderTarget(target);
+			if (hkViewport.fOriginal)
+				hkViewport.fOriginal(rc, 0, 0, texW, texH);
 
 			rc->ClearColor4ub(0, 0, 0, 255);
 			rc->ClearBuffers(true, true, true);
@@ -2785,6 +2737,12 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 			if (touchedAngles && m_Game && m_Game->m_EngineClient)
 				m_Game->m_EngineClient->SetViewAngles(oldEngineAngles);
+
+			rc->SetRenderTarget(oldRT);
+			if (hasOldViewport && hkViewport.fOriginal)
+				hkViewport.fOriginal(rc, oldX, oldY, oldW, oldH);
+
+			m_VR->m_SuppressHudCapture = prevSuppress;
 		};
 
 	bool scopeLensPostProcessPending = false;
