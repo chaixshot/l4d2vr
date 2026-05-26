@@ -52,6 +52,10 @@ Hooks::Hooks(Game* game)
 		hkTextMsg.enableHook();
 	if (hkUpdateLaserSight.pTarget)
 		hkUpdateLaserSight.enableHook();
+	if (hkUpdateFlashlight.pTarget)
+		hkUpdateFlashlight.enableHook();
+	if (hkUpdateFlashlightColor.pTarget)
+		hkUpdateFlashlightColor.enableHook();
 	if (hkConVarSetValueString.pTarget)
 		hkConVarSetValueString.enableHook();
 	if (hkConVarSetValueFloat.pTarget)
@@ -184,6 +188,18 @@ int Hooks::initSourceHooks()
 	{
 		LPVOID UpdateLaserSightAddr = (LPVOID)(m_Game->m_Offsets->UpdateLaserSight.address);
 		hkUpdateLaserSight.createHook(UpdateLaserSightAddr, &dUpdateLaserSight);
+	}
+
+	if (m_Game->m_Offsets->UpdateFlashlight.valid)
+	{
+		LPVOID UpdateFlashlightAddr = (LPVOID)(m_Game->m_Offsets->UpdateFlashlight.address);
+		hkUpdateFlashlight.createHook(UpdateFlashlightAddr, &dUpdateFlashlight);
+	}
+
+	if (m_Game->m_Offsets->UpdateFlashlightColor.valid)
+	{
+		LPVOID UpdateFlashlightColorAddr = (LPVOID)(m_Game->m_Offsets->UpdateFlashlightColor.address);
+		hkUpdateFlashlightColor.createHook(UpdateFlashlightColorAddr, &dUpdateFlashlightColor);
 	}
 
 	const char* conVarSamples[] = { "name", "r_shadows", "cl_ragdoll_limit" };

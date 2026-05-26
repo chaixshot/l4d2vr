@@ -11,6 +11,8 @@ void VR::ProcessInput()
 
     // Recomputed every frame from CustomAction bindings.
     m_CustomWalkHeld = false;
+    m_ScopeFovAdjustSuppressWalk = false;
+    m_ScopeFovAdjustingThisFrame = false;
 
     vr::VROverlay()->SetOverlayFlag(m_HUDTopHandle, vr::VROverlayFlags_MakeOverlaysInteractiveIfVisible, false);
     for (vr::VROverlayHandle_t& overlay : m_HUDBottomHandles)
@@ -111,8 +113,12 @@ void VR::ProcessInput()
 
         applyTurnFromStick(analogActionData.x);
 
+
         // Wrap from 0 to 360
         m_RotationOffset -= 360 * std::floor(m_RotationOffset / 360);
+    }
+    else
+    {
     }
 
     // TODO: Instead of ClientCmding, override Usercmd in CreateMove
@@ -212,6 +218,83 @@ void VR::ProcessInput()
     }
 
     const bool wantUse = PressedDigitalAction(m_ActionUse);
+
+    // Scope realtime adjustment uses Use + left stick while scoped-in.
+    // Vertical adjusts magnification FOV; horizontal adjusts scope overlay size.
+    // The left stick is reserved here, so normal movement is suppressed while either axis is active.
+    const bool scopeFovAdjustAllowed = wantUse && IsScopeActive() && m_ScopeWeaponIsFirearm;
+    bool scopeAnalogAdjustingNow = false;
+    if (scopeFovAdjustAllowed)
+    {
+        vr::InputAnalogActionData_t scopeWalkData{};
+        if (GetAnalogActionData(m_ActionWalk, scopeWalkData))
+        {
+            constexpr float deadzone = 0.25f;
+            const float dtSeconds = std::clamp(deltaTime * 0.001f, 0.0f, 0.1f);
+
+            auto normalizeStick = [deadzone](float value)
+            {
+                const float absValue = std::fabs(value);
+                if (absValue <= deadzone)
+                    return 0.0f;
+                const float normalized = (absValue - deadzone) / (1.0f - deadzone);
+                return value < 0.0f ? -normalized : normalized;
+            };
+
+            const float nx = normalizeStick(scopeWalkData.x);
+            const float ny = normalizeStick(scopeWalkData.y);
+            if (std::fabs(nx) > 0.0001f || std::fabs(ny) > 0.0001f)
+            {
+                m_ScopeFovAdjustSuppressWalk = true;
+                scopeAnalogAdjustingNow = true;
+            }
+
+            bool scopeChanged = false;
+            if (std::fabs(ny) > 0.0001f)
+            {
+                m_ScopeFov = std::clamp(
+                    m_ScopeFov - ny * std::max(0.0f, m_ScopeFovAdjustSpeed) * dtSeconds,
+                    std::min(m_ScopeFovMin, m_ScopeFovMax),
+                    std::max(m_ScopeFovMin, m_ScopeFovMax));
+
+                // UpdateTracking() runs before ProcessInput() in the update loop.
+                // Keep this set for the next tracking update so changing FOV does not also
+                // re-scale the current aim angle and pull the zoom center off the reticle.
+                m_ScopeFovAdjustingThisFrame = true;
+                scopeChanged = true;
+            }
+
+            if (std::fabs(nx) > 0.0001f)
+            {
+                m_ScopeOverlayWidthMeters = std::clamp(
+                    m_ScopeOverlayWidthMeters + nx * std::max(0.0f, m_ScopeSizeAdjustSpeed) * dtSeconds,
+                    std::min(m_ScopeSizeMin, m_ScopeSizeMax),
+                    std::max(m_ScopeSizeMin, m_ScopeSizeMax));
+                scopeChanged = true;
+            }
+
+            if (scopeChanged)
+            {
+                ScopeAdjustment& adjustment = EnsureScopeAdjustment(m_CurrentScopeAdjustmentKey);
+                adjustment.fov = std::clamp(m_ScopeFov, m_ScopeFovMin, m_ScopeFovMax);
+                adjustment.widthMeters = std::clamp(m_ScopeOverlayWidthMeters, m_ScopeSizeMin, m_ScopeSizeMax);
+                adjustment.overlayOffset = { m_ScopeOverlayXOffset, m_ScopeOverlayYOffset, m_ScopeOverlayZOffset };
+                m_ScopeAdjustmentsDirty = true;
+            }
+        }
+    }
+
+    if (scopeAnalogAdjustingNow)
+    {
+        m_ScopeAnalogAdjustActive = true;
+    }
+    else if (m_ScopeAnalogAdjustActive)
+    {
+        m_ScopeAnalogAdjustActive = false;
+        if (m_ScopeAdjustmentsDirty)
+            SaveScopeAdjustments();
+    }
+
     if (wantUse && !m_UseCmdOwned)
     {
         m_Game->ClientCmd_Unrestricted("+use");
@@ -334,11 +417,6 @@ void VR::ProcessInput()
     [[maybe_unused]] bool scopeToggleDown = false;
     bool scopeToggleJustPressed = false;
     [[maybe_unused]] bool scopeToggleDataValid = getActionState(&m_ActionScopeToggle, scopeToggleActionData, scopeToggleDown, scopeToggleJustPressed);
-
-    vr::InputDigitalActionData_t scopeMagnificationToggleActionData{};
-    [[maybe_unused]] bool scopeMagnificationToggleDown = false;
-    bool scopeMagnificationToggleJustPressed = false;
-    [[maybe_unused]] bool scopeMagnificationToggleDataValid = getActionState(&m_ActionScopeMagnificationToggle, scopeMagnificationToggleActionData, scopeMagnificationToggleDown, scopeMagnificationToggleJustPressed);
 
     auto getWeaponSlot = [](C_WeaponCSBase* weapon) -> int
         {
@@ -947,17 +1025,13 @@ void VR::ProcessInput()
         ToggleScope();
     }
 
-    if (scopeMagnificationToggleJustPressed)
-    {
-        CycleScopeMagnification();
-    }
-
     bool effectiveRangeAutoFireOwnsPrimary = false;
     if (m_EffectiveAttackRangeAutoFireEnabled
         && m_AimLineEffectiveAttackRangeActive
         && !m_AimLineEffectiveAttackRangeTargetIsWitch
         && !m_SuppressPlayerInput
         && !m_AdjustingViewmodel
+        && !m_AdjustingScope
         && !isObserverOrIdle
         && localPlayer)
     {
@@ -1000,14 +1074,6 @@ void VR::ProcessInput()
         {
             m_Game->ClientCmd_Unrestricted("+attack");
             m_PrimaryAttackCmdOwned = true;
-
-            // Melee swings do not go through the bullet fire hook, so trigger haptics on swing press.
-            if (localPlayer)
-            {
-                C_WeaponCSBase* activeWeapon = (C_WeaponCSBase*)localPlayer->GetActiveWeapon();
-                if (activeWeapon && activeWeapon->GetWeaponID() == C_WeaponCSBase::WeaponID::MELEE)
-                    TriggerMeleeSwingHaptics(false);
-            }
         }
         else if (!primaryAttackDown && m_PrimaryAttackCmdOwned)
         {
@@ -1048,7 +1114,34 @@ void VR::ProcessInput()
     [[maybe_unused]] bool viewmodelSecondaryJustPressed = false;
     bool viewmodelComboValid = getComboStates(m_ViewmodelAdjustCombo, viewmodelPrimaryData, viewmodelSecondaryData,
         viewmodelPrimaryDown, viewmodelSecondaryDown, viewmodelPrimaryJustPressed, viewmodelSecondaryJustPressed);
-    const bool adjustViewmodelActive = m_ViewmodelAdjustEnabled && viewmodelComboValid && viewmodelPrimaryDown && viewmodelSecondaryDown;
+    const bool scopeAdjustActive = m_ViewmodelAdjustEnabled && IsScopeActive() && m_ScopeWeaponIsFirearm &&
+        viewmodelComboValid && viewmodelPrimaryDown && viewmodelSecondaryDown;
+    const bool adjustViewmodelActive = !scopeAdjustActive && m_ViewmodelAdjustEnabled && viewmodelComboValid && viewmodelPrimaryDown && viewmodelSecondaryDown;
+
+    if (scopeAdjustActive && !m_AdjustingScope)
+    {
+        if (m_AdjustingViewmodel)
+        {
+            m_AdjustingViewmodel = false;
+            m_AdjustingKey.clear();
+            m_AdjustSuppressControllerUntil = {};
+            m_AdjustControllerSuppressed = false;
+            if (m_ViewmodelAdjustmentsDirty)
+                SaveViewmodelAdjustments();
+        }
+
+        m_AdjustingScope = true;
+        m_AdjustStartScopeLeftPos = m_LeftControllerPosAbs;
+        m_AdjustStartScopeOverlayOffset = { m_ScopeOverlayXOffset, m_ScopeOverlayYOffset, m_ScopeOverlayZOffset };
+        m_AdjustingScopeKey = m_CurrentScopeAdjustmentKey;
+    }
+    else if (!scopeAdjustActive && m_AdjustingScope)
+    {
+        m_AdjustingScope = false;
+        m_AdjustingScopeKey.clear();
+        if (m_ScopeAdjustmentsDirty)
+            SaveScopeAdjustments();
+    }
 
     if (adjustViewmodelActive && !m_AdjustingViewmodel)
     {
@@ -1121,7 +1214,7 @@ void VR::ProcessInput()
     reloadButtonDown = (reloadButtonDown || gestureReloadActive) && !suppressReload;
     secondaryAttackActive = secondaryAttackActive || gestureSecondaryAttackActive;
 
-    const bool wantReload = (!crouchButtonDown && reloadButtonDown && !adjustViewmodelActive);
+    const bool wantReload = (!crouchButtonDown && reloadButtonDown && !adjustViewmodelActive && !scopeAdjustActive);
     if (wantReload && !m_ReloadCmdOwned)
     {
         m_Game->ClientCmd_Unrestricted("+reload");
@@ -1134,7 +1227,7 @@ void VR::ProcessInput()
     }
 
     {
-        const bool wantAttack2 = secondaryAttackActive && !adjustViewmodelActive;
+        const bool wantAttack2 = secondaryAttackActive && !adjustViewmodelActive && !scopeAdjustActive;
         if (isObserverOrIdle)
         {
             // Don't hold +attack2 while spectating.

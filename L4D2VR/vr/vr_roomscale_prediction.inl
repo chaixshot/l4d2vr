@@ -112,7 +112,7 @@ void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool contr
 
     Vector roomWorldVelocity(gameDeltaM.x * m_VRScale / dt, gameDeltaM.y * m_VRScale / dt, 0.0f);
     const float roomSpeed = std::sqrt((roomWorldVelocity.x * roomWorldVelocity.x) + (roomWorldVelocity.y * roomWorldVelocity.y));
-    const float maxCmdSpeed = m_AdjustingViewmodel ? 25.0f : 250.0f;
+    const float maxCmdSpeed = (m_AdjustingViewmodel || m_AdjustingScope) ? 25.0f : 250.0f;
     if (roomSpeed > maxCmdSpeed && roomSpeed > 0.0001f)
     {
         const float s = maxCmdSpeed / roomSpeed;

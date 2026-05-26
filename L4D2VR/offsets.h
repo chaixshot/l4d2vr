@@ -72,6 +72,8 @@ public:
     Offset StopParticleEffect =          { "client.dll", 0x1523C0, "55 8B EC 51 53 56 8B 75 08 57 8B F9 8B 5F 14 85 F6 74 61 33 C0 85 DB 0F 8E ? ? ? ? 8B 57 08 83 C2 14 39 32 74 11 40 83 C2 18 3B C3 7C F4 5F 5E 5B 8B E5 5D C2 04 00", 0, true };
     Offset ParticleSetControlPointForwardVector = { "client.dll", 0x15C030, "55 8B EC 8B 45 0C 56 57 8B 7D 08 8B F1 50 57 8D 4E 10 E8 ? ? ? ? 57 8B CE E8 ? ? ? ? 5F 5E 5D C2 08 00", 0, true };
     Offset DrawLaserBeam =               { "client.dll", 0x0EF660, "53 8B DC 83 EC 08 83 E4 F0 83 C4 04 55 8B 6B 04 89 6C 24 04 8B EC 81 EC C8 04 00 00 A1 ? ? ? ? 33 C5 89 45 FC A1 ? ? ? ? D9 BD BA FB FF FF D9 40 0C 8B 4B 0C 0F B7 85 BA FB FF FF D8 0D ? ? ? ? 0D 00 0C 00 00", 0, true };
+    Offset UpdateFlashlight =             { "client.dll", 0x0EE820, "55 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 10 8B 55 18 53 8B 5D 0C 56 8B F1", 0, true };
+    Offset UpdateFlashlightColor =        { "client.dll", 0x0EEB10, "55 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 0C 8B 55 14 53 56 89 85 ? ? ? ? 8B 45 18 8B F1", 0, true };
 
     Offset ServerFireTerrorBullets =     { "server.dll", 0x3C3FC0, "55 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 08 8B 4D 10" };
     Offset ReadUserCmd =                 { "server.dll", 0x205100, "55 8B EC 53 8B 5D 10 56 57 8B 7D 0C 53" };

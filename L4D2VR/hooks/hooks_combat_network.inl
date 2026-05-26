@@ -783,6 +783,108 @@ namespace
 			SetLaserParticleLine(effect, laserEnd - axis * dotRadius, laserEnd + axis * dotRadius);
 		}
 	}
+
+	static inline char AsciiLower(char c)
+	{
+		return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
+	}
+
+	static inline bool TextureNameIsFlashlight(const char* textureName)
+	{
+		if (!textureName || !textureName[0])
+			return true;
+
+		const char needle[] = "flashlight";
+		__try
+		{
+			for (const char* p = textureName; *p; ++p)
+			{
+				const char* a = p;
+				const char* b = needle;
+				while (*a && *b && AsciiLower(*a) == *b)
+				{
+					++a;
+					++b;
+				}
+				if (!*b)
+					return true;
+			}
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+
+		return false;
+	}
+
+	static inline bool IsFiniteVector(const Vector& v)
+	{
+		return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+	}
+
+	static inline bool BuildHmdFlashlightPose(int entIndex, const char* textureName, Vector& origin, Vector& forward, Vector& right, Vector& up)
+	{
+		VR* vr = Hooks::m_VR;
+		if (!vr || !vr->m_IsVREnabled || !vr->m_FlashlightFollowHmd)
+			return false;
+		if (vr->IsThirdPersonCameraActive())
+			return false;
+		if (!Hooks::m_Game || !Hooks::m_Game->m_EngineClient || !Hooks::m_Game->m_EngineClient->IsInGame())
+			return false;
+
+		const int localPlayerIndex = Hooks::m_Game->m_EngineClient->GetLocalPlayer();
+		if (localPlayerIndex <= 0 || entIndex != localPlayerIndex)
+			return false;
+		if (!vr->m_FlashlightFollowHmdForFirearms && vr->m_ScopeWeaponIsFirearm)
+			return false;
+		if (!TextureNameIsFlashlight(textureName))
+			return false;
+
+		origin = vr->m_HmdPosAbs;
+		forward = vr->m_HmdForward;
+		right = vr->m_HmdRight;
+		up = vr->m_HmdUp;
+
+		if (forward.IsZero() || right.IsZero() || up.IsZero())
+			QAngle::AngleVectors(vr->m_HmdAngAbs, &forward, &right, &up);
+
+		if (forward.IsZero() || !IsFiniteVector(origin) || !IsFiniteVector(forward) ||
+			!IsFiniteVector(right) || !IsFiniteVector(up))
+			return false;
+
+		VectorNormalize(forward);
+		if (!right.IsZero())
+			VectorNormalize(right);
+		if (!up.IsZero())
+			VectorNormalize(up);
+
+		return true;
+	}
+}
+
+void __fastcall Hooks::dUpdateFlashlight(void* ecx, void* edx, int entIndex, const Vector& origin, const Vector& forward, const Vector& right, const Vector& up, float fov, float farZ, float linearAtten, bool castsShadows, const char* textureName)
+{
+	Vector hmdOrigin{}, hmdForward{}, hmdRight{}, hmdUp{};
+	if (BuildHmdFlashlightPose(entIndex, textureName, hmdOrigin, hmdForward, hmdRight, hmdUp))
+	{
+		hkUpdateFlashlight.fOriginal(ecx, entIndex, hmdOrigin, hmdForward, hmdRight, hmdUp, fov, farZ, linearAtten, castsShadows, textureName);
+		return;
+	}
+
+	hkUpdateFlashlight.fOriginal(ecx, entIndex, origin, forward, right, up, fov, farZ, linearAtten, castsShadows, textureName);
+}
+
+void __fastcall Hooks::dUpdateFlashlightColor(void* ecx, void* edx, int entIndex, const Vector& origin, const Vector& forward, const Vector& right, const Vector& up, int color, bool castsShadows, int textureId, const Vector& colorVector, bool something)
+{
+	Vector hmdOrigin{}, hmdForward{}, hmdRight{}, hmdUp{};
+	if (BuildHmdFlashlightPose(entIndex, nullptr, hmdOrigin, hmdForward, hmdRight, hmdUp))
+	{
+		hkUpdateFlashlightColor.fOriginal(ecx, entIndex, hmdOrigin, hmdForward, hmdRight, hmdUp, color, castsShadows, textureId, colorVector, something);
+		return;
+	}
+
+	hkUpdateFlashlightColor.fOriginal(ecx, entIndex, origin, forward, right, up, color, castsShadows, textureId, colorVector, something);
 }
 
 void __fastcall Hooks::dUpdateLaserSight(void* ecx, void* edx)
@@ -1220,13 +1322,21 @@ float __fastcall Hooks::dProcessUsercmds(void* ecx, void* edx, edict_t* player,
 				Vector traceDirection = initialMeleeDirection;
 				int numTraces = 10;
 				float traceAngle = swingAngle / numTraces;
+				bool confirmedMeleeCollision = false;
 				for (int i = 0; i < numTraces; ++i)
 				{
 					traceDirection = VectorRotate(traceDirection, pivot, traceAngle);
-					m_Game->m_Hooks->hkTestMeleeSwingCollisionServer.fOriginal(curWep, traceDirection);
+					const int entitiesHitBefore = curWep->entitiesHitThisSwing;
+					const int collisionResult = m_Game->m_Hooks->hkTestMeleeSwingCollisionServer.fOriginal(curWep, traceDirection);
+					const int entitiesHitAfter = curWep->entitiesHitThisSwing;
+					if (collisionResult != 0 || entitiesHitAfter > entitiesHitBefore)
+						confirmedMeleeCollision = true;
 				}
 
 				m_Game->m_PerformingMelee = false;
+
+				if (confirmedMeleeCollision && m_VR && index == m_Game->m_EngineClient->GetLocalPlayer())
+					m_VR->NotifyMeleeHitConfirmed(0);
 			}
 		}
 	}

@@ -2833,19 +2833,6 @@ bool VR::ShouldShowAimLine(C_WeaponCSBase* weapon) const
     }
 }
 
-void VR::CycleScopeMagnification()
-{
-    if (!m_ScopeEnabled || m_ScopeMagnificationOptions.empty())
-        return;
-
-    m_ScopeMagnificationIndex = (m_ScopeMagnificationIndex + 1) % m_ScopeMagnificationOptions.size();
-    m_ScopeFov = std::clamp(m_ScopeMagnificationOptions[m_ScopeMagnificationIndex], 1.0f, 179.0f);
-
-    // Changing magnification changes the sensitivity scale. Rebase on next frame to avoid a sudden jump.
-    if (m_ScopeActive)
-        m_ScopeAimSensitivityInit = false;
-}
-
 void VR::UpdateScopeAimLineState()
 {
     if (m_AimLineConfigEnabled)
@@ -2854,8 +2841,6 @@ void VR::UpdateScopeAimLineState()
         return;
     }
 
-    // Scope RTT has its own reticle now. Do not auto-enable the gameplay aim line
-    // just because the player is looking through the scope.
     if (m_ScopeForcingAimLine)
     {
         m_AimLineEnabled = false;
@@ -2869,15 +2854,34 @@ void VR::ToggleScope()
     if (!m_ScopeEnabled || !m_ScopeWeaponIsFirearm)
     {
         m_ScopeToggleActive = false;
+        m_ScopeFovAdjustSuppressWalk = false;
+        m_ScopeFovAdjustingThisFrame = false;
+        m_ScopeAnalogAdjustActive = false;
+        if (m_AdjustingScope)
+        {
+            m_AdjustingScope = false;
+            m_AdjustingScopeKey.clear();
+        }
+        if (m_ScopeAdjustmentsDirty)
+            SaveScopeAdjustments();
         return;
     }
 
     m_ScopeToggleActive = !m_ScopeToggleActive;
 
-    // Rebase smoothing/sensitivity state on the first frame after the toggle.
     m_ScopeAimSensitivityInit = false;
     m_ScopeStabilizationInit = false;
     m_ScopeStabilizationLastTime = {};
+    m_ScopeFovAdjustSuppressWalk = false;
+    m_ScopeFovAdjustingThisFrame = false;
+    m_ScopeAnalogAdjustActive = false;
+    if (!m_ScopeToggleActive && m_AdjustingScope)
+    {
+        m_AdjustingScope = false;
+        m_AdjustingScopeKey.clear();
+    }
+    if (!m_ScopeToggleActive && m_ScopeAdjustmentsDirty)
+        SaveScopeAdjustments();
 }
 
 void VR::ToggleMouseModeScope()
@@ -3281,61 +3285,11 @@ void VR::UpdateD3DAimLineOverlayForView(C_BasePlayer* localPlayer, const CViewSe
 
 void VR::RenderDrawAimLineQueued(C_BasePlayer* localPlayer)
 {
-    // Render-thread aim line drawing for mat_queue_mode!=0.
-    //
-    // Why: In queued rendering, the viewmodel/hands are driven by a render-thread snapshot (predicted pose +
-    // queued-view smoothing). If we add debug-overlay geometry from the update thread, it will often be 1+ frames
-    // behind (especially during stick locomotion/turning), making the aim line feel like it "doesn't follow" the hand.
-    //
-    // This render-thread path recomputes the visual ray from the current render-frame snapshot and draws a
-    // single-frame-duration overlay so it stays crisp without accumulating ghosts.
-
-    if (!m_Game || !m_Game->m_DebugOverlay)
-        return;
-
-    const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
-    if (queueMode == 0)
-        return;
-
-    // If the D3D overlay is enabled, queued/multicore visibility is handled by the
-    // per-eye D3D path. Do not also enqueue Source DebugOverlay geometry, otherwise
-    // stale one-frame lines can remain visible beside the D3D line.
-    if (!m_AimLineEnabled || m_D3DAimLineOverlayEnabled || m_ScopeRenderingPass || ShouldRenderScope())
-        return;
-    const bool scopeOnlyAimLine = m_ScopeAimLineOnlyInScope
-        && m_ThirdPersonFrontViewEnabled
-        && m_IsThirdPersonCamera
-        && m_ScopeWeaponIsFirearm;
-    if (scopeOnlyAimLine && !m_ScopeRenderingPass)
-        return;
-
-    m_AimLineMaxHz = GetHmdDisplayFrequencyHz();
-    if (ShouldThrottle(m_LastAimLineDrawTime, m_AimLineMaxHz))
-        return;
-
-    Vector start{};
-    Vector end{};
-    if (!BuildRenderAimLineSegment(localPlayer, start, end))
-        return;
-
-    // Duration: keep it alive for ~one render interval so we don't accumulate multiple historical lines.
-    using namespace std::chrono;
-    static thread_local steady_clock::time_point s_last{};
-    const auto now = steady_clock::now();
-
-    float dt = 1.0f / 90.0f;
-    if (s_last.time_since_epoch().count() != 0)
-        dt = duration<float>(now - s_last).count();
-    s_last = now;
-
-    dt = std::clamp(dt, 1.0f / 240.0f, 1.0f / 20.0f);
-
-    float durationSec = dt * 0.99f;
-    durationSec = std::clamp(durationSec, 0.001f, 0.050f);
-    if (scopeOnlyAimLine && m_ScopeRenderingPass)
-        durationSec = 0.0f;
-
-    DrawLineWithThickness(start, end, durationSec);
+    // Keep queued/multicore behavior aligned with DrawAimLine(): AimLineEnabled
+    // remains a logic/cache switch, but the Source DebugOverlay aim line is not a
+    // visual fallback. The visible line is handled by the D3D per-eye overlay.
+    (void)localPlayer;
+    return;
 }
 
 void VR::RenderDrawGameLaserSight(C_BasePlayer* localPlayer)
@@ -3742,6 +3696,27 @@ void VR::TriggerMeleeSwingHaptics(bool leftHand)
         m_MeleeSwingHapticsProfile.durationSeconds,
         m_MeleeSwingHapticsProfile.frequency,
         m_MeleeSwingHapticsProfile.amplitude);
+}
+
+void VR::NotifyMeleeHitConfirmed(std::uintptr_t entityTag)
+{
+    if (!m_WeaponHapticsEnabled || !m_IsVREnabled)
+        return;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (m_LastMeleeHitHapticsTriggerTime.time_since_epoch().count() != 0)
+    {
+        const float elapsed = std::chrono::duration<float>(now - m_LastMeleeHitHapticsTriggerTime).count();
+        if (elapsed >= 0.0f && elapsed < 0.05f)
+            return;
+
+        if (entityTag != 0 && entityTag == m_LastMeleeHitHapticsEntityTag && elapsed >= 0.0f && elapsed < 0.20f)
+            return;
+    }
+
+    m_LastMeleeHitHapticsTriggerTime = now;
+    m_LastMeleeHitHapticsEntityTag = entityTag;
+    TriggerMeleeSwingHaptics(false);
 }
 
 void VR::TriggerShoveHaptics(bool leftHand)

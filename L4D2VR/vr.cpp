@@ -578,10 +578,89 @@ namespace
         VR* m_VR = nullptr;
     };
 
+    class VRMeleeHitHapticsEventListener final : public IGameEventListener2
+    {
+    public:
+        explicit VRMeleeHitHapticsEventListener(VR* vr)
+            : m_VR(vr)
+        {
+        }
+
+        void FireGameEvent(IGameEvent* event) override
+        {
+            if (m_VR)
+                m_VR->HandleMeleeHitHapticsGameEvent(event);
+        }
+
+        int GetEventDebugID(void) override
+        {
+            return kGameEventDebugIdInit;
+        }
+
+    private:
+        VR* m_VR = nullptr;
+    };
+
     static std::string ToLowerCopy(std::string value)
     {
         std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
         return value;
+    }
+
+    static bool IsMeleeHitWeaponName(const char* weaponName)
+    {
+        if (!weaponName || !*weaponName)
+            return false;
+
+        const std::string weapon = ToLowerCopy(weaponName);
+        if (weapon == "melee" || weapon.find("weapon_melee") != std::string::npos || weapon.find("melee") != std::string::npos)
+            return true;
+
+        static constexpr const char* kMeleeWeaponNames[] = {
+            "fireaxe",
+            "katana",
+            "electric_guitar",
+            "baseball_bat",
+            "cricket_bat",
+            "knife",
+            "golfclub",
+            "crowbar",
+            "machete",
+            "tonfa",
+            "frying_pan",
+            "shovel",
+            "pitchfork",
+            "riotshield"
+        };
+
+        for (const char* name : kMeleeWeaponNames)
+        {
+            if (weapon.find(name) != std::string::npos)
+                return true;
+        }
+
+        return false;
+    }
+
+    static bool IsActiveWeaponMeleeSafe(C_BasePlayer* player)
+    {
+        if (!player)
+            return false;
+
+#ifdef _MSC_VER
+        __try
+        {
+            C_WeaponCSBase* activeWeapon = reinterpret_cast<C_WeaponCSBase*>(player->GetActiveWeapon());
+            return activeWeapon && activeWeapon->GetWeaponID() == C_WeaponCSBase::WeaponID::MELEE;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+#else
+        C_WeaponCSBase* activeWeapon = reinterpret_cast<C_WeaponCSBase*>(player->GetActiveWeapon());
+        return activeWeapon && activeWeapon->GetWeaponID() == C_WeaponCSBase::WeaponID::MELEE;
+#endif
     }
 
     static std::string TrimCopy(std::string value)
@@ -1849,6 +1928,14 @@ namespace
         else if (eventName == "witch_killed")
         {
             entityIndex = event->GetInt("witchid", 0);
+        }
+        else if (eventName == "witch_hurt")
+        {
+            entityIndex = event->GetInt("witchid", 0);
+            if (entityIndex <= 0)
+                entityIndex = event->GetInt("entityid", 0);
+            if (entityIndex <= 0)
+                entityIndex = event->GetInt("entindex", 0);
         }
         else if (eventName == "player_death")
         {
@@ -4195,6 +4282,155 @@ void VR::TriggerDirectionalDamageHaptics(float amplitude, float frequency, float
     const float rightWeight = std::clamp(kOppositeHandFloor + (1.0f - kOppositeHandFloor) * rightBlend, kOppositeHandFloor, 1.0f);
     TriggerPhysicalHandHapticPulse(true, durationSeconds, frequency, amp * leftWeight, priority);
     TriggerPhysicalHandHapticPulse(false, durationSeconds, frequency, amp * rightWeight, priority);
+}
+
+void VR::UpdateMeleeHitHaptics()
+{
+    if (!m_IsVREnabled || !m_WeaponHapticsEnabled || !m_Game || !m_Game->m_EngineClient || !m_Game->m_EngineClient->IsInGame())
+    {
+        m_LastMeleeHitHapticsTriggerTime = {};
+        m_LastMeleeHitHapticsEntityTag = 0;
+        return;
+    }
+
+    EnsureMeleeHitHapticsEventListener();
+}
+
+void VR::EnsureMeleeHitHapticsEventListener()
+{
+    if (m_MeleeHitHapticsEventListenerRegistered || !m_Game)
+        return;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (m_LastMeleeHitHapticsEventRegisterAttempt.time_since_epoch().count() != 0)
+    {
+        const float elapsed = std::chrono::duration<float>(now - m_LastMeleeHitHapticsEventRegisterAttempt).count();
+        if (elapsed < 2.0f)
+            return;
+    }
+    m_LastMeleeHitHapticsEventRegisterAttempt = now;
+
+    if (!m_MeleeHitHapticsEventManager)
+        m_MeleeHitHapticsEventManager = m_Game->m_GameEventManager;
+
+    if (!m_MeleeHitHapticsEventManager)
+    {
+        HMODULE engineModule = GetModuleHandleA("engine.dll");
+        if (engineModule)
+        {
+            using tCreateInterface = void* (__cdecl*)(const char* name, int* returnCode);
+            const auto createInterface = reinterpret_cast<tCreateInterface>(GetProcAddress(engineModule, "CreateInterface"));
+            if (createInterface)
+            {
+                int returnCode = 0;
+                void* iface = createInterface("GAMEEVENTSMANAGER002", &returnCode);
+                if (!iface)
+                    iface = createInterface("GAMEEVENTSMANAGER001", &returnCode);
+                m_MeleeHitHapticsEventManager = static_cast<IGameEventManager2*>(iface);
+                if (m_MeleeHitHapticsEventManager && !m_Game->m_GameEventManager)
+                    m_Game->m_GameEventManager = m_MeleeHitHapticsEventManager;
+            }
+        }
+    }
+
+    if (!m_MeleeHitHapticsEventManager)
+        return;
+
+    if (!m_MeleeHitHapticsEventListener)
+        m_MeleeHitHapticsEventListener = new VRMeleeHitHapticsEventListener(this);
+
+    static constexpr const char* kMeleeHitEvents[] = {
+        "infected_hurt",
+        "player_hurt",
+        "witch_hurt",
+        "infected_death",
+        "player_death",
+        "witch_killed"
+    };
+
+    bool registeredAny = false;
+    for (const char* eventName : kMeleeHitEvents)
+    {
+        const bool alreadyRegistered = m_MeleeHitHapticsEventManager->FindListener(m_MeleeHitHapticsEventListener, eventName);
+        const bool registered = alreadyRegistered || m_MeleeHitHapticsEventManager->AddListener(m_MeleeHitHapticsEventListener, eventName, false);
+        registeredAny = registeredAny || registered;
+    }
+
+    m_MeleeHitHapticsEventListenerRegistered = registeredAny;
+}
+
+void VR::HandleMeleeHitHapticsGameEvent(IGameEvent* event)
+{
+    if (!event || !m_WeaponHapticsEnabled || !m_IsVREnabled || !m_Game || !m_Game->m_EngineClient)
+        return;
+
+    const char* rawEventName = event->GetName();
+    if (!rawEventName || !*rawEventName)
+        return;
+
+    const std::string eventName = ToLowerCopy(rawEventName);
+    const bool isCommonInfectedEvent = (eventName == "infected_hurt" || eventName == "infected_death");
+    const bool isWitchEvent = (eventName == "witch_hurt" || eventName == "witch_killed");
+    const bool isPlayerInfectedEvent = (eventName == "player_hurt" || eventName == "player_death");
+    if (!isCommonInfectedEvent && !isWitchEvent && !isPlayerInfectedEvent)
+        return;
+
+    const int localPlayerIndex = m_Game->m_EngineClient->GetLocalPlayer();
+    if (localPlayerIndex <= 0)
+        return;
+
+    const int localUserId = GetLocalPlayerUserId(m_Game);
+    int attackerUserId = event->GetInt("attacker", 0);
+    if (attackerUserId <= 0)
+        attackerUserId = event->GetInt("userid", 0);
+    if (attackerUserId <= 0)
+        attackerUserId = event->GetInt("attackeruserid", 0);
+
+    int attackerIndex = 0;
+    if (attackerUserId > 0)
+        attackerIndex = m_Game->m_EngineClient->GetPlayerForUserID(attackerUserId);
+    if (attackerIndex <= 0)
+        attackerIndex = event->GetInt("attackerentid", 0);
+    if (attackerIndex <= 0)
+        attackerIndex = event->GetInt("attackerentityid", 0);
+    if (attackerIndex <= 0)
+        attackerIndex = event->GetInt("attackerid", 0);
+
+    const bool attackerMatchesLocalUser = localUserId > 0 && attackerUserId == localUserId;
+    const bool attackerMatchesLocalIndex = attackerIndex > 0 && attackerIndex == localPlayerIndex;
+    if (!attackerMatchesLocalUser && !attackerMatchesLocalIndex)
+        return;
+
+    bool activeWeaponIsMelee = false;
+    C_BasePlayer* localPlayer = reinterpret_cast<C_BasePlayer*>(SafeGetProjectedItemLabelClientEntity(this, localPlayerIndex));
+    activeWeaponIsMelee = IsActiveWeaponMeleeSafe(localPlayer);
+
+    const bool eventWeaponIsMelee = IsMeleeHitWeaponName(event->GetString("weapon", ""));
+    if (!eventWeaponIsMelee && !activeWeaponIsMelee)
+        return;
+
+    const std::uintptr_t entityTag = ResolveKillEventEntityTag(m_Game, event, eventName);
+    bool monsterHit = isCommonInfectedEvent || isWitchEvent;
+    if (isPlayerInfectedEvent)
+    {
+        C_BaseEntity* victim = reinterpret_cast<C_BaseEntity*>(entityTag);
+        if (!victim)
+            return;
+
+        const unsigned char* base = reinterpret_cast<const unsigned char*>(victim);
+        int team = 0;
+        const bool hasTeam = VR_TryReadI32(base, kTeamNumOffset, team);
+        if (hasTeam && team == 2)
+            return;
+
+        const SpecialInfectedType specialType = GetSpecialInfectedType(victim);
+        monsterHit = (hasTeam && team == 3) || specialType != SpecialInfectedType::None;
+    }
+
+    if (!monsterHit)
+        return;
+
+    NotifyMeleeHitConfirmed(entityTag);
 }
 
 VR::DamageFeedbackType VR::ClassifyDamageFeedbackType(const char* weaponName, int damage) const
@@ -10301,7 +10537,7 @@ void VR::UpdateKillSoundFeedback()
 // -----------------------------------------------------------------------------
 // Optional special-infected / item-label feature bridge
 // -----------------------------------------------------------------------------
-// These three VR methods are called from core code and hooks even when the
+// These VR methods are called from core code and hooks even when the
 // optional special_infected_features.cpp translation unit is removed from the
 // project. Keep stable wrappers here so stripped builds link cleanly. When the
 // optional file is linked, it registers the real implementation callbacks during
@@ -10310,12 +10546,14 @@ namespace
 {
     using L4D2VROptionalDrawItemModelLabelFn = void(__cdecl*)(VR*, int, const std::string&, const Vector&, const C_BaseEntity*, const char*);
     using L4D2VROptionalScanFn = void(__cdecl*)(VR*);
+    using L4D2VROptionalCreateMoveFn = void(__cdecl*)(VR*, CUserCmd*, int, bool, bool, float, float, bool);
 
     struct L4D2VROptionalSpecialInfectedCallbacks
     {
         L4D2VROptionalDrawItemModelLabelFn drawItemModelLabel = nullptr;
         L4D2VROptionalScanFn scanSpecialInfectedEntities = nullptr;
         L4D2VROptionalScanFn scanItemModelLabelEntities = nullptr;
+        L4D2VROptionalCreateMoveFn applyCreateMoveFeatures = nullptr;
     };
 
     L4D2VROptionalSpecialInfectedCallbacks& GetOptionalSpecialInfectedCallbacks()
@@ -10328,12 +10566,14 @@ namespace
 extern "C" void __cdecl L4D2VR_RegisterSpecialInfectedFeatureCallbacks(
     L4D2VROptionalDrawItemModelLabelFn drawItemModelLabel,
     L4D2VROptionalScanFn scanSpecialInfectedEntities,
-    L4D2VROptionalScanFn scanItemModelLabelEntities)
+    L4D2VROptionalScanFn scanItemModelLabelEntities,
+    L4D2VROptionalCreateMoveFn applyCreateMoveFeatures)
 {
     auto& callbacks = GetOptionalSpecialInfectedCallbacks();
     callbacks.drawItemModelLabel = drawItemModelLabel;
     callbacks.scanSpecialInfectedEntities = scanSpecialInfectedEntities;
     callbacks.scanItemModelLabelEntities = scanItemModelLabelEntities;
+    callbacks.applyCreateMoveFeatures = applyCreateMoveFeatures;
 }
 
 void VR::DrawItemModelLabel(int entityIndex, const std::string& modelName, const Vector& modelOrigin, const C_BaseEntity* entity, const char* className)
@@ -10363,6 +10603,13 @@ void VR::ScanSpecialInfectedEntitiesFromClientList()
     auto* callback = GetOptionalSpecialInfectedCallbacks().scanSpecialInfectedEntities;
     if (callback)
         callback(this);
+}
+
+void VR::ApplyOptionalCreateMoveFeatures(CUserCmd* cmd, int stage, bool inputJumpHeld, bool hadWalkAxis, float walkNx, float walkNy, bool suppressScopeWalk)
+{
+    auto* callback = GetOptionalSpecialInfectedCallbacks().applyCreateMoveFeatures;
+    if (callback)
+        callback(this, cmd, stage, inputJumpHeld, hadWalkAxis, walkNx, walkNy, suppressScopeWalk);
 }
 
 void VR::ScanItemModelLabelEntitiesFromClientList()

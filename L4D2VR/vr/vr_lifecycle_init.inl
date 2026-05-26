@@ -871,6 +871,8 @@ VR::VR(Game* game)
     GetCurrentDirectory(MAX_STR_LEN, currentDir);
     m_ViewmodelAdjustmentSavePath = std::string(currentDir) + "\\viewmodel_adjustments.txt";
     LoadViewmodelAdjustments();
+    m_ScopeAdjustmentSavePath = std::string(currentDir) + "\\scope_adjustments.txt";
+    LoadScopeAdjustments();
 
     ConfigureExplicitTiming();
 
@@ -1048,7 +1050,6 @@ int VR::SetActionManifest(const char* fileName)
     m_Input->GetActionHandle("/actions/main/in/Pause", &m_Pause);
     m_Input->GetActionHandle("/actions/main/in/NonVRServerMovementAngleToggle", &m_NonVRServerMovementAngleToggle);
     m_Input->GetActionHandle("/actions/main/in/ScopeToggle", &m_ActionScopeToggle);
-    m_Input->GetActionHandle("/actions/main/in/ScopeMagnificationToggle", &m_ActionScopeMagnificationToggle);
     // Aim-line friendly-fire guard toggle (bindable in SteamVR)
     m_Input->GetActionHandle("/actions/main/in/FriendlyFireBlockToggle", &m_ActionFriendlyFireBlockToggle);
     m_Input->GetActionHandle("/actions/main/in/CustomAction1", &m_CustomAction1);

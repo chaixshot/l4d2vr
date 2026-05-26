@@ -215,6 +215,7 @@ void VR::UpdateTracking()
             m_ScopeWeaponIsFirearm = IsFirearmWeaponId(weapon->GetWeaponID());
     }
     RefreshActiveViewmodelAdjustment(viewPlayer);
+    RefreshActiveScopeAdjustment(viewPlayer);
 
     if (!m_IsThirdPersonCamera)
     {
@@ -939,18 +940,19 @@ void VR::UpdateTracking()
             QAngle aimAngRaw;
             QAngle::VectorAngles(m_RightControllerForward, m_RightControllerUp, aimAngRaw);
 
+            // FOV changes alter GetScopeAimSensitivityScale(). If the old base angle is kept,
+            // the scaled aim angle moves even when the controller is still, which makes the
+            // scope image appear to zoom diagonally instead of around the reticle center.
+            if (m_ScopeFovAdjustingThisFrame)
+                m_ScopeAimSensitivityInit = false;
+
             if (!m_ScopeAimSensitivityInit)
             {
                 m_ScopeAimSensitivityInit = true;
                 m_ScopeAimSensitivityBaseAng = aimAngRaw;
             }
 
-            float gain = 1.0f;
-            if (!m_ScopeAimSensitivityScales.empty())
-            {
-                const size_t idx = std::min(m_ScopeMagnificationIndex, m_ScopeAimSensitivityScales.size() - 1);
-                gain = std::clamp(m_ScopeAimSensitivityScales[idx], 0.05f, 4.0f);
-            }
+            const float gain = GetScopeAimSensitivityScale();
 
             if (std::fabs(gain - 1.0f) > 0.001f)
             {
@@ -1125,7 +1127,36 @@ void VR::UpdateTracking()
     QAngle::VectorAngles(m_LeftControllerForward, m_LeftControllerUp, m_LeftControllerAngAbs);
     QAngle::VectorAngles(m_RightControllerForward, m_RightControllerUp, m_RightControllerAngAbs);
 
-    if (m_AdjustingViewmodel)
+    if (m_AdjustingScope)
+    {
+        if (m_AdjustingScopeKey != m_CurrentScopeAdjustmentKey)
+        {
+            m_AdjustStartScopeLeftPos = m_LeftControllerPosAbs;
+            m_AdjustStartScopeOverlayOffset = { m_ScopeOverlayXOffset, m_ScopeOverlayYOffset, m_ScopeOverlayZOffset };
+            m_AdjustingScopeKey = m_CurrentScopeAdjustmentKey;
+        }
+
+        const Vector deltaPos = m_LeftControllerPosAbs - m_AdjustStartScopeLeftPos;
+        const float invScale = (m_VRScale > 0.0001f) ? (1.0f / m_VRScale) : 0.0f;
+        const float moveSpeed = std::clamp(m_ScopeOffsetAdjustMoveSpeed, 0.1f, 5.0f);
+        Vector scopeDelta =
+        {
+            DotProduct(deltaPos, m_RightControllerRight) * invScale * moveSpeed,
+            DotProduct(deltaPos, m_RightControllerUp) * invScale * moveSpeed,
+            -DotProduct(deltaPos, m_RightControllerForward) * invScale * moveSpeed
+        };
+
+        m_ScopeOverlayXOffset = m_AdjustStartScopeOverlayOffset.x + scopeDelta.x;
+        m_ScopeOverlayYOffset = m_AdjustStartScopeOverlayOffset.y + scopeDelta.y;
+        m_ScopeOverlayZOffset = m_AdjustStartScopeOverlayOffset.z + scopeDelta.z;
+
+        ScopeAdjustment& adjustment = EnsureScopeAdjustment(m_CurrentScopeAdjustmentKey);
+        adjustment.fov = std::clamp(m_ScopeFov, m_ScopeFovMin, m_ScopeFovMax);
+        adjustment.widthMeters = std::clamp(m_ScopeOverlayWidthMeters, m_ScopeSizeMin, m_ScopeSizeMax);
+        adjustment.overlayOffset = { m_ScopeOverlayXOffset, m_ScopeOverlayYOffset, m_ScopeOverlayZOffset };
+        m_ScopeAdjustmentsDirty = true;
+    }
+    else if (m_AdjustingViewmodel)
     {
         auto wrapDelta = [](float angle)
             {

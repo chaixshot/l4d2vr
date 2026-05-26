@@ -54,6 +54,13 @@ struct ViewmodelAdjustment
 	QAngle angle;
 };
 
+struct ScopeAdjustment
+{
+	float fov = 20.0f;
+	float widthMeters = 0.30f;
+	Vector overlayOffset = { 0.02f, 0.04f, -0.06f };
+};
+
 
 struct TrackedDevicePoseData
 {
@@ -481,6 +488,21 @@ public:
 	std::chrono::steady_clock::time_point m_AdjustSuppressControllerUntil{};
 	bool m_AdjustControllerSuppressed = false;
 
+	ScopeAdjustment m_DefaultScopeAdjust{};
+	std::unordered_map<std::string, ScopeAdjustment> m_ScopeAdjustments{};
+	std::string m_CurrentScopeAdjustmentKey;
+	std::string m_LastLoggedScopeAdjustmentKey;
+	bool m_ScopeAdjustmentsDirty = false;
+	std::string m_ScopeAdjustmentSavePath;
+	float m_ScopeSizeMin = 0.03f;
+	float m_ScopeSizeMax = 0.30f;
+	float m_ScopeSizeAdjustSpeed = 0.12f;      // meters per second at full stick deflection
+	float m_ScopeOffsetAdjustMoveSpeed = 1.0f;
+	bool m_AdjustingScope = false;
+	std::string m_AdjustingScopeKey;
+	Vector m_AdjustStartScopeLeftPos = { 0,0,0 };
+	Vector m_AdjustStartScopeOverlayOffset = { 0.02f, 0.04f, -0.06f };
+
 	Vector m_AimLineStart = { 0,0,0 };
 	Vector m_AimLineEnd = { 0,0,0 };
 
@@ -738,6 +760,30 @@ public:
 
 	bool m_PressedTurn = false;
 	bool m_PushingThumbstick = false;
+	bool m_AutoBunnyHop = false;
+	bool m_AutoAirStrafe = false;
+	bool m_AutoAirStrafeLandingSpeedPreserve = true;
+	float m_AutoAirStrafeMaxGainPerHop = 0.0f;
+	float m_AutoAirStrafeSpeedProjection = 0.0f;
+	float m_AutoAirStrafeMaxTurnBrakeProjection = 2.0f;
+	float m_AutoAirStrafeTurnResponsiveness = 0.25f;
+	bool m_AutoAirStrafeFlip = false;
+	bool m_AutoAirStrafeDebugLog = false;
+	float m_AutoAirStrafeDebugLogHz = 4.0f;
+	bool m_AutoAirStrafeDebugWasAirborne = false;
+	float m_AutoAirStrafeDebugAirStartSpeed = 0.0f;
+	float m_AutoAirStrafeDebugAirPeakSpeed = 0.0f;
+	float m_AutoAirStrafeDebugLastSpeed = 0.0f;
+	int m_AutoAirStrafeDebugAirTicks = 0;
+	int m_AutoAirStrafeDebugActiveTicks = 0;
+	std::chrono::steady_clock::time_point m_AutoAirStrafeDebugLastLog{};
+	bool m_AutoAirStrafeDebugHavePrevSpeed = false;
+	int m_AutoAirStrafeDebugPrevCmd = 0;
+	float m_AutoAirStrafeDebugPrevSpeed = 0.0f;
+	float m_AutoAirStrafeDebugPrevVx = 0.0f;
+	float m_AutoAirStrafeDebugPrevVy = 0.0f;
+	float m_AutoAirStrafeDebugPrevYaw = 0.0f;
+	bool m_AutoAirStrafeDebugPrevGround = false;
 	// Any locomotion (keyboard WASD, thumbstick, etc.) detected in the current CreateMove.
 	// Used to avoid conflicts with 1:1 roomscale movement/camera decoupling.
 	bool m_LocomotionActive = false;
@@ -850,7 +896,6 @@ public:
 	vr::VRActionHandle_t m_CustomAction4;
 	vr::VRActionHandle_t m_CustomAction5;
 	vr::VRActionHandle_t m_ActionScopeToggle;
-	vr::VRActionHandle_t m_ActionScopeMagnificationToggle;
 	bool m_WeaponHapticsEnabled = true;
 	std::unordered_map<std::string, WeaponHapticsProfile> m_WeaponHapticsOverrides;
 	WeaponHapticsProfile m_DefaultWeaponHapticsProfile = { 0.018f, 130.0f, 0.32f };
@@ -939,12 +984,8 @@ public:
 	bool   m_MouseModeScopeOverlayAngleOffsetSet = false;
 	// Mouse-mode scope hotkeys (keyboard). Format in config.txt: key:X, key:F1..F12 (see parseVirtualKey).
 	std::optional<WORD> m_MouseModeScopeToggleKey;
-	std::optional<WORD> m_MouseModeScopeMagnificationKey;
 	bool m_MouseModeScopeToggleActive = false;
 	bool m_MouseModeScopeToggleKeyDownPrev = false;
-	bool m_MouseModeScopeMagnificationKeyDownPrev = false;
-	// Per-magnification sensitivity scale (%) for mouse-mode. First entry corresponds to 1x.
-	std::vector<float> m_MouseModeScopeSensitivityScales = { 50.0f, 25.0f, 15.0f, 5.0f };
 	// Convergence distance (Source units). Aim ray from the viewmodel anchor is steered to intersect
 	// the HMD-center ray at this distance. Set <= 0 to disable convergence (use raw viewmodel ray).
 	float m_MouseModeAimConvergeDistance = 2048.0f;
@@ -1362,6 +1403,8 @@ public:
 
 
 	bool m_FlashlightEnhancementEnabled = false;
+	bool m_FlashlightFollowHmd = true;
+	bool m_FlashlightFollowHmdForFirearms = false;
 	bool m_FlashlightEnhancementApplied = false;
 	bool m_FlashlightEnhancementOriginalsCaptured = false;
 	float m_FlashlightEnhancement3rdPersonRange = 300.0f;
@@ -1566,6 +1609,8 @@ public:
 	static constexpr int kObserverTargetOffset = 0x1454; // C_BasePlayer::m_hObserverTarget
 	static constexpr int kGroundEntityOffset = 0x13C; // DT_BasePlayer::m_hGroundEntity
 	static constexpr int kFlagsOffset = 0xF0; // DT_BasePlayer::m_fFlags
+	static constexpr int kVelocityXOffset = 0x100; // DT_BasePlayer::m_vecVelocity[0]
+	static constexpr int kVelocityYOffset = 0x104; // DT_BasePlayer::m_vecVelocity[1]
 	static constexpr int kVelocityZOffset = 0x108; // DT_BasePlayer::m_vecVelocity[2]
 	static constexpr int kOnGroundFlag = 0x1; // FL_ONGROUND
 
@@ -1877,6 +1922,9 @@ public:
 	IGameEventManager2* m_KillSoundEventManager = nullptr;
 	IGameEventListener2* m_KillSoundEventListener = nullptr;
 	bool m_KillSoundEventListenerRegistered = false;
+	IGameEventManager2* m_MeleeHitHapticsEventManager = nullptr;
+	IGameEventListener2* m_MeleeHitHapticsEventListener = nullptr;
+	bool m_MeleeHitHapticsEventListenerRegistered = false;
 	IGameEventManager2* m_DamageFeedbackEventManager = nullptr;
 	IGameEventListener2* m_DamageFeedbackEventListener = nullptr;
 	bool m_DamageFeedbackEventListenerRegistered = false;
@@ -1915,6 +1963,9 @@ public:
 	float m_DamageAcidSustainIntervalSeconds = 0.08f;
 	std::chrono::steady_clock::time_point m_LastDamageFeedbackEventRegisterAttempt{};
 	std::chrono::steady_clock::time_point m_LastDamageFeedbackEventSeenTime{};
+	std::chrono::steady_clock::time_point m_LastMeleeHitHapticsEventRegisterAttempt{};
+	std::chrono::steady_clock::time_point m_LastMeleeHitHapticsTriggerTime{};
+	std::uintptr_t m_LastMeleeHitHapticsEntityTag = 0;
 	PendingDamageFeedback m_PendingDamageFeedback{};
 	std::chrono::steady_clock::time_point m_LastDamageFeedbackTriggerTime{};
 	int m_LastObservedDamageHealth = -1;
@@ -2248,10 +2299,15 @@ public:
 	bool  m_ScopeEnabled = false;
 	int   m_ScopeRTTSize = 512;               // square RTT size in pixels
 	std::chrono::steady_clock::time_point m_LastScopeRTTRenderTime{};
-	float m_ScopeFov = 20.0f;                  // smaller = more zoom
+	float m_ScopeFov = 20.0f;                  // active per-weapon FOV; smaller = more zoom
+	float m_ScopeFovMin = 3.0f;                // lower clamp for per-weapon magnification adjustment
+	float m_ScopeFovMax = 20.0f;               // upper clamp for per-weapon magnification adjustment
+	float m_ScopeFovAdjustSpeed = 18.0f;       // degrees per second at full stick deflection
+	float m_ScopeAimSensitivityFovReductionRate = 0.75f;
+	bool  m_ScopeFovAdjustSuppressWalk = false;
+	bool  m_ScopeFovAdjustingThisFrame = false;
+	bool  m_ScopeAnalogAdjustActive = false;
 	float m_ScopeZNear = 2.0f;                 // game units
-	std::vector<float> m_ScopeMagnificationOptions{ 20.0f, 15.0f, 5.0f, 3.0f };
-	size_t m_ScopeMagnificationIndex = 0;
 
 	// Scope camera pose relative to gun hand (game units, in controller basis fwd/right/up)
 	Vector m_ScopeCameraOffset = { 12.0f, 0.0f, 3.0f };
@@ -2286,12 +2342,8 @@ public:
 	float m_ScopeStabilizationBeta = 0.5f;      // responsiveness to fast motion
 	float m_ScopeStabilizationDCutoff = 1.0f;    // Hz (derivative low-pass cutoff)
 
-	// Scoped aim sensitivity scaling (mouse-style ADS / zoom sensitivity).
-	// Multiplies controller aim delta while scoped-in:
-	//  - 1.0 = unchanged
-	//  - 0.8 = 80% sensitivity (slower)
-	// Supports per-magnification values via config: ScopeAimSensitivityScale=100,85,70,55
-	std::vector<float> m_ScopeAimSensitivityScales{ 0.6f, 0.4f, 0.35f, 0.15f };
+	// Scoped aim sensitivity scaling is derived from the current realtime scope FOV.
+	// At ScopeFovMax the gain is 1.0; as FOV decreases, aim sensitivity decreases.
 	bool   m_ScopeAimSensitivityInit = false;
 	QAngle m_ScopeAimSensitivityBaseAng = { 0.0f, 0.0f, 0.0f };
 
@@ -2315,15 +2367,21 @@ public:
 	QAngle GetScopeCameraAbsAngle() const { return m_ScopeCameraAngAbs; }
 	bool   IsMouseModeScopeActive() const { return m_MouseModeEnabled && m_ScopeEnabled && m_ScopeWeaponIsFirearm && m_MouseModeScopeToggleActive; }
 	bool   IsSteamVRScopeToggleActive() const { return m_ScopeEnabled && m_ScopeWeaponIsFirearm && m_ScopeToggleActive; }
+	float  GetScopeAimSensitivityScale() const
+	{
+		if (!IsScopeActive())
+			return 1.0f;
+
+		const float maxFov = std::max(m_ScopeFovMin, m_ScopeFovMax);
+		if (!(maxFov > 0.01f) || !(m_ScopeAimSensitivityFovReductionRate > 0.0f))
+			return 1.0f;
+
+		const float ratio = std::clamp(m_ScopeFov / maxFov, 0.01f, 1.0f);
+		return std::clamp(std::pow(ratio, m_ScopeAimSensitivityFovReductionRate), 0.05f, 1.0f);
+	}
 	float  GetMouseModeScopeSensitivityScale() const
 	{
-		if (!IsMouseModeScopeActive())
-			return 1.0f;
-		const int idx = std::max(0, static_cast<int>(m_ScopeMagnificationIndex));
-		if (m_MouseModeScopeSensitivityScales.empty())
-			return 1.0f;
-		const int clamped = std::min(idx, (int)m_MouseModeScopeSensitivityScales.size() - 1);
-		return std::clamp(m_MouseModeScopeSensitivityScales[clamped] / 100.0f, 0.05f, 2.0f);
+		return IsMouseModeScopeActive() ? GetScopeAimSensitivityScale() : 1.0f;
 	}
 	bool   IsScopeActive() const { return m_ScopeEnabled && (m_ScopeActive || IsMouseModeScopeActive() || IsSteamVRScopeToggleActive()); }
 	bool   ShouldRenderScope() const
@@ -2337,7 +2395,6 @@ public:
 	bool   ApplyScopeLensPostProcess();
 	void   ToggleScope();
 	void   ToggleMouseModeScope();
-	void   CycleScopeMagnification();
 	void   UpdateScopeAimLineState();
 
 	// ----------------------------
@@ -2488,12 +2545,18 @@ public:
 	void TriggerWeaponFireHaptics(int weaponId, bool leftHand = false);
 	void TriggerMeleeSwingHaptics(bool leftHand = false);
 	void TriggerShoveHaptics(bool leftHand = false);
+	void NotifyMeleeHitConfirmed(std::uintptr_t entityTag = 0);
 	void ParseConfigFile();
 	void ParseHapticsConfigFile();
 	void LoadViewmodelAdjustments();
 	void SaveViewmodelAdjustments();
 	void RefreshActiveViewmodelAdjustment(C_BasePlayer* localPlayer);
 	ViewmodelAdjustment& EnsureViewmodelAdjustment(const std::string& key);
+	void LoadScopeAdjustments();
+	void SaveScopeAdjustments();
+	void RefreshActiveScopeAdjustment(C_BasePlayer* localPlayer);
+	ScopeAdjustment& EnsureScopeAdjustment(const std::string& key);
+	std::string BuildScopeAdjustKey(C_WeaponCSBase* weapon) const;
 	std::string BuildViewmodelAdjustKey(C_WeaponCSBase* weapon) const;
 	std::string WeaponIdToString(int weaponId) const;
 	std::string NormalizeViewmodelAdjustKey(const std::string& rawKey) const;
@@ -2513,6 +2576,9 @@ public:
 	int GetIncapMaxHealth() const;
 	void BeginPredictedHitFeedbackShot(int commandNumber = 0);
 	void RegisterPotentialKillSoundHit(const Vector& start, const QAngle& angles);
+	void UpdateMeleeHitHaptics();
+	void EnsureMeleeHitHapticsEventListener();
+	void HandleMeleeHitHapticsGameEvent(IGameEvent* event);
 	void UpdateKillSoundFeedback();
 	void EnsureKillSoundEventListener();
 	void HandleKillSoundGameEvent(IGameEvent* event);
@@ -2645,12 +2711,14 @@ public:
 	void DrawItemModelLabel(int entityIndex, const std::string& modelName, const Vector& modelOrigin, const C_BaseEntity* entity, const char* className);
 	void ScanSpecialInfectedEntitiesFromClientList();
 	void ScanItemModelLabelEntitiesFromClientList();
+	void ApplyOptionalCreateMoveFeatures(CUserCmd* cmd, int stage, bool inputJumpHeld, bool hadWalkAxis, float walkNx, float walkNy, bool suppressScopeWalk);
 
 	// Optional implementations supplied by special_infected_features.cpp. Do not call these
 	// directly from core code because stripped builds intentionally omit their definitions.
 	void DrawItemModelLabelImpl(int entityIndex, const std::string& modelName, const Vector& modelOrigin, const C_BaseEntity* entity, const char* className);
 	void ScanSpecialInfectedEntitiesFromClientListImpl();
 	void ScanItemModelLabelEntitiesFromClientListImpl();
+	void ApplyOptionalCreateMoveFeaturesImpl(CUserCmd* cmd, int stage, bool inputJumpHeld, bool hadWalkAxis, float walkNx, float walkNy, bool suppressScopeWalk);
 	void RefreshSpecialInfectedPreWarning(const Vector& infectedOrigin, SpecialInfectedType type, int entityIndex, bool isPlayerClass);
 	void RefreshSpecialInfectedBlindSpotWarning(const Vector& infectedOrigin);
 	void BeginSpecialInfectedIntentSenseScan();

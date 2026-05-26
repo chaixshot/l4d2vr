@@ -47,6 +47,58 @@ static inline bool IsFiniteViewAngle(const QAngle& a)
 	return std::isfinite(a.x) && std::isfinite(a.y) && std::isfinite(a.z);
 }
 
+static bool IsLocalClientActiveWeapon(void* weapon)
+{
+	if (!weapon || !Hooks::m_Game || !Hooks::m_Game->m_EngineClient)
+		return false;
+
+	const int localPlayerIndex = Hooks::m_Game->m_EngineClient->GetLocalPlayer();
+	if (localPlayerIndex <= 0)
+		return false;
+
+	C_BasePlayer* localPlayer = reinterpret_cast<C_BasePlayer*>(Hooks::m_Game->GetClientEntity(localPlayerIndex));
+	if (!localPlayer)
+		return false;
+
+#ifdef _MSC_VER
+	__try
+	{
+		return reinterpret_cast<void*>(localPlayer->GetActiveWeapon()) == weapon;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return false;
+	}
+#else
+	return reinterpret_cast<void*>(localPlayer->GetActiveWeapon()) == weapon;
+#endif
+}
+
+static bool IsLocalServerMeleeUsercmdContext()
+{
+	if (!Hooks::m_Game || !Hooks::m_Game->m_EngineClient)
+		return false;
+
+	const int localPlayerIndex = Hooks::m_Game->m_EngineClient->GetLocalPlayer();
+	return localPlayerIndex > 0 && Hooks::m_Game->m_CurrentUsercmdID == localPlayerIndex;
+}
+
+static void NotifyLocalMeleeCollisionHaptics(bool serverCollision, void* weapon, int collisionResult, int entitiesHitBefore, int entitiesHitAfter)
+{
+	const bool collided = (collisionResult != 0)
+		|| (entitiesHitBefore >= 0 && entitiesHitAfter > entitiesHitBefore);
+	if (!collided || !Hooks::m_VR)
+		return;
+
+	const bool localMelee = serverCollision
+		? IsLocalServerMeleeUsercmdContext()
+		: IsLocalClientActiveWeapon(weapon);
+	if (!localMelee)
+		return;
+
+	Hooks::m_VR->NotifyMeleeHitConfirmed(0);
+}
+
 static inline QAngle BuildVRAudioListenerAngles(VR* vr, const Vector& fallbackAngles)
 {
 	QAngle listenerAngles(fallbackAngles.x, fallbackAngles.y, fallbackAngles.z);

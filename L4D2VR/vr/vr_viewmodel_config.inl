@@ -461,6 +461,151 @@ void VR::SaveViewmodelAdjustments()
     m_ViewmodelAdjustmentsDirty = false;
 }
 
+
+std::string VR::BuildScopeAdjustKey(C_WeaponCSBase* weapon) const
+{
+    return BuildViewmodelAdjustKey(weapon);
+}
+
+ScopeAdjustment& VR::EnsureScopeAdjustment(const std::string& key)
+{
+    auto [it, inserted] = m_ScopeAdjustments.emplace(key, m_DefaultScopeAdjust);
+    return it->second;
+}
+
+void VR::RefreshActiveScopeAdjustment(C_BasePlayer* localPlayer)
+{
+    C_WeaponCSBase* activeWeapon = localPlayer ? (C_WeaponCSBase*)localPlayer->GetActiveWeapon() : nullptr;
+    std::string adjustKey = BuildScopeAdjustKey(activeWeapon);
+
+    m_CurrentScopeAdjustmentKey = adjustKey;
+
+    if (m_LastLoggedScopeAdjustmentKey != m_CurrentScopeAdjustmentKey)
+    {
+        m_LastLoggedScopeAdjustmentKey = m_CurrentScopeAdjustmentKey;
+    }
+
+    ScopeAdjustment& adjustment = EnsureScopeAdjustment(adjustKey);
+    m_ScopeFov = std::clamp(adjustment.fov, m_ScopeFovMin, m_ScopeFovMax);
+    m_ScopeOverlayWidthMeters = std::clamp(adjustment.widthMeters, m_ScopeSizeMin, m_ScopeSizeMax);
+    m_ScopeOverlayXOffset = adjustment.overlayOffset.x;
+    m_ScopeOverlayYOffset = adjustment.overlayOffset.y;
+    m_ScopeOverlayZOffset = adjustment.overlayOffset.z;
+}
+
+void VR::LoadScopeAdjustments()
+{
+    m_ScopeAdjustments.clear();
+
+    if (m_ScopeAdjustmentSavePath.empty())
+        return;
+
+    std::ifstream adjustmentStream(m_ScopeAdjustmentSavePath);
+    if (!adjustmentStream)
+        return;
+
+    auto ltrim = [](std::string& s) {
+        s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char ch) { return !std::isspace(ch); }));
+        };
+    auto rtrim = [](std::string& s) {
+        s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char ch) { return !std::isspace(ch); }).base(), s.end());
+        };
+    auto trim = [&](std::string& s) { ltrim(s); rtrim(s); };
+
+    auto parseFloat = [&](const std::string& raw, float fallback)->float
+        {
+            try
+            {
+                size_t parsed = 0;
+                float value = std::stof(raw, &parsed);
+                if (parsed == 0 || !std::isfinite(value))
+                    return fallback;
+                return value;
+            }
+            catch (...)
+            {
+                return fallback;
+            }
+        };
+
+    auto parseVector3 = [&](const std::string& raw, const Vector& defaults)->Vector
+        {
+            Vector result = defaults;
+            std::stringstream ss(raw);
+            std::string token;
+            float* components[3] = { &result.x, &result.y, &result.z };
+            int index = 0;
+
+            while (std::getline(ss, token, ',') && index < 3)
+            {
+                trim(token);
+                if (!token.empty())
+                    *components[index] = parseFloat(token, *components[index]);
+                ++index;
+            }
+
+            return result;
+        };
+
+    std::string line;
+    while (std::getline(adjustmentStream, line))
+    {
+        trim(line);
+        if (line.empty())
+            continue;
+
+        size_t eq = line.find('=');
+        size_t firstSeparator = line.find(';', eq == std::string::npos ? 0 : eq + 1);
+        size_t secondSeparator = firstSeparator == std::string::npos ? std::string::npos : line.find(';', firstSeparator + 1);
+
+        if (eq == std::string::npos || firstSeparator == std::string::npos || secondSeparator == std::string::npos || firstSeparator <= eq)
+            continue;
+
+        std::string key = line.substr(0, eq);
+        trim(key);
+        if (key.empty())
+            continue;
+
+        std::string widthStr = line.substr(eq + 1, firstSeparator - eq - 1);
+        std::string offsetStr = line.substr(firstSeparator + 1, secondSeparator - firstSeparator - 1);
+        std::string fovStr = line.substr(secondSeparator + 1);
+        trim(widthStr);
+        trim(offsetStr);
+        trim(fovStr);
+
+        ScopeAdjustment adjustment = m_DefaultScopeAdjust;
+        adjustment.widthMeters = parseFloat(widthStr, adjustment.widthMeters);
+        adjustment.overlayOffset = parseVector3(offsetStr, adjustment.overlayOffset);
+        adjustment.fov = parseFloat(fovStr, adjustment.fov);
+
+        std::string normalizedKey = NormalizeViewmodelAdjustKey(key);
+        m_ScopeAdjustments[normalizedKey] = adjustment;
+    }
+
+    m_ScopeAdjustmentsDirty = false;
+}
+
+void VR::SaveScopeAdjustments()
+{
+    if (m_ScopeAdjustmentSavePath.empty())
+        return;
+
+    std::ofstream adjustmentStream(m_ScopeAdjustmentSavePath, std::ios::trunc);
+    if (!adjustmentStream)
+        return;
+
+    for (const auto& [key, adjustment] : m_ScopeAdjustments)
+    {
+        const float widthMeters = std::clamp(adjustment.widthMeters, m_ScopeSizeMin, m_ScopeSizeMax);
+        const float fov = std::clamp(adjustment.fov, m_ScopeFovMin, m_ScopeFovMax);
+        adjustmentStream << key << '=' << widthMeters;
+        adjustmentStream << ';' << adjustment.overlayOffset.x << ',' << adjustment.overlayOffset.y << ',' << adjustment.overlayOffset.z;
+        adjustmentStream << ';' << fov << "\n";
+    }
+
+    m_ScopeAdjustmentsDirty = false;
+}
+
 void VR::ParseConfigFile()
 {
     //  򵥵  trim
@@ -1044,6 +1189,15 @@ void VR::ParseConfigFile()
     else
         headSmoothingValue = controllerSmoothingValue; // Match controller smoothing by default
     m_HeadSmoothing = std::clamp(headSmoothingValue, 0.0f, 0.99f);
+    m_AutoBunnyHop = getBool("AutoBunnyHop", m_AutoBunnyHop);
+    m_AutoAirStrafe = getBool("AutoAirStrafe", m_AutoAirStrafe);
+    m_AutoAirStrafeLandingSpeedPreserve = getBool("AutoAirStrafeLandingSpeedPreserve", m_AutoAirStrafeLandingSpeedPreserve);
+    m_AutoAirStrafeMaxGainPerHop = std::clamp(getFloat("AutoAirStrafeMaxGainPerHop", m_AutoAirStrafeMaxGainPerHop), 0.0f, 100.0f);
+    m_AutoAirStrafeSpeedProjection = std::clamp(getFloat("AutoAirStrafeSpeedProjection", m_AutoAirStrafeSpeedProjection), 0.0f, 29.0f);
+    m_AutoAirStrafeMaxTurnBrakeProjection = std::clamp(getFloat("AutoAirStrafeMaxTurnBrakeProjection", m_AutoAirStrafeMaxTurnBrakeProjection), 0.0f, 30.0f);
+    m_AutoAirStrafeTurnResponsiveness = std::clamp(getFloat("AutoAirStrafeTurnResponsiveness", m_AutoAirStrafeTurnResponsiveness), 0.0f, 1.0f);
+    m_AutoAirStrafeDebugLog = getBool("AutoAirStrafeDebugLog", m_AutoAirStrafeDebugLog);
+    m_AutoAirStrafeDebugLogHz = std::clamp(getFloat("AutoAirStrafeDebugLogHz", m_AutoAirStrafeDebugLogHz), 0.0f, 60.0f);
     m_MotionGestureSwingThreshold = std::max(0.0f, getFloat("MotionGestureSwingThreshold", m_MotionGestureSwingThreshold));
     m_MotionGesturePushThreshold = std::max(0.0f, getFloat("MotionGesturePushThreshold", m_MotionGesturePushThreshold));
     m_MotionGestureDownSwingThreshold = std::max(0.0f, getFloat("MotionGestureDownSwingThreshold", m_MotionGestureDownSwingThreshold));
@@ -1306,82 +1460,42 @@ void VR::ParseConfigFile()
     // Gun-mounted scope
     m_ScopeEnabled = getBool("ScopeEnabled", m_ScopeEnabled);
     m_ScopeRTTSize = std::clamp(getInt("ScopeRTTSize", m_ScopeRTTSize), 128, 4096);
-    m_ScopeFov = std::clamp(getFloat("ScopeFov", m_ScopeFov), 1.0f, 179.0f);
+    m_DefaultScopeAdjust.fov = std::clamp(getFloat("ScopeDefaultFov", m_DefaultScopeAdjust.fov), 1.0f, 179.0f);
+    {
+        const auto fovRange = getFloatList("ScopeMagnificationFovRange", "3,20");
+        if (fovRange.size() >= 2 && std::isfinite(fovRange[0]) && std::isfinite(fovRange[1]))
+        {
+            m_ScopeFovMin = std::clamp(std::min(fovRange[0], fovRange[1]), 1.0f, 179.0f);
+            m_ScopeFovMax = std::clamp(std::max(fovRange[0], fovRange[1]), 1.0f, 179.0f);
+        }
+        m_DefaultScopeAdjust.fov = std::clamp(m_DefaultScopeAdjust.fov, m_ScopeFovMin, m_ScopeFovMax);
+    }
+    m_ScopeFovAdjustSpeed = std::clamp(getFloat("ScopeMagnificationAdjustSpeed", m_ScopeFovAdjustSpeed), 0.0f, 180.0f);
+    {
+        const auto sizeRange = getFloatList("ScopeSizeRange", "0.03,0.30");
+        if (sizeRange.size() >= 2 && std::isfinite(sizeRange[0]) && std::isfinite(sizeRange[1]))
+        {
+            m_ScopeSizeMin = std::clamp(std::min(sizeRange[0], sizeRange[1]), 0.001f, 5.0f);
+            m_ScopeSizeMax = std::clamp(std::max(sizeRange[0], sizeRange[1]), 0.001f, 5.0f);
+            if (m_ScopeSizeMax < m_ScopeSizeMin)
+                m_ScopeSizeMax = m_ScopeSizeMin;
+        }
+    }
+    m_ScopeSizeAdjustSpeed = std::clamp(getFloat("ScopeSizeAdjustSpeed", m_ScopeSizeAdjustSpeed), 0.0f, 5.0f);
+    m_ScopeOffsetAdjustMoveSpeed = std::clamp(getFloat("ScopeOffsetAdjustMoveSpeed", m_ScopeOffsetAdjustMoveSpeed), 0.1f, 5.0f);
+    m_ScopeAimSensitivityFovReductionRate = std::clamp(getFloat("ScopeAimSensitivityFovReductionRate", m_ScopeAimSensitivityFovReductionRate), 0.0f, 4.0f);
     m_ScopeZNear = std::clamp(getFloat("ScopeZNear", m_ScopeZNear), 0.1f, 64.0f);
-    {
-        const float configuredScopeFov = m_ScopeFov;
-        const auto magnifications = getFloatList("ScopeMagnification");
-        if (!magnifications.empty())
-        {
-            m_ScopeMagnificationOptions.clear();
-            for (float mag : magnifications)
-            {
-                if (std::isfinite(mag))
-                    m_ScopeMagnificationOptions.push_back(std::clamp(mag, 1.0f, 179.0f));
-            }
-        }
 
-        if (m_ScopeMagnificationOptions.empty())
-            m_ScopeMagnificationOptions.push_back(m_ScopeFov);
-
-        m_ScopeMagnificationIndex = 0;
-        for (size_t i = 0; i < m_ScopeMagnificationOptions.size(); ++i)
-        {
-            if (fabs(m_ScopeMagnificationOptions[i] - configuredScopeFov) < 0.01f)
-            {
-                m_ScopeMagnificationIndex = i;
-                break;
-            }
-        }
-        m_ScopeFov = std::clamp(m_ScopeMagnificationOptions[m_ScopeMagnificationIndex], 1.0f, 179.0f);
-    }
-
-
-    // Scoped aim sensitivity scaling (mouse-style ADS / zoom sensitivity).
-    // Accepts either:
-    //   ScopeAimSensitivityScale=80              (80% for all magnifications)
-    //   ScopeAimSensitivityScale=100,85,70,55    (per ScopeMagnification index)
-    //   ScopeAimSensitivityScale=120,140,160,180 (faster than base when magnified)
-    {
-        const auto scalesRaw = getFloatList("ScopeAimSensitivityScale");
-        if (!scalesRaw.empty())
-        {
-            m_ScopeAimSensitivityScales.clear();
-            for (float s : scalesRaw)
-            {
-                if (!std::isfinite(s))
-                    continue;
-
-                // Allow both [0..1] and [0..100] styles.
-                if (s > 1.5f)
-                    s *= 0.01f;
-
-                m_ScopeAimSensitivityScales.push_back(std::clamp(s, 0.05f, 4.0f));
-            }
-        }
-
-        // Ensure the table matches magnification count.
-        const size_t n = m_ScopeMagnificationOptions.size();
-        if (n > 0)
-        {
-            if (m_ScopeAimSensitivityScales.empty())
-                m_ScopeAimSensitivityScales.assign(n, 1.0f);
-            else if (m_ScopeAimSensitivityScales.size() < n)
-                m_ScopeAimSensitivityScales.resize(n, m_ScopeAimSensitivityScales.back());
-            else if (m_ScopeAimSensitivityScales.size() > n)
-                m_ScopeAimSensitivityScales.resize(n);
-        }
-    }
-
-    // Changing config values should not cause a sudden jump mid-scope.
-    m_ScopeAimSensitivityInit = false;
     m_ScopeCameraOffset = getVector3("ScopeCameraOffset", m_ScopeCameraOffset);
     { Vector tmp = getVector3("ScopeCameraAngleOffset", Vector{ m_ScopeCameraAngleOffset.x, m_ScopeCameraAngleOffset.y, m_ScopeCameraAngleOffset.z }); m_ScopeCameraAngleOffset = QAngle{ tmp.x, tmp.y, tmp.z }; }
 
-    m_ScopeOverlayWidthMeters = std::max(0.001f, getFloat("ScopeOverlayWidthMeters", m_ScopeOverlayWidthMeters));
-    m_ScopeOverlayXOffset = getFloat("ScopeOverlayXOffset", m_ScopeOverlayXOffset);
-    m_ScopeOverlayYOffset = getFloat("ScopeOverlayYOffset", m_ScopeOverlayYOffset);
-    m_ScopeOverlayZOffset = getFloat("ScopeOverlayZOffset", m_ScopeOverlayZOffset);
+    m_DefaultScopeAdjust.widthMeters = std::clamp(getFloat("ScopeDefaultOverlayWidthMeters", m_DefaultScopeAdjust.widthMeters), m_ScopeSizeMin, m_ScopeSizeMax);
+    m_DefaultScopeAdjust.overlayOffset = getVector3("ScopeDefaultOverlayOffset", m_DefaultScopeAdjust.overlayOffset);
+    m_ScopeFov = m_DefaultScopeAdjust.fov;
+    m_ScopeOverlayWidthMeters = m_DefaultScopeAdjust.widthMeters;
+    m_ScopeOverlayXOffset = m_DefaultScopeAdjust.overlayOffset.x;
+    m_ScopeOverlayYOffset = m_DefaultScopeAdjust.overlayOffset.y;
+    m_ScopeOverlayZOffset = m_DefaultScopeAdjust.overlayOffset.z;
     { Vector tmp = getVector3("ScopeOverlayAngleOffset", Vector{ m_ScopeOverlayAngleOffset.x, m_ScopeOverlayAngleOffset.y, m_ScopeOverlayAngleOffset.z }); m_ScopeOverlayAngleOffset = QAngle{ tmp.x, tmp.y, tmp.z }; }
     m_ScopeAimLineOnlyInScope = getBool("ScopeAimLineOnlyInScope", m_ScopeAimLineOnlyInScope);
     m_ScopeReticleAlpha = std::clamp(getFloat("ScopeReticleAlpha", m_ScopeReticleAlpha), 0.0f, 1.0f);
@@ -1500,21 +1614,8 @@ void VR::ParseConfigFile()
         m_MouseModeScopeOverlayAngleOffset = QAngle{ tmp.x, tmp.y, tmp.z };
     }
     m_MouseModeScopeToggleKey = parseVirtualKey(getString("MouseModeScopeToggleKey", "key:q"));
-    m_MouseModeScopeMagnificationKey = parseVirtualKey(getString("MouseModeScopeMagnificationKey", "key:z"));
-
-    // Optional bindable impulses for mouse-mode scope control.
-    // Using impulses avoids GetAsyncKeyState issues and allows normal Source binds.
-    auto mouseModeScopeSensitivityList = getFloatList("MouseModeScopeSensitivityScale", "50,25,15,5");
-    if (mouseModeScopeSensitivityList.empty())
-        mouseModeScopeSensitivityList.push_back(100.0f);
-    for (auto& v : mouseModeScopeSensitivityList)
-        v = std::clamp(v, 1.0f, 200.0f);
-    if (mouseModeScopeSensitivityList.size() < m_ScopeMagnificationOptions.size())
-        mouseModeScopeSensitivityList.resize(m_ScopeMagnificationOptions.size(), mouseModeScopeSensitivityList.back());
-    m_MouseModeScopeSensitivityScales = mouseModeScopeSensitivityList;
     m_MouseModeAimConvergeDistance = getFloat("MouseModeAimConvergeDistance", m_MouseModeAimConvergeDistance);
 
-    // Non-VR server melee feel tuning (ForceNonVRServerMovement=true only)
     m_NonVRMeleeSwingThreshold = std::max(0.0f, getFloat("NonVRMeleeSwingThreshold", m_NonVRMeleeSwingThreshold));
     m_NonVRMeleeSwingCooldown = std::max(0.0f, getFloat("NonVRMeleeSwingCooldown", m_NonVRMeleeSwingCooldown));
     m_NonVRMeleeHoldTime = std::max(0.0f, getFloat("NonVRMeleeHoldTime", m_NonVRMeleeHoldTime));
@@ -1744,6 +1845,8 @@ void VR::ParseConfigFile()
 
     m_FlashlightEnhancementEnabled =
         getBool("FlashlightEnhancementEnabled", m_FlashlightEnhancementEnabled);
+    m_FlashlightFollowHmd = getBool("FlashlightFollowHmd", m_FlashlightFollowHmd);
+    m_FlashlightFollowHmdForFirearms = getBool("FlashlightFollowHmdForFirearms", m_FlashlightFollowHmdForFirearms);
     m_FlashlightEnhancementSettingsDirty.store(true, std::memory_order_release);
     m_LocalVScriptConvarsEnabled =
         getBool("LocalVScriptConvarsEnabled", m_LocalVScriptConvarsEnabled);

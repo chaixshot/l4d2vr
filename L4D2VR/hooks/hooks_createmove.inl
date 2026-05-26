@@ -110,12 +110,17 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			}
 		}
 		const bool treatServerAsNonVR = m_VR->m_ForceNonVRServerMovement;
+		constexpr int kIN_JUMP = (1 << 1);
+		const bool inputJumpHeld = (cmd->buttons & kIN_JUMP) != 0;
+
+		m_VR->ApplyOptionalCreateMoveFeatures(cmd, 0, inputJumpHeld, false, 0.0f, 0.0f, false);
 
 		if (m_VR->m_EffectiveAttackRangeAutoFireEnabled
 			&& m_VR->m_AimLineEffectiveAttackRangeActive
 			&& !m_VR->m_AimLineEffectiveAttackRangeTargetIsWitch
 			&& !m_VR->m_SuppressPlayerInput
-			&& !m_VR->m_AdjustingViewmodel)
+			&& !m_VR->m_AdjustingViewmodel
+				&& !m_VR->m_AdjustingScope)
 		{
 			const int lpIdx = (m_Game->m_EngineClient) ? m_Game->m_EngineClient->GetLocalPlayer() : -1;
 			C_BasePlayer* lp = (lpIdx > 0) ? (C_BasePlayer*)m_Game->GetClientEntity(lpIdx) : nullptr;
@@ -169,8 +174,6 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 
 			if (pollKeyPressed(m_VR->m_MouseModeScopeToggleKey, m_VR->m_MouseModeScopeToggleKeyDownPrev))
 				m_VR->ToggleMouseModeScope();
-			if (pollKeyPressed(m_VR->m_MouseModeScopeMagnificationKey, m_VR->m_MouseModeScopeMagnificationKeyDownPrev) && m_VR->IsMouseModeScopeActive())
-				m_VR->CycleScopeMagnification();
 
 			const float mouseScopeGain = m_VR->GetMouseModeScopeSensitivityScale();
 
@@ -272,13 +275,20 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			cmd->mousedy = 0;
 		}
 		const QAngle originalViewAngles = cmd->viewangles;
-		const float originalForwardMove = cmd->forwardmove;
-		const float originalSideMove = cmd->sidemove;
+		const bool suppressScopeWalk = m_VR->m_ScopeFovAdjustSuppressWalk;
+		const float originalForwardMove = suppressScopeWalk ? 0.0f : cmd->forwardmove;
+		const float originalSideMove = suppressScopeWalk ? 0.0f : cmd->sidemove;
+		if (suppressScopeWalk)
+		{
+			cmd->forwardmove = 0.0f;
+			cmd->sidemove = 0.0f;
+			cmd->buttons &= ~((1 << 3) | (1 << 4) | (1 << 9) | (1 << 10));
+		}
 		bool hadWalkAxis = false;
 		float walkNx = 0.f, walkNy = 0.f; 
 		float walkMaxSpeed = 0.f;
 		float ax = 0.f, ay = 0.f;
-		if (!m_VR->m_AdjustingViewmodel && m_VR->GetWalkAxis(ax, ay)) {
+		if (!m_VR->m_AdjustingViewmodel && !m_VR->m_AdjustingScope && !suppressScopeWalk && m_VR->GetWalkAxis(ax, ay)) {
 			// Deadzone + normalization. In viewmodel adjustment mode this axis is reserved for rotation.
 			const float dz = 0.2f;
 			auto norm = [&](float v) {
@@ -367,7 +377,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 
 			// Third-person melee: when holding a melee weapon, steer the server-facing viewangles
 			// toward the rendered reticle convergence point so swings land where the crosshair points.
-			if (m_Game->m_IsMeleeWeaponActive && m_VR->IsThirdPersonCameraActive() && m_VR->m_HasAimConvergePoint && !m_VR->m_AdjustingViewmodel)
+			if (m_Game->m_IsMeleeWeaponActive && m_VR->IsThirdPersonCameraActive() && m_VR->m_HasAimConvergePoint && !m_VR->m_AdjustingViewmodel
+				&& !m_VR->m_AdjustingScope)
 			{
 				Vector eyePos = (m_VR->GetViewOriginLeft() + m_VR->GetViewOriginRight()) * 0.5f;
 				Vector dir = m_VR->m_AimConvergePoint - eyePos;
@@ -384,7 +395,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 
 			// Non-VR server melee feel: translate a controller swing into a normal melee attack (IN_ATTACK)
 			// This only affects local *input* / presentation. The server still does normal melee resolution.
-			if (m_Game->m_IsMeleeWeaponActive && !m_VR->m_AdjustingViewmodel)
+			if (m_Game->m_IsMeleeWeaponActive && !m_VR->m_AdjustingViewmodel
+				&& !m_VR->m_AdjustingScope)
 			{
 				using clock = std::chrono::steady_clock;
 				const auto now = clock::now();
@@ -633,7 +645,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			{
 				using clock = std::chrono::steady_clock;
 				const auto now = clock::now();
-				const bool tpMeleeEligible = m_Game->m_IsMeleeWeaponActive && m_VR->IsThirdPersonCameraActive() && m_VR->m_HasAimConvergePoint && !m_VR->m_AdjustingViewmodel;
+				const bool tpMeleeEligible = m_Game->m_IsMeleeWeaponActive && m_VR->IsThirdPersonCameraActive() && m_VR->m_HasAimConvergePoint && !m_VR->m_AdjustingViewmodel && !m_VR->m_AdjustingScope;
 				if (!tpMeleeEligible)
 				{
 					s_tpMeleePrevAttackDown = false;
@@ -689,7 +701,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		if (m_VR->m_SpecialInfectedWarningActionEnabled
 			&& m_VR->m_SpecialInfectedWarningActionStep != VR::SpecialInfectedWarningActionStep::None
 			&& m_VR->m_SpecialInfectedWarningTargetActive
-			&& !m_VR->m_AdjustingViewmodel)
+			&& !m_VR->m_AdjustingViewmodel
+				&& !m_VR->m_AdjustingScope)
 		{
 			Vector aimOrigin = (m_VR->GetViewOriginLeft() + m_VR->GetViewOriginRight()) * 0.5f;
 			if (aimOrigin.IsZero())
@@ -722,13 +735,16 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 				cmd->buttons |= kIN_ATTACK2;
 			}
 		}
+
+		m_VR->ApplyOptionalCreateMoveFeatures(cmd, 1, inputJumpHeld, hadWalkAxis, walkNx, walkNy, suppressScopeWalk);
 	}
 
 	// Keep Source's main-thread viewangles aligned with the VR audio listener while
 	// third-person rendering is active. The render thread avoids SetViewAngles in
 	// queued/multicore mode, so this main-thread update prevents stale visual-camera
 	// angles from driving front/back sound spatialization.
-	if (m_Game && m_Game->m_EngineClient && m_VR->m_IsThirdPersonCamera && !m_VR->m_AdjustingViewmodel)
+	if (m_Game && m_Game->m_EngineClient && m_VR->m_IsThirdPersonCamera && !m_VR->m_AdjustingViewmodel
+				&& !m_VR->m_AdjustingScope)
 	{
 		Vector currentAudioFallback(cmd->viewangles.x, cmd->viewangles.y, cmd->viewangles.z);
 		QAngle listenerAngles = BuildVRAudioListenerAngles(m_VR, currentAudioFallback);
@@ -1243,9 +1259,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			if (activeWeapon)
 			{
 				const C_WeaponCSBase::WeaponID weaponId = activeWeapon->GetWeaponID();
-				if (weaponId == C_WeaponCSBase::WeaponID::MELEE)
-					m_VR->TriggerMeleeSwingHaptics(false);
-				else if (weaponId == C_WeaponCSBase::WeaponID::CHAINSAW)
+				if (weaponId == C_WeaponCSBase::WeaponID::CHAINSAW)
 					m_VR->TriggerWeaponFireHaptics((int)weaponId, false);
 			}
 		}

@@ -320,12 +320,19 @@ void Hooks::dGetViewport(void* ecx, void* edx, int& x, int& y, int& width, int& 
 
 int Hooks::dTestMeleeSwingCollisionClient(void* ecx, void* edx, Vector const& vec)
 {
-	return hkTestMeleeSwingCollisionClient.fOriginal(ecx, vec);
+	const int result = hkTestMeleeSwingCollisionClient.fOriginal(ecx, vec);
+	NotifyLocalMeleeCollisionHaptics(false, ecx, result, -1, -1);
+	return result;
 }
 
 int Hooks::dTestMeleeSwingCollisionServer(void* ecx, void* edx, Vector const& vec)
 {
-	return hkTestMeleeSwingCollisionServer.fOriginal(ecx, vec);
+	Server_WeaponCSBase* weapon = reinterpret_cast<Server_WeaponCSBase*>(ecx);
+	const int entitiesHitBefore = weapon ? weapon->entitiesHitThisSwing : -1;
+	const int result = hkTestMeleeSwingCollisionServer.fOriginal(ecx, vec);
+	const int entitiesHitAfter = weapon ? weapon->entitiesHitThisSwing : entitiesHitBefore;
+	NotifyLocalMeleeCollisionHaptics(true, ecx, result, entitiesHitBefore, entitiesHitAfter);
+	return result;
 }
 
 void Hooks::dDoMeleeSwingServer(void* ecx, void* edx)

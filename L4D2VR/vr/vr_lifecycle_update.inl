@@ -1336,6 +1336,7 @@ void VR::Update()
 
     UpdateTracking();
     UpdateKillSoundFeedback();
+    UpdateMeleeHitHaptics();
     PumpSpeechToTextCapture();
     PumpSpeechToTextResults();
     if (!m_TextToSpeechEnabled && !m_SpeechToTextSendVoiceEnabled)

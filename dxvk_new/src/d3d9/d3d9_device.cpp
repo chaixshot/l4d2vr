@@ -377,33 +377,6 @@ namespace dxvk {
             device->EndScene();
         }
 
-        static void VrAimLineLogQueuedSubmitTargets(
-            VR* vr,
-            IDirect3DSurface9* leftTarget,
-            IDirect3DSurface9* rightTarget) {
-            if (!vr)
-                return;
-
-            static DWORD s_lastLogMs = 0;
-            const DWORD nowMs = ::GetTickCount();
-            if (nowMs - s_lastLogMs < 1000)
-                return;
-            s_lastLogMs = nowMs;
-
-            D3DAimLineOverlayEyeState leftLine{};
-            D3DAimLineOverlayEyeState rightLine{};
-            const bool leftValid = vr->GetD3DAimLineOverlayEye(0, leftLine);
-            const bool rightValid = vr->GetD3DAimLineOverlayEye(1, rightLine);
-            Game::logMsg("[VR][D3DAimLine][QueuedSubmit] left=%d right=%d leftTarget=%p rightTarget=%p leftSubmit=%d rightSubmit=%d L=(%.1f,%.1f)->(%.1f,%.1f) R=(%.1f,%.1f)->(%.1f,%.1f)",
-                leftValid ? 1 : 0,
-                rightValid ? 1 : 0,
-                static_cast<void*>(leftTarget),
-                static_cast<void*>(rightTarget),
-                vr->m_D9LeftEyeSubmitSurface ? 1 : 0,
-                vr->m_D9RightEyeSubmitSurface ? 1 : 0,
-                leftLine.x0, leftLine.y0, leftLine.x1, leftLine.y1,
-                rightLine.x0, rightLine.y0, rightLine.x1, rightLine.y1);
-        }
 
         static void VrAimLineDrawOverlaysToEyeSurfaces(D3D9DeviceEx* device, VR* vr, bool backupTarget) {
             if (!device || !vr || !vr->m_D3DAimLineOverlayEnabled)
@@ -422,7 +395,6 @@ namespace dxvk {
             IDirect3DSurface9* leftTarget = vr->m_D9LeftEyeSubmitSurface ? vr->m_D9LeftEyeSubmitSurface : vr->m_D9LeftEyeSurface;
             IDirect3DSurface9* rightTarget = vr->m_D9RightEyeSubmitSurface ? vr->m_D9RightEyeSubmitSurface : vr->m_D9RightEyeSurface;
 
-            VrAimLineLogQueuedSubmitTargets(vr, leftTarget, rightTarget);
 
             if (leftTarget)
                 VrAimLineDrawOverlayToSurface(device, vr, 0, leftTarget, false);
