@@ -1193,6 +1193,7 @@ void VR::ParseConfigFile()
     m_AutoAirStrafe = getBool("AutoAirStrafe", m_AutoAirStrafe);
     m_AutoAirStrafeLandingSpeedPreserve = getBool("AutoAirStrafeLandingSpeedPreserve", m_AutoAirStrafeLandingSpeedPreserve);
     m_AutoAirStrafeMaxGainPerHop = std::clamp(getFloat("AutoAirStrafeMaxGainPerHop", m_AutoAirStrafeMaxGainPerHop), 0.0f, 100.0f);
+    m_AutoAirStrafeTargetSpeed = std::clamp(getFloat("AutoAirStrafeTargetSpeed", m_AutoAirStrafeTargetSpeed), 0.0f, 2000.0f);
     m_AutoAirStrafeSpeedProjection = std::clamp(getFloat("AutoAirStrafeSpeedProjection", m_AutoAirStrafeSpeedProjection), 0.0f, 29.0f);
     m_AutoAirStrafeMaxTurnBrakeProjection = std::clamp(getFloat("AutoAirStrafeMaxTurnBrakeProjection", m_AutoAirStrafeMaxTurnBrakeProjection), 0.0f, 30.0f);
     m_AutoAirStrafeTurnResponsiveness = std::clamp(getFloat("AutoAirStrafeTurnResponsiveness", m_AutoAirStrafeTurnResponsiveness), 0.0f, 1.0f);

@@ -764,6 +764,7 @@ public:
 	bool m_AutoAirStrafe = false;
 	bool m_AutoAirStrafeLandingSpeedPreserve = true;
 	float m_AutoAirStrafeMaxGainPerHop = 0.0f;
+	float m_AutoAirStrafeTargetSpeed = 0.0f;
 	float m_AutoAirStrafeSpeedProjection = 0.0f;
 	float m_AutoAirStrafeMaxTurnBrakeProjection = 2.0f;
 	float m_AutoAirStrafeTurnResponsiveness = 0.25f;

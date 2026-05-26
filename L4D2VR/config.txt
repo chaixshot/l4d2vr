@@ -8,6 +8,7 @@ AutoBunnyHop=false
 AutoAirStrafe=false
 AutoAirStrafeLandingSpeedPreserve=true
 AutoAirStrafeMaxGainPerHop=0
+AutoAirStrafeTargetSpeed=450
 AutoAirStrafeSpeedProjection=0
 AutoAirStrafeMaxTurnBrakeProjection=2
 AutoAirStrafeTurnResponsiveness=0.25
