@@ -184,6 +184,7 @@ void VR::ResetPosition()
     m_Roomscale1To1LastEngineEye = {};
     m_Roomscale1To1PendingVisualWorldDeltaValid = false;
     m_Roomscale1To1PendingVisualWorldDelta = {};
+    ClearRoomscale1To1ServerMoveDelta();
     m_Roomscale1To1StandingHmdZValid = false;
     m_Roomscale1To1PhysicalCrouchActive = false;
 }
@@ -1588,6 +1589,7 @@ void VR::ParseConfigFile()
     // 1:1 roomscale cmd movement / camera decoupling
     m_Roomscale1To1DecoupleCamera = getBool("Roomscale1To1DecoupleCamera", m_Roomscale1To1DecoupleCamera);
     m_Roomscale1To1DisableWhileThumbstick = getBool("Roomscale1To1DisableWhileThumbstick", m_Roomscale1To1DisableWhileThumbstick);
+    m_Roomscale1To1ServerMove = getBool("Roomscale1To1ServerMove", m_Roomscale1To1ServerMove);
     m_Roomscale1To1MovementScale = std::clamp(getFloat("Roomscale1To1MovementScale", m_Roomscale1To1MovementScale), 0.0f, 4.0f);
     m_Roomscale1To1MinApplyMeters = std::max(0.0f, getFloat("Roomscale1To1MinApplyMeters", m_Roomscale1To1MinApplyMeters));
     m_Roomscale1To1PhysicalCrouch = getBool("Roomscale1To1PhysicalCrouch", m_Roomscale1To1PhysicalCrouch);

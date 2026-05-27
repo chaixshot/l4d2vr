@@ -88,6 +88,17 @@ public:
     Offset GetActiveWeapon =             { "server.dll", 0x464F0, "55 8B EC 8B 45 0C 56 8B 75 08 50 56 E8 ? ? ? ? 84 C0 74 47 8B", -64 };
     Offset GetMeleeWeaponInfo =          { "server.dll", 0x3E67D0, "8B 81 ? ? ? ? 50 B9 ? ? ? ? E8 ? ? ? ? C3" };
     Offset EyePosition =                 { "server.dll", 0x6D610, "55 8B EC 56 8B F1 8B 86 ? ? ? ? C1 E8 0B A8 01 74 05 E8 ? ? ? ? 8B 45 08 F3" };
+    // Server CBaseEntity helpers used by VR-only roomscale movement on local/listen servers.
+    Offset CBaseEntity_GetAbsOrigin_Server = { "server.dll", 0x28D10,
+        "56 8B F1 8B 86 ? ? ? ? C1 E8 0B A8 01 74 05 E8 ? ? ? ? 8D 86 ? ? ? ? 5E C3",
+        0,
+        true
+    };
+    Offset CBaseEntity_SetOrigin_Server = { "server.dll", 0x521A0,
+        "55 8B EC 8B 01 8B 55 08 8B 80 ? ? ? ? 6A 00 6A 00 52 FF D0 5D C2 04 00",
+        0,
+        true
+    };
     // CBaseEntity::SetAbsOrigin (client) - used for viewmodel stabilization.
     Offset CBaseEntity_SetAbsOrigin_Client = { "client.dll", 0,
         "55 8B EC 56 57 8B F1 E8 ?? ?? ?? ?? 8B 7D 08 F3 0F 10 07",

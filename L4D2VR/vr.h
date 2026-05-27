@@ -1480,10 +1480,11 @@ public:
 	float m_Roomscale1To1MaxStepMeters = 0.35f;
 
 	// Roomscale 1:1 movement:
-	// HMD planar movement is converted into standard CUserCmd movement so Source keeps
-	// normal prediction, collision, server validation, and multiplayer compatibility.
+	// Local/listen VR servers can consume HMD planar movement directly through server.dll.
+	// Other servers fall back to standard CUserCmd movement for compatibility.
 	bool m_Roomscale1To1DecoupleCamera = true;
 	bool m_Roomscale1To1DisableWhileThumbstick = true;
+	bool m_Roomscale1To1ServerMove = true;
 	float m_Roomscale1To1MovementScale = 1.0f;
 	float m_Roomscale1To1MinApplyMeters = 0.005f;
 	bool m_Roomscale1To1PhysicalCrouch = true;
@@ -1496,6 +1497,9 @@ public:
 	bool m_Roomscale1To1LastEngineEyeValid = false;
 	Vector m_Roomscale1To1PendingVisualWorldDelta = {};
 	bool m_Roomscale1To1PendingVisualWorldDeltaValid = false;
+	std::mutex m_Roomscale1To1ServerMoveMutex;
+	Vector m_Roomscale1To1PendingServerWorldDelta = {};
+	bool m_Roomscale1To1PendingServerWorldDeltaValid = false;
 	float m_Roomscale1To1StandingHmdZ = 0.0f;
 	bool m_Roomscale1To1StandingHmdZValid = false;
 	bool m_Roomscale1To1PhysicalCrouchActive = false;
@@ -2733,6 +2737,10 @@ public:
 	void UpdateSpecialInfectedPreWarningState();
 	Vector GetAimRenderCameraDelta() const;
 	void ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool controlLocomotionActive);
+	bool ShouldUseRoomscale1To1ServerMove() const;
+	void QueueRoomscale1To1ServerMoveDelta(const Vector& worldDelta);
+	bool ConsumeRoomscale1To1ServerMoveDelta(Vector& outWorldDelta);
+	void ClearRoomscale1To1ServerMoveDelta();
 	void OnPredictionRunCommand(CUserCmd* cmd);
 	void OnPrimaryAttackServerDecision(CUserCmd* cmd, bool fromSecondaryPrediction);
 	void StartSpecialInfectedWarningAction();

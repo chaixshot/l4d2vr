@@ -12,6 +12,67 @@ Vector VR::GetAimRenderCameraDelta() const
     return m_ThirdPersonRenderCenter - m_SetupOrigin;
 }
 
+bool VR::ShouldUseRoomscale1To1ServerMove() const
+{
+    const bool hasServerEntityMove =
+        m_Game &&
+        m_Game->m_EngineTraceServer &&
+        m_Game->m_Offsets &&
+        m_Game->m_Offsets->CBaseEntity_GetAbsOrigin_Server.address &&
+        m_Game->m_Offsets->CBaseEntity_SetOrigin_Server.address;
+
+    return m_IsVREnabled &&
+        m_Roomscale1To1Movement &&
+        m_Roomscale1To1ServerMove &&
+        Hooks::s_ServerUnderstandsVR &&
+        !m_ForceNonVRServerMovement &&
+        hasServerEntityMove;
+}
+
+void VR::QueueRoomscale1To1ServerMoveDelta(const Vector& worldDelta)
+{
+    if (!std::isfinite(worldDelta.x) || !std::isfinite(worldDelta.y) || !std::isfinite(worldDelta.z))
+        return;
+
+    Vector planarDelta(worldDelta.x, worldDelta.y, 0.0f);
+    if (planarDelta.Length() <= 0.01f)
+        return;
+
+    std::lock_guard<std::mutex> lock(m_Roomscale1To1ServerMoveMutex);
+    // Server-side room movement must not repay old physical deltas. If the local
+    // server does not consume for a few ticks, releasing that backlog teleports the
+    // player at high speed. Keep only the latest measured HMD step.
+    m_Roomscale1To1PendingServerWorldDelta = planarDelta;
+    m_Roomscale1To1PendingServerWorldDelta.z = 0.0f;
+
+    const float maxServerStep =
+        std::max(1.0f, std::max(0.0f, m_Roomscale1To1MaxStepMeters) * std::max(1.0f, std::fabs(m_VRScale)));
+    const float len = m_Roomscale1To1PendingServerWorldDelta.Length();
+    if (std::isfinite(len) && len > maxServerStep && len > 0.0001f)
+        m_Roomscale1To1PendingServerWorldDelta *= (maxServerStep / len);
+
+    m_Roomscale1To1PendingServerWorldDeltaValid = true;
+}
+
+bool VR::ConsumeRoomscale1To1ServerMoveDelta(Vector& outWorldDelta)
+{
+    std::lock_guard<std::mutex> lock(m_Roomscale1To1ServerMoveMutex);
+    if (!m_Roomscale1To1PendingServerWorldDeltaValid)
+        return false;
+
+    outWorldDelta = m_Roomscale1To1PendingServerWorldDelta;
+    m_Roomscale1To1PendingServerWorldDelta = {};
+    m_Roomscale1To1PendingServerWorldDeltaValid = false;
+    return outWorldDelta.Length() > 0.01f;
+}
+
+void VR::ClearRoomscale1To1ServerMoveDelta()
+{
+    std::lock_guard<std::mutex> lock(m_Roomscale1To1ServerMoveMutex);
+    m_Roomscale1To1PendingServerWorldDelta = {};
+    m_Roomscale1To1PendingServerWorldDeltaValid = false;
+}
+
 void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool controlLocomotionActive)
 {
     const Vector cur = m_HmdPosCorrectedPrev;
@@ -28,6 +89,7 @@ void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool contr
     if (!cmd || !m_Roomscale1To1Movement)
     {
         m_Roomscale1To1PrevValid = false;
+        ClearRoomscale1To1ServerMoveDelta();
         m_Roomscale1To1StandingHmdZValid = false;
         m_Roomscale1To1PhysicalCrouchActive = false;
         return;
@@ -66,6 +128,7 @@ void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool contr
     if (m_Roomscale1To1DisableWhileThumbstick && controlLocomotionActive)
     {
         resetReference();
+        ClearRoomscale1To1ServerMoveDelta();
         return;
     }
 
@@ -101,14 +164,33 @@ void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool contr
         deltaM.y *= s;
     }
 
+    const Vector gameDeltaM(deltaM.x * movementScale, deltaM.y * movementScale, 0.0f);
+    m_Roomscale1To1PendingVisualWorldDelta = Vector(deltaM.x * m_VRScale, deltaM.y * m_VRScale, 0.0f);
+    m_Roomscale1To1PendingVisualWorldDeltaValid = true;
+
+    if (ShouldUseRoomscale1To1ServerMove())
+    {
+        Vector serverWorldDelta(gameDeltaM.x * m_VRScale, gameDeltaM.y * m_VRScale, 0.0f);
+        QueueRoomscale1To1ServerMoveDelta(serverWorldDelta);
+        m_Roomscale1To1PendingVisualWorldDelta = {};
+        m_Roomscale1To1PendingVisualWorldDeltaValid = false;
+
+        if (m_Roomscale1To1DebugLog && !ShouldThrottle(m_Roomscale1To1DebugLastEncode, m_Roomscale1To1DebugLogHz))
+        {
+            Game::logMsg("[VR][1to1][servermove-queue] cmd=%d tick=%d scale=%.3f hmdM=(%.3f %.3f) gameM=(%.3f %.3f) world=(%.1f %.1f)",
+                cmd->command_number, cmd->tick_count,
+                movementScale,
+                deltaM.x, deltaM.y,
+                gameDeltaM.x, gameDeltaM.y,
+                serverWorldDelta.x, serverWorldDelta.y);
+        }
+        return;
+    }
+
     float dt = inputSampleTime;
     if (dt <= 0.0001f)
         dt = 1.0f / 30.0f;
     dt = std::clamp(dt, 1.0f / 240.0f, 1.0f / 15.0f);
-
-    const Vector gameDeltaM(deltaM.x * movementScale, deltaM.y * movementScale, 0.0f);
-    m_Roomscale1To1PendingVisualWorldDelta = Vector(deltaM.x * m_VRScale, deltaM.y * m_VRScale, 0.0f);
-    m_Roomscale1To1PendingVisualWorldDeltaValid = true;
 
     Vector roomWorldVelocity(gameDeltaM.x * m_VRScale / dt, gameDeltaM.y * m_VRScale / dt, 0.0f);
     const float roomSpeed = std::sqrt((roomWorldVelocity.x * roomWorldVelocity.x) + (roomWorldVelocity.y * roomWorldVelocity.y));

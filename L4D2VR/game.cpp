@@ -404,6 +404,7 @@ Game::Game()
     m_BaseClientDll = static_cast<IBaseClientDLL*>(GetInterfaceSafe("client.dll", "VClient016"));
     m_ClientEntityList = static_cast<IClientEntityList*>(GetInterfaceSafe("client.dll", "VClientEntityList003"));
     m_EngineTrace = static_cast<IEngineTrace*>(GetInterfaceSafe("engine.dll", "EngineTraceClient003"));
+    m_EngineTraceServer = static_cast<IEngineTrace*>(TryInterfaceNoError("engine.dll", "EngineTraceServer003"));
     m_EngineClient = static_cast<IEngineClient*>(GetInterfaceSafe("engine.dll", "VEngineClient013"));
     m_GameEventManager = static_cast<IGameEventManager2*>(TryInterfaceNoError("engine.dll", "GAMEEVENTSMANAGER002"));
     if (!m_GameEventManager)

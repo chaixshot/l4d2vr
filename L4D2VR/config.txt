@@ -46,6 +46,7 @@ HandHudDebugLogHz=1
 Roomscale1To1Movement=false
 Roomscale1To1DebugLogHz=4
 Roomscale1To1DecoupleCamera=true
+Roomscale1To1ServerMove=true
 Roomscale1To1MovementScale=1.0
 Roomscale1To1MinApplyMeters=0.005
 Roomscale1To1PhysicalCrouch=true

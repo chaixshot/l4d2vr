@@ -56,6 +56,7 @@ public:
     // === Engine Interfaces ===
     IClientEntityList* m_ClientEntityList = nullptr;
     IEngineTrace* m_EngineTrace = nullptr;
+    IEngineTrace* m_EngineTraceServer = nullptr;
     IEngineClient* m_EngineClient = nullptr;
     IMaterialSystem* m_MaterialSystem = nullptr;
     IBaseClientDLL* m_BaseClientDll = nullptr;

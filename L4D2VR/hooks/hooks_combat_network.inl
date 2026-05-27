@@ -1273,6 +1273,8 @@ float __fastcall Hooks::dProcessUsercmds(void* ecx, void* edx, edict_t* player,
 	int index = oEntindex(pPlayer);
 	m_Game->m_CurrentUsercmdID = index;
 
+	ApplyServerRoomscale1To1Move(pPlayer, pUnknown, index);
+
 	float result = hkProcessUsercmds.fOriginal(ecx, player, buf, numcmds, totalcmds, dropped_packets, ignore, paused);
 
 	// ===== 你原有的“近战挥砍检测/追踪”逻辑，保持不变 =====

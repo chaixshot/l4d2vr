@@ -1293,7 +1293,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			const int observerMode = lp ? (int)ReadNetvar<int>(lp, VR::kObserverModeOffset) : 1;
 			const bool liveLocalPlayer = lp && lifeState == 0 && observerMode == 0;
 
-			if (roomscaleMayDriveMovement && liveLocalPlayer)
+			if (roomscaleMayDriveMovement && liveLocalPlayer && !m_VR->ShouldUseRoomscale1To1ServerMove())
 			{
 				Vector engineEye = lp->EyePosition();
 				engineEye.z = 0.0f;

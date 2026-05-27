@@ -230,6 +230,170 @@ static inline const char* DebugTextureName(ITexture* texture)
 	}
 }
 
+static Vector ClipPlanarDeltaAgainstPlane(const Vector& delta, const Vector& planeNormal)
+{
+	Vector planarNormal(planeNormal.x, planeNormal.y, 0.0f);
+	const float normalLenSqr = planarNormal.LengthSqr();
+	if (!std::isfinite(normalLenSqr) || normalLenSqr <= 0.0001f)
+		return {};
+
+	Vector planarDelta(delta.x, delta.y, 0.0f);
+	const float intoPlane = planarDelta.Dot(planarNormal) / normalLenSqr;
+	Vector clipped = planarDelta - (planarNormal * intoPlane);
+	clipped.z = 0.0f;
+	return clipped;
+}
+
+static void TraceRoomscaleServerRay(IEngineTrace* engineTrace, const Ray_t& ray, unsigned int mask, CTraceFilter* filter, CGameTrace& outTrace)
+{
+	outTrace.fraction = 1.0f;
+	outTrace.allsolid = false;
+	outTrace.startsolid = false;
+	outTrace.m_pEnt = nullptr;
+
+	if (!engineTrace)
+		return;
+
+	engineTrace->TraceRay(ray, mask, filter, &outTrace);
+}
+
+static bool ApplyServerRoomscale1To1Move(Server_BaseEntity* serverPlayer, IServerUnknown* serverUnknown, int playerIndex)
+{
+	if (!Hooks::m_Game || !Hooks::m_VR || !serverPlayer || !serverUnknown)
+		return false;
+
+	if (!Hooks::m_Game->m_EngineClient || Hooks::m_Game->m_EngineClient->GetLocalPlayer() != playerIndex)
+	{
+		Hooks::m_VR->ClearRoomscale1To1ServerMoveDelta();
+		return false;
+	}
+
+	if (!Hooks::m_VR->ShouldUseRoomscale1To1ServerMove())
+	{
+		Hooks::m_VR->ClearRoomscale1To1ServerMoveDelta();
+		return false;
+	}
+
+	Vector worldDelta{};
+	if (!Hooks::m_VR->ConsumeRoomscale1To1ServerMoveDelta(worldDelta))
+		return false;
+
+	worldDelta.z = 0.0f;
+	const float requestedLen = worldDelta.Length();
+	if (!std::isfinite(requestedLen) || requestedLen <= 0.01f)
+		return false;
+
+	using GetAbsOriginServerFn = Vector* (__thiscall*)(void*);
+	using SetOriginServerFn = void(__thiscall*)(void*, const Vector&);
+	auto getAbsOrigin = reinterpret_cast<GetAbsOriginServerFn>(Hooks::m_Game->m_Offsets->CBaseEntity_GetAbsOrigin_Server.address);
+	auto setOrigin = reinterpret_cast<SetOriginServerFn>(Hooks::m_Game->m_Offsets->CBaseEntity_SetOrigin_Server.address);
+	IEngineTrace* serverTrace = Hooks::m_Game->m_EngineTraceServer;
+	if (!getAbsOrigin || !setOrigin || !serverTrace)
+		return false;
+
+	bool applied = false;
+	Vector start{};
+	Vector target{};
+	Vector clippedTarget{};
+	CGameTrace trace{};
+
+	Vector* originPtr = getAbsOrigin(serverPlayer);
+	if (!originPtr)
+		return false;
+
+	start = *originPtr;
+	target = start + worldDelta;
+	target.z = start.z;
+	clippedTarget = start;
+
+	const bool crouched = Hooks::m_VR->m_Roomscale1To1PhysicalCrouchActive;
+	const Vector hullMins(-16.0f, -16.0f, 0.0f);
+	const Vector hullMaxs(16.0f, 16.0f, crouched ? 36.0f : 72.0f);
+	constexpr unsigned int kRoomscaleServerMoveMask =
+		CONTENTS_SOLID | CONTENTS_MOVEABLE | CONTENTS_PLAYERCLIP | CONTENTS_WINDOW | CONTENTS_MONSTER | CONTENTS_GRATE;
+
+	auto traceHull = [&](const Vector& from, const Vector& to, CGameTrace& outTrace)
+	{
+		Ray_t ray;
+		ray.Init(from, to, hullMins, hullMaxs);
+		CTraceFilterSkipSelf filter(static_cast<IHandleEntity*>(serverUnknown), 0);
+
+		static int s_preTraceLogBudget = 8;
+		if (s_preTraceLogBudget > 0)
+		{
+			--s_preTraceLogBudget;
+			Game::logMsg("[VR][1to1][servermove-trace-pre] trace=%p player=%p unk=%p from=(%.1f %.1f %.1f) to=(%.1f %.1f %.1f) hull=(%.1f %.1f %.1f)/(%.1f %.1f %.1f) mask=0x%08x",
+				reinterpret_cast<void*>(serverTrace),
+				reinterpret_cast<void*>(serverPlayer),
+				reinterpret_cast<void*>(serverUnknown),
+				from.x, from.y, from.z,
+				to.x, to.y, to.z,
+				hullMins.x, hullMins.y, hullMins.z,
+				hullMaxs.x, hullMaxs.y, hullMaxs.z,
+				kRoomscaleServerMoveMask);
+		}
+
+		TraceRoomscaleServerRay(serverTrace, ray, kRoomscaleServerMoveMask, &filter, outTrace);
+	};
+
+	Vector current = start;
+	Vector remaining = worldDelta;
+	for (int bump = 0; bump < 2; ++bump)
+	{
+		Vector moveTarget = current + remaining;
+		moveTarget.z = start.z;
+
+		traceHull(current, moveTarget, trace);
+		if (trace.allsolid || trace.startsolid)
+			break;
+
+		current = trace.endpos;
+		current.z = start.z;
+
+		if (trace.fraction >= 1.0f)
+			break;
+
+		Vector targetRemainder = target - current;
+		targetRemainder.z = 0.0f;
+		remaining = ClipPlanarDeltaAgainstPlane(targetRemainder, trace.plane.normal);
+		if (remaining.Length() <= 0.01f)
+			break;
+	}
+
+	clippedTarget = current;
+	Vector acceptedDelta = clippedTarget - start;
+	acceptedDelta.z = 0.0f;
+	if (!trace.allsolid && !trace.startsolid)
+	{
+		if (acceptedDelta.Length() > 0.01f)
+		{
+			setOrigin(serverPlayer, clippedTarget);
+			applied = true;
+		}
+	}
+
+	if (Hooks::m_VR->m_Roomscale1To1DebugLog)
+	{
+		static std::chrono::steady_clock::time_point s_lastServerMoveLog{};
+		if (!ShouldThrottleLog(s_lastServerMoveLog, Hooks::m_VR->m_Roomscale1To1DebugLogHz))
+		{
+			const float acceptedLen = applied ? (clippedTarget - start).Length() : 0.0f;
+			Game::logMsg("[VR][1to1][servermove] player=%d applied=%d frac=%.3f startSolid=%d allSolid=%d req=(%.1f %.1f) accepted=%.1f start=(%.1f %.1f %.1f) target=(%.1f %.1f %.1f)",
+				playerIndex,
+				applied ? 1 : 0,
+				trace.fraction,
+				trace.startsolid ? 1 : 0,
+				trace.allsolid ? 1 : 0,
+				worldDelta.x, worldDelta.y,
+				acceptedLen,
+				start.x, start.y, start.z,
+				clippedTarget.x, clippedTarget.y, clippedTarget.z);
+		}
+	}
+
+	return applied;
+}
+
 static inline void DebugTextureSize(ITexture* texture, int& width, int& height)
 {
 	width = 0;
