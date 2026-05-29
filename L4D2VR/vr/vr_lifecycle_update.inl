@@ -2259,15 +2259,21 @@ void VR::SubmitVRTextures()
 
 
     vr::VROverlay()->HideOverlay(m_MainMenuHandle);
-    applyHudTexture(m_HUDTopHandle, topBounds);
+    const bool focusedVguiHud =
+        (m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsPaused()) ||
+        (m_Game && m_Game->m_VguiSurface && m_Game->m_VguiSurface->IsCursorVisible());
+    const bool wantsTopHudOverlay = focusedVguiHud || IsGameplayHudRequested();
+    if (wantsTopHudOverlay)
+    {
+        applyHudTexture(m_HUDTopHandle, topBounds);
+        vr::VROverlay()->ShowOverlay(m_HUDTopHandle);
+    }
+    else
+    {
+        vr::VROverlay()->HideOverlay(m_HUDTopHandle);
+    }
     for (vr::VROverlayHandle_t& overlay : m_HUDBottomHandles)
         vr::VROverlay()->HideOverlay(overlay);
-    if (m_Game->m_VguiSurface->IsCursorVisible())
-    {
-        vr::VROverlay()->ShowOverlay(m_HUDTopHandle);
-        for (vr::VROverlayHandle_t& overlay : m_HUDBottomHandles)
-            vr::VROverlay()->HideOverlay(overlay);
-    }
 
     // Scope overlay independent of HUD cursor mode
     if (m_ScopeTexture && m_ScopeEnabled)

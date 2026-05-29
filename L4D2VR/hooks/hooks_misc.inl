@@ -962,7 +962,7 @@ void Hooks::dPushRenderTargetAndViewport(void* ecx, void* edx, ITexture* pTextur
         return hkPushRenderTargetAndViewport.fOriginal(ecx, pTexture, pDepthTexture, nViewX, nViewY, nViewW, nViewH);
     }
 
-    // Single-threaded path (mat_queue_mode 0): use state machine to detect HUD push
+    // Single-threaded path (mat_queue_mode 0): use state machine to detect HUD push.
     bool overrideHudRT = (m_HUDStep == HUDPushStep::ReadyToOverride) &&
         !m_VR->m_HudPaintedThisFrame.load(std::memory_order_relaxed);
 
@@ -1060,87 +1060,50 @@ void Hooks::dVGui_Paint(void* ecx, void* edx, int mode)
     const bool inGame = m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame();
     const bool isPaused = m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsPaused();
     const bool cursorVisible = (m_Game && m_Game->m_VguiSurface) ? m_Game->m_VguiSurface->IsCursorVisible() : false;
-    const bool allowBackbufferVgui = !inGame || isPaused || cursorVisible;
+    const bool focusedInGameVgui = inGame && (isPaused || cursorVisible);
+    const bool gameplayHudRequested = inGame && m_VR->IsGameplayHudRequested();
 
-    if (m_VR->m_RenderPipelineDebugLog)
-    {
-        static thread_local std::chrono::steady_clock::time_point s_lastVguiPaintLog{};
-        if (!ShouldThrottleLog(s_lastVguiPaintLog, m_VR->m_RenderPipelineDebugLogHz))
+    auto BuildFullHudPaintMode = [&](int paintMode)
         {
-            IMatRenderContext* ctx = m_Game && m_Game->m_MaterialSystem ? m_Game->m_MaterialSystem->GetRenderContext() : nullptr;
-            ITexture* currentRt = DebugCurrentRenderTarget(ctx);
-            int rtMapW = 0;
-            int rtMapH = 0;
-            int rtActualW = 0;
-            int rtActualH = 0;
-            DebugTextureFullSize(currentRt, rtMapW, rtMapH, rtActualW, rtActualH);
+            int fullHudMode = PAINT_UIPANELS | PAINT_INGAMEPANELS;
+            if (cursorVisible)
+                fullHudMode |= PAINT_CURSOR;
+            return paintMode | fullHudMode;
+        };
 
-            ITexture* hudTexture = nullptr;
-            {
-                std::lock_guard<TextureStateMutex> lock(m_VR->m_TextureMutex);
-                hudTexture = m_VR->m_HUDTexture;
-            }
-            int hudMapW = 0;
-            int hudMapH = 0;
-            int hudActualW = 0;
-            int hudActualH = 0;
-            DebugTextureFullSize(hudTexture, hudMapW, hudMapH, hudActualW, hudActualH);
+    // Extra offscreen passes such as scope / rear mirror / clean desktop mirror must not
+    // recurse through the VGUI capture path. Desktop HUD visibility is handled by the
+    // captured m_HUDTexture and composited in the DXVK Present mirror path; when HUD is
+    // not requested, this remains a hard capture stop.
+    if (m_VR->m_SuppressHudCapture)
+    {
+        if (!inGame)
+            return hkVgui_Paint.fOriginal(ecx, mode);
 
-            int windowW = 0;
-            int windowH = 0;
-            int backBufferW = 0;
-            int backBufferH = 0;
-            int clientW = 0;
-            int clientH = 0;
-            int vpX = 0;
-            int vpY = 0;
-            int vpW = 0;
-            int vpH = 0;
-            DebugRenderContextWindowSize(ctx, windowW, windowH);
-            DebugBackBufferDimensions(m_Game ? m_Game->m_MaterialSystem : nullptr, backBufferW, backBufferH);
-            DebugClientRectSize(clientW, clientH);
-            DebugGetViewport(ctx, vpX, vpY, vpW, vpH);
-
-            const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
-            Game::logMsg("[VR][DesktopHUD][VGuiPaint] tid=%lu q=%d mode=0x%X inGame=%d paused=%d cursor=%d allowBackbuffer=%d win=%dx%d client=%dx%d bb=%dx%d vp=%d,%d %dx%d rt=%s(map=%dx%d actual=%dx%d) hudTex=%s(map=%dx%d actual=%dx%d) hudPainted=%d renderedHud=%d suppress=%d",
-                GetCurrentThreadId(), queueMode, mode,
-                inGame ? 1 : 0, isPaused ? 1 : 0, cursorVisible ? 1 : 0, allowBackbufferVgui ? 1 : 0,
-                windowW, windowH, clientW, clientH, backBufferW, backBufferH, vpX, vpY, vpW, vpH,
-                DebugTextureName(currentRt), rtMapW, rtMapH, rtActualW, rtActualH,
-                DebugTextureName(hudTexture), hudMapW, hudMapH, hudActualW, hudActualH,
-                m_VR->m_HudPaintedThisFrame.load(std::memory_order_acquire) ? 1 : 0,
-                m_VR->m_RenderedHud.load(std::memory_order_acquire) ? 1 : 0,
-                m_VR->m_SuppressHudCapture ? 1 : 0);
-        }
+        return;
     }
 
-    // When scope/rear-mirror RTT is rendering, don't redirect HUD/VGUI
-    if (m_VR->m_SuppressHudCapture)
-        return;
+    auto IsPaintingToNativeBackBuffer = [&]() -> bool
+        {
+            IMatRenderContext* ctx = m_Game && m_Game->m_MaterialSystem ? m_Game->m_MaterialSystem->GetRenderContext() : nullptr;
+            if (!ctx)
+                return false;
+
+            // In Source's material system a null render target represents the current backbuffer.
+            // Only allow native desktop VGUI in that case. If this is an eye RT, HUD RT, scope RT,
+            // mirror RT, water RT, etc., capture to m_HUDTexture only and do not draw into that target.
+            return ctx->GetRenderTarget() == nullptr;
+        };
 
     auto PaintToHudOnce = [&](int paintMode)
         {
             bool expected = false;
             if (!m_VR->m_HudPaintedThisFrame.compare_exchange_strong(expected, true, std::memory_order_acq_rel))
-            {
-                if (m_VR->m_RenderPipelineDebugLog)
-                {
-                    static thread_local std::chrono::steady_clock::time_point s_lastHudCaptureSkipLog{};
-                    if (!ShouldThrottleLog(s_lastHudCaptureSkipLog, m_VR->m_RenderPipelineDebugLogHz))
-                    {
-                        Game::logMsg("[VR][DesktopHUD][CaptureSkip] tid=%lu reason=already-painted paintMode=0x%X renderedHud=%d",
-                            GetCurrentThreadId(), paintMode,
-                            m_VR->m_RenderedHud.load(std::memory_order_acquire) ? 1 : 0);
-                    }
-                }
                 return;
-            }
 
             IMatRenderContext* ctx = m_Game && m_Game->m_MaterialSystem ? m_Game->m_MaterialSystem->GetRenderContext() : nullptr;
             if (!ctx)
             {
-                if (m_VR->m_RenderPipelineDebugLog)
-                    Game::logMsg("[VR][DesktopHUD][CaptureAbort] tid=%lu reason=no-render-context paintMode=0x%X", GetCurrentThreadId(), paintMode);
                 m_VR->HandleMissingRenderContext("Hooks::dVGui_Paint");
                 return;
             }
@@ -1150,164 +1113,69 @@ void Hooks::dVGui_Paint(void* ecx, void* edx, int mode)
                 std::lock_guard<TextureStateMutex> lock(m_VR->m_TextureMutex);
                 hudTexture = m_VR->m_HUDTexture;
             }
-
             if (!hudTexture)
-            {
-                if (m_VR->m_RenderPipelineDebugLog)
-                    Game::logMsg("[VR][DesktopHUD][CaptureAbort] tid=%lu reason=no-hud-texture paintMode=0x%X", GetCurrentThreadId(), paintMode);
                 return;
-            }
-
-            static thread_local std::chrono::steady_clock::time_point s_lastHudCaptureLog{};
-            const bool logCapture = m_VR->m_RenderPipelineDebugLog &&
-                !ShouldThrottleLog(s_lastHudCaptureLog, m_VR->m_RenderPipelineDebugLogHz);
 
             ITexture* prevTarget = ctx->GetRenderTarget();
+            int hudMapW = hudTexture->GetMappingWidth();
+            int hudMapH = hudTexture->GetMappingHeight();
+            if (hudMapW <= 0)
+                hudMapW = 1;
+            if (hudMapH <= 0)
+                hudMapH = 1;
 
-            int windowW = 0;
-            int windowH = 0;
-            int backBufferW = 0;
-            int backBufferH = 0;
-            int clientW = 0;
-            int clientH = 0;
-            int prevMapW = 0;
-            int prevMapH = 0;
-            int prevActualW = 0;
-            int prevActualH = 0;
-            int hudMapW = 0;
-            int hudMapH = 0;
-            int hudActualW = 0;
-            int hudActualH = 0;
-            int vpBeforeX = 0;
-            int vpBeforeY = 0;
-            int vpBeforeW = 0;
-            int vpBeforeH = 0;
-            DebugRenderContextWindowSize(ctx, windowW, windowH);
-            DebugBackBufferDimensions(m_Game ? m_Game->m_MaterialSystem : nullptr, backBufferW, backBufferH);
-            DebugClientRectSize(clientW, clientH);
-            DebugTextureFullSize(prevTarget, prevMapW, prevMapH, prevActualW, prevActualH);
-            DebugTextureFullSize(hudTexture, hudMapW, hudMapH, hudActualW, hudActualH);
+            int oldX = 0;
+            int oldY = 0;
+            int oldW = 0;
+            int oldH = 0;
             const bool canRestoreViewport = hkGetViewport.fOriginal && hkViewport.fOriginal &&
-                DebugGetViewport(ctx, vpBeforeX, vpBeforeY, vpBeforeW, vpBeforeH);
+                DebugGetViewport(ctx, oldX, oldY, oldW, oldH);
 
-            auto SetHudCaptureViewport = [&]()
-                {
-                    if (canRestoreViewport)
-                        hkViewport.fOriginal(ctx, 0, 0, (std::max)(1, hudMapW), (std::max)(1, hudMapH));
-                };
+            ctx->SetRenderTarget(hudTexture);
+            if (hkViewport.fOriginal)
+                hkViewport.fOriginal(ctx, 0, 0, hudMapW, hudMapH);
 
-            auto RestoreCapturedViewport = [&]()
-                {
-                    if (canRestoreViewport)
-                        hkViewport.fOriginal(ctx, vpBeforeX, vpBeforeY, vpBeforeW, vpBeforeH);
-                };
+            ctx->OverrideAlphaWriteEnable(true, true);
+            ctx->ClearColor4ub(0, 0, 0, isPaused ? 255 : 0);
+            ctx->ClearBuffers(true, false, false);
 
-            if (logCapture)
-            {
-                Game::logMsg("[VR][DesktopHUD][CaptureBegin] tid=%lu q=%d paintMode=0x%X inGame=%d paused=%d cursor=%d win=%dx%d client=%dx%d bb=%dx%d vpBefore=%d,%d %dx%d prevRt=%s(map=%dx%d actual=%dx%d) hudTex=%s(map=%dx%d actual=%dx%d)",
-                    GetCurrentThreadId(), (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0, paintMode,
-                    inGame ? 1 : 0, isPaused ? 1 : 0, cursorVisible ? 1 : 0,
-                    windowW, windowH, clientW, clientH, backBufferW, backBufferH,
-                    vpBeforeX, vpBeforeY, vpBeforeW, vpBeforeH,
-                    DebugTextureName(prevTarget), prevMapW, prevMapH, prevActualW, prevActualH,
-                    DebugTextureName(hudTexture), hudMapW, hudMapH, hudActualW, hudActualH);
-            }
+            hkVgui_Paint.fOriginal(ecx, paintMode);
+            m_VR->DrawKillIndicators(ctx, hudTexture);
 
-            if (prevTarget != hudTexture)
-            {
-                ctx->SetRenderTarget(hudTexture);
-                SetHudCaptureViewport();
-
-                if (logCapture)
-                {
-                    int vpAfterSetX = 0;
-                    int vpAfterSetY = 0;
-                    int vpAfterSetW = 0;
-                    int vpAfterSetH = 0;
-                    DebugGetViewport(ctx, vpAfterSetX, vpAfterSetY, vpAfterSetW, vpAfterSetH);
-                    Game::logMsg("[VR][DesktopHUD][CaptureAfterSetRT] tid=%lu vp=%d,%d %dx%d expectedHud=%dx%d",
-                        GetCurrentThreadId(), vpAfterSetX, vpAfterSetY, vpAfterSetW, vpAfterSetH, hudMapW, hudMapH);
-                }
-
-                ctx->OverrideAlphaWriteEnable(true, true);
-                const unsigned char clearAlpha = isPaused ? 255 : 0;
-                ctx->ClearColor4ub(0, 0, 0, clearAlpha);
-                ctx->ClearBuffers(true, false, false);
-                hkVgui_Paint.fOriginal(ecx, paintMode);
-                m_VR->DrawKillIndicators(ctx, hudTexture);
-
-                if (logCapture)
-                {
-                    int vpAfterPaintX = 0;
-                    int vpAfterPaintY = 0;
-                    int vpAfterPaintW = 0;
-                    int vpAfterPaintH = 0;
-                    DebugGetViewport(ctx, vpAfterPaintX, vpAfterPaintY, vpAfterPaintW, vpAfterPaintH);
-                    Game::logMsg("[VR][DesktopHUD][CaptureAfterPaint] tid=%lu vp=%d,%d %dx%d hudTex=%dx%d",
-                        GetCurrentThreadId(), vpAfterPaintX, vpAfterPaintY, vpAfterPaintW, vpAfterPaintH, hudMapW, hudMapH);
-                }
-
-                ctx->OverrideAlphaWriteEnable(false, true);
-                ctx->SetRenderTarget(prevTarget);
-                RestoreCapturedViewport();
-
-                if (logCapture)
-                {
-                    int vpRestoredX = 0;
-                    int vpRestoredY = 0;
-                    int vpRestoredW = 0;
-                    int vpRestoredH = 0;
-                    DebugGetViewport(ctx, vpRestoredX, vpRestoredY, vpRestoredW, vpRestoredH);
-                    ITexture* restoredRt = DebugCurrentRenderTarget(ctx);
-                    int restoredMapW = 0;
-                    int restoredMapH = 0;
-                    int restoredActualW = 0;
-                    int restoredActualH = 0;
-                    DebugTextureFullSize(restoredRt, restoredMapW, restoredMapH, restoredActualW, restoredActualH);
-                    Game::logMsg("[VR][DesktopHUD][CaptureEnd] tid=%lu path=set-rt restoredRt=%s(map=%dx%d actual=%dx%d) vpRestored=%d,%d %dx%d",
-                        GetCurrentThreadId(), DebugTextureName(restoredRt), restoredMapW, restoredMapH, restoredActualW, restoredActualH,
-                        vpRestoredX, vpRestoredY, vpRestoredW, vpRestoredH);
-                }
-            }
-            else
-            {
-                // Already on the HUD RT (single-threaded PushRT hijack).
-                SetHudCaptureViewport();
-                hkVgui_Paint.fOriginal(ecx, paintMode);
-                m_VR->DrawKillIndicators(ctx, hudTexture);
-                RestoreCapturedViewport();
-
-                if (logCapture)
-                {
-                    int vpAfterPaintX = 0;
-                    int vpAfterPaintY = 0;
-                    int vpAfterPaintW = 0;
-                    int vpAfterPaintH = 0;
-                    DebugGetViewport(ctx, vpAfterPaintX, vpAfterPaintY, vpAfterPaintW, vpAfterPaintH);
-                    Game::logMsg("[VR][DesktopHUD][CaptureEnd] tid=%lu path=already-hud-rt vp=%d,%d %dx%d hudTex=%dx%d",
-                        GetCurrentThreadId(), vpAfterPaintX, vpAfterPaintY, vpAfterPaintW, vpAfterPaintH, hudMapW, hudMapH);
-                }
-            }
+            ctx->OverrideAlphaWriteEnable(false, true);
+            ctx->SetRenderTarget(prevTarget);
+            if (canRestoreViewport)
+                hkViewport.fOriginal(ctx, oldX, oldY, oldW, oldH);
 
             m_VR->m_RenderedHud.store(true, std::memory_order_release);
         };
 
-    // Prefer a compact paint mode when capturing the HUD.
-    const int hudMode = PAINT_UIPANELS | PAINT_INGAMEPANELS;
-    const int fullHudMode = PAINT_UIPANELS | PAINT_INGAMEPANELS | PAINT_CURSOR;
-    const int paintMode = (!inGame || cursorVisible || isPaused) ? (mode | fullHudMode) : hudMode;
-
-    if (inGame && !allowBackbufferVgui)
+    if (inGame)
     {
-        // In-game: paint HUD into our HUD texture, suppress backbuffer VGUI to avoid
-        // duplicating HUD into the eye render targets (especially under multicore).
-        PaintToHudOnce(paintMode);
+        // In VR gameplay, capture is allowed only while the HUD is actually meant to be visible:
+        // focused UI, HudAlwaysVisible=true, or the off-hand lift request. Every other gameplay
+        // state is a hard capture stop. When the current target is the native backbuffer, paint
+        // there too so desktop spectators match the requested HUD state.
+        if (focusedInGameVgui || gameplayHudRequested)
+        {
+            const int fullHudMode = BuildFullHudPaintMode(mode);
+            PaintToHudOnce(fullHudMode);
+
+            // HudAlwaysVisible/lift/menu must also be visible on the desktop when Source is
+            // currently painting the native backbuffer. This does not weaken the capture-stop
+            // rule: the branch is reached only while the HUD is explicitly requested.
+            if (IsPaintingToNativeBackBuffer())
+                hkVgui_Paint.fOriginal(ecx, fullHudMode);
+        }
+        else
+        {
+            m_VR->m_RenderedHud.store(false, std::memory_order_release);
+            m_VR->m_QueuedHudFreshUntil = {};
+        }
         return;
     }
 
-    // Menu/pause/cursor: keep normal VGUI on the backbuffer, but also update HUD texture once.
-    if (inGame)
-        PaintToHudOnce(paintMode);
+    // Main menu / loading screens are not VR gameplay; keep normal desktop VGUI.
     hkVgui_Paint.fOriginal(ecx, mode);
 }
 

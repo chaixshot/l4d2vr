@@ -454,6 +454,10 @@ public:
 	// Render/HUD/multicore pipeline diagnostics. Default off; logs key frame boundaries only.
 	bool  m_RenderPipelineDebugLog = false;
 	float m_RenderPipelineDebugLogHz = 2.0f;
+	// Performance mode: skip the real right-eye Source RenderView in single-threaded rendering
+	// and copy the completed left-eye render target into the right-eye render target.
+	// This improves CPU time but removes true stereo depth; default off.
+	bool m_RightEyeCopyFromLeft = false;
 	std::chrono::steady_clock::time_point m_RenderPipelineLastSubmitLog{};
 	// Bullet FX alignment: optional visual-only offset applied to
 		// client-side bullet tracers/impact effects so they can be tuned to match the aim line.
@@ -1007,6 +1011,10 @@ public:
 	bool m_HudFollowHmdMovement = false;
 	bool m_HudAlwaysVisible = false;
 	bool m_HudToggleState = false;
+	// Runtime HUD request used by HudAlwaysVisible=false. Raised off-hand temporarily enables
+	// normal VGUI capture and top HUD display instead of only showing a stale overlay.
+	std::atomic<uint32_t> m_HudLiftGestureActive{ 0 };
+	std::chrono::steady_clock::time_point m_HudLiftGestureVisibleUntil{};
 	std::chrono::steady_clock::time_point m_HudChatVisibleUntil{};
 	// Queued rendering (mat_queue_mode!=0): keep HUD visibility stable for a short
 	// window after a successful HUD capture so transient render-thread misses don't
@@ -2485,6 +2493,8 @@ public:
 	void SubmitVRTextures();
 	void LogCompositorError(const char* action, vr::EVRCompositorError error);
 	void RepositionOverlays();
+	void UpdateHudLiftGestureState(bool inGame);
+	bool IsGameplayHudRequested() const;
 	void UpdateRearMirrorOverlayTransform();
 	void UpdateScopeOverlayTransform();
 	void UpdateHandHudOverlays();
@@ -2644,7 +2654,9 @@ public:
 	void DrawPostMirrorPluginOverlays(IMatRenderContext* renderContext, C_BasePlayer* localPlayer, const CViewSetup& view);
 	bool PrepareLeftEyeSurvivorGlowCopy();
 	bool CopyLeftEyeSurvivorGlowToRightEye();
+	bool CopyLeftEyeToRightEyeTexture();
 	bool CopyEyeToDesktopMirrorTexture(int eyeIndex);
+	bool CompositeHudToDesktopMirrorTexture();
 	IDirect3DTexture9* GetOrCreateProjectedItemLabelTexture(
 		IDirect3DDevice9* device,
 		const std::string& text,

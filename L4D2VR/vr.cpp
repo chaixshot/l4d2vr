@@ -501,6 +501,92 @@ static inline bool GetPlayerNameUtf8Safe(IEngineClient* engine, int entIndex, ch
     return outName[0] != 0;
 }
 
+
+void VR::UpdateHudLiftGestureState(bool inGame)
+{
+    const bool wasActive = m_HudLiftGestureActive.load(std::memory_order_acquire) != 0;
+    auto stopLiftHudCapture = [&](bool clearCapturedHud)
+        {
+            m_HudLiftGestureActive.store(0, std::memory_order_release);
+            m_HudLiftGestureVisibleUntil = {};
+            if (clearCapturedHud)
+            {
+                m_QueuedHudFreshUntil = {};
+                m_RenderedHud.store(false, std::memory_order_release);
+                m_HudPaintedThisFrame.store(false, std::memory_order_release);
+            }
+        };
+
+    if (!inGame || !m_System)
+    {
+        stopLiftHudCapture(true);
+        m_HudToggleState = false;
+        return;
+    }
+
+    if (m_HudAlwaysVisible)
+    {
+        stopLiftHudCapture(false);
+        m_HudToggleState = true;
+        return;
+    }
+
+    vr::TrackedDeviceIndex_t leftControllerIndex =
+        m_System->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
+    vr::TrackedDeviceIndex_t rightControllerIndex =
+        m_System->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_RightHand);
+    if (m_LeftHanded)
+        std::swap(leftControllerIndex, rightControllerIndex);
+
+    const bool leftControllerValid =
+        leftControllerIndex != vr::k_unTrackedDeviceIndexInvalid &&
+        leftControllerIndex < vr::k_unMaxTrackedDeviceCount &&
+        m_Poses[leftControllerIndex].bPoseIsValid;
+
+    bool raised = false;
+    if (leftControllerValid)
+    {
+        const float scale = (std::max)(1.0f, m_VRScale);
+
+        // Source units: m_VRScale is units per meter. Keep the exit threshold tight:
+        // lowering the off-hand must stop normal gameplay HUD capture, not just hide an overlay.
+        const float enterBelowHead = 0.24f * scale;
+        const float exitBelowHead = 0.31f * scale;
+        const float zThreshold = m_HmdPosAbs.z - (wasActive ? exitBelowHead : enterBelowHead);
+
+        const Vector delta = m_LeftControllerPosAbs - m_HmdPosAbs;
+        const float horizontalDistSq = delta.x * delta.x + delta.y * delta.y;
+        const float maxHorizontalDist = 0.95f * scale;
+
+        raised =
+            m_LeftControllerPosAbs.z >= zThreshold &&
+            horizontalDistSq <= maxHorizontalDist * maxHorizontalDist;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (raised)
+        m_HudLiftGestureVisibleUntil = now + std::chrono::milliseconds(120);
+
+    const bool active = raised || (m_HudLiftGestureVisibleUntil.time_since_epoch().count() != 0 &&
+        now < m_HudLiftGestureVisibleUntil);
+
+    if (!active)
+    {
+        stopLiftHudCapture(true);
+        m_HudToggleState = false;
+        return;
+    }
+
+    m_HudLiftGestureActive.store(1u, std::memory_order_release);
+    m_HudToggleState = true;
+}
+
+bool VR::IsGameplayHudRequested() const
+{
+    return m_HudAlwaysVisible ||
+        m_HudLiftGestureActive.load(std::memory_order_acquire) != 0;
+}
+
 #include "vr/vr_lifecycle_init.inl"
 #include "vr/vr_lifecycle_update.inl"
 #include "vr/vr_lifecycle_pose_hud.inl"
@@ -10089,6 +10175,399 @@ bool VR::ApplyScopeLensPostProcess()
     return ok;
 }
 
+bool VR::CopyLeftEyeToRightEyeTexture()
+{
+    if (!m_IsVREnabled || !m_RightEyeCopyFromLeft)
+        return false;
+
+    // Single-threaded only. In queued rendering, direct D3D9 copy/draw work can race
+    // Source/DXVK command submission. This mode is a deliberate performance option
+    // that replaces the real right-eye scene with a copy of the left-eye scene.
+    if (m_Game && m_Game->GetMatQueueMode() != 0)
+        return false;
+
+    if (!m_CreatedVRTextures.load(std::memory_order_acquire))
+        return false;
+
+    IDirect3DSurface9* src = nullptr;
+    IDirect3DSurface9* dst = nullptr;
+    {
+        std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
+        if (m_CreatingTextureID != Texture_None)
+            return false;
+
+        src = m_D9LeftEyeSurface;
+        dst = m_D9RightEyeSurface;
+        if (!src || !dst || src == dst)
+            return false;
+
+        src->AddRef();
+        dst->AddRef();
+    }
+
+    auto releaseSurfaceRefs = [&]()
+        {
+            if (src)
+            {
+                src->Release();
+                src = nullptr;
+            }
+            if (dst)
+            {
+                dst->Release();
+                dst = nullptr;
+            }
+        };
+
+    IDirect3DDevice9* device = nullptr;
+    HRESULT hr = src->GetDevice(&device);
+    if (FAILED(hr) || !device)
+    {
+        hr = dst->GetDevice(&device);
+        if (FAILED(hr) || !device)
+        {
+            releaseSurfaceRefs();
+            return false;
+        }
+    }
+
+    const HRESULT cooperativeHr = device->TestCooperativeLevel();
+    if (cooperativeHr == D3DERR_DEVICELOST ||
+        cooperativeHr == D3DERR_DEVICENOTRESET ||
+        cooperativeHr == D3DERR_DRIVERINTERNALERROR)
+    {
+        device->Release();
+        releaseSurfaceRefs();
+        return false;
+    }
+
+    D3DSURFACE_DESC srcDesc{};
+    D3DSURFACE_DESC dstDesc{};
+    if (FAILED(src->GetDesc(&srcDesc)) || FAILED(dst->GetDesc(&dstDesc)) ||
+        srcDesc.Width == 0 || srcDesc.Height == 0 ||
+        dstDesc.Width == 0 || dstDesc.Height == 0)
+    {
+        device->Release();
+        releaseSurfaceRefs();
+        return false;
+    }
+
+    IDirect3DTexture9* srcTexture = nullptr;
+    hr = src->GetContainer(kDesktopMirrorIID_IDirect3DTexture9, reinterpret_cast<void**>(&srcTexture));
+    if (FAILED(hr) || !srcTexture)
+    {
+        device->Release();
+        releaseSurfaceRefs();
+        return false;
+    }
+
+    IDirect3DSurface9* oldRenderTarget = nullptr;
+    const HRESULT oldRtHr = device->GetRenderTarget(0, &oldRenderTarget);
+    D3DVIEWPORT9 oldViewport{};
+    const bool haveOldViewport = SUCCEEDED(device->GetViewport(&oldViewport));
+
+    IDirect3DStateBlock9* stateBlock = nullptr;
+    if (SUCCEEDED(device->CreateStateBlock(D3DSBT_ALL, &stateBlock)) && stateBlock)
+        stateBlock->Capture();
+
+    D3DVIEWPORT9 viewport{};
+    viewport.X = 0;
+    viewport.Y = 0;
+    viewport.Width = dstDesc.Width;
+    viewport.Height = dstDesc.Height;
+    viewport.MinZ = 0.0f;
+    viewport.MaxZ = 1.0f;
+
+    struct EyeCopyVertex
+    {
+        float x;
+        float y;
+        float z;
+        float rhw;
+        D3DCOLOR color;
+        float u;
+        float v;
+    };
+    static constexpr DWORD kEyeCopyFvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1;
+
+    const float left = -0.5f;
+    const float top = -0.5f;
+    const float right = static_cast<float>(dstDesc.Width) - 0.5f;
+    const float bottom = static_cast<float>(dstDesc.Height) - 0.5f;
+    const EyeCopyVertex quad[4] =
+    {
+        { left,  top,    0.0f, 1.0f, 0xFFFFFFFFu, 0.0f, 0.0f },
+        { right, top,    0.0f, 1.0f, 0xFFFFFFFFu, 1.0f, 0.0f },
+        { left,  bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0.0f, 1.0f },
+        { right, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 1.0f, 1.0f }
+    };
+
+    bool ok = true;
+    hr = device->SetRenderTarget(0, dst);
+    ok = ok && SUCCEEDED(hr);
+    if (ok)
+    {
+        device->SetViewport(&viewport);
+        device->SetVertexShader(nullptr);
+        device->SetPixelShader(nullptr);
+        device->SetFVF(kEyeCopyFvf);
+        device->SetTexture(0, srcTexture);
+        device->SetRenderState(D3DRS_ZENABLE, FALSE);
+        device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+        device->SetRenderState(D3DRS_LIGHTING, FALSE);
+        device->SetRenderState(D3DRS_FOGENABLE, FALSE);
+        device->SetRenderState(D3DRS_COLORWRITEENABLE,
+            D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN |
+            D3DCOLORWRITEENABLE_BLUE | D3DCOLORWRITEENABLE_ALPHA);
+        device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+        device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_POINT);
+        device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+        device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+
+        hr = device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(EyeCopyVertex));
+        ok = SUCCEEDED(hr);
+    }
+
+    if (stateBlock)
+    {
+        stateBlock->Apply();
+        stateBlock->Release();
+    }
+    else
+    {
+        device->SetTexture(0, nullptr);
+    }
+
+    if (SUCCEEDED(oldRtHr) && oldRenderTarget)
+        device->SetRenderTarget(0, oldRenderTarget);
+    if (haveOldViewport)
+        device->SetViewport(&oldViewport);
+
+    if (oldRenderTarget)
+        oldRenderTarget->Release();
+    srcTexture->Release();
+    device->Release();
+    releaseSurfaceRefs();
+    return ok;
+}
+
+bool VR::CompositeHudToDesktopMirrorTexture()
+{
+    if (!m_IsVREnabled || !m_DesktopMirrorEnabled || !m_DesktopMirrorHidePluginOverlays)
+        return false;
+
+    const bool focusedInGameVgui =
+        (m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsPaused()) ||
+        (m_Game && m_Game->m_VguiSurface && m_Game->m_VguiSurface->IsCursorVisible());
+    const bool gameplayHudRequested = IsGameplayHudRequested();
+    if (!focusedInGameVgui && !gameplayHudRequested)
+        return false;
+
+    if (!m_HudPaintedThisFrame.load(std::memory_order_acquire) && !m_RenderedHud.load(std::memory_order_acquire))
+        return false;
+    if (!m_CreatedVRTextures.load(std::memory_order_acquire))
+        return false;
+
+    IDirect3DSurface9* src = nullptr;
+    IDirect3DSurface9* dst = nullptr;
+    {
+        std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
+        if (m_CreatingTextureID != Texture_None)
+            return false;
+
+        src = m_D9HUDSurface;
+        dst = m_D9DesktopMirrorSurface;
+        if (!src || !dst || src == dst)
+            return false;
+
+        src->AddRef();
+        dst->AddRef();
+    }
+
+    auto releaseSurfaceRefs = [&]()
+        {
+            if (src)
+            {
+                src->Release();
+                src = nullptr;
+            }
+            if (dst)
+            {
+                dst->Release();
+                dst = nullptr;
+            }
+        };
+
+    IDirect3DDevice9* device = nullptr;
+    HRESULT hr = dst->GetDevice(&device);
+    if (FAILED(hr) || !device)
+    {
+        hr = src->GetDevice(&device);
+        if (FAILED(hr) || !device)
+        {
+            releaseSurfaceRefs();
+            return false;
+        }
+    }
+
+    const HRESULT cooperativeHr = device->TestCooperativeLevel();
+    if (cooperativeHr == D3DERR_DEVICELOST || cooperativeHr == D3DERR_DEVICENOTRESET || cooperativeHr == D3DERR_DRIVERINTERNALERROR)
+    {
+        if (m_RenderPipelineDebugLog)
+            Game::logMsg("[VR][DesktopHUD] skip HUD composite during device transition hr=0x%08X", static_cast<unsigned int>(cooperativeHr));
+        device->Release();
+        releaseSurfaceRefs();
+        return false;
+    }
+
+    D3DSURFACE_DESC srcDesc{};
+    D3DSURFACE_DESC dstDesc{};
+    if (FAILED(src->GetDesc(&srcDesc)) || FAILED(dst->GetDesc(&dstDesc)) ||
+        srcDesc.Width == 0 || srcDesc.Height == 0 || dstDesc.Width == 0 || dstDesc.Height == 0)
+    {
+        device->Release();
+        releaseSurfaceRefs();
+        return false;
+    }
+
+    IDirect3DTexture9* srcTexture = nullptr;
+    hr = src->GetContainer(kDesktopMirrorIID_IDirect3DTexture9, reinterpret_cast<void**>(&srcTexture));
+    if (FAILED(hr) || !srcTexture)
+    {
+        if (m_RenderPipelineDebugLog)
+            Game::logMsg("[VR][DesktopHUD] HUD surface has no texture container hr=0x%08X", static_cast<unsigned int>(hr));
+        device->Release();
+        releaseSurfaceRefs();
+        return false;
+    }
+
+    IDirect3DSurface9* oldRenderTarget = nullptr;
+    const HRESULT oldRtHr = device->GetRenderTarget(0, &oldRenderTarget);
+    D3DVIEWPORT9 oldViewport{};
+    const bool haveOldViewport = SUCCEEDED(device->GetViewport(&oldViewport));
+
+    IDirect3DStateBlock9* stateBlock = nullptr;
+    if (SUCCEEDED(device->CreateStateBlock(D3DSBT_ALL, &stateBlock)) && stateBlock)
+        stateBlock->Capture();
+
+    D3DVIEWPORT9 viewport{};
+    viewport.X = 0;
+    viewport.Y = 0;
+    viewport.Width = dstDesc.Width;
+    viewport.Height = dstDesc.Height;
+    viewport.MinZ = 0.0f;
+    viewport.MaxZ = 1.0f;
+
+    struct DesktopHudVertex
+    {
+        float x;
+        float y;
+        float z;
+        float rhw;
+        D3DCOLOR color;
+        float u;
+        float v;
+    };
+    static constexpr DWORD kDesktopHudFvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_TEX1;
+
+    const float left = -0.5f;
+    const float top = -0.5f;
+    const float right = static_cast<float>(dstDesc.Width) - 0.5f;
+    const float bottom = static_cast<float>(dstDesc.Height) - 0.5f;
+    const DesktopHudVertex quad[4] =
+    {
+        { left,  top,    0.0f, 1.0f, 0xFFFFFFFFu, 0.0f, 0.0f },
+        { right, top,    0.0f, 1.0f, 0xFFFFFFFFu, 1.0f, 0.0f },
+        { left,  bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0.0f, 1.0f },
+        { right, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 1.0f, 1.0f }
+    };
+
+    bool ok = true;
+    hr = device->SetRenderTarget(0, dst);
+    ok = ok && SUCCEEDED(hr);
+    if (ok)
+    {
+        device->SetViewport(&viewport);
+        device->SetVertexShader(nullptr);
+        device->SetPixelShader(nullptr);
+        device->SetFVF(kDesktopHudFvf);
+        device->SetTexture(0, srcTexture);
+        device->SetRenderState(D3DRS_ZENABLE, FALSE);
+        device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+        if (focusedInGameVgui)
+        {
+            // Menu / cursor UI is captured with meaningful alpha. Keep normal alpha blending.
+            device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+            device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+        }
+        else
+        {
+            // Gameplay VGUI often writes RGB but leaves alpha at the transparent clear value.
+            // VR overlays still display that RGB, but desktop alpha blending would make it invisible.
+            // Use source-color compositing for gameplay HUD so black clear pixels remain no-op while HUD RGB appears.
+            device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
+            device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+        }
+        device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+        device->SetRenderState(D3DRS_LIGHTING, FALSE);
+        device->SetRenderState(D3DRS_FOGENABLE, FALSE);
+        device->SetRenderState(D3DRS_COLORWRITEENABLE,
+            D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN |
+            D3DCOLORWRITEENABLE_BLUE | D3DCOLORWRITEENABLE_ALPHA);
+        device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+        device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+        device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+        device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+        device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+        device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+        device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+        device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+        device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+        device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+
+        hr = device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(DesktopHudVertex));
+        ok = SUCCEEDED(hr);
+    }
+
+    if (stateBlock)
+    {
+        stateBlock->Apply();
+        stateBlock->Release();
+    }
+    else
+    {
+        device->SetTexture(0, nullptr);
+    }
+
+    if (SUCCEEDED(oldRtHr) && oldRenderTarget)
+        device->SetRenderTarget(0, oldRenderTarget);
+    if (haveOldViewport)
+        device->SetViewport(&oldViewport);
+
+    if (!ok && m_RenderPipelineDebugLog)
+        Game::logMsg("[VR][DesktopHUD] HUD composite failed hr=0x%08X", static_cast<unsigned int>(hr));
+
+    if (oldRenderTarget)
+        oldRenderTarget->Release();
+    srcTexture->Release();
+    device->Release();
+    releaseSurfaceRefs();
+    return ok;
+}
+
 bool VR::CopyEyeToDesktopMirrorTexture(int eyeIndex)
 {
     if (!m_IsVREnabled || !m_DesktopMirrorEnabled || !m_DesktopMirrorHidePluginOverlays)
@@ -10284,6 +10763,11 @@ bool VR::CopyEyeToDesktopMirrorTexture(int eyeIndex)
     srcTexture->Release();
     device->Release();
     releaseSurfaceRefs();
+
+    // Do not composite HUD into desktopMirrorClean0 here. DXVK's Present path is the
+    // final owner of desktop mirroring and composites m_HUDTexture after StretchRect.
+    // Doing it here as well can double-draw the HUD on single-threaded rendering.
+
     return ok;
 }
 

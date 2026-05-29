@@ -1105,7 +1105,8 @@ void VR::ParseConfigFile()
     m_TopHudCurvature = std::clamp(getFloat("TopHudCurvature", m_TopHudCurvature), 0.0f, 1.0f);
     m_HudFollowHmdMovement = getBool("HudFollowHmdMovement", m_HudFollowHmdMovement);
     m_HudAlwaysVisible = getBool("HudAlwaysVisible", m_HudAlwaysVisible);
-    m_HudToggleState = m_HudAlwaysVisible;
+    m_HudToggleState = m_HudAlwaysVisible ||
+        m_HudLiftGestureActive.load(std::memory_order_acquire) != 0;
 
     // Hand HUD background opacity (0..1)
     m_LeftWristHudBgAlpha = std::clamp(getFloat("LeftWristHudBgAlpha", m_LeftWristHudBgAlpha), 0.0f, 1.0f);
@@ -1407,6 +1408,7 @@ void VR::ParseConfigFile()
     m_QueuedViewmodelStabilizeDebugLogHz = std::max(0.0f, getFloat("QueuedViewmodelStabilizeDebugLogHz", m_QueuedViewmodelStabilizeDebugLogHz));
     m_RenderPipelineDebugLog = getBool("RenderPipelineDebugLog", m_RenderPipelineDebugLog);
     m_RenderPipelineDebugLogHz = std::clamp(getFloat("RenderPipelineDebugLogHz", m_RenderPipelineDebugLogHz), 0.0f, 60.0f);
+    m_RightEyeCopyFromLeft = getBool("RightEyeCopyFromLeft", m_RightEyeCopyFromLeft);
 
     // ReShade compatibility: ReShade's D3D9 runtime can leave the device/backbuffer state in
     // a state that is valid for flat desktop Present but invalid for our per-eye VR RT chain.
