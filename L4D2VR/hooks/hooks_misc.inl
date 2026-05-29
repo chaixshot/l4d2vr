@@ -1071,14 +1071,18 @@ void Hooks::dVGui_Paint(void* ecx, void* edx, int mode)
             return paintMode | fullHudMode;
         };
 
-    // Extra offscreen passes such as scope / rear mirror / clean desktop mirror must not
-    // recurse through the VGUI capture path. Desktop HUD visibility is handled by the
-    // captured m_HUDTexture and composited in the DXVK Present mirror path; when HUD is
-    // not requested, this remains a hard capture stop.
+    // Extra offscreen passes such as scope / rear mirror should not recurse through
+    // the VGUI capture path. The selected desktop-mirror clean pass is the one
+    // exception: when the gameplay HUD is requested, let Source paint VGUI directly
+    // into desktopMirrorClean0 so spectators see the same HUD state without placing
+    // the HUD inside the VR eye textures.
     if (m_VR->m_SuppressHudCapture)
     {
         if (!inGame)
             return hkVgui_Paint.fOriginal(ecx, mode);
+
+        if (m_VR->m_DesktopMirrorCleanRenderingPass && (focusedInGameVgui || gameplayHudRequested))
+            return hkVgui_Paint.fOriginal(ecx, BuildFullHudPaintMode(mode));
 
         return;
     }

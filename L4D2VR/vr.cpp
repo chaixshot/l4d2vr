@@ -10764,9 +10764,8 @@ bool VR::CopyEyeToDesktopMirrorTexture(int eyeIndex)
     device->Release();
     releaseSurfaceRefs();
 
-    // Do not composite HUD into desktopMirrorClean0 here. DXVK's Present path is the
-    // final owner of desktop mirroring and composites m_HUDTexture after StretchRect.
-    // Doing it here as well can double-draw the HUD on single-threaded rendering.
+    if (ok)
+        CompositeHudToDesktopMirrorTexture();
 
     return ok;
 }

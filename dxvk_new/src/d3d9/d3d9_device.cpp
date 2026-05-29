@@ -697,8 +697,7 @@ namespace dxvk {
             D3D9DeviceEx* device,
             IDirect3DSurface9* backBuffer,
             IDirect3DSurface9* hudSurface,
-            const D3DSURFACE_DESC& backBufferDesc,
-            bool useHudAlphaBlend) {
+            const D3DSURFACE_DESC& backBufferDesc) {
             if (!device || !backBuffer || !hudSurface || backBufferDesc.Width == 0 || backBufferDesc.Height == 0)
                 return;
 
@@ -747,17 +746,8 @@ namespace dxvk {
             device->SetRenderState(D3DRS_ZENABLE, FALSE);
             device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
             device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-            if (useHudAlphaBlend) {
-                device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-                device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-            }
-            else {
-                // Gameplay HUD capture is cleared to transparent black, but Source VGUI
-                // can leave alpha at 0 while writing visible RGB. SteamVR overlays display
-                // the RGB data, but desktop alpha blending would make it invisible.
-                device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
-                device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-            }
+            device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+            device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
             device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
             device->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
             device->SetRenderState(D3DRS_COLORWRITEENABLE,
@@ -809,9 +799,7 @@ namespace dxvk {
             hudTexture->Release();
         }
 
-        static bool VrShouldCompositeNativeHudToDesktop(const VR* vr, bool& useHudAlphaBlend) {
-            useHudAlphaBlend = true;
-
+        static bool VrShouldCompositeNativeHudToDesktop(const VR* vr) {
             if (!vr || !vr->m_Game || !vr->m_Game->m_EngineClient)
                 return false;
 
@@ -820,19 +808,12 @@ namespace dxvk {
 
             const bool paused = vr->m_Game->m_EngineClient->IsPaused();
             const bool cursorVisible = vr->m_Game->m_VguiSurface && vr->m_Game->m_VguiSurface->IsCursorVisible();
-            const bool focusedInGameVgui = paused || cursorVisible;
-            const bool gameplayHudRequested = vr->IsGameplayHudRequested();
-            if (!focusedInGameVgui && !gameplayHudRequested)
+            if (!paused && !cursorVisible)
                 return false;
-
-            // Focused VGUI/menu captures have meaningful alpha. Gameplay HUD captures can
-            // contain visible RGB with alpha still at 0, so Present must not depend on alpha
-            // for HudAlwaysVisible/lift-triggered HUD.
-            useHudAlphaBlend = focusedInGameVgui;
 
             // The HUD texture is persistent. If Present composites it unconditionally,
             // stale pause/chat pixels get redrawn onto the desktop mirror forever after
-            // the focused VGUI closes. Only composite a freshly captured/requested in-game HUD.
+            // the focused VGUI closes. Only composite a freshly captured in-game HUD.
             return vr->m_RenderedHud.load(std::memory_order_acquire);
         }
 
@@ -886,11 +867,8 @@ namespace dxvk {
 
             if (FAILED(hr))
                 Logger::warn(str::format("VR desktop mirror StretchRect failed: 0x", std::hex, hr));
-            else {
-                bool useHudAlphaBlend = true;
-                if (haveBackBufferDesc && vr->m_D9HUDSurface && VrShouldCompositeNativeHudToDesktop(vr, useHudAlphaBlend))
-                    VrDrawNativeHudToDesktopBackBuffer(device, backBuffer, vr->m_D9HUDSurface, backBufferDesc, useHudAlphaBlend);
-            }
+            else if (haveBackBufferDesc && vr->m_D9HUDSurface && VrShouldCompositeNativeHudToDesktop(vr))
+                VrDrawNativeHudToDesktopBackBuffer(device, backBuffer, vr->m_D9HUDSurface, backBufferDesc);
 
             backBuffer->Release();
         }
