@@ -2150,19 +2150,16 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 	// Queued render: draw aim line from the render-thread snapshot so it stays glued to the hand/gun.
 	// IMPORTANT: must run after we compute m_SetupOrigin / m_ThirdPersonRenderCenter for this frame.
-	// When desktop mirror overlay hiding is active in queued/multicore mode, render a clean
-	// selected-eye pass into desktopMirrorClean0 before plugin DebugOverlay/D3D overlay
-	// primitives are submitted for the VR eyes.
-	const bool desktopMirrorHidePluginOverlaysRequestedThisFrame =
+	// DesktopMirrorHidePluginOverlays is intentionally single-thread only. Running an extra
+	// clean Source RenderView in queued mode adds another world pass on top of both VR eyes
+	// and can destabilize Source's shared shadow RTT state under scene pressure.
+	const bool desktopMirrorHidePluginOverlaysSingleCopyActive =
 		m_VR->m_IsVREnabled &&
 		m_VR->m_DesktopMirrorEnabled &&
 		m_VR->m_DesktopMirrorHidePluginOverlays &&
-		(m_VR->m_DesktopMirrorTexture != nullptr);
-	const bool desktopMirrorHidePluginOverlaysSingleCopyActive =
-		desktopMirrorHidePluginOverlaysRequestedThisFrame && (queueMode == 0);
-	const bool desktopMirrorHidePluginOverlaysQueuedRtActive =
-		desktopMirrorHidePluginOverlaysRequestedThisFrame && (queueMode != 0);
-	if (m_VR->m_IsVREnabled && queueMode != 0 && !desktopMirrorHidePluginOverlaysQueuedRtActive)
+		(m_VR->m_DesktopMirrorTexture != nullptr) &&
+		(queueMode == 0);
+	if (m_VR->m_IsVREnabled && queueMode != 0)
 	{
 		m_VR->RenderDrawAimLineQueued(localPlayer);
 	}
@@ -2204,117 +2201,12 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	hudRight.origin = rightEyeView.origin;
 	hudRight.angles = renderViewAngles;
 
-	auto renderQueuedDesktopMirrorCleanPass = [&](const CViewSetup& cleanView, const CViewSetup& cleanHud) -> bool
-		{
-			if (!desktopMirrorHidePluginOverlaysQueuedRtActive || !m_VR->m_DesktopMirrorTexture)
-				return false;
-
-			const bool prevSuppressHudCapture = m_VR->m_SuppressHudCapture;
-			const bool prevCleanRenderingPass = m_VR->m_DesktopMirrorCleanRenderingPass;
-			m_VR->m_SuppressHudCapture = true;
-			m_VR->m_DesktopMirrorCleanRenderingPass = true;
-
-			struct CleanMirrorPassGuard
-			{
-				VR* vr = nullptr;
-				bool suppress = false;
-				bool clean = false;
-				~CleanMirrorPassGuard()
-				{
-					if (!vr)
-						return;
-					vr->m_DesktopMirrorCleanRenderingPass = clean;
-					vr->m_SuppressHudCapture = suppress;
-				}
-			} cleanGuard{ m_VR, prevSuppressHudCapture, prevCleanRenderingPass };
-
-			CViewSetup mirrorView = cleanView;
-			CViewSetup mirrorHud = cleanHud;
-			mirrorView.x = 0;
-			mirrorView.y = 0;
-			mirrorView.m_nUnscaledX = 0;
-			mirrorView.m_nUnscaledY = 0;
-			mirrorView.width = static_cast<int>(m_VR->m_RenderWidth);
-			mirrorView.m_nUnscaledWidth = static_cast<int>(m_VR->m_RenderWidth);
-			mirrorView.height = static_cast<int>(m_VR->m_RenderHeight);
-			mirrorView.m_nUnscaledHeight = static_cast<int>(m_VR->m_RenderHeight);
-			mirrorHud.x = 0;
-			mirrorHud.y = 0;
-			mirrorHud.m_nUnscaledX = 0;
-			mirrorHud.m_nUnscaledY = 0;
-			mirrorHud.width = mirrorView.width;
-			mirrorHud.m_nUnscaledWidth = mirrorView.m_nUnscaledWidth;
-			mirrorHud.height = mirrorView.height;
-			mirrorHud.m_nUnscaledHeight = mirrorView.m_nUnscaledHeight;
-
-			if (!hkGetViewport.fOriginal || !hkViewport.fOriginal)
-			{
-				hkPushRenderTargetAndViewport.fOriginal(
-					rndrContext,
-					m_VR->m_DesktopMirrorTexture,
-					nullptr,
-					0,
-					0,
-					static_cast<int>(m_VR->m_RenderWidth),
-					static_cast<int>(m_VR->m_RenderHeight));
-				rndrContext->ClearColor4ub(0, 0, 0, 255);
-				rndrContext->ClearBuffers(true, true, true);
-				callOriginalRenderView(mirrorView, mirrorHud, nClearFlags, whatToDraw);
-				hkPopRenderTargetAndViewport.fOriginal(rndrContext);
-				return true;
-			}
-
-			int oldX = 0;
-			int oldY = 0;
-			int oldW = 0;
-			int oldH = 0;
-			hkGetViewport.fOriginal(rndrContext, oldX, oldY, oldW, oldH);
-			ITexture* oldRT = rndrContext->GetRenderTarget();
-
-			rndrContext->SetRenderTarget(m_VR->m_DesktopMirrorTexture);
-			hkViewport.fOriginal(
-				rndrContext,
-				0,
-				0,
-				static_cast<int>(m_VR->m_RenderWidth),
-				static_cast<int>(m_VR->m_RenderHeight));
-			rndrContext->ClearColor4ub(0, 0, 0, 255);
-			rndrContext->ClearBuffers(true, true, true);
-
-			callOriginalRenderView(mirrorView, mirrorHud, nClearFlags, whatToDraw);
-
-			rndrContext->SetRenderTarget(oldRT);
-			hkViewport.fOriginal(rndrContext, oldX, oldY, oldW, oldH);
-			return true;
-		};
-
 	std::unique_lock<std::recursive_mutex> reshadeQueuedSurfaceLock;
 	if (queueMode != 0 && m_VR->m_ReShadeVRCompat)
 		reshadeQueuedSurfaceLock = std::unique_lock<std::recursive_mutex>(m_VR->m_ReShadeVRCompatSurfaceMutex);
 
-	if (desktopMirrorHidePluginOverlaysQueuedRtActive)
-	{
-		// Queued/multicore clean mirror intentionally does not use the cheap D3D copy path,
-		// because direct raw D3D9 copies can collide with DXVK's queued command stream.
-		// Instead, update desktopMirrorClean0 with a separate clean Source RenderView pass.
-		// Running that every VR frame costs almost a full additional eye render, so throttle
-		// only the desktop spectator image to about half-rate; the HMD eyes still render every frame.
-		static thread_local bool s_queuedDesktopMirrorCleanFlip = false;
-		s_queuedDesktopMirrorCleanFlip = !s_queuedDesktopMirrorCleanFlip;
-		if (s_queuedDesktopMirrorCleanFlip)
-		{
-			const CViewSetup& cleanView = (m_VR->m_DesktopMirrorEye == 0) ? leftEyeView : rightEyeView;
-			const CViewSetup& cleanHud = (m_VR->m_DesktopMirrorEye == 0) ? hudLeft : hudRight;
-			renderQueuedDesktopMirrorCleanPass(cleanView, cleanHud);
-		}
-
-		// The clean mirror pass window is over. Plugin DebugOverlay primitives can now be
-		// submitted for the normal VR eye passes without being captured by desktopMirrorClean0.
-		m_VR->RenderDrawAimLineQueued(localPlayer);
-	}
-
-	const bool submitSpecialInfectedArrowsFromEyePass =
-		desktopMirrorHidePluginOverlaysQueuedRtActive;
+	// The queued clean desktop-mirror RenderView path was removed deliberately.
+	// Queued mode mirrors the regular eye; only single-thread mode uses desktopMirrorClean0.
 
 	const Vector sharedCenterOrigin(
 		(leftEyeView.origin.x + rightEyeView.origin.x) * 0.5f,
@@ -2433,12 +2325,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	bool rightEyeCopiedFromLeft = false;
 
 	{
-		if (submitSpecialInfectedArrowsFromEyePass)
-		{
-			m_VR->ScanSpecialInfectedEntitiesFromClientList();
-			m_VR->DrawCachedSpecialInfectedArrowsDebugOverlay();
-		}
-
 		renderEyeScene(1, m_VR->m_LeftEyeTexture, m_VR->m_D9LeftEyeSurface, leftEyeView, hudLeft, true);
 		if (desktopMirrorHidePluginOverlaysSingleCopyActive && m_VR->m_DesktopMirrorEye == 0)
 			m_VR->CopyEyeToDesktopMirrorTexture(0);
@@ -2457,12 +2343,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	m_PushedHud = false;
 
 	{
-		if (!copyRightEyeFromLeft && submitSpecialInfectedArrowsFromEyePass)
-		{
-			m_VR->ScanSpecialInfectedEntitiesFromClientList();
-			m_VR->DrawCachedSpecialInfectedArrowsDebugOverlay();
-		}
-
 		if (!rightEyeCopiedFromLeft)
 			renderEyeScene(2, m_VR->m_RightEyeTexture, m_VR->m_D9RightEyeSurface, rightEyeView, hudRight, false);
 		if (desktopMirrorHidePluginOverlaysSingleCopyActive && m_VR->m_DesktopMirrorEye != 0)

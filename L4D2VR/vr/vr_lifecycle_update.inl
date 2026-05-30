@@ -510,15 +510,17 @@ namespace
             return;
 
         // The user-facing setting is a request; the runtime flag is true only when the
-        // clean desktop mirror target exists. Single-threaded rendering fills that target
-        // with a post-eye D3D copy. Queued/multicore rendering fills it with a separate
-        // clean Source RenderView pass, so queued mode is not filtered out here.
+        // clean desktop mirror target exists and rendering is single-threaded. Queued mode
+        // must not insert a separate clean world RenderView: the two VR eye passes already
+        // exercise Source's shared shadow RTT path heavily, and the extra pass can corrupt
+        // persistent shadow output after a scene-pressure spike.
 
         const bool requested = vr->m_DesktopMirrorEnabled && vr->m_DesktopMirrorHidePluginOverlaysRequested;
         const bool texturesReady = vr->m_CreatedVRTextures.load(std::memory_order_acquire);
         const bool cleanTargetReady = (vr->m_DesktopMirrorTexture != nullptr);
-        const bool effective = requested && cleanTargetReady;
-        const bool needRecreate = requested && texturesReady && !vr->m_DesktopMirrorTexture;
+        const bool cleanCopySafe = !queuedRendering;
+        const bool effective = requested && cleanTargetReady && cleanCopySafe;
+        const bool needRecreate = requested && cleanCopySafe && texturesReady && !vr->m_DesktopMirrorTexture;
 
         const bool changed = (vr->m_DesktopMirrorHidePluginOverlays != effective);
         vr->m_DesktopMirrorHidePluginOverlays = effective;
@@ -1593,15 +1595,16 @@ void VR::CreateVRTextures()
     }
 
     const bool createDesktopMirrorCleanTarget =
-        m_DesktopMirrorEnabled && m_DesktopMirrorHidePluginOverlaysRequested;
+        m_DesktopMirrorEnabled &&
+        m_DesktopMirrorHidePluginOverlaysRequested &&
+        (!m_Game || m_Game->GetMatQueueMode() == 0);
     m_DesktopMirrorHidePluginOverlays = false;
     if (createDesktopMirrorCleanTarget)
     {
         // Full-size clean eye RTT for desktop mirroring. This is intentionally not
-        // submitted to SteamVR. Single-threaded rendering updates it with the cheap
-        // post-eye D3D copy path. Queued/multicore rendering updates it with a separate
-        // clean Source RenderView pass because direct raw D3D9 copies/draws are unsafe
-        // in the queued command stream.
+        // submitted to SteamVR. It is used only by the single-threaded cheap post-eye
+        // D3D copy path. Queued/multicore rendering mirrors the regular eye directly;
+        // it must not add an extra clean world RenderView.
         m_CreatingTextureID = Texture_DesktopMirror;
         m_DesktopMirrorTexture = m_Game->m_MaterialSystem->CreateNamedRenderTargetTextureEx(
             "desktopMirrorClean0",
