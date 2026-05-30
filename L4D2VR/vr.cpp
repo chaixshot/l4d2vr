@@ -4109,68 +4109,7 @@ static bool ShouldSuppressProjectedItemLabelForMotion(const VR::ProjectedItemLab
         return false;
     }
 
-    static const unsigned char* QueuedGlyph5x7(char ch)
-    {
-        static const unsigned char kQMark[7] = { 0x0E,0x11,0x01,0x06,0x04,0x00,0x04 };
-        static const unsigned char kSpace[7] = { 0,0,0,0,0,0,0 };
-        static const unsigned char kDash[7] = { 0,0,0,0x1F,0,0,0 };
-        static const unsigned char kSlash[7] = { 0x01,0x02,0x04,0x08,0x10,0,0 };
-        static const unsigned char kPlus[7] = { 0,0x04,0x04,0x1F,0x04,0x04,0 };
 
-        static const unsigned char kDigits[10][7] = {
-            { 0x0E,0x11,0x13,0x15,0x19,0x11,0x0E },
-            { 0x04,0x0C,0x04,0x04,0x04,0x04,0x0E },
-            { 0x0E,0x11,0x01,0x02,0x04,0x08,0x1F },
-            { 0x1E,0x01,0x01,0x0E,0x01,0x01,0x1E },
-            { 0x02,0x06,0x0A,0x12,0x1F,0x02,0x02 },
-            { 0x1F,0x10,0x1E,0x01,0x01,0x11,0x0E },
-            { 0x06,0x08,0x10,0x1E,0x11,0x11,0x0E },
-            { 0x1F,0x01,0x02,0x04,0x08,0x08,0x08 },
-            { 0x0E,0x11,0x11,0x0E,0x11,0x11,0x0E },
-            { 0x0E,0x11,0x11,0x0F,0x01,0x02,0x0C },
-        };
-
-        static const unsigned char kUpper[26][7] = {
-            { 0x0E,0x11,0x11,0x1F,0x11,0x11,0x11 }, { 0x1E,0x11,0x11,0x1E,0x11,0x11,0x1E },
-            { 0x0E,0x11,0x10,0x10,0x10,0x11,0x0E }, { 0x1E,0x11,0x11,0x11,0x11,0x11,0x1E },
-            { 0x1F,0x10,0x10,0x1E,0x10,0x10,0x1F }, { 0x1F,0x10,0x10,0x1E,0x10,0x10,0x10 },
-            { 0x0E,0x11,0x10,0x17,0x11,0x11,0x0F }, { 0x11,0x11,0x11,0x1F,0x11,0x11,0x11 },
-            { 0x0E,0x04,0x04,0x04,0x04,0x04,0x0E }, { 0x07,0x02,0x02,0x02,0x12,0x12,0x0C },
-            { 0x11,0x12,0x14,0x18,0x14,0x12,0x11 }, { 0x10,0x10,0x10,0x10,0x10,0x10,0x1F },
-            { 0x11,0x1B,0x15,0x15,0x11,0x11,0x11 }, { 0x11,0x19,0x15,0x13,0x11,0x11,0x11 },
-            { 0x0E,0x11,0x11,0x11,0x11,0x11,0x0E }, { 0x1E,0x11,0x11,0x1E,0x10,0x10,0x10 },
-            { 0x0E,0x11,0x11,0x11,0x15,0x12,0x0D }, { 0x1E,0x11,0x11,0x1E,0x14,0x12,0x11 },
-            { 0x0F,0x10,0x10,0x0E,0x01,0x01,0x1E }, { 0x1F,0x04,0x04,0x04,0x04,0x04,0x04 },
-            { 0x11,0x11,0x11,0x11,0x11,0x11,0x0E }, { 0x11,0x11,0x11,0x11,0x0A,0x0A,0x04 },
-            { 0x11,0x11,0x11,0x15,0x15,0x15,0x0A }, { 0x11,0x11,0x0A,0x04,0x0A,0x11,0x11 },
-            { 0x11,0x11,0x0A,0x04,0x04,0x04,0x04 }, { 0x1F,0x01,0x02,0x04,0x08,0x10,0x1F },
-        };
-
-        static const unsigned char kLower[26][7] = {
-            { 0x00,0x00,0x0E,0x01,0x0F,0x11,0x0F }, { 0x10,0x10,0x16,0x19,0x11,0x11,0x1E },
-            { 0x00,0x00,0x0E,0x10,0x10,0x11,0x0E }, { 0x01,0x01,0x0D,0x13,0x11,0x11,0x0F },
-            { 0x00,0x00,0x0E,0x11,0x1F,0x10,0x0E }, { 0x06,0x09,0x08,0x1C,0x08,0x08,0x08 },
-            { 0x00,0x00,0x0F,0x11,0x0F,0x01,0x0E }, { 0x10,0x10,0x16,0x19,0x11,0x11,0x11 },
-            { 0x04,0x00,0x0C,0x04,0x04,0x04,0x0E }, { 0x02,0x00,0x06,0x02,0x02,0x12,0x0C },
-            { 0x10,0x10,0x12,0x14,0x18,0x14,0x12 }, { 0x0C,0x04,0x04,0x04,0x04,0x04,0x0E },
-            { 0x00,0x00,0x1A,0x15,0x15,0x15,0x15 }, { 0x00,0x00,0x16,0x19,0x11,0x11,0x11 },
-            { 0x00,0x00,0x0E,0x11,0x11,0x11,0x0E }, { 0x00,0x00,0x1E,0x11,0x1E,0x10,0x10 },
-            { 0x00,0x00,0x0D,0x13,0x0F,0x01,0x01 }, { 0x00,0x00,0x16,0x19,0x10,0x10,0x10 },
-            { 0x00,0x00,0x0F,0x10,0x0E,0x01,0x1E }, { 0x08,0x08,0x1C,0x08,0x08,0x09,0x06 },
-            { 0x00,0x00,0x11,0x11,0x11,0x13,0x0D }, { 0x00,0x00,0x11,0x11,0x0A,0x0A,0x04 },
-            { 0x00,0x00,0x11,0x15,0x15,0x15,0x0A }, { 0x00,0x00,0x11,0x0A,0x04,0x0A,0x11 },
-            { 0x00,0x00,0x11,0x11,0x0F,0x01,0x0E }, { 0x00,0x00,0x1F,0x02,0x04,0x08,0x1F },
-        };
-
-        if (ch == ' ') return kSpace;
-        if (ch == '-') return kDash;
-        if (ch == '/') return kSlash;
-        if (ch == '+') return kPlus;
-        if (ch >= '0' && ch <= '9') return kDigits[ch - '0'];
-        if (ch >= 'A' && ch <= 'Z') return kUpper[ch - 'A'];
-        if (ch >= 'a' && ch <= 'z') return kLower[ch - 'a'];
-        return kQMark;
-    }
 }
 
 bool VR::ReadLocalKillCounters(C_BasePlayer* localPlayer, int& outCommon, int& outSpecial)
@@ -8346,6 +8285,9 @@ void VR::SpawnKillIndicator(bool headshot, const Vector& worldPos)
 
 void VR::DestroyItemLabelOverlayTexture()
 {
+    ClearQueuedProjectedItemLabels();
+
+    std::lock_guard<std::recursive_mutex> cacheLock(m_ItemLabelTextureCacheMutex);
     for (auto& pair : m_ItemLabelTextureCache)
     {
         auto& cached = pair.second;
@@ -8755,6 +8697,177 @@ void VR::DestroyDesktopCompanionWindows()
     m_DesktopCompanionIntentHudH = 0;
 }
 
+void VR::PublishQueuedProjectedItemLabels(int eyeIndex, std::vector<QueuedProjectedItemLabelDraw> draws)
+{
+    if (eyeIndex < 0 || eyeIndex >= static_cast<int>(m_QueuedProjectedItemLabelEyes.size()))
+        return;
+
+    std::lock_guard<std::mutex> lock(m_QueuedProjectedItemLabelMutex);
+    m_QueuedProjectedItemLabelEyes[eyeIndex] = std::move(draws);
+}
+
+void VR::ClearQueuedProjectedItemLabelEye(int eyeIndex)
+{
+    if (eyeIndex < 0 || eyeIndex >= static_cast<int>(m_QueuedProjectedItemLabelEyes.size()))
+        return;
+
+    std::lock_guard<std::mutex> lock(m_QueuedProjectedItemLabelMutex);
+    m_QueuedProjectedItemLabelEyes[eyeIndex].clear();
+}
+
+void VR::ClearQueuedProjectedItemLabels()
+{
+    std::lock_guard<std::mutex> lock(m_QueuedProjectedItemLabelMutex);
+    for (auto& eye : m_QueuedProjectedItemLabelEyes)
+        eye.clear();
+}
+
+void VR::DrawQueuedProjectedItemLabelsToSurface(IDirect3DDevice9* device, int eyeIndex, IDirect3DSurface9* target)
+{
+    if (!device || !target || eyeIndex < 0 || eyeIndex >= static_cast<int>(m_QueuedProjectedItemLabelEyes.size()))
+        return;
+
+    std::vector<QueuedProjectedItemLabelDraw> draws;
+    {
+        std::lock_guard<std::mutex> lock(m_QueuedProjectedItemLabelMutex);
+        draws = m_QueuedProjectedItemLabelEyes[eyeIndex];
+    }
+    if (draws.empty())
+        return;
+
+    D3DSURFACE_DESC desc{};
+    if (FAILED(target->GetDesc(&desc)) || desc.Width == 0 || desc.Height == 0)
+        return;
+
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::recursive_mutex> cacheLock(m_ItemLabelTextureCacheMutex);
+    for (auto it = m_ItemLabelTextureCache.begin(); it != m_ItemLabelTextureCache.end();)
+    {
+        const float ageSeconds = std::chrono::duration<float>(now - it->second.lastUsed).count();
+        const bool stale = ageSeconds > 8.0f;
+        const bool overBudget = (m_ItemLabelTextureCache.size() > 96) && ageSeconds > 2.0f;
+        if (!it->second.texture || stale || overBudget)
+        {
+            if (it->second.texture)
+                it->second.texture->Release();
+            it = m_ItemLabelTextureCache.erase(it);
+            continue;
+        }
+        ++it;
+    }
+
+    if (FAILED(device->BeginScene()))
+        return;
+
+    IDirect3DStateBlock9* stateBlock = nullptr;
+    if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &stateBlock)) || !stateBlock)
+    {
+        device->EndScene();
+        return;
+    }
+    stateBlock->Capture();
+
+    IDirect3DSurface9* oldRenderTarget = nullptr;
+    device->GetRenderTarget(0, &oldRenderTarget);
+
+    D3DVIEWPORT9 oldViewport{};
+    const bool hasOldViewport = SUCCEEDED(device->GetViewport(&oldViewport));
+
+    D3DVIEWPORT9 viewport{};
+    viewport.X = 0;
+    viewport.Y = 0;
+    viewport.Width = desc.Width;
+    viewport.Height = desc.Height;
+    viewport.MinZ = 0.0f;
+    viewport.MaxZ = 1.0f;
+
+    device->SetRenderTarget(0, target);
+    device->SetViewport(&viewport);
+    device->SetVertexShader(nullptr);
+    device->SetPixelShader(nullptr);
+    device->SetFVF(kProjectedItemLabelFvf);
+    device->SetRenderState(D3DRS_ZENABLE, FALSE);
+    device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+    device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+    device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+    device->SetRenderState(D3DRS_LIGHTING, FALSE);
+    device->SetRenderState(D3DRS_FOGENABLE, FALSE);
+    device->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+    device->SetRenderState(D3DRS_COLORWRITEENABLE,
+        D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE | D3DCOLORWRITEENABLE_ALPHA);
+    device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+    device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_SELECTARG1);
+    device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+    device->SetTextureStageState(1, D3DTSS_COLOROP, D3DTOP_DISABLE);
+    device->SetTextureStageState(1, D3DTSS_ALPHAOP, D3DTOP_DISABLE);
+    device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+    device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+    device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
+    device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+    device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+
+    const int screenWidth = static_cast<int>(desc.Width);
+    const int screenHeight = static_cast<int>(desc.Height);
+    for (const QueuedProjectedItemLabelDraw& draw : draws)
+    {
+        if (draw.text.empty() || draw.fontPx <= 0)
+            continue;
+
+        int texW = 0;
+        int texH = 0;
+        IDirect3DTexture9* texture = GetOrCreateProjectedItemLabelTexture(
+            device,
+            draw.text,
+            draw.fontPx,
+            draw.colorR,
+            draw.colorG,
+            draw.colorB,
+            draw.colorA,
+            texW,
+            texH);
+        if (!texture || texW <= 0 || texH <= 0)
+            continue;
+
+        const int drawX = std::clamp(draw.screenX - texW / 2, 2, (std::max)(2, screenWidth - texW - 2));
+        const int drawY = std::clamp(draw.screenY - texH / 2, 2, (std::max)(2, screenHeight - texH - 2));
+        const float left = static_cast<float>(drawX) - 0.5f;
+        const float top = static_cast<float>(drawY) - 0.5f;
+        const float right = left + static_cast<float>(texW);
+        const float bottom = top + static_cast<float>(texH);
+
+        const ProjectedItemLabelVertex quad[4] =
+        {
+            { left, top, 0.0f, 1.0f, 0xFFFFFFFFu, 0.0f, 0.0f },
+            { right, top, 0.0f, 1.0f, 0xFFFFFFFFu, 1.0f, 0.0f },
+            { left, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 0.0f, 1.0f },
+            { right, bottom, 0.0f, 1.0f, 0xFFFFFFFFu, 1.0f, 1.0f }
+        };
+
+        device->SetTexture(0, texture);
+        device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(ProjectedItemLabelVertex));
+    }
+
+    if (stateBlock)
+    {
+        stateBlock->Apply();
+        stateBlock->Release();
+    }
+
+    if (oldRenderTarget)
+    {
+        device->SetRenderTarget(0, oldRenderTarget);
+        oldRenderTarget->Release();
+    }
+
+    if (hasOldViewport)
+        device->SetViewport(&oldViewport);
+
+    device->EndScene();
+}
+
 IDirect3DTexture9* VR::GetOrCreateProjectedItemLabelTexture(
     IDirect3DDevice9* device,
     const std::string& text,
@@ -8771,6 +8884,7 @@ IDirect3DTexture9* VR::GetOrCreateProjectedItemLabelTexture(
     if (!device || text.empty())
         return nullptr;
 
+    std::lock_guard<std::recursive_mutex> cacheLock(m_ItemLabelTextureCacheMutex);
     const bool hasNonAscii = ContainsNonAscii(text.c_str());
     fontPx = QuantizeProjectedItemLabelFontPx(fontPx);
     const Rgba color
@@ -8868,27 +8982,38 @@ IDirect3DTexture9* VR::GetOrCreateProjectedItemLabelTexture(
     return cached.texture;
 }
 
-void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSetup& view)
+void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSetup& view, int eyeIndex)
 {
-    if (!renderContext)
-        return;
+    const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
+    const bool queued = queueMode != 0;
+    const auto clearQueuedEye = [&]()
+        {
+            if (queued)
+                ClearQueuedProjectedItemLabelEye(eyeIndex);
+        };
 
-    // In queued/multicore mode we cannot use the raw D3D9 post-overlay path,
-    // but the function still has a DebugOverlay glyph fallback below. Do not
-    // return here, otherwise ItemModelLabel only updates its cache and never
-    // produces any visible output.
+    if (!renderContext)
+    {
+        clearQueuedEye();
+        return;
+    }
 
     if (m_DesktopMirrorCleanRenderingPass && m_DesktopMirrorHidePluginOverlays)
+    {
+        clearQueuedEye();
         return;
+    }
 
     const auto now = std::chrono::steady_clock::now();
     if (!m_ItemModelLabelEnabled || !m_Game || !m_Game->m_EngineClient || !m_Game->m_EngineClient->IsInGame())
     {
         m_ProjectedItemLabels.clear();
+        ClearQueuedProjectedItemLabels();
         return;
     }
 
-    const int queueMode = m_Game->GetMatQueueMode();
+    if (!queued)
+        ClearQueuedProjectedItemLabels();
 
     const float holdSeconds = GetProjectedItemLabelHoldSeconds(this);
     for (auto it = m_ProjectedItemLabels.begin(); it != m_ProjectedItemLabels.end();)
@@ -8901,12 +9026,18 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
     }
 
     if (m_ProjectedItemLabels.empty())
+    {
+        clearQueuedEye();
         return;
+    }
 
     int screenWidth = view.width;
     int screenHeight = view.height;
     if (screenWidth <= 0 || screenHeight <= 0)
+    {
+        clearQueuedEye();
         return;
+    }
 
     QAngle viewAngles(view.angles.x, view.angles.y, view.angles.z);
     Vector forward{};
@@ -8914,7 +9045,10 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
     Vector up{};
     QAngle::AngleVectors(viewAngles, &forward, &right, &up);
     if (forward.IsZero() || right.IsZero() || up.IsZero())
+    {
+        clearQueuedEye();
         return;
+    }
 
     VectorNormalize(forward);
     VectorNormalize(right);
@@ -8926,7 +9060,10 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
     const float tanHalfFovX = std::tan(DEG2RAD(view.fov * 0.5f));
     const float tanHalfFovY = tanHalfFovX / std::max(aspect, 0.01f);
     if (tanHalfFovX <= 0.0001f || tanHalfFovY <= 0.0001f)
+    {
+        clearQueuedEye();
         return;
+    }
 
     struct VisibleProjectedItemLabel
     {
@@ -8945,7 +9082,7 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
         if (ShouldSuppressProjectedItemLabelForMotion(projected, now))
             continue;
 
-        if (queueMode == 0 && ShouldSuppressProjectedItemLabelNearPlayer(this, projected.worldPos))
+        if (ShouldSuppressProjectedItemLabelNearPlayer(this, projected.worldPos))
             continue;
 
         const float maxDistance = std::max(0.0f, m_ItemModelLabelMaxDistance);
@@ -9001,7 +9138,10 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
     }
 
     if (visibleLabels.empty())
+    {
+        clearQueuedEye();
         return;
+    }
 
     std::sort(
         visibleLabels.begin(),
@@ -9011,11 +9151,7 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
             return lhs.depth < rhs.depth;
         });
 
-    size_t maxProjectedItemLabelsPerEye = static_cast<size_t>(std::clamp(m_ItemModelLabelMaxVisiblePerEye, 1, 64));
-    if (queueMode != 0)
-        maxProjectedItemLabelsPerEye = (std::min)(
-            maxProjectedItemLabelsPerEye,
-            static_cast<size_t>(std::clamp(m_ItemModelLabelQueuedMaxVisiblePerEye, 1, 16)));
+    const size_t maxProjectedItemLabelsPerEye = static_cast<size_t>(std::clamp(m_ItemModelLabelMaxVisiblePerEye, 1, 64));
     if (visibleLabels.size() > maxProjectedItemLabelsPerEye)
         visibleLabels.resize(maxProjectedItemLabelsPerEye);
 
@@ -9027,25 +9163,10 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
             return lhs.depth > rhs.depth;
         });
 
-    if (queueMode != 0)
+    if (queued)
     {
-        if (!m_Game || !m_Game->m_DebugOverlay)
-            return;
-
-        // DebugOverlay primitives are global and survive across RenderView passes.
-        // Keep queued label glyphs single-pass so they do not leak into the clean
-        // desktop mirror RTT on the next frame.
-        const float durationSec = 0.001f;
-        const Vector glyphRight = right;
-        const Vector glyphUp = up;
-
-        auto drawGlyphRun = [&](const Vector& topLeft, float x0, float yMid, float x1, const Rgba& color)
-            {
-                const Vector p0 = topLeft + glyphRight * x0 - glyphUp * yMid;
-                const Vector p1 = topLeft + glyphRight * x1 - glyphUp * yMid;
-                m_Game->m_DebugOverlay->AddLineOverlay(p0, p1, color.r, color.g, color.b, true, durationSec);
-            };
-
+        std::vector<QueuedProjectedItemLabelDraw> queuedDraws;
+        queuedDraws.reserve(visibleLabels.size());
         for (const VisibleProjectedItemLabel& visible : visibleLabels)
         {
             if (!visible.label)
@@ -9055,58 +9176,28 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
             if (!GetProjectedItemLabelColor(visible.label->category, color))
                 continue;
 
-            const float textScale = std::clamp(m_ItemModelLabelQueuedTextScale, 0.25f, 4.0f);
-            const float worldTextHeight = 8.5f * textScale;
-            const float cellSize = worldTextHeight / 7.0f;
-            const float charAdvance = cellSize * 6.0f;
-            const std::string& fullText = visible.label->label;
-            const size_t maxChars = static_cast<size_t>(std::clamp(m_ItemModelLabelQueuedMaxChars, 4, 32));
-            const size_t charCount = (std::min)(fullText.size(), maxChars);
-            if (charCount == 0)
-                continue;
+            const float worldTextHeight = 9.0f * std::clamp(m_ItemModelLabelTextScale, 0.25f, 4.0f);
+            int fontPx = static_cast<int>(std::lround((worldTextHeight / (visible.depth * tanHalfFovY * 2.0f)) * static_cast<float>(screenHeight)));
+            const bool hasNonAscii = ContainsNonAscii(visible.label->label.c_str());
+            const float textScale = std::clamp(m_ItemModelLabelTextScale, 0.25f, 4.0f);
+            const int minFontPx = (std::max)(6, static_cast<int>(std::lround((hasNonAscii ? 12.0f : 10.0f) * textScale)));
+            const int maxFontPx = (std::max)(minFontPx, static_cast<int>(std::lround((hasNonAscii ? 28.0f : 24.0f) * textScale)));
+            fontPx = std::clamp(fontPx, minFontPx, maxFontPx);
+            fontPx = QuantizeProjectedItemLabelFontPx(fontPx);
 
-            const float textWidth = charAdvance * static_cast<float>(charCount) - cellSize;
-            const Vector topLeft =
-                visible.label->worldPos
-                - glyphRight * (textWidth * 0.5f)
-                + glyphUp * (worldTextHeight * 0.5f);
-
-            float penX = 0.0f;
-            for (size_t charIndex = 0; charIndex < charCount; ++charIndex)
-            {
-                const char ch = fullText[charIndex];
-                const unsigned char* rows = QueuedGlyph5x7(ch);
-                for (int yy = 0; yy < 7; ++yy)
-                {
-                    const unsigned char bits = rows[yy];
-                    int runStart = -1;
-                    for (int xx = 0; xx <= 5; ++xx)
-                    {
-                        const bool filled = (xx < 5) && ((bits & (1u << (4 - xx))) != 0);
-                        if (filled)
-                        {
-                            if (runStart < 0)
-                                runStart = xx;
-                            continue;
-                        }
-
-                        if (runStart < 0)
-                            continue;
-
-                        const float inset = cellSize * 0.12f;
-                        drawGlyphRun(
-                            topLeft,
-                            penX + static_cast<float>(runStart) * cellSize + inset,
-                            (static_cast<float>(yy) + 0.5f) * cellSize,
-                            penX + static_cast<float>(xx) * cellSize - inset,
-                            color);
-                        runStart = -1;
-                    }
-                }
-
-                penX += charAdvance;
-            }
+            QueuedProjectedItemLabelDraw draw{};
+            draw.text = visible.label->label;
+            draw.screenX = visible.screenX;
+            draw.screenY = visible.screenY;
+            draw.fontPx = fontPx;
+            draw.colorR = static_cast<int>(color.r);
+            draw.colorG = static_cast<int>(color.g);
+            draw.colorB = static_cast<int>(color.b);
+            draw.colorA = static_cast<int>(color.a);
+            queuedDraws.push_back(std::move(draw));
         }
+
+        PublishQueuedProjectedItemLabels(eyeIndex, std::move(queuedDraws));
         return;
     }
 
@@ -9118,6 +9209,7 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
         return;
     }
 
+    std::lock_guard<std::recursive_mutex> cacheLock(m_ItemLabelTextureCacheMutex);
     for (auto it = m_ItemLabelTextureCache.begin(); it != m_ItemLabelTextureCache.end();)
     {
         const float ageSeconds = std::chrono::duration<float>(now - it->second.lastUsed).count();
@@ -9222,7 +9314,6 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
 
     device->Release();
 }
-
 
 namespace
 {
@@ -9568,22 +9659,21 @@ void VR::DrawProjectedSpecialInfectedArrows(IMatRenderContext* renderContext, co
     device->Release();
 }
 
-void VR::DrawPostMirrorPluginOverlays(IMatRenderContext* renderContext, C_BasePlayer* localPlayer, const CViewSetup& view)
+void VR::DrawPostMirrorPluginOverlays(IMatRenderContext* renderContext, C_BasePlayer* localPlayer, const CViewSetup& view, int eyeIndex)
 {
     if (!renderContext)
         return;
 
-    // This function normally uses raw D3D9 draws after Source's RenderView. In queued/multicore
-    // mode those post-mirror D3D draws can race DXVK's queued command stream, so this
-    // function keeps only the DebugOverlay item-label fallback alive and skips the raw
-    // D3D overlay draws for special-infected arrows and the optional D3D aim line.
+    // Raw D3D draws after Source RenderView are unsafe in queued mode. Item labels still
+    // use the same GDI-generated textures as the single-threaded path, but their textured
+    // quads are published here and drawn later from DXVK's safe eye-submit point.
     if (m_Game && m_Game->GetMatQueueMode() != 0)
     {
-        DrawProjectedItemLabels(renderContext, view);
+        DrawProjectedItemLabels(renderContext, view, eyeIndex);
         return;
     }
 
-    DrawProjectedItemLabels(renderContext, view);
+    DrawProjectedItemLabels(renderContext, view, eyeIndex);
     DrawProjectedSpecialInfectedArrows(renderContext, view);
 
     if (!m_DesktopMirrorHidePluginOverlays || !m_DesktopMirrorEnabled)

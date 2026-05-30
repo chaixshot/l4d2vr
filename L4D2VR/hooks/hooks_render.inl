@@ -2335,7 +2335,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			rndrContext->SetRenderTarget(m_VR->m_LeftEyeTexture);
 			if (hkViewport.fOriginal)
 				hkViewport.fOriginal(rndrContext, 0, 0, m_VR->m_RenderWidth, m_VR->m_RenderHeight);
-			m_VR->DrawPostMirrorPluginOverlays(rndrContext, localPlayer, leftEyeView);
+			m_VR->DrawPostMirrorPluginOverlays(rndrContext, localPlayer, leftEyeView, 0);
 		}
 		if (m_VR->m_IsVREnabled)
 			m_VR->UpdateD3DAimLineOverlayForView(localPlayer, leftEyeView, 0);
@@ -2352,7 +2352,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			rndrContext->SetRenderTarget(m_VR->m_RightEyeTexture);
 			if (hkViewport.fOriginal)
 				hkViewport.fOriginal(rndrContext, 0, 0, m_VR->m_RenderWidth, m_VR->m_RenderHeight);
-			m_VR->DrawPostMirrorPluginOverlays(rndrContext, localPlayer, rightEyeView);
+			m_VR->DrawPostMirrorPluginOverlays(rndrContext, localPlayer, rightEyeView, 1);
 		}
 		if (m_VR->m_IsVREnabled)
 			m_VR->UpdateD3DAimLineOverlayForView(localPlayer, rightEyeView, 1);

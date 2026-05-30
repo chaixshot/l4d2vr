@@ -1093,6 +1093,7 @@ void VR::UpdateAutoMatQueueMode()
     {
         m_Game->SetConVarInt("crosshair", 0);
         m_Game->SetConVarFloat("mat_grain_scale_override", 0.0f);
+        m_Game->SetConVarInt("engine_no_focus_sleep", 0);
         // Source motion blur uses global view history. Extra scope RTT RenderView passes can
         // poison the next stereo eye, so keep motion blur disabled for VR.
         m_Game->SetConVarInt("mat_motion_blur_enabled", 0);

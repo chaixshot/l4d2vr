@@ -1615,6 +1615,20 @@ public:
 		std::chrono::steady_clock::time_point lastUsed{};
 	};
 
+	// Queued rendering publishes the same textured labels used by the single-threaded path,
+	// but defers the actual D3D draw until DXVK reaches the safe eye-submit point.
+	struct QueuedProjectedItemLabelDraw
+	{
+		std::string text;
+		int screenX = 0;
+		int screenY = 0;
+		int fontPx = 0;
+		int colorR = 255;
+		int colorG = 255;
+		int colorB = 255;
+		int colorA = 255;
+	};
+
 	static constexpr int kZombieClassOffset = 0x1c90;
 	static constexpr int kLifeStateOffset = 0x147;
 	static constexpr int kTeamNumOffset = 0xE4; // DT_BaseEntity::m_iTeamNum
@@ -2289,17 +2303,17 @@ public:
 	float m_ItemModelLabelMaxHz = 60.0f;
 	float m_ItemModelLabelScanHz = 6.0f;
 	float m_ItemModelLabelTextScale = 1.0f;
-	float m_ItemModelLabelQueuedTextScale = 1.0f;
 	float m_ItemModelLabelMaxDistance = 4096.0f;
 	int m_ItemModelLabelMaxVisiblePerEye = 18;
-	int m_ItemModelLabelQueuedMaxVisiblePerEye = 3;
-	int m_ItemModelLabelQueuedMaxChars = 12;
 	float m_ItemModelLabelPlayerSuppressRadius = 96.0f;
 	float m_ItemModelLabelPlayerSuppressMinZ = -32.0f;
 	float m_ItemModelLabelPlayerSuppressMaxZ = 128.0f;
 	mutable std::unordered_map<int, std::chrono::steady_clock::time_point> m_LastItemModelLabelTime{};
 	std::unordered_map<int, ProjectedItemLabel> m_ProjectedItemLabels{};
 	std::unordered_map<std::string, CachedProjectedItemLabelTexture> m_ItemLabelTextureCache{};
+	mutable std::recursive_mutex m_ItemLabelTextureCacheMutex{};
+	mutable std::mutex m_QueuedProjectedItemLabelMutex{};
+	std::array<std::vector<QueuedProjectedItemLabelDraw>, 2> m_QueuedProjectedItemLabelEyes{};
 	mutable std::mutex m_ProjectedSpecialInfectedArrowMutex;
 	std::unordered_map<int, ProjectedSpecialInfectedArrow> m_ProjectedSpecialInfectedArrows{};
 	int m_AimLineWarningColorR = 255;
@@ -2647,11 +2661,11 @@ public:
 	void SpawnHitIndicator(const Vector& worldPos);
 	void SpawnKillIndicator(bool headshot, const Vector& worldPos);
 	void DrawKillIndicators(IMatRenderContext* renderContext, ITexture* hudTexture);
-	void DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSetup& view);
+	void DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSetup& view, int eyeIndex);
 	void RecordProjectedSpecialInfectedArrow(int entityIndex, const Vector& origin, SpecialInfectedType type);
 	void DrawCachedSpecialInfectedArrowsDebugOverlay();
 	void DrawProjectedSpecialInfectedArrows(IMatRenderContext* renderContext, const CViewSetup& view);
-	void DrawPostMirrorPluginOverlays(IMatRenderContext* renderContext, C_BasePlayer* localPlayer, const CViewSetup& view);
+	void DrawPostMirrorPluginOverlays(IMatRenderContext* renderContext, C_BasePlayer* localPlayer, const CViewSetup& view, int eyeIndex);
 	bool PrepareLeftEyeSurvivorGlowCopy();
 	bool CopyLeftEyeSurvivorGlowToRightEye();
 	bool CopyLeftEyeToRightEyeTexture();
@@ -2675,6 +2689,10 @@ public:
 	bool EnsureKillIndicatorOverlayTexture(int materialIndex, int width, int height);
 	bool UploadKillIndicatorOverlayTexture(int materialIndex, const uint8_t* rgba, int width, int height, uint32_t frameIndex = 0, bool fromDecodedFrames = false);
 	void DestroyItemLabelOverlayTexture();
+	void PublishQueuedProjectedItemLabels(int eyeIndex, std::vector<QueuedProjectedItemLabelDraw> draws);
+	void ClearQueuedProjectedItemLabelEye(int eyeIndex);
+	void ClearQueuedProjectedItemLabels();
+	void DrawQueuedProjectedItemLabelsToSurface(IDirect3DDevice9* device, int eyeIndex, IDirect3DSurface9* target);
 	void PumpDesktopCompanionWindows();
 	void UpdateDesktopRearMirrorWindow(bool visible);
 	void UpdateDesktopIntentSenseHudWindow(const uint8_t* rgba, int width, int height, bool visible);

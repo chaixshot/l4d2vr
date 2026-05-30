@@ -402,6 +402,19 @@ namespace dxvk {
                 VrAimLineDrawOverlayToSurface(device, vr, 1, rightTarget, false);
         }
 
+        static void VrItemModelLabelDrawOverlaysToSubmitTargets(D3D9DeviceEx* device, VR* vr) {
+            if (!device || !vr || !vr->m_ItemModelLabelEnabled)
+                return;
+
+            IDirect3DSurface9* leftTarget = vr->m_D9LeftEyeSubmitSurface ? vr->m_D9LeftEyeSubmitSurface : vr->m_D9LeftEyeSurface;
+            IDirect3DSurface9* rightTarget = vr->m_D9RightEyeSubmitSurface ? vr->m_D9RightEyeSubmitSurface : vr->m_D9RightEyeSurface;
+
+            if (leftTarget)
+                vr->DrawQueuedProjectedItemLabelsToSurface(device, 0, leftTarget);
+            if (rightTarget)
+                vr->DrawQueuedProjectedItemLabelsToSurface(device, 1, rightTarget);
+        }
+
         static bool VrTextureBoundsToSourceRect(
             const vr::VRTextureBounds_t* bounds,
             const D3DSURFACE_DESC& desc,
@@ -5139,6 +5152,7 @@ namespace dxvk {
 
                 if (!inGame) {
                     vr->ClearD3DAimLineOverlay();
+                    vr->ClearQueuedProjectedItemLabels();
                 }
                 else if (!queued && !deferEyeSubmitResolve) {
                     VrAimLineDrawOverlaysToEyeSurfaces(this, vr, true);
@@ -5237,6 +5251,7 @@ namespace dxvk {
                     // state and surface mutex are the ownership signal; enqueue the eye->submit copy,
                     // then make that copy visible before VR::Update submits to OpenVR/ALVR.
                     VrResolveEyeSurfacesToSubmit(this, postPresentVR);
+                    VrItemModelLabelDrawOverlaysToSubmitTargets(this, postPresentVR);
                     VrAimLineDrawOverlaysToSubmitTargets(this, postPresentVR);
                     postPresentVR->m_ReShadeVRCompatResolvedFrameId.store(completedFrameId, std::memory_order_release);
                     if (g_D3DVR9)
@@ -5252,6 +5267,7 @@ namespace dxvk {
                 const bool inGame = (g_Game->m_EngineClient && g_Game->m_EngineClient->IsInGame());
                 const bool queued = (g_Game->GetMatQueueMode() != 0);
                 if (inGame && queued) {
+                    VrItemModelLabelDrawOverlaysToSubmitTargets(this, vr);
                     VrAimLineDrawOverlaysToSubmitTargets(this, vr);
                     if (g_D3DVR9)
                         g_D3DVR9->WaitDeviceIdle();

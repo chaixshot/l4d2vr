@@ -1653,10 +1653,10 @@ void VR::ParseConfigFile()
     // Drop stale projected labels when config is reloaded so newly blacklisted text disappears immediately.
     m_ProjectedItemLabels.clear();
     m_LastItemModelLabelTime.clear();
+    ClearQueuedProjectedItemLabels();
     m_ItemModelLabelMaxHz = std::max(0.0f, getFloat("ItemModelLabelMaxHz", m_ItemModelLabelMaxHz));
     m_ItemModelLabelScanHz = std::clamp(getFloat("ItemModelLabelScanHz", m_ItemModelLabelScanHz), 1.0f, 60.0f);
     m_ItemModelLabelTextScale = std::clamp(getFloat("ItemModelLabelTextScale", m_ItemModelLabelTextScale), 0.25f, 4.0f);
-    m_ItemModelLabelQueuedTextScale = std::clamp(getFloat("ItemModelLabelQueuedTextScale", m_ItemModelLabelQueuedTextScale), 0.25f, 4.0f);
     m_ItemModelLabelMaxDistance = std::max(0.0f, getFloat("ItemModelLabelMaxDistance", m_ItemModelLabelMaxDistance));
     m_ItemModelLabelMaxVisiblePerEye = std::clamp(getInt("ItemModelLabelMaxVisiblePerEye", m_ItemModelLabelMaxVisiblePerEye), 1, 64);
     m_DesktopMirrorEnabled = getBool("DesktopMirrorEnabled", m_DesktopMirrorEnabled);
@@ -1692,8 +1692,6 @@ void VR::ParseConfigFile()
         m_CreatedVRTextures.store(false, std::memory_order_release);
         m_CreatingTextureID = Texture_None;
     }
-    m_ItemModelLabelQueuedMaxVisiblePerEye = std::clamp(getInt("ItemModelLabelQueuedMaxVisiblePerEye", m_ItemModelLabelQueuedMaxVisiblePerEye), 1, 16);
-    m_ItemModelLabelQueuedMaxChars = std::clamp(getInt("ItemModelLabelQueuedMaxChars", m_ItemModelLabelQueuedMaxChars), 4, 32);
     m_ItemModelLabelPlayerSuppressRadius = std::max(0.0f, getFloat("ItemModelLabelPlayerSuppressRadius", m_ItemModelLabelPlayerSuppressRadius));
     m_ItemModelLabelPlayerSuppressMinZ = getFloat("ItemModelLabelPlayerSuppressMinZ", m_ItemModelLabelPlayerSuppressMinZ);
     m_ItemModelLabelPlayerSuppressMaxZ = getFloat("ItemModelLabelPlayerSuppressMaxZ", m_ItemModelLabelPlayerSuppressMaxZ);
