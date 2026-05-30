@@ -350,6 +350,8 @@ struct Ray_t
 		m_Extents *= 0.5f;
 		m_IsRay = (m_Extents.LengthSqr() < 1e-6);
 
+		m_pWorldAxisTransform = 0;
+
 		// Offset m_Start to be in the center of the box...
 		VectorAdd(mins, maxs, m_StartOffset);
 		m_StartOffset *= 0.5f;

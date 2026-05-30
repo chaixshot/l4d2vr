@@ -1277,6 +1277,12 @@ float __fastcall Hooks::dProcessUsercmds(void* ecx, void* edx, edict_t* player,
 
 	float result = hkProcessUsercmds.fOriginal(ecx, player, buf, numcmds, totalcmds, dropped_packets, ignore, paused);
 
+	// A blocked direct roomscale move is injected into one decoded server CUserCmd so
+	// Source's normal player movement can run StepMove. Reconcile the resulting planar
+	// displacement after ProcessUsercmds returns, then correct the VR camera only by the
+	// difference between accepted movement and the physical HMD movement.
+	FinalizePendingRoomscaleServerCmdFallback(pPlayer, index);
+
 	// ===== 你原有的“近战挥砍检测/追踪”逻辑，保持不变 =====
 	const bool hasValidPlayer = m_Game->IsValidPlayerIndex(index);
 
@@ -1421,6 +1427,10 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 			m_Game->m_PlayersVRInfo[i].isUsingVR = false;
 		}
 	}
+
+	// If the planar SetOrigin sweep hit a stair or another obstruction, route this
+	// displacement through Source's ordinary server movement for one command.
+	InjectPendingRoomscaleServerCmdFallback(i, move);
 
 	return 1;
 }

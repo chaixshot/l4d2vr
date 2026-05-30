@@ -2768,8 +2768,12 @@ public:
 	Vector GetAimRenderCameraDelta() const;
 	void ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool controlLocomotionActive);
 	bool ShouldUseRoomscale1To1ServerMove() const;
-	void QueueRoomscale1To1ServerMoveDelta(const Vector& worldDelta);
-	bool ConsumeRoomscale1To1ServerMoveDelta(Vector& outWorldDelta);
+	void QueueRoomscale1To1ServerMoveDelta(const Vector& worldDelta, const Vector& visualWorldDelta);
+	bool ConsumeRoomscale1To1ServerMoveDelta(Vector& outWorldDelta, Vector& outVisualWorldDelta);
+	void QueueRoomscale1To1ServerVisualCorrection(const Vector& worldCorrection);
+	void ApplyPendingRoomscale1To1ServerVisualCorrection();
+	void ApplyRoomscale1To1VisualWorldCorrection(const Vector& worldCorrection);
+	void CancelRoomscale1To1ServerMoveDelta();
 	void ClearRoomscale1To1ServerMoveDelta();
 	void OnPredictionRunCommand(CUserCmd* cmd);
 	void OnPrimaryAttackServerDecision(CUserCmd* cmd, bool fromSecondaryPrediction);

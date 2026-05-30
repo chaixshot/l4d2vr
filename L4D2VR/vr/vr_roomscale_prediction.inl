@@ -29,21 +29,85 @@ bool VR::ShouldUseRoomscale1To1ServerMove() const
         hasServerEntityMove;
 }
 
-void VR::QueueRoomscale1To1ServerMoveDelta(const Vector& worldDelta)
+namespace
 {
-    if (!std::isfinite(worldDelta.x) || !std::isfinite(worldDelta.y) || !std::isfinite(worldDelta.z))
-        return;
+    struct Roomscale1To1ServerVisualState
+    {
+        VR* owner = nullptr;
+        Vector pendingServerVisualWorldDelta = {};
+        Vector pendingServerVisualCorrectionWorld = {};
+        bool pendingServerVisualCorrectionWorldValid = false;
+    };
 
+    Roomscale1To1ServerVisualState& GetRoomscale1To1ServerVisualState(VR* owner)
+    {
+        static Roomscale1To1ServerVisualState state;
+        if (state.owner != owner)
+        {
+            state = {};
+            state.owner = owner;
+        }
+        return state;
+    }
+
+    bool IsFiniteRoomscalePlanarVector(const Vector& value)
+    {
+        return std::isfinite(value.x) && std::isfinite(value.y);
+    }
+
+    void NormalizeRoomscalePendingCorrection(Vector& correction, bool& valid)
+    {
+        correction.z = 0.0f;
+        const float len = correction.Length();
+        if (!std::isfinite(len) || len <= 0.01f)
+        {
+            correction = {};
+            valid = false;
+            return;
+        }
+
+        valid = true;
+    }
+}
+
+void VR::QueueRoomscale1To1ServerMoveDelta(const Vector& worldDelta, const Vector& visualWorldDelta)
+{
     Vector planarDelta(worldDelta.x, worldDelta.y, 0.0f);
-    if (planarDelta.Length() <= 0.01f)
+    Vector planarVisualDelta(visualWorldDelta.x, visualWorldDelta.y, 0.0f);
+    if (!IsFiniteRoomscalePlanarVector(planarDelta) || !IsFiniteRoomscalePlanarVector(planarVisualDelta))
         return;
 
     std::lock_guard<std::mutex> lock(m_Roomscale1To1ServerMoveMutex);
-    // Server-side room movement must not repay old physical deltas. If the local
-    // server does not consume for a few ticks, releasing that backlog teleports the
-    // player at high speed. Keep only the latest measured HMD step.
+    auto& visualState = GetRoomscale1To1ServerVisualState(this);
+
+    // The VR pose can update faster than server usercmd processing. Keep only the newest
+    // direct server move request, but cancel the visual displacement that belonged to any
+    // overwritten request. Otherwise the HMD camera continues forward while the player
+    // entity never receives that discarded physical step.
+    if (m_Roomscale1To1PendingServerWorldDeltaValid)
+    {
+        visualState.pendingServerVisualCorrectionWorld -= visualState.pendingServerVisualWorldDelta;
+        NormalizeRoomscalePendingCorrection(
+            visualState.pendingServerVisualCorrectionWorld,
+            visualState.pendingServerVisualCorrectionWorldValid);
+    }
+
+    m_Roomscale1To1PendingServerWorldDelta = {};
+    visualState.pendingServerVisualWorldDelta = {};
+    m_Roomscale1To1PendingServerWorldDeltaValid = false;
+
+    const float requestedLen = planarDelta.Length();
+    if (!std::isfinite(requestedLen) || requestedLen <= 0.01f)
+    {
+        visualState.pendingServerVisualCorrectionWorld -= planarVisualDelta;
+        NormalizeRoomscalePendingCorrection(
+            visualState.pendingServerVisualCorrectionWorld,
+            visualState.pendingServerVisualCorrectionWorldValid);
+        return;
+    }
+
     m_Roomscale1To1PendingServerWorldDelta = planarDelta;
-    m_Roomscale1To1PendingServerWorldDelta.z = 0.0f;
+    visualState.pendingServerVisualWorldDelta = planarVisualDelta;
 
     const float maxServerStep =
         std::max(1.0f, std::max(0.0f, m_Roomscale1To1MaxStepMeters) * std::max(1.0f, std::fabs(m_VRScale)));
@@ -54,23 +118,113 @@ void VR::QueueRoomscale1To1ServerMoveDelta(const Vector& worldDelta)
     m_Roomscale1To1PendingServerWorldDeltaValid = true;
 }
 
-bool VR::ConsumeRoomscale1To1ServerMoveDelta(Vector& outWorldDelta)
+bool VR::ConsumeRoomscale1To1ServerMoveDelta(Vector& outWorldDelta, Vector& outVisualWorldDelta)
 {
     std::lock_guard<std::mutex> lock(m_Roomscale1To1ServerMoveMutex);
     if (!m_Roomscale1To1PendingServerWorldDeltaValid)
         return false;
 
+    auto& visualState = GetRoomscale1To1ServerVisualState(this);
     outWorldDelta = m_Roomscale1To1PendingServerWorldDelta;
+    outVisualWorldDelta = visualState.pendingServerVisualWorldDelta;
     m_Roomscale1To1PendingServerWorldDelta = {};
+    visualState.pendingServerVisualWorldDelta = {};
     m_Roomscale1To1PendingServerWorldDeltaValid = false;
     return outWorldDelta.Length() > 0.01f;
+}
+
+void VR::QueueRoomscale1To1ServerVisualCorrection(const Vector& worldCorrection)
+{
+    Vector planarCorrection(worldCorrection.x, worldCorrection.y, 0.0f);
+    if (!IsFiniteRoomscalePlanarVector(planarCorrection))
+        return;
+
+    std::lock_guard<std::mutex> lock(m_Roomscale1To1ServerMoveMutex);
+    auto& visualState = GetRoomscale1To1ServerVisualState(this);
+    visualState.pendingServerVisualCorrectionWorld += planarCorrection;
+    NormalizeRoomscalePendingCorrection(
+        visualState.pendingServerVisualCorrectionWorld,
+        visualState.pendingServerVisualCorrectionWorldValid);
+}
+
+void VR::ApplyRoomscale1To1VisualWorldCorrection(const Vector& worldCorrection)
+{
+    Vector planarCorrection(worldCorrection.x, worldCorrection.y, 0.0f);
+    if (!IsFiniteRoomscalePlanarVector(planarCorrection))
+        return;
+
+    const float correctionLen = planarCorrection.Length();
+    if (!std::isfinite(correctionLen) || correctionLen <= 0.01f || std::fabs(m_VRScale) <= 0.001f)
+        return;
+
+    const Vector correctionLocal = planarCorrection / m_VRScale;
+    m_HmdPosCorrectedPrev += correctionLocal;
+    if (m_Roomscale1To1PrevValid)
+        m_Roomscale1To1PrevCorrectedAbs += correctionLocal;
+
+    // A roomscale collision correction is a coordinate rebase, not tracked-head motion.
+    // Shift the smoothed/cached values together so head smoothing does not repay the
+    // rejected movement over several rendered frames and cached aim/controller positions
+    // remain aligned until the next tracking update.
+    if (m_HeadSmoothingInitialized)
+        m_HmdPosSmoothed += correctionLocal;
+    m_HmdPosLocalInWorld += planarCorrection;
+    m_HmdPosAbs += planarCorrection;
+    m_HmdPosAbsPrev += planarCorrection;
+    m_SetupOriginToHMD += planarCorrection;
+    m_LeftControllerPosAbs += planarCorrection;
+    m_RightControllerPosAbs += planarCorrection;
+}
+
+void VR::ApplyPendingRoomscale1To1ServerVisualCorrection()
+{
+    Vector worldCorrection{};
+    {
+        std::lock_guard<std::mutex> lock(m_Roomscale1To1ServerMoveMutex);
+        auto& visualState = GetRoomscale1To1ServerVisualState(this);
+        if (!visualState.pendingServerVisualCorrectionWorldValid)
+            return;
+
+        worldCorrection = visualState.pendingServerVisualCorrectionWorld;
+        visualState.pendingServerVisualCorrectionWorld = {};
+        visualState.pendingServerVisualCorrectionWorldValid = false;
+    }
+
+    ApplyRoomscale1To1VisualWorldCorrection(worldCorrection);
+
+    if (m_Roomscale1To1DebugLog && !ShouldThrottle(m_Roomscale1To1DebugLastEncode, m_Roomscale1To1DebugLogHz))
+    {
+        Game::logMsg("[VR][1to1][servermove-visual-correct] world=(%.2f %.2f) len=%.2f",
+            worldCorrection.x, worldCorrection.y, worldCorrection.Length());
+    }
+}
+
+void VR::CancelRoomscale1To1ServerMoveDelta()
+{
+    std::lock_guard<std::mutex> lock(m_Roomscale1To1ServerMoveMutex);
+    auto& visualState = GetRoomscale1To1ServerVisualState(this);
+    if (m_Roomscale1To1PendingServerWorldDeltaValid)
+    {
+        visualState.pendingServerVisualCorrectionWorld -= visualState.pendingServerVisualWorldDelta;
+        NormalizeRoomscalePendingCorrection(
+            visualState.pendingServerVisualCorrectionWorld,
+            visualState.pendingServerVisualCorrectionWorldValid);
+    }
+
+    m_Roomscale1To1PendingServerWorldDelta = {};
+    visualState.pendingServerVisualWorldDelta = {};
+    m_Roomscale1To1PendingServerWorldDeltaValid = false;
 }
 
 void VR::ClearRoomscale1To1ServerMoveDelta()
 {
     std::lock_guard<std::mutex> lock(m_Roomscale1To1ServerMoveMutex);
+    auto& visualState = GetRoomscale1To1ServerVisualState(this);
     m_Roomscale1To1PendingServerWorldDelta = {};
+    visualState.pendingServerVisualWorldDelta = {};
     m_Roomscale1To1PendingServerWorldDeltaValid = false;
+    visualState.pendingServerVisualCorrectionWorld = {};
+    visualState.pendingServerVisualCorrectionWorldValid = false;
 }
 
 void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool controlLocomotionActive)
@@ -89,7 +243,7 @@ void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool contr
     if (!cmd || !m_Roomscale1To1Movement)
     {
         m_Roomscale1To1PrevValid = false;
-        ClearRoomscale1To1ServerMoveDelta();
+        CancelRoomscale1To1ServerMoveDelta();
         m_Roomscale1To1StandingHmdZValid = false;
         m_Roomscale1To1PhysicalCrouchActive = false;
         return;
@@ -128,7 +282,7 @@ void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool contr
     if (m_Roomscale1To1DisableWhileThumbstick && controlLocomotionActive)
     {
         resetReference();
-        ClearRoomscale1To1ServerMoveDelta();
+        CancelRoomscale1To1ServerMoveDelta();
         return;
     }
 
@@ -153,8 +307,6 @@ void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool contr
         return;
 
     const float movementScale = std::clamp(m_Roomscale1To1MovementScale, 0.0f, 4.0f);
-    if (movementScale <= 0.0001f)
-        return;
 
     const float maxStepM = std::max(0.0f, m_Roomscale1To1MaxStepMeters);
     if (maxStepM > 0.0f && lenM > maxStepM)
@@ -165,13 +317,27 @@ void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool contr
     }
 
     const Vector gameDeltaM(deltaM.x * movementScale, deltaM.y * movementScale, 0.0f);
-    m_Roomscale1To1PendingVisualWorldDelta = Vector(deltaM.x * m_VRScale, deltaM.y * m_VRScale, 0.0f);
-    m_Roomscale1To1PendingVisualWorldDeltaValid = true;
+
+    // The physical HMD pose has already moved the camera by deltaM. When the configured
+    // roomscale multiplier is not 1.0, immediately rebase the visual camera by the
+    // remaining scaled displacement. Server/client movement reconciliation must then
+    // compare against the scaled visual delta, otherwise the player entity can move
+    // farther or shorter than the rendered camera until ResetPosition is used.
+    const Vector visualScaleCorrectionM = gameDeltaM - deltaM;
+    const Vector visualScaleCorrectionWorld(
+        visualScaleCorrectionM.x * m_VRScale,
+        visualScaleCorrectionM.y * m_VRScale,
+        0.0f);
+    ApplyRoomscale1To1VisualWorldCorrection(visualScaleCorrectionWorld);
+
+    m_Roomscale1To1PendingVisualWorldDelta = Vector(gameDeltaM.x * m_VRScale, gameDeltaM.y * m_VRScale, 0.0f);
+    m_Roomscale1To1PendingVisualWorldDeltaValid =
+        m_Roomscale1To1PendingVisualWorldDelta.Length() > 0.01f;
 
     if (ShouldUseRoomscale1To1ServerMove())
     {
         Vector serverWorldDelta(gameDeltaM.x * m_VRScale, gameDeltaM.y * m_VRScale, 0.0f);
-        QueueRoomscale1To1ServerMoveDelta(serverWorldDelta);
+        QueueRoomscale1To1ServerMoveDelta(serverWorldDelta, m_Roomscale1To1PendingVisualWorldDelta);
         m_Roomscale1To1PendingVisualWorldDelta = {};
         m_Roomscale1To1PendingVisualWorldDeltaValid = false;
 
@@ -186,6 +352,9 @@ void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool contr
         }
         return;
     }
+
+    if (movementScale <= 0.0001f)
+        return;
 
     float dt = inputSampleTime;
     if (dt <= 0.0001f)

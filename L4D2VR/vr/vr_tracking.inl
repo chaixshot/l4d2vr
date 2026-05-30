@@ -489,12 +489,32 @@ void VR::UpdateTracking()
     // - Legacy: only allow roomscale camera anchoring while "standing still" (velocity==0), and disable while thumbstick locomotion is active.
     // - 1:1 server roomscale (ForceNonVRServerMovement=false): optionally keep the camera fully decoupled from the tick-rate player origin
     //   so HMD motion stays smooth at headset refresh rate.
+    // - Thumbstick movement cannot be gated by the current input sample alone. Source prediction/interpolation may keep moving the player
+    //   for a few frames after the stick sample drops to zero. Keep the anchor coupled while the engine still reports horizontal velocity,
+    //   plus a short drain window so the final predicted origin delta is not skipped. Direct server-hook roomscale SetOrigin does not create
+    //   player velocity, so physical 1:1 walking remains decoupled and is not double-applied visually.
+    const float engineLocomotionSpeed2D = localPlayer->m_vecVelocity.Length2D();
+    const bool engineLocomotionActive =
+        std::isfinite(engineLocomotionSpeed2D) && engineLocomotionSpeed2D > 0.5f;
+    static std::chrono::steady_clock::time_point s_roomscale1To1EngineLocomotionCoupleUntil{};
+    const auto roomscale1To1CoupleNow = std::chrono::steady_clock::now();
+    if (!m_Roomscale1To1Movement)
+    {
+        s_roomscale1To1EngineLocomotionCoupleUntil = {};
+    }
+    else if (m_LocomotionActive || engineLocomotionActive)
+    {
+        s_roomscale1To1EngineLocomotionCoupleUntil =
+            roomscale1To1CoupleNow + std::chrono::milliseconds(150);
+    }
+    const bool keepAnchorCoupledForEngineLocomotion =
+        roomscale1To1CoupleNow < s_roomscale1To1EngineLocomotionCoupleUntil;
     const bool want1to1DecoupledCamera =
         m_Roomscale1To1Movement &&
         !m_ForceNonVRServerMovement &&
         m_Roomscale1To1DecoupleCamera &&
         !m_IsThirdPersonCamera &&
-        !m_LocomotionActive &&
+        !keepAnchorCoupledForEngineLocomotion &&
         !usingMountedGunNow;
 
     if (m_IsThirdPersonCamera && m_Roomscale1To1Movement && m_Roomscale1To1DecoupleCamera)

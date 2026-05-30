@@ -230,20 +230,6 @@ static inline const char* DebugTextureName(ITexture* texture)
 	}
 }
 
-static Vector ClipPlanarDeltaAgainstPlane(const Vector& delta, const Vector& planeNormal)
-{
-	Vector planarNormal(planeNormal.x, planeNormal.y, 0.0f);
-	const float normalLenSqr = planarNormal.LengthSqr();
-	if (!std::isfinite(normalLenSqr) || normalLenSqr <= 0.0001f)
-		return {};
-
-	Vector planarDelta(delta.x, delta.y, 0.0f);
-	const float intoPlane = planarDelta.Dot(planarNormal) / normalLenSqr;
-	Vector clipped = planarDelta - (planarNormal * intoPlane);
-	clipped.z = 0.0f;
-	return clipped;
-}
-
 static void TraceRoomscaleServerRay(IEngineTrace* engineTrace, const Ray_t& ray, unsigned int mask, CTraceFilter* filter, CGameTrace& outTrace)
 {
 	outTrace.fraction = 1.0f;
@@ -257,31 +243,184 @@ static void TraceRoomscaleServerRay(IEngineTrace* engineTrace, const Ray_t& ray,
 	engineTrace->TraceRay(ray, mask, filter, &outTrace);
 }
 
+struct RoomscaleServerCmdFallbackContext
+{
+	bool active = false;
+	bool injected = false;
+	bool skippedForExistingMove = false;
+	int playerIndex = -1;
+	Vector startOrigin{};
+	Vector worldDelta{};
+	Vector visualWorldDelta{};
+};
+
+static thread_local RoomscaleServerCmdFallbackContext s_RoomscaleServerCmdFallback{};
+
+static void ClearRoomscaleServerCmdFallback()
+{
+	s_RoomscaleServerCmdFallback = {};
+}
+
+static void BeginRoomscaleServerCmdFallback(int playerIndex, const Vector& startOrigin, const Vector& worldDelta, const Vector& visualWorldDelta)
+{
+	ClearRoomscaleServerCmdFallback();
+	s_RoomscaleServerCmdFallback.active = true;
+	s_RoomscaleServerCmdFallback.playerIndex = playerIndex;
+	s_RoomscaleServerCmdFallback.startOrigin = startOrigin;
+	s_RoomscaleServerCmdFallback.worldDelta = Vector(worldDelta.x, worldDelta.y, 0.0f);
+	s_RoomscaleServerCmdFallback.visualWorldDelta = Vector(visualWorldDelta.x, visualWorldDelta.y, 0.0f);
+}
+
+static bool InjectPendingRoomscaleServerCmdFallback(int playerIndex, CUserCmd* cmd)
+{
+	if (!cmd || !s_RoomscaleServerCmdFallback.active || s_RoomscaleServerCmdFallback.injected ||
+		s_RoomscaleServerCmdFallback.skippedForExistingMove ||
+		s_RoomscaleServerCmdFallback.playerIndex != playerIndex)
+	{
+		return false;
+	}
+
+	Vector fallbackWorldDelta = s_RoomscaleServerCmdFallback.worldDelta;
+	fallbackWorldDelta.z = 0.0f;
+	const float fallbackLen = fallbackWorldDelta.Length();
+	if (!std::isfinite(fallbackLen) || fallbackLen <= 0.01f)
+		return false;
+
+	// Do not mix the fallback with an existing thumbstick command. Final reconciliation
+	// would otherwise include both locomotion sources and shift the visual camera twice.
+	// Thumbstick movement already uses Source's normal StepMove path, so discarding this
+	// single blocked physical step is the stable behavior.
+	if (std::fabs(cmd->forwardmove) > 0.5f || std::fabs(cmd->sidemove) > 0.5f)
+	{
+		s_RoomscaleServerCmdFallback.skippedForExistingMove = true;
+		if (Hooks::m_VR && Hooks::m_VR->m_Roomscale1To1DebugLog)
+		{
+			Game::logMsg("[VR][1to1][servermove-step-fallback-skip] player=%d cmd=%d existingMove=(%.1f %.1f)",
+				playerIndex, cmd->command_number, cmd->forwardmove, cmd->sidemove);
+		}
+		return false;
+	}
+
+	// The direct SetOrigin path cannot climb a stair because its hull sweep stays planar.
+	// When that sweep is blocked, feed the physical displacement back through a regular
+	// server CUserCmd. Source's normal player movement then runs StepMove and handles stairs.
+	constexpr float kFallbackTickSeconds = (1.0f / 30.0f);
+	constexpr float kFallbackMaxSpeed = 250.0f;
+	Vector fallbackWorldVelocity = fallbackWorldDelta * (1.0f / kFallbackTickSeconds);
+	const float fallbackSpeed = fallbackWorldVelocity.Length();
+	if (std::isfinite(fallbackSpeed) && fallbackSpeed > kFallbackMaxSpeed)
+		fallbackWorldVelocity *= (kFallbackMaxSpeed / fallbackSpeed);
+
+	QAngle yawOnly(0.0f, cmd->viewangles.y, 0.0f);
+	Vector cmdForward, cmdRight, cmdUp;
+	QAngle::AngleVectors(yawOnly, &cmdForward, &cmdRight, &cmdUp);
+
+	Vector worldMove = (cmdForward * cmd->forwardmove) + (cmdRight * cmd->sidemove);
+	worldMove += fallbackWorldVelocity;
+	cmd->forwardmove = DotProduct(worldMove, cmdForward);
+	cmd->sidemove = DotProduct(worldMove, cmdRight);
+
+	constexpr int kIN_FORWARD = (1 << 3);
+	constexpr int kIN_BACK = (1 << 4);
+	constexpr int kIN_MOVELEFT = (1 << 9);
+	constexpr int kIN_MOVERIGHT = (1 << 10);
+	if (cmd->forwardmove > 0.5f)          cmd->buttons |= kIN_FORWARD;
+	else if (cmd->forwardmove < -0.5f)   cmd->buttons |= kIN_BACK;
+	if (cmd->sidemove > 0.5f)            cmd->buttons |= kIN_MOVERIGHT;
+	else if (cmd->sidemove < -0.5f)      cmd->buttons |= kIN_MOVELEFT;
+
+	s_RoomscaleServerCmdFallback.injected = true;
+
+	if (Hooks::m_VR && Hooks::m_VR->m_Roomscale1To1DebugLog)
+	{
+		Game::logMsg("[VR][1to1][servermove-step-fallback-inject] player=%d cmd=%d world=(%.1f %.1f) vel=(%.1f %.1f) move=(%.1f %.1f)",
+			playerIndex,
+			cmd->command_number,
+			fallbackWorldDelta.x, fallbackWorldDelta.y,
+			fallbackWorldVelocity.x, fallbackWorldVelocity.y,
+			cmd->forwardmove, cmd->sidemove);
+	}
+
+	return true;
+}
+
+static void FinalizePendingRoomscaleServerCmdFallback(Server_BaseEntity* serverPlayer, int playerIndex)
+{
+	if (!s_RoomscaleServerCmdFallback.active || s_RoomscaleServerCmdFallback.playerIndex != playerIndex)
+		return;
+
+	Vector acceptedWorldDelta{};
+	using GetAbsOriginServerFn = Vector* (__thiscall*)(void*);
+	auto getAbsOrigin = (Hooks::m_Game && Hooks::m_Game->m_Offsets)
+		? reinterpret_cast<GetAbsOriginServerFn>(Hooks::m_Game->m_Offsets->CBaseEntity_GetAbsOrigin_Server.address)
+		: nullptr;
+
+	if (s_RoomscaleServerCmdFallback.injected && serverPlayer && getAbsOrigin)
+	{
+		Vector* originPtr = getAbsOrigin(serverPlayer);
+		if (originPtr)
+		{
+			acceptedWorldDelta = *originPtr - s_RoomscaleServerCmdFallback.startOrigin;
+			acceptedWorldDelta.z = 0.0f;
+		}
+	}
+
+	Vector correction = acceptedWorldDelta - s_RoomscaleServerCmdFallback.visualWorldDelta;
+	correction.z = 0.0f;
+	if (Hooks::m_VR)
+		Hooks::m_VR->QueueRoomscale1To1ServerVisualCorrection(correction);
+
+	if (Hooks::m_VR && Hooks::m_VR->m_Roomscale1To1DebugLog)
+	{
+		Game::logMsg("[VR][1to1][servermove-step-fallback-final] player=%d injected=%d requested=(%.1f %.1f) accepted=(%.1f %.1f) correction=(%.1f %.1f)",
+			playerIndex,
+			s_RoomscaleServerCmdFallback.injected ? 1 : 0,
+			s_RoomscaleServerCmdFallback.worldDelta.x,
+			s_RoomscaleServerCmdFallback.worldDelta.y,
+			acceptedWorldDelta.x,
+			acceptedWorldDelta.y,
+			correction.x,
+			correction.y);
+	}
+
+	ClearRoomscaleServerCmdFallback();
+}
+
 static bool ApplyServerRoomscale1To1Move(Server_BaseEntity* serverPlayer, IServerUnknown* serverUnknown, int playerIndex)
 {
+	ClearRoomscaleServerCmdFallback();
+
 	if (!Hooks::m_Game || !Hooks::m_VR || !serverPlayer || !serverUnknown)
 		return false;
 
 	if (!Hooks::m_Game->m_EngineClient || Hooks::m_Game->m_EngineClient->GetLocalPlayer() != playerIndex)
-	{
-		Hooks::m_VR->ClearRoomscale1To1ServerMoveDelta();
 		return false;
-	}
 
 	if (!Hooks::m_VR->ShouldUseRoomscale1To1ServerMove())
 	{
-		Hooks::m_VR->ClearRoomscale1To1ServerMoveDelta();
+		Hooks::m_VR->CancelRoomscale1To1ServerMoveDelta();
 		return false;
 	}
 
 	Vector worldDelta{};
-	if (!Hooks::m_VR->ConsumeRoomscale1To1ServerMoveDelta(worldDelta))
+	Vector visualWorldDelta{};
+	if (!Hooks::m_VR->ConsumeRoomscale1To1ServerMoveDelta(worldDelta, visualWorldDelta))
 		return false;
+
+	auto queueVisualCorrection = [&](const Vector& acceptedWorldDelta)
+	{
+		Vector correction = acceptedWorldDelta - visualWorldDelta;
+		correction.z = 0.0f;
+		Hooks::m_VR->QueueRoomscale1To1ServerVisualCorrection(correction);
+	};
 
 	worldDelta.z = 0.0f;
 	const float requestedLen = worldDelta.Length();
 	if (!std::isfinite(requestedLen) || requestedLen <= 0.01f)
+	{
+		queueVisualCorrection({});
 		return false;
+	}
 
 	using GetAbsOriginServerFn = Vector* (__thiscall*)(void*);
 	using SetOriginServerFn = void(__thiscall*)(void*, const Vector&);
@@ -289,22 +428,21 @@ static bool ApplyServerRoomscale1To1Move(Server_BaseEntity* serverPlayer, IServe
 	auto setOrigin = reinterpret_cast<SetOriginServerFn>(Hooks::m_Game->m_Offsets->CBaseEntity_SetOrigin_Server.address);
 	IEngineTrace* serverTrace = Hooks::m_Game->m_EngineTraceServer;
 	if (!getAbsOrigin || !setOrigin || !serverTrace)
+	{
+		queueVisualCorrection({});
 		return false;
-
-	bool applied = false;
-	Vector start{};
-	Vector target{};
-	Vector clippedTarget{};
-	CGameTrace trace{};
+	}
 
 	Vector* originPtr = getAbsOrigin(serverPlayer);
 	if (!originPtr)
+	{
+		queueVisualCorrection({});
 		return false;
+	}
 
-	start = *originPtr;
-	target = start + worldDelta;
+	const Vector start = *originPtr;
+	Vector target = start + worldDelta;
 	target.z = start.z;
-	clippedTarget = start;
 
 	const bool crouched = Hooks::m_VR->m_Roomscale1To1PhysicalCrouchActive;
 	const Vector hullMins(-16.0f, -16.0f, 0.0f);
@@ -312,78 +450,54 @@ static bool ApplyServerRoomscale1To1Move(Server_BaseEntity* serverPlayer, IServe
 	constexpr unsigned int kRoomscaleServerMoveMask =
 		CONTENTS_SOLID | CONTENTS_MOVEABLE | CONTENTS_PLAYERCLIP | CONTENTS_WINDOW | CONTENTS_MONSTER | CONTENTS_GRATE;
 
-	auto traceHull = [&](const Vector& from, const Vector& to, CGameTrace& outTrace)
-	{
-		Ray_t ray;
-		ray.Init(from, to, hullMins, hullMaxs);
-		CTraceFilterSkipSelf filter(static_cast<IHandleEntity*>(serverUnknown), 0);
+	Ray_t ray;
+	ray.Init(start, target, hullMins, hullMaxs);
+	CTraceFilterSkipSelf filter(static_cast<IHandleEntity*>(serverUnknown), 0);
+	CGameTrace trace{};
+	TraceRoomscaleServerRay(serverTrace, ray, kRoomscaleServerMoveMask, &filter, trace);
 
-		static int s_preTraceLogBudget = 8;
-		if (s_preTraceLogBudget > 0)
+	// Open floor: retain the direct low-latency server move.
+	// Any obstruction: do not invent a custom stair solver here. Let Source's regular
+	// player movement process the same displacement as a CUserCmd so StepMove remains intact.
+	if (trace.allsolid || trace.startsolid || trace.fraction < 0.999f)
+	{
+		BeginRoomscaleServerCmdFallback(playerIndex, start, worldDelta, visualWorldDelta);
+
+		if (Hooks::m_VR->m_Roomscale1To1DebugLog)
 		{
-			--s_preTraceLogBudget;
-			Game::logMsg("[VR][1to1][servermove-trace-pre] trace=%p player=%p unk=%p from=(%.1f %.1f %.1f) to=(%.1f %.1f %.1f) hull=(%.1f %.1f %.1f)/(%.1f %.1f %.1f) mask=0x%08x",
-				reinterpret_cast<void*>(serverTrace),
-				reinterpret_cast<void*>(serverPlayer),
-				reinterpret_cast<void*>(serverUnknown),
-				from.x, from.y, from.z,
-				to.x, to.y, to.z,
-				hullMins.x, hullMins.y, hullMins.z,
-				hullMaxs.x, hullMaxs.y, hullMaxs.z,
-				kRoomscaleServerMoveMask);
+			Game::logMsg("[VR][1to1][servermove-step-fallback-queue] player=%d frac=%.3f startSolid=%d allSolid=%d req=(%.1f %.1f) start=(%.1f %.1f %.1f)",
+				playerIndex,
+				trace.fraction,
+				trace.startsolid ? 1 : 0,
+				trace.allsolid ? 1 : 0,
+				worldDelta.x, worldDelta.y,
+				start.x, start.y, start.z);
 		}
-
-		TraceRoomscaleServerRay(serverTrace, ray, kRoomscaleServerMoveMask, &filter, outTrace);
-	};
-
-	Vector current = start;
-	Vector remaining = worldDelta;
-	for (int bump = 0; bump < 2; ++bump)
-	{
-		Vector moveTarget = current + remaining;
-		moveTarget.z = start.z;
-
-		traceHull(current, moveTarget, trace);
-		if (trace.allsolid || trace.startsolid)
-			break;
-
-		current = trace.endpos;
-		current.z = start.z;
-
-		if (trace.fraction >= 1.0f)
-			break;
-
-		Vector targetRemainder = target - current;
-		targetRemainder.z = 0.0f;
-		remaining = ClipPlanarDeltaAgainstPlane(targetRemainder, trace.plane.normal);
-		if (remaining.Length() <= 0.01f)
-			break;
+		return false;
 	}
 
-	clippedTarget = current;
-	Vector acceptedDelta = clippedTarget - start;
-	acceptedDelta.z = 0.0f;
-	if (!trace.allsolid && !trace.startsolid)
+	Vector acceptedWorldDelta = trace.endpos - start;
+	acceptedWorldDelta.z = 0.0f;
+	const float acceptedLen = acceptedWorldDelta.Length();
+	if (!std::isfinite(acceptedLen) || acceptedLen <= 0.01f)
 	{
-		if (acceptedDelta.Length() > 0.01f)
-		{
-			setOrigin(serverPlayer, clippedTarget);
-			applied = true;
-		}
+		queueVisualCorrection({});
+		return false;
 	}
+
+	Vector clippedTarget = trace.endpos;
+	clippedTarget.z = start.z;
+	setOrigin(serverPlayer, clippedTarget);
+	queueVisualCorrection(acceptedWorldDelta);
 
 	if (Hooks::m_VR->m_Roomscale1To1DebugLog)
 	{
 		static std::chrono::steady_clock::time_point s_lastServerMoveLog{};
 		if (!ShouldThrottleLog(s_lastServerMoveLog, Hooks::m_VR->m_Roomscale1To1DebugLogHz))
 		{
-			const float acceptedLen = applied ? (clippedTarget - start).Length() : 0.0f;
-			Game::logMsg("[VR][1to1][servermove] player=%d applied=%d frac=%.3f startSolid=%d allSolid=%d req=(%.1f %.1f) accepted=%.1f start=(%.1f %.1f %.1f) target=(%.1f %.1f %.1f)",
+			Game::logMsg("[VR][1to1][servermove] player=%d mode=direct frac=%.3f req=(%.1f %.1f) accepted=%.1f start=(%.1f %.1f %.1f) target=(%.1f %.1f %.1f)",
 				playerIndex,
-				applied ? 1 : 0,
 				trace.fraction,
-				trace.startsolid ? 1 : 0,
-				trace.allsolid ? 1 : 0,
 				worldDelta.x, worldDelta.y,
 				acceptedLen,
 				start.x, start.y, start.z,
@@ -391,7 +505,7 @@ static bool ApplyServerRoomscale1To1Move(Server_BaseEntity* serverPlayer, IServe
 		}
 	}
 
-	return applied;
+	return true;
 }
 
 static inline void DebugTextureSize(ITexture* texture, int& width, int& height)

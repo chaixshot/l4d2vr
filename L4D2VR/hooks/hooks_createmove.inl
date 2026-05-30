@@ -64,6 +64,11 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 
 	bool result = hkCreateMove.fOriginal(ecx, flInputSampleTime, cmd);
 
+	// Server-hook roomscale movement is applied after the originating CreateMove.
+	// Consume its accepted-vs-visual correction before this command uses cached VR poses.
+	if (m_VR)
+		m_VR->ApplyPendingRoomscale1To1ServerVisualCorrection();
+
 	m_VR->m_EffectiveAttackRangeAutoFireActive = false;
 
 	auto resetEffectiveRangeMeleeCycle = [&]()
@@ -1317,9 +1322,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 						const float correctionLen = correctionWorld.Length();
 						if (std::isfinite(correctionLen) && correctionLen > 0.01f && correctionLen < 96.0f)
 						{
-							const Vector correctionLocal = correctionWorld / m_VR->m_VRScale;
-							m_VR->m_HmdPosCorrectedPrev += correctionLocal;
-							m_VR->m_Roomscale1To1PrevCorrectedAbs += correctionLocal;
+							m_VR->ApplyRoomscale1To1VisualWorldCorrection(correctionWorld);
 						}
 					}
 				}

@@ -821,7 +821,8 @@ namespace dxvk {
 
             const bool paused = vr->m_Game->m_EngineClient->IsPaused();
             const bool cursorVisible = vr->m_Game->m_VguiSurface && vr->m_Game->m_VguiSurface->IsCursorVisible();
-            if (!paused && !cursorVisible)
+            const bool gameplayHudRequested = vr->IsGameplayHudRequested();
+            if (!paused && !cursorVisible && !gameplayHudRequested)
                 return false;
 
             // The HUD texture is persistent. If Present composites it unconditionally,
