@@ -69,7 +69,18 @@ void VR::ProcessInput()
             StopVoiceRecordCommandNow();
         }
         m_PrimaryAttackDown = false;
+        CancelTeleportTargeting();
         return;
+    }
+
+    vr::InputDigitalActionData_t teleportActionData{};
+    const bool teleportActionValid = GetDigitalActionData(m_ActionTeleport, teleportActionData);
+    if (teleportActionValid && teleportActionData.bChanged)
+    {
+        if (teleportActionData.bState)
+            BeginTeleportTargeting();
+        else
+            EndTeleportTargeting(true);
     }
 
     vr::InputAnalogActionData_t analogActionData;
@@ -111,7 +122,8 @@ void VR::ProcessInput()
                 }
             };
 
-        applyTurnFromStick(analogActionData.x);
+        if (!m_TeleportTargetingActive)
+            applyTurnFromStick(analogActionData.x);
 
 
         // Wrap from 0 to 360
@@ -119,6 +131,44 @@ void VR::ProcessInput()
     }
     else
     {
+    }
+
+    if (m_TeleportVisualScoutActive)
+    {
+        // Detached scout view is observation-only. Release any held gameplay command
+        // immediately. Teleport remains available so the camera can be repositioned
+        // repeatedly without returning to the authoritative body. A fresh Use press
+        // is the explicit return-to-body command.
+        auto releaseOwnedCommand = [&](bool& owned, const char* releaseCommand)
+            {
+                if (!owned)
+                    return;
+                m_Game->ClientCmd_Unrestricted(releaseCommand);
+                owned = false;
+            };
+        releaseOwnedCommand(m_PrimaryAttackCmdOwned, "-attack");
+        releaseOwnedCommand(m_SecondaryAttackCmdOwned, "-attack2");
+        releaseOwnedCommand(m_JumpCmdOwned, "-jump");
+        releaseOwnedCommand(m_UseCmdOwned, "-use");
+        releaseOwnedCommand(m_ReloadCmdOwned, "-reload");
+        releaseOwnedCommand(m_DuckCmdOwned, "-duck");
+        m_PrimaryAttackDown = false;
+        m_PushingThumbstick = false;
+        m_LocomotionActive = false;
+
+        const bool scoutUseDown = PressedDigitalAction(m_ActionUse);
+        if (!scoutUseDown)
+        {
+            m_TeleportVisualScoutUseExitArmed = true;
+        }
+        else if (m_TeleportVisualScoutUseExitArmed)
+        {
+            ExitTeleportVisualScout();
+            return;
+        }
+
+        UpdateTeleportTargeting();
+        return;
     }
 
     // TODO: Instead of ClientCmding, override Usercmd in CreateMove
@@ -217,7 +267,9 @@ void VR::ProcessInput()
         }
     }
 
-    const bool wantUse = PressedDigitalAction(m_ActionUse);
+    // While aiming teleport, Use is reserved as a modifier that ignores playerclip
+    // barriers. Do not also send +use into gameplay.
+    const bool wantUse = PressedDigitalAction(m_ActionUse) && !m_TeleportTargetingActive;
 
     // Scope realtime adjustment uses Use + left stick while scoped-in.
     // Vertical adjusts magnification FOV; horizontal adjusts scope overlay size.
@@ -1352,6 +1404,11 @@ void VR::ProcessInput()
                     m_RotationOffset -= 360.0f * std::floor(m_RotationOffset / 360.0f);
                 };
 
+            // Teleport now has its own SteamVR action. Swallow legacy CustomAction
+            // tokens so old config files do not send an unknown console command.
+            if (token == "teleport" || token == "vr_teleport" || token == "vr_teleportlocomotion")
+                return true;
+
             if (token == "thirdpersonfronttoggle" || token == "vr_thirdpersonfronttoggle" || token == "vr_toggle_thirdpersonfront")
             {
                 if (actionData.bState && actionData.bChanged)
@@ -1438,6 +1495,7 @@ void VR::ProcessInput()
     handleCustomAction(m_CustomAction3, m_CustomAction3Binding);
     handleCustomAction(m_CustomAction4, m_CustomAction4Binding);
     handleCustomAction(m_CustomAction5, m_CustomAction5Binding);
+    UpdateTeleportTargeting();
 
     auto showTopHud = [&]()
         {

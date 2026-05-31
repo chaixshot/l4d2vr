@@ -1359,7 +1359,10 @@ void VR::Update()
         m_Game->m_VguiSurface->IsCursorVisible();
 
     if (menuInputActive)
+    {
+        CancelTeleportTargeting();
         ProcessMenuInput();
+    }
     else
         ProcessInput();
 

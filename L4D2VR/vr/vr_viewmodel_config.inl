@@ -176,6 +176,13 @@ Vector VR::GetViewOriginRight()
 
 void VR::ResetPosition()
 {
+    if (m_TeleportVisualScoutActive)
+    {
+        // A detached scout camera must not be pulled back by manual or automatic
+        // VR recenter paths. Use is the explicit return-to-body action.
+        return;
+    }
+
     m_CameraAnchor += m_SetupOrigin - m_HmdPosAbs;
     m_HeightOffset += m_SetupOrigin.z - m_HmdPosAbs.z;
     m_Roomscale1To1PrevValid = false;
@@ -185,6 +192,9 @@ void VR::ResetPosition()
     m_Roomscale1To1PendingVisualWorldDeltaValid = false;
     m_Roomscale1To1PendingVisualWorldDelta = {};
     ClearRoomscale1To1ServerMoveDelta();
+    CancelTeleportTargeting();
+    ClearTeleportServerTarget();
+    ClearTeleportVisualScout();
     m_Roomscale1To1StandingHmdZValid = false;
     m_Roomscale1To1PhysicalCrouchActive = false;
 }
@@ -1585,6 +1595,8 @@ void VR::ParseConfigFile()
     m_NonVRServerMovementEffectsDebugLogHz = std::max(0.0f, getFloat("NonVRServerMovementEffectsDebugLogHz", m_NonVRServerMovementEffectsDebugLogHz));
     m_Roomscale1To1Movement = getBool("Roomscale1To1Movement", m_Roomscale1To1Movement);
     m_Roomscale1To1MaxStepMeters = getFloat("Roomscale1To1MaxStepMeters", m_Roomscale1To1MaxStepMeters);
+    m_TeleportMaxDistanceMeters = std::clamp(getFloat("TeleportMaxDistanceMeters", m_TeleportMaxDistanceMeters), 0.25f, 50.0f);
+    m_TeleportVisualScoutOnNonVRServerEnabled = getBool("TeleportVisualScoutOnNonVRServerEnabled", m_TeleportVisualScoutOnNonVRServerEnabled);
     m_Roomscale1To1DebugLog = getBool("Roomscale1To1DebugLog", m_Roomscale1To1DebugLog);
     m_Roomscale1To1DebugLogHz = getFloat("Roomscale1To1DebugLogHz", m_Roomscale1To1DebugLogHz);
 

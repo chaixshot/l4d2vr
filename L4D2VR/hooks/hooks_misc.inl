@@ -416,6 +416,25 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 			className = HooksSafeGetNetworkClassName(m_Game, const_cast<C_BaseEntity*>(entity));
 			isPlayerClass = className && (std::strcmp(className, "CTerrorPlayer") == 0 || std::strcmp(className, "C_TerrorPlayer") == 0);
 		}
+		// A server SetOrigin teleport can leave one queued first-person viewmodel draw
+		// produced against the pre-teleport anchor. Drop that short transition window
+		// instead of rendering a weapon model that flashes once and disappears.
+		const bool teleportSuppressibleViewmodel =
+			(className && (std::strcmp(className, "CBaseViewModel") == 0 || std::strcmp(className, "C_BaseViewModel") == 0)) ||
+			(modelName.find("models/weapons/v_") != std::string::npos) ||
+			(modelName.find("/v_models/") != std::string::npos) ||
+			(modelName.find("models/v_models/") != std::string::npos) ||
+			(modelName.find("models/weapons/melee/v_") != std::string::npos) ||
+			(modelName.find("/melee/v_") != std::string::npos) ||
+			(modelName.find("models/weapons/arms/") != std::string::npos) ||
+			(modelName.find("/arms/") != std::string::npos) ||
+			(modelName.find("v_arms") != std::string::npos) ||
+			(modelName.find("models/weapons/hands/") != std::string::npos) ||
+			(modelName.find("/hands/") != std::string::npos) ||
+			(modelName.find("v_hands") != std::string::npos);
+		if (teleportSuppressibleViewmodel && m_VR->ShouldSuppressTeleportViewmodelRender())
+			return;
+
 		const bool suppressDesktopMirrorPluginOverlays =
 			m_VR->m_DesktopMirrorCleanRenderingPass && m_VR->m_DesktopMirrorHidePluginOverlays;
 		const bool desktopMirrorOverlayHideActive =

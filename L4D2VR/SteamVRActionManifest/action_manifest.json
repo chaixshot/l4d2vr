@@ -13,7 +13,6 @@
 			"binding_url": "bindings_vive_cosmos_controller.json"
 		}
 	],
-
 	"actions": [
 		{
 			"name": "/actions/base/in/pose_lefthand",
@@ -68,6 +67,11 @@
 		{
 			"name": "/actions/main/in/Use",
 			"type": "boolean"
+		},
+		{
+			"name": "/actions/main/in/Teleport",
+			"type": "boolean",
+			"requirement": "optional"
 		},
 		{
 			"name": "/actions/main/in/NextItem",
@@ -186,7 +190,6 @@
 			"requirement": "optional"
 		}
 	],
-
 	"action_sets": [
 		{
 			"name": "/actions/main",
@@ -197,7 +200,6 @@
 			"usage": "hidden"
 		}
 	],
-
 	"localization": [
 		{
 			"language_tag": "en_us",
@@ -209,6 +211,7 @@
 			"/actions/main/in/Turn": "Turn",
 			"/actions/main/in/Reload": "Reload",
 			"/actions/main/in/Use": "Use",
+			"/actions/main/in/Teleport": "Teleport",
 			"/actions/main/in/NextItem": "Next Item",
 			"/actions/main/in/PrevItem": "Previous Item",
 			"/actions/main/in/ResetPosition": "Reset Position",

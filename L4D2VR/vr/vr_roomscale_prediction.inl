@@ -227,6 +227,750 @@ void VR::ClearRoomscale1To1ServerMoveDelta()
     visualState.pendingServerVisualCorrectionWorldValid = false;
 }
 
+namespace
+{
+    constexpr unsigned int kTeleportPathTraceMask =
+        CONTENTS_SOLID | CONTENTS_MOVEABLE | CONTENTS_PLAYERCLIP | CONTENTS_WINDOW | CONTENTS_GRATE;
+    // Landing validation intentionally ignores dynamic actors and movable props.
+    // They are transient and made otherwise-valid flat ground fail unpredictably.
+    // Keep static world, playerclip, window and grate collision so real teleports
+    // still cannot be committed inside map geometry.
+    constexpr unsigned int kTeleportLandingStaticTraceMask =
+        CONTENTS_SOLID | CONTENTS_PLAYERCLIP | CONTENTS_WINDOW | CONTENTS_GRATE;
+    constexpr float kTeleportArcGravityMetersPerSecondSq = 9.81f;
+    constexpr float kTeleportArcStepSeconds = 0.055f;
+    constexpr float kTeleportArcNominalTravelSeconds = 0.90f;
+    constexpr float kTeleportLandingFloorSearchUpUnits = 128.0f;
+    constexpr float kTeleportLandingFloorSearchDownUnits = 256.0f;
+    constexpr float kTeleportLandingHullSweepUpUnits = 128.0f;
+    constexpr float kTeleportLandingFloorLiftUnits = 2.0f;
+    constexpr float kTeleportTwoPi = 6.28318530717958647692f;
+
+    bool IsFiniteTeleportVector(const Vector& value)
+    {
+        return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+    }
+
+    bool NormalizeTeleportVectorInPlace(Vector& value)
+    {
+        const float lengthSq = value.LengthSqr();
+        if (!std::isfinite(lengthSq) || lengthSq <= 0.000001f)
+            return false;
+
+        value *= (1.0f / std::sqrt(lengthSq));
+        return IsFiniteTeleportVector(value);
+    }
+
+    void TraceTeleportClientRay(IEngineTrace* engineTrace, const Ray_t& ray, unsigned int mask, CTraceFilter* filter, CGameTrace& outTrace)
+    {
+        outTrace.fraction = 1.0f;
+        outTrace.allsolid = false;
+        outTrace.startsolid = false;
+        outTrace.m_pEnt = nullptr;
+        if (engineTrace)
+            engineTrace->TraceRay(ray, mask, filter, &outTrace);
+    }
+
+    bool IsTeleportWalkableFloor(const CGameTrace& trace)
+    {
+        // The floor probe itself travels vertically downward, so it already rejects walls.
+        // Do not reject steep ramps: L4D2 maps may use sloped walkable collision surfaces.
+        return !trace.allsolid && !trace.startsolid && trace.fraction < 0.999f;
+    }
+
+    bool ValidateTeleportLandingClient(VR* vr, C_BasePlayer* localPlayer, const Vector& surfacePoint, Vector& outLandingPoint)
+    {
+        if (!vr || !vr->m_Game || !vr->m_Game->m_EngineTrace || !localPlayer || !IsFiniteTeleportVector(surfacePoint))
+            return false;
+
+        IEngineTrace* engineTrace = vr->m_Game->m_EngineTrace;
+        CTraceFilterSkipSelf filter(reinterpret_cast<IHandleEntity*>(localPlayer), 0);
+
+        Ray_t floorRay;
+        floorRay.Init(
+            surfacePoint + Vector(0.0f, 0.0f, kTeleportLandingFloorSearchUpUnits),
+            surfacePoint - Vector(0.0f, 0.0f, kTeleportLandingFloorSearchDownUnits));
+        CGameTrace floorTrace{};
+        TraceTeleportClientRay(engineTrace, floorRay, kTeleportLandingStaticTraceMask, &filter, floorTrace);
+        if (!IsTeleportWalkableFloor(floorTrace))
+            return false;
+
+        const bool crouched = vr->m_Roomscale1To1PhysicalCrouchActive;
+        const float hullHeight = crouched ? 36.0f : 72.0f;
+        // Use a slightly inset landing hull. Source movement resolves small contact
+        // tolerances itself; requiring a zero-tolerance 32x32x72 static fit rejects
+        // valid flat ground beside seams, tiny props and accumulated trace epsilon.
+        const Vector hullMins(-14.0f, -14.0f, 0.0f);
+        const Vector hullMaxs(14.0f, 14.0f, hullHeight - 2.0f);
+        const Vector occupancyMins(-14.0f, -14.0f, 1.0f);
+        const Vector occupancyMaxs(14.0f, 14.0f, hullHeight - 1.0f);
+
+        // Place the inset player hull by sweeping downward onto the surface. A
+        // stationary hull test at the center of a ramp is unreliable because the
+        // uphill side of the box can already overlap the slope. The sweep returns a
+        // usable origin above flat floors and ramps without imposing an artificial
+        // normal-angle or corner-height restriction.
+        const Vector hullSweepStart = floorTrace.endpos + Vector(0.0f, 0.0f, kTeleportLandingHullSweepUpUnits);
+        const Vector hullSweepEnd = floorTrace.endpos + Vector(0.0f, 0.0f, kTeleportLandingFloorLiftUnits);
+        Ray_t landingHullSweep;
+        landingHullSweep.Init(hullSweepStart, hullSweepEnd, hullMins, hullMaxs);
+        CGameTrace landingHullTrace{};
+        TraceTeleportClientRay(engineTrace, landingHullSweep, kTeleportLandingStaticTraceMask, &filter, landingHullTrace);
+        if (landingHullTrace.startsolid || landingHullTrace.allsolid)
+            return false;
+
+        Vector landingPoint = (landingHullTrace.fraction < 0.999f) ? landingHullTrace.endpos : hullSweepEnd;
+        landingPoint.z += kTeleportLandingFloorLiftUnits;
+        if (!IsFiniteTeleportVector(landingPoint))
+            return false;
+
+        Vector playerOrigin{};
+#ifdef _MSC_VER
+        __try
+        {
+            playerOrigin = localPlayer->GetAbsOrigin();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+#else
+        playerOrigin = localPlayer->GetAbsOrigin();
+#endif
+        if (!IsFiniteTeleportVector(playerOrigin))
+            return false;
+
+        const float scale = (std::max)(1.0f, std::fabs(vr->m_VRScale));
+        const Vector playerToTarget = landingPoint - playerOrigin;
+        const float distance = playerToTarget.Length();
+        const float teleportMaxDistanceMeters = std::clamp(vr->m_TeleportMaxDistanceMeters, 0.25f, 50.0f);
+        if (!std::isfinite(distance) || distance > teleportMaxDistanceMeters * scale)
+            return false;
+
+        bool occupancyClear = false;
+        for (int liftStep = 0; liftStep <= 24; ++liftStep)
+        {
+            Vector candidate = landingPoint + Vector(0.0f, 0.0f, static_cast<float>(liftStep));
+            Ray_t occupancyRay;
+            occupancyRay.Init(candidate, candidate, occupancyMins, occupancyMaxs);
+            CGameTrace occupancyTrace{};
+            TraceTeleportClientRay(engineTrace, occupancyRay, kTeleportLandingStaticTraceMask, &filter, occupancyTrace);
+            if (!occupancyTrace.startsolid && !occupancyTrace.allsolid && occupancyTrace.fraction >= 0.999f)
+            {
+                landingPoint = candidate;
+                occupancyClear = true;
+                break;
+            }
+        }
+        if (!occupancyClear)
+            return false;
+
+        outLandingPoint = landingPoint;
+        return true;
+    }
+
+    void DrawTeleportPreview(VR* vr)
+    {
+        if (!vr || !vr->m_Game || !vr->m_Game->m_DebugOverlay || vr->m_TeleportArcPointCount < 2)
+            return;
+
+        const bool valid = vr->m_TeleportTargetValid;
+        const bool visualScoutOnly = valid && vr->m_TeleportTargetVisualScoutOnly;
+        const int r = valid ? (visualScoutOnly ? 48 : 32) : 255;
+        const int g = valid ? (visualScoutOnly ? 180 : 220) : 64;
+        const int b = valid ? (visualScoutOnly ? 255 : 120) : 48;
+        const float duration = (std::max)(0.035f, vr->m_LastFrameDuration * 2.0f);
+
+        for (int i = 1; i < vr->m_TeleportArcPointCount; ++i)
+        {
+            vr->m_Game->m_DebugOverlay->AddLineOverlay(
+                vr->m_TeleportArcPoints[i - 1],
+                vr->m_TeleportArcPoints[i],
+                r, g, b, true, duration);
+        }
+
+        const Vector center = vr->m_TeleportMarkerWorld;
+        if (!IsFiniteTeleportVector(center))
+            return;
+
+        constexpr int kRingSegments = 24;
+        constexpr float kRingRadius = 16.0f;
+        for (int i = 0; i < kRingSegments; ++i)
+        {
+            const float a0 = (static_cast<float>(i) / static_cast<float>(kRingSegments)) * kTeleportTwoPi;
+            const float a1 = (static_cast<float>(i + 1) / static_cast<float>(kRingSegments)) * kTeleportTwoPi;
+            const Vector p0 = center + Vector(std::cos(a0) * kRingRadius, std::sin(a0) * kRingRadius, 1.0f);
+            const Vector p1 = center + Vector(std::cos(a1) * kRingRadius, std::sin(a1) * kRingRadius, 1.0f);
+            vr->m_Game->m_DebugOverlay->AddLineOverlay(p0, p1, r, g, b, true, duration);
+        }
+
+        vr->m_Game->m_DebugOverlay->AddLineOverlay(
+            center + Vector(0.0f, 0.0f, 2.0f),
+            center + Vector(0.0f, 0.0f, valid ? 26.0f : 14.0f),
+            r, g, b, true, duration);
+
+        Vector facing = vr->m_HmdForward;
+        facing.z = 0.0f;
+        if (NormalizeTeleportVectorInPlace(facing))
+        {
+            const float yaw = vr->m_TeleportFacingYawOffset * (kTeleportTwoPi / 360.0f);
+            const float c = std::cos(yaw);
+            const float s = std::sin(yaw);
+            const Vector oriented(
+                (facing.x * c) - (facing.y * s),
+                (facing.x * s) + (facing.y * c),
+                0.0f);
+            const Vector arrowBase = center + Vector(0.0f, 0.0f, 2.0f);
+            const Vector arrowTip = arrowBase + (oriented * 28.0f);
+            const Vector arrowSide(-oriented.y, oriented.x, 0.0f);
+            vr->m_Game->m_DebugOverlay->AddLineOverlay(arrowBase, arrowTip, r, g, b, true, duration);
+            vr->m_Game->m_DebugOverlay->AddLineOverlay(arrowTip, arrowTip - (oriented * 8.0f) + (arrowSide * 5.0f), r, g, b, true, duration);
+            vr->m_Game->m_DebugOverlay->AddLineOverlay(arrowTip, arrowTip - (oriented * 8.0f) - (arrowSide * 5.0f), r, g, b, true, duration);
+        }
+    }
+}
+
+bool VR::ShouldUseTeleportServerMove() const
+{
+    const bool hasServerEntityMove =
+        m_Game &&
+        m_Game->m_EngineTraceServer &&
+        m_Game->m_Offsets &&
+        m_Game->m_Offsets->CBaseEntity_GetAbsOrigin_Server.address &&
+        m_Game->m_Offsets->CBaseEntity_SetOrigin_Server.address;
+
+    return m_IsVREnabled && Hooks::s_ServerUnderstandsVR && !m_ForceNonVRServerMovement && hasServerEntityMove;
+}
+
+void VR::BeginTeleportTargeting()
+{
+    if (!m_IsVREnabled)
+        return;
+
+    // While scouting, Teleport starts another detached-camera relocation. Use is
+    // the only normal return-to-body command, so scouting can be chained indefinitely.
+
+    m_TeleportTargetingActive = true;
+    m_TeleportCommitPending = false;
+    m_TeleportTargetValid = false;
+    m_TeleportTargetVisualScoutOnly = false;
+    m_TeleportArcPointCount = 0;
+    m_TeleportFacingYawOffset = 0.0f;
+    m_TeleportFacingTurnPressed = false;
+    ClearTeleportServerTarget();
+    CancelRoomscale1To1ServerMoveDelta();
+    m_Roomscale1To1PrevValid = false;
+}
+
+void VR::EndTeleportTargeting(bool commit)
+{
+    if (!m_TeleportTargetingActive)
+        return;
+
+    if (commit)
+    {
+        m_TeleportCommitPending = true;
+        return;
+    }
+
+    CancelTeleportTargeting();
+}
+
+void VR::CancelTeleportTargeting()
+{
+    m_TeleportTargetingActive = false;
+    m_TeleportCommitPending = false;
+    m_TeleportTargetValid = false;
+    m_TeleportTargetVisualScoutOnly = false;
+    m_TeleportArcPointCount = 0;
+    m_TeleportFacingYawOffset = 0.0f;
+    m_TeleportFacingTurnPressed = false;
+}
+
+void VR::QueueTeleportServerTarget(const Vector& targetWorld)
+{
+    if (!IsFiniteTeleportVector(targetWorld))
+        return;
+
+    CancelRoomscale1To1ServerMoveDelta();
+    std::lock_guard<std::mutex> lock(m_TeleportServerMoveMutex);
+    m_TeleportPendingServerTarget = targetWorld;
+    m_TeleportPendingServerTargetValid = true;
+}
+
+bool VR::ConsumeTeleportServerTarget(Vector& outTargetWorld)
+{
+    std::lock_guard<std::mutex> lock(m_TeleportServerMoveMutex);
+    if (!m_TeleportPendingServerTargetValid)
+        return false;
+
+    outTargetWorld = m_TeleportPendingServerTarget;
+    m_TeleportPendingServerTarget = {};
+    m_TeleportPendingServerTargetValid = false;
+    return IsFiniteTeleportVector(outTargetWorld);
+}
+
+void VR::ClearTeleportServerTarget()
+{
+    std::lock_guard<std::mutex> lock(m_TeleportServerMoveMutex);
+    m_TeleportPendingServerTarget = {};
+    m_TeleportPendingServerTargetValid = false;
+}
+
+void VR::SuppressTeleportViewmodelForMs(uint32_t durationMs)
+{
+    if (durationMs == 0)
+        return;
+
+    const uint32_t until = static_cast<uint32_t>(::GetTickCount()) + durationMs;
+    uint32_t current = m_TeleportViewmodelSuppressUntilMs.load(std::memory_order_relaxed);
+    while (static_cast<int32_t>(until - current) > 0 &&
+        !m_TeleportViewmodelSuppressUntilMs.compare_exchange_weak(
+            current, until, std::memory_order_relaxed, std::memory_order_relaxed))
+    {
+    }
+}
+
+bool VR::ShouldSuppressTeleportViewmodelRender() const
+{
+    const uint32_t until = m_TeleportViewmodelSuppressUntilMs.load(std::memory_order_relaxed);
+    const uint32_t now = static_cast<uint32_t>(::GetTickCount());
+    return static_cast<int32_t>(until - now) > 0;
+}
+
+void VR::ClearTeleportVisualScout()
+{
+    m_TeleportVisualScoutActive = false;
+    m_TeleportVisualScoutUseExitArmed = false;
+    m_TeleportVisualScoutCameraAnchor = {};
+    m_TeleportVisualScoutReturnRotationOffset = 0.0f;
+    m_TeleportVisualScoutBodyViewAngles = {};
+    m_TeleportVisualScoutBodyViewAnglesValid = false;
+}
+
+void VR::EnterTeleportVisualScout(const Vector& targetWorld)
+{
+    if (!IsFiniteTeleportVector(targetWorld) || !m_Game || !m_Game->m_EngineClient)
+        return;
+
+    const int localIndex = m_Game->m_EngineClient->GetLocalPlayer();
+    C_BasePlayer* localPlayer = (localIndex > 0)
+        ? reinterpret_cast<C_BasePlayer*>(m_Game->GetClientEntity(localIndex))
+        : nullptr;
+    if (!localPlayer)
+        return;
+
+    // Visual scouting targets the rendered HMD observation point directly. Unlike a
+    // real teleport landing target, it is not a player-origin / feet position.
+    if (!IsFiniteTeleportVector(m_HmdPosAbs) || !IsFiniteTeleportVector(m_HmdPosLocalInWorld))
+        return;
+
+    const Vector scoutDelta = targetWorld - m_HmdPosAbs;
+    const float scoutDistance = scoutDelta.Length();
+    if (!std::isfinite(scoutDistance) || scoutDistance <= 0.01f)
+        return;
+
+    const bool relocatingExistingScout = m_TeleportVisualScoutActive;
+    if (!relocatingExistingScout)
+    {
+        m_TeleportVisualScoutReturnRotationOffset = m_RotationOffset;
+        m_TeleportVisualScoutBodyViewAngles = {};
+        m_TeleportVisualScoutBodyViewAnglesValid = false;
+        if (m_Game->m_EngineClient)
+        {
+            QAngle bodyAngles{};
+            m_Game->m_EngineClient->GetViewAngles(bodyAngles);
+            if (std::isfinite(bodyAngles.x) && std::isfinite(bodyAngles.y) && std::isfinite(bodyAngles.z))
+            {
+                m_TeleportVisualScoutBodyViewAngles = bodyAngles;
+                m_TeleportVisualScoutBodyViewAnglesValid = true;
+            }
+        }
+
+        // If Use was held as a playerclip-bypass modifier when scouting began, require
+        // it to be released once before it can act as the return-to-body command.
+        m_TeleportVisualScoutUseExitArmed = !PressedDigitalAction(m_ActionUse);
+    }
+    // Anchor the selected world point to the rendered HMD itself. Do not carry a
+    // stale pre-scout roomscale offset into the detached camera basis.
+    m_TeleportVisualScoutCameraAnchor =
+        targetWorld + Vector(0.0f, 0.0f, 64.0f) - m_HmdPosLocalInWorld;
+    m_TeleportPendingCameraPlanarRecenterTarget = {};
+    m_TeleportPendingCameraPlanarRecenterValid = false;
+    m_TeleportCameraClipSuppressFrames = 0;
+    m_TeleportVisualScoutActive = true;
+    SuppressTeleportViewmodelForMs(TELEPORT_VIEWMODEL_SUPPRESS_MS);
+
+    // A scout camera is intentionally detached from the server origin. Clear all
+    // server-move and delayed engine-origin compensation state so neither path can
+    // pull the camera back or apply the offset twice.
+    ClearTeleportServerTarget();
+    ClearRoomscale1To1ServerMoveDelta();
+    m_TeleportPendingEngineAnchorWorldDelta = {};
+    m_TeleportEngineAnchorCompensationFrames = 0;
+    m_AutoResetPositionPending = false;
+    m_ResetPositionAfterObserverTargetSwitchPending = false;
+    m_ResetPositionAfterMountedGunExitPending = false;
+    m_Roomscale1To1PrevValid = false;
+    m_Roomscale1To1LastEngineEyeValid = false;
+    m_Roomscale1To1PendingVisualWorldDelta = {};
+    m_Roomscale1To1PendingVisualWorldDeltaValid = false;
+}
+
+void VR::ExitTeleportVisualScout()
+{
+    if (!m_TeleportVisualScoutActive)
+        return;
+
+    const float returnRotationOffset = m_TeleportVisualScoutReturnRotationOffset;
+    ClearTeleportVisualScout();
+    m_TeleportPendingCameraPlanarRecenterTarget = {};
+    m_TeleportPendingCameraPlanarRecenterValid = false;
+    m_TeleportCameraClipSuppressFrames = 0;
+    SuppressTeleportViewmodelForMs(TELEPORT_VIEWMODEL_SUPPRESS_MS);
+
+    // Recenter directly on the current authoritative body origin. Do not route this
+    // through ResetPosition(): the detached scout Z offset must not leak into HeightOffset.
+    if (!m_SetupOrigin.IsZero() && IsFiniteTeleportVector(m_SetupOrigin) && IsFiniteTeleportVector(m_HmdPosLocalInWorld))
+    {
+        m_CameraAnchor = m_SetupOrigin + Vector(0.0f, 0.0f, 64.0f) - m_HmdPosLocalInWorld;
+        m_HeightOffset = m_CameraAnchor.z - m_SetupOrigin.z;
+        m_HmdPosAbs = m_CameraAnchor - Vector(0.0f, 0.0f, 64.0f) + m_HmdPosLocalInWorld;
+        m_HmdPosAbsPrev = m_HmdPosAbs;
+        m_SetupOriginToHMD = m_HmdPosAbs - m_SetupOrigin;
+    }
+
+    m_RotationOffset = returnRotationOffset;
+    m_RotationOffset -= 360.0f * std::floor(m_RotationOffset / 360.0f);
+    m_TeleportPendingEngineAnchorWorldDelta = {};
+    m_TeleportEngineAnchorCompensationFrames = 0;
+    m_AutoResetPositionPending = false;
+    m_ResetPositionAfterObserverTargetSwitchPending = false;
+    m_ResetPositionAfterMountedGunExitPending = false;
+    m_Roomscale1To1PrevValid = false;
+    m_Roomscale1To1LastEngineEyeValid = false;
+    m_Roomscale1To1PendingVisualWorldDelta = {};
+    m_Roomscale1To1PendingVisualWorldDeltaValid = false;
+    ClearRoomscale1To1ServerMoveDelta();
+    CancelTeleportTargeting();
+}
+
+void VR::QueueTeleportVisualWorldDelta(const Vector& worldDelta, const Vector& landingTarget)
+{
+    if (!IsFiniteTeleportVector(worldDelta) || !IsFiniteTeleportVector(landingTarget))
+        return;
+
+    const float len = worldDelta.Length();
+    if (!std::isfinite(len) || len <= 0.01f)
+        return;
+
+    std::lock_guard<std::mutex> lock(m_TeleportServerMoveMutex);
+    m_TeleportPendingVisualWorldDelta += worldDelta;
+    m_TeleportPendingVisualWorldDeltaValid = true;
+    m_TeleportPendingVisualLandingTarget = landingTarget;
+    m_TeleportPendingVisualLandingTargetValid = true;
+}
+
+void VR::ApplyPendingTeleportVisualWorldDelta()
+{
+    Vector worldDelta{};
+    Vector landingTarget{};
+    bool landingTargetValid = false;
+    {
+        std::lock_guard<std::mutex> lock(m_TeleportServerMoveMutex);
+        if (!m_TeleportPendingVisualWorldDeltaValid)
+            return;
+
+        worldDelta = m_TeleportPendingVisualWorldDelta;
+        landingTarget = m_TeleportPendingVisualLandingTarget;
+        landingTargetValid = m_TeleportPendingVisualLandingTargetValid;
+        m_TeleportPendingVisualWorldDelta = {};
+        m_TeleportPendingVisualWorldDeltaValid = false;
+        m_TeleportPendingVisualLandingTarget = {};
+        m_TeleportPendingVisualLandingTargetValid = false;
+    }
+
+    if (!IsFiniteTeleportVector(worldDelta))
+        return;
+
+    SuppressTeleportViewmodelForMs(TELEPORT_VIEWMODEL_SUPPRESS_MS);
+    ClearTeleportVisualScout();
+    m_CameraAnchor += worldDelta;
+    m_HmdPosAbs += worldDelta;
+    m_HmdPosAbsPrev += worldDelta;
+    m_SetupOriginToHMD += worldDelta;
+    m_LeftControllerPosAbs += worldDelta;
+    m_RightControllerPosAbs += worldDelta;
+
+    // Recenter after UpdateTracking has refreshed m_HmdPosLocalInWorld for the
+    // current frame. Using the previous tracking sample here can push the camera
+    // beyond the accepted landing point when the user is looking forward or sideways.
+    if (landingTargetValid && IsFiniteTeleportVector(landingTarget))
+    {
+        m_TeleportPendingCameraPlanarRecenterTarget = landingTarget;
+        m_TeleportPendingCameraPlanarRecenterValid = true;
+        m_TeleportCameraClipSuppressFrames = 12;
+    }
+
+    if (IsFiniteTeleportVector(m_SetupOrigin))
+        m_SetupOriginToHMD = m_HmdPosAbs - m_SetupOrigin;
+
+    // The client origin update caused by server SetOrigin may be observed slightly later.
+    // Consume that matching engine-origin delta once so the visual anchor is not shifted twice.
+    m_TeleportPendingEngineAnchorWorldDelta += worldDelta;
+    m_TeleportEngineAnchorCompensationFrames = 12;
+
+    m_Roomscale1To1PrevValid = false;
+    m_Roomscale1To1LastEngineEyeValid = false;
+    m_Roomscale1To1PendingVisualWorldDelta = {};
+    m_Roomscale1To1PendingVisualWorldDeltaValid = false;
+    ClearRoomscale1To1ServerMoveDelta();
+}
+
+void VR::ConsumeTeleportEngineAnchorCompensation(Vector& engineOriginDelta)
+{
+    if (m_TeleportEngineAnchorCompensationFrames <= 0)
+        return;
+
+    --m_TeleportEngineAnchorCompensationFrames;
+    Vector expected = m_TeleportPendingEngineAnchorWorldDelta;
+    if (!IsFiniteTeleportVector(expected) || expected.Length() <= 0.01f)
+    {
+        m_TeleportPendingEngineAnchorWorldDelta = {};
+        m_TeleportEngineAnchorCompensationFrames = 0;
+        return;
+    }
+
+    const float expectedLenSq = expected.LengthSqr();
+    const float originLen = engineOriginDelta.Length();
+    if (expectedLenSq > 0.01f && std::isfinite(originLen) && originLen > 0.5f)
+    {
+        const float projection = engineOriginDelta.Dot(expected) / expectedLenSq;
+        if (std::isfinite(projection) && projection > 0.05f)
+        {
+            const float consumeScale = std::clamp(projection, 0.0f, 1.0f);
+            const Vector consumed = expected * consumeScale;
+            engineOriginDelta -= consumed;
+            m_TeleportPendingEngineAnchorWorldDelta -= consumed;
+        }
+    }
+
+    if (m_TeleportPendingEngineAnchorWorldDelta.Length() <= 0.5f || m_TeleportEngineAnchorCompensationFrames <= 0)
+    {
+        m_TeleportPendingEngineAnchorWorldDelta = {};
+        m_TeleportEngineAnchorCompensationFrames = 0;
+    }
+}
+
+void VR::UpdateTeleportTargeting()
+{
+    if (!m_TeleportTargetingActive)
+        return;
+
+    m_TeleportTargetValid = false;
+    m_TeleportTargetVisualScoutOnly = false;
+    m_TeleportArcPointCount = 0;
+    CancelRoomscale1To1ServerMoveDelta();
+    m_Roomscale1To1PrevValid = false;
+
+    C_BasePlayer* localPlayer = nullptr;
+    if (m_Game && m_Game->m_EngineClient && m_Game->m_ClientEntityList)
+    {
+        const int localIndex = m_Game->m_EngineClient->GetLocalPlayer();
+        if (localIndex > 0)
+            localPlayer = reinterpret_cast<C_BasePlayer*>(m_Game->GetClientEntity(localIndex));
+    }
+
+    bool canTrace = localPlayer != nullptr && m_Game && m_Game->m_EngineTrace;
+    bool canCommit = localPlayer != nullptr && !m_PlayerControlledBySI && !m_UsingMountedGunPrev;
+    if (localPlayer)
+    {
+        const auto* base = reinterpret_cast<const std::uint8_t*>(localPlayer);
+        const int lifeState = static_cast<int>(*reinterpret_cast<const std::uint8_t*>(base + kLifeStateOffset));
+        const int observerMode = *reinterpret_cast<const int*>(base + kObserverModeOffset);
+        const bool incapacitated = *reinterpret_cast<const std::uint8_t*>(base + kIsIncapacitatedOffset) != 0;
+        const bool hangingFromLedge = *reinterpret_cast<const std::uint8_t*>(base + kIsHangingFromLedgeOffset) != 0;
+        const bool playerStateValid = lifeState == 0 && observerMode == 0;
+        canTrace = canTrace && playerStateValid;
+        canCommit = canCommit && playerStateValid && !incapacitated && !hangingFromLedge;
+    }
+
+    vr::InputAnalogActionData_t facingTurn{};
+    if (GetAnalogActionData(m_ActionTurn, facingTurn))
+    {
+        if (m_SnapTurning)
+        {
+            if (!m_TeleportFacingTurnPressed && facingTurn.x > 0.5f)
+            {
+                m_TeleportFacingYawOffset += m_SnapTurnAngle;
+                m_TeleportFacingTurnPressed = true;
+            }
+            else if (!m_TeleportFacingTurnPressed && facingTurn.x < -0.5f)
+            {
+                m_TeleportFacingYawOffset -= m_SnapTurnAngle;
+                m_TeleportFacingTurnPressed = true;
+            }
+            else if (facingTurn.x < 0.3f && facingTurn.x > -0.3f)
+            {
+                m_TeleportFacingTurnPressed = false;
+            }
+        }
+        else
+        {
+            constexpr float kDeadzone = 0.2f;
+            const float absX = std::fabs(facingTurn.x);
+            if (absX > kDeadzone)
+            {
+                const float normalized = (absX - kDeadzone) / (1.0f - kDeadzone);
+                const float signedNormalized = (facingTurn.x < 0.0f) ? -normalized : normalized;
+                m_TeleportFacingYawOffset += signedNormalized * m_TurnSpeed * (m_LastFrameDuration * 1000.0f);
+            }
+        }
+        while (m_TeleportFacingYawOffset > 180.0f) m_TeleportFacingYawOffset -= 360.0f;
+        while (m_TeleportFacingYawOffset < -180.0f) m_TeleportFacingYawOffset += 360.0f;
+    }
+
+    Vector direction = m_RightControllerForwardUnforced;
+    if (direction.IsZero() || !IsFiniteTeleportVector(direction))
+        direction = m_RightControllerForward;
+    NormalizeTeleportVectorInPlace(direction);
+
+    const float scale = (std::max)(1.0f, std::fabs(m_VRScale));
+    const float teleportMaxDistanceMeters = std::clamp(m_TeleportMaxDistanceMeters, 0.25f, 50.0f);
+    const float teleportMaxDistanceUnits = teleportMaxDistanceMeters * scale;
+    // Use the runtime distance parameter as the sole range source. Keep a fixed nominal
+    // travel time and derive velocity linearly from the configured maximum so preview,
+    // client validation and server validation remain consistent.
+    const float teleportArcSpeedMetersPerSecond =
+        teleportMaxDistanceMeters / kTeleportArcNominalTravelSeconds;
+    Vector current = m_RightControllerPosAbs;
+    m_TeleportArcPoints[0] = current;
+    m_TeleportArcPointCount = 1;
+    m_TeleportMarkerWorld = current;
+
+    const bool canUseServerMove = ShouldUseTeleportServerMove();
+    const bool visualScoutOnly =
+        m_TeleportVisualScoutActive ||
+        (!canUseServerMove && m_TeleportVisualScoutOnNonVRServerEnabled);
+    if (visualScoutOnly)
+    {
+        // Camera-only scouting is intentionally collision-free. It is a probe view, not
+        // authoritative locomotion: walls, ceilings, low spaces and missing floor support
+        // must not block the preview. Keep a straight controller ray so the destination is
+        // deterministic even when the target is inside geometry or behind multiple walls.
+        if (localPlayer && canCommit &&
+            IsFiniteTeleportVector(current) && IsFiniteTeleportVector(direction) && !direction.IsZero())
+        {
+            const Vector scoutTarget = current + (direction * teleportMaxDistanceUnits);
+            if (IsFiniteTeleportVector(scoutTarget))
+            {
+                m_TeleportArcPoints[m_TeleportArcPointCount++] = scoutTarget;
+                m_TeleportTargetWorld = scoutTarget;
+                m_TeleportMarkerWorld = scoutTarget;
+                m_TeleportTargetValid = true;
+                m_TeleportTargetVisualScoutOnly = true;
+            }
+        }
+    }
+    else
+    {
+        Vector velocity = direction * (teleportArcSpeedMetersPerSecond * scale);
+        const Vector gravity(0.0f, 0.0f, -kTeleportArcGravityMetersPerSecondSq * scale);
+        // Holding Use together with Teleport ignores playerclip barriers only. Real
+        // solid walls, windows and grates still stop the arc, and the destination
+        // still has to pass the normal landing occupancy validation.
+        const bool ignorePlayerClip = PressedDigitalAction(m_ActionUse);
+        const unsigned int pathTraceMask = ignorePlayerClip
+            ? (kTeleportPathTraceMask & ~CONTENTS_PLAYERCLIP)
+            : kTeleportPathTraceMask;
+        bool hitSurface = false;
+        Vector hitPoint = current;
+        float traveledDistanceUnits = 0.0f;
+        if (canTrace && IsFiniteTeleportVector(current) && IsFiniteTeleportVector(direction) && !direction.IsZero())
+        {
+            CTraceFilterSkipNPCsAndPlayers pathFilter(reinterpret_cast<IHandleEntity*>(localPlayer), 0);
+            for (int i = 0; i < TELEPORT_ARC_SEGMENTS; ++i)
+            {
+                Vector next = current + (velocity * kTeleportArcStepSeconds) + (gravity * (0.5f * kTeleportArcStepSeconds * kTeleportArcStepSeconds));
+                velocity += gravity * kTeleportArcStepSeconds;
+
+                bool reachedMaxDistance = false;
+                const Vector segment = next - current;
+                const float segmentDistance = segment.Length();
+                if (!std::isfinite(segmentDistance) || segmentDistance <= 0.0001f)
+                    break;
+
+                const float remainingDistance = teleportMaxDistanceUnits - traveledDistanceUnits;
+                if (remainingDistance <= 0.0001f)
+                    break;
+                if (segmentDistance > remainingDistance)
+                {
+                    next = current + (segment * (remainingDistance / segmentDistance));
+                    reachedMaxDistance = true;
+                }
+
+                Ray_t pathRay;
+                pathRay.Init(current, next);
+                CGameTrace pathTrace{};
+                TraceTeleportClientRay(m_Game->m_EngineTrace, pathRay, pathTraceMask, &pathFilter, pathTrace);
+
+                const Vector renderedEnd = (pathTrace.fraction < 0.999f) ? pathTrace.endpos : next;
+                const float renderedDistance = (renderedEnd - current).Length();
+                if (std::isfinite(renderedDistance))
+                    traveledDistanceUnits += renderedDistance;
+                m_TeleportArcPoints[m_TeleportArcPointCount++] = renderedEnd;
+                m_TeleportMarkerWorld = renderedEnd;
+
+                if (pathTrace.allsolid || pathTrace.startsolid || pathTrace.fraction < 0.999f)
+                {
+                    hitSurface = !pathTrace.allsolid && !pathTrace.startsolid;
+                    hitPoint = pathTrace.endpos;
+                    break;
+                }
+
+                current = next;
+                if (reachedMaxDistance)
+                    break;
+            }
+        }
+
+        Vector landingPoint{};
+        bool landingValid = hitSurface && ValidateTeleportLandingClient(this, localPlayer, hitPoint, landingPoint);
+        // Allow the preview endpoint to hover above a valid floor. This is useful on
+        // second-storey floors, balcony edges and other places where the arc stops in
+        // open air slightly above the walkable surface instead of colliding with it.
+        if (!landingValid && m_TeleportArcPointCount > 1)
+            landingValid = ValidateTeleportLandingClient(this, localPlayer, m_TeleportMarkerWorld, landingPoint);
+
+        if (landingValid)
+        {
+            m_TeleportTargetWorld = landingPoint;
+            m_TeleportMarkerWorld = landingPoint;
+            // A non-VR server may still render the normal arc as a red unavailable
+            // preview when detached scouting is disabled, but must never queue SetOrigin.
+            m_TeleportTargetValid = canCommit && canUseServerMove;
+            m_TeleportTargetVisualScoutOnly = false;
+        }
+    }
+
+    DrawTeleportPreview(this);
+
+    if (m_TeleportCommitPending)
+    {
+        if (m_TeleportTargetValid)
+        {
+            if (m_TeleportTargetVisualScoutOnly)
+                EnterTeleportVisualScout(m_TeleportTargetWorld);
+            else
+                QueueTeleportServerTarget(m_TeleportTargetWorld);
+
+            m_RotationOffset -= m_TeleportFacingYawOffset;
+            m_RotationOffset -= 360.0f * std::floor(m_RotationOffset / 360.0f);
+        }
+        CancelTeleportTargeting();
+    }
+}
+
 void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool controlLocomotionActive)
 {
     const Vector cur = m_HmdPosCorrectedPrev;
@@ -240,7 +984,7 @@ void VR::ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool contr
     m_Roomscale1To1PendingVisualWorldDelta = {};
     m_Roomscale1To1PendingVisualWorldDeltaValid = false;
 
-    if (!cmd || !m_Roomscale1To1Movement)
+    if (!cmd || !m_Roomscale1To1Movement || m_TeleportTargetingActive || m_TeleportVisualScoutActive)
     {
         m_Roomscale1To1PrevValid = false;
         CancelRoomscale1To1ServerMoveDelta();

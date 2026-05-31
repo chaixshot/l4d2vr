@@ -386,6 +386,151 @@ static void FinalizePendingRoomscaleServerCmdFallback(Server_BaseEntity* serverP
 	ClearRoomscaleServerCmdFallback();
 }
 
+static bool IsFiniteTeleportServerVector(const Vector& value)
+{
+	return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
+static bool IsTeleportServerWalkableFloor(const CGameTrace& trace)
+{
+	// The landing probe travels vertically downward. Keep occupancy/support checks,
+	// but do not reject steep ramps based on the plane normal.
+	return !trace.allsolid && !trace.startsolid && trace.fraction < 0.999f;
+}
+
+static bool ValidateServerTeleportLanding(
+	Server_BaseEntity* serverPlayer,
+	IServerUnknown* serverUnknown,
+	const Vector& requestedTarget,
+	Vector& outStart,
+	Vector& outLandingTarget)
+{
+	if (!Hooks::m_Game || !Hooks::m_VR || !serverPlayer || !serverUnknown || !IsFiniteTeleportServerVector(requestedTarget))
+		return false;
+
+	using GetAbsOriginServerFn = Vector* (__thiscall*)(void*);
+	auto getAbsOrigin = reinterpret_cast<GetAbsOriginServerFn>(Hooks::m_Game->m_Offsets->CBaseEntity_GetAbsOrigin_Server.address);
+	IEngineTrace* serverTrace = Hooks::m_Game->m_EngineTraceServer;
+	if (!getAbsOrigin || !serverTrace)
+		return false;
+
+	Vector* originPtr = getAbsOrigin(serverPlayer);
+	if (!originPtr || !IsFiniteTeleportServerVector(*originPtr))
+		return false;
+
+	outStart = *originPtr;
+	const float scale = (std::max)(1.0f, std::fabs(Hooks::m_VR->m_VRScale));
+	const float teleportMaxDistanceMeters = std::clamp(Hooks::m_VR->m_TeleportMaxDistanceMeters, 0.25f, 50.0f);
+
+	// Ignore dynamic actors and movable props while validating the final landing.
+	// Static map collision remains authoritative, but transient entities no longer
+	// make ordinary flat ground randomly fail the server-side second pass.
+	constexpr unsigned int kTeleportLandingStaticTraceMask =
+		CONTENTS_SOLID | CONTENTS_PLAYERCLIP | CONTENTS_WINDOW | CONTENTS_GRATE;
+	CTraceFilterSkipSelf filter(static_cast<IHandleEntity*>(serverUnknown), 0);
+
+	Ray_t floorRay;
+	floorRay.Init(
+		requestedTarget + Vector(0.0f, 0.0f, 128.0f),
+		requestedTarget - Vector(0.0f, 0.0f, 256.0f));
+	CGameTrace floorTrace{};
+	TraceRoomscaleServerRay(serverTrace, floorRay, kTeleportLandingStaticTraceMask, &filter, floorTrace);
+	if (!IsTeleportServerWalkableFloor(floorTrace))
+		return false;
+
+	const bool crouched = Hooks::m_VR->m_Roomscale1To1PhysicalCrouchActive;
+	const float hullHeight = crouched ? 36.0f : 72.0f;
+	// Match the client-side inset landing hull. Small contact tolerances are left to
+	// Source movement resolution instead of rejecting an otherwise valid location.
+	const Vector hullMins(-14.0f, -14.0f, 0.0f);
+	const Vector hullMaxs(14.0f, 14.0f, hullHeight - 2.0f);
+	const Vector occupancyMins(-14.0f, -14.0f, 1.0f);
+	const Vector occupancyMaxs(14.0f, 14.0f, hullHeight - 1.0f);
+
+	// Sweep the inset player hull down onto the candidate surface. This accepts ramps
+	// without treating the uphill side of the hull as an invalid stationary overlap.
+	const Vector hullSweepStart = floorTrace.endpos + Vector(0.0f, 0.0f, 128.0f);
+	const Vector hullSweepEnd = floorTrace.endpos + Vector(0.0f, 0.0f, 2.0f);
+	Ray_t landingHullSweep;
+	landingHullSweep.Init(hullSweepStart, hullSweepEnd, hullMins, hullMaxs);
+	CGameTrace landingHullTrace{};
+	TraceRoomscaleServerRay(serverTrace, landingHullSweep, kTeleportLandingStaticTraceMask, &filter, landingHullTrace);
+	if (landingHullTrace.startsolid || landingHullTrace.allsolid)
+		return false;
+
+	Vector landingTarget = (landingHullTrace.fraction < 0.999f) ? landingHullTrace.endpos : hullSweepEnd;
+	landingTarget.z += 2.0f;
+	if (!IsFiniteTeleportServerVector(landingTarget))
+		return false;
+
+	const Vector acceptedDelta = landingTarget - outStart;
+	const float acceptedDistance = acceptedDelta.Length();
+	if (!std::isfinite(acceptedDistance) || acceptedDistance > teleportMaxDistanceMeters * scale)
+		return false;
+
+	bool occupancyClear = false;
+	for (int liftStep = 0; liftStep <= 24; ++liftStep)
+	{
+		Vector candidate = landingTarget + Vector(0.0f, 0.0f, static_cast<float>(liftStep));
+		Ray_t occupancyRay;
+		occupancyRay.Init(candidate, candidate, occupancyMins, occupancyMaxs);
+		CGameTrace occupancyTrace{};
+		TraceRoomscaleServerRay(serverTrace, occupancyRay, kTeleportLandingStaticTraceMask, &filter, occupancyTrace);
+		if (!occupancyTrace.startsolid && !occupancyTrace.allsolid && occupancyTrace.fraction >= 0.999f)
+		{
+			landingTarget = candidate;
+			occupancyClear = true;
+			break;
+		}
+	}
+	if (!occupancyClear)
+		return false;
+
+	outLandingTarget = landingTarget;
+	return true;
+}
+
+static bool ApplyServerTeleportMove(Server_BaseEntity* serverPlayer, IServerUnknown* serverUnknown, int playerIndex)
+{
+	if (!Hooks::m_Game || !Hooks::m_VR || !serverPlayer || !serverUnknown)
+		return false;
+
+	if (!Hooks::m_Game->m_EngineClient || Hooks::m_Game->m_EngineClient->GetLocalPlayer() != playerIndex)
+		return false;
+
+	if (Hooks::m_VR->m_PlayerControlledBySI ||
+		Hooks::m_VR->m_UsingMountedGunPrev ||
+		Hooks::m_VR->m_RenderPlayerIncap.load(std::memory_order_relaxed) != 0 ||
+		Hooks::m_VR->m_RenderTpLedge.load(std::memory_order_relaxed) != 0)
+	{
+		Hooks::m_VR->ClearTeleportServerTarget();
+		return false;
+	}
+
+	Vector requestedTarget{};
+	if (!Hooks::m_VR->ConsumeTeleportServerTarget(requestedTarget))
+		return false;
+
+	if (!Hooks::m_VR->ShouldUseTeleportServerMove())
+		return false;
+
+	Vector start{};
+	Vector landingTarget{};
+	if (!ValidateServerTeleportLanding(serverPlayer, serverUnknown, requestedTarget, start, landingTarget))
+		return false;
+
+	using SetOriginServerFn = void(__thiscall*)(void*, const Vector&);
+	auto setOrigin = reinterpret_cast<SetOriginServerFn>(Hooks::m_Game->m_Offsets->CBaseEntity_SetOrigin_Server.address);
+	if (!setOrigin)
+		return false;
+
+	Hooks::m_VR->SuppressTeleportViewmodelForMs(VR::TELEPORT_VIEWMODEL_SUPPRESS_MS);
+	setOrigin(serverPlayer, landingTarget);
+	Hooks::m_VR->ClearRoomscale1To1ServerMoveDelta();
+	Hooks::m_VR->QueueTeleportVisualWorldDelta(landingTarget - start, landingTarget);
+	return true;
+}
+
 static bool ApplyServerRoomscale1To1Move(Server_BaseEntity* serverPlayer, IServerUnknown* serverUnknown, int playerIndex)
 {
 	ClearRoomscaleServerCmdFallback();

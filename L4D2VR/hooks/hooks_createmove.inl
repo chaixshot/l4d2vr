@@ -71,6 +71,60 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 
 	m_VR->m_EffectiveAttackRangeAutoFireActive = false;
 
+	if (m_VR && m_VR->m_TeleportVisualScoutActive)
+	{
+		// Detached scout view is local-only. Return before VR aim, melee helpers,
+		// auto-fire and roomscale code can mutate the authoritative body command.
+		// Keep command timing intact, but freeze body orientation and strip actions.
+		if (m_VR->m_TeleportVisualScoutBodyViewAnglesValid)
+			cmd->viewangles = m_VR->m_TeleportVisualScoutBodyViewAngles;
+		cmd->forwardmove = 0.0f;
+		cmd->sidemove = 0.0f;
+		cmd->upmove = 0.0f;
+		cmd->buttons = 0;
+		cmd->impulse = 0;
+		cmd->weaponselect = 0;
+		cmd->weaponsubtype = 0;
+		cmd->mousedx = 0;
+		cmd->mousedy = 0;
+		m_VR->m_PushingThumbstick = false;
+		m_VR->m_LocomotionActive = false;
+
+		// Drop transient attack helpers so returning to the body cannot replay a
+		// queued melee swing, auto-repeat pulse or effective-range cycle.
+		s_nonvrMeleeHoldTicks = 0;
+		s_nonvrMeleeArmed = true;
+		s_nonvrMeleeLockUntil = {};
+		s_nonvrMeleeCooldownUntil = {};
+		s_nonvrMeleePending = false;
+		s_nonvrMeleeFireAt = {};
+		s_nonvrMeleePendingHoldTicks = 0;
+		s_nonvrMeleeHasPrev = false;
+		s_tpMeleePrevAttackDown = false;
+		s_tpMeleeLockUntil = {};
+		s_autoRepeatSprayPushWeapon = 0;
+		s_autoRepeatSprayPushPrevClip1 = -1;
+		s_autoRepeatSprayPushDelayTicks = 0;
+		s_autoRepeatSprayPushHoldTicks = 0;
+		s_autoFastMeleeHoldPrev = false;
+		s_autoFastMeleeNextSwingCmd = -1;
+		s_autoFastMeleeWeapon = 0;
+		s_autoFastMeleeSwitchOutPending = false;
+		s_autoFastMeleeSwitchBackPending = false;
+		s_autoFastMeleeSwitchOutCmd = -1;
+		s_autoFastMeleeSwitchBackCmd = -1;
+		s_autoFastMeleeLastIntentCmd = -1;
+		s_effectiveRangeMeleeNextCycleAt = {};
+		s_effectiveRangeMeleeWeapon = 0;
+		s_effectiveRangeMeleeSwitchOutPending = false;
+		s_effectiveRangeMeleeSwitchBackPending = false;
+		s_effectiveRangeMeleeSwitchOutCmd = -1;
+		s_effectiveRangeMeleeSwitchBackCmd = -1;
+		s_effectiveRangeMeleeCycleEndCmd = -1;
+		m_VR->m_EffectiveAttackRangeAutoFirePrevAttackDown = false;
+		return result;
+	}
+
 	auto resetEffectiveRangeMeleeCycle = [&]()
 		{
 			s_effectiveRangeMeleeNextCycleAt = {};
@@ -280,7 +334,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			cmd->mousedy = 0;
 		}
 		const QAngle originalViewAngles = cmd->viewangles;
-		const bool suppressScopeWalk = m_VR->m_ScopeFovAdjustSuppressWalk;
+		const bool suppressScopeWalk = m_VR->m_ScopeFovAdjustSuppressWalk || m_VR->m_TeleportTargetingActive;
 		const float originalForwardMove = suppressScopeWalk ? 0.0f : cmd->forwardmove;
 		const float originalSideMove = suppressScopeWalk ? 0.0f : cmd->sidemove;
 		if (suppressScopeWalk)

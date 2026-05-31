@@ -1024,6 +1024,7 @@ int VR::SetActionManifest(const char* fileName)
     m_Input->GetActionHandle("/actions/main/in/PrimaryAttack", &m_ActionPrimaryAttack);
     m_Input->GetActionHandle("/actions/main/in/Reload", &m_ActionReload);
     m_Input->GetActionHandle("/actions/main/in/Use", &m_ActionUse);
+    m_Input->GetActionHandle("/actions/main/in/Teleport", &m_ActionTeleport);
     m_Input->GetActionHandle("/actions/main/in/Walk", &m_ActionWalk);
     m_Input->GetActionHandle("/actions/main/in/Turn", &m_ActionTurn);
     m_Input->GetActionHandle("/actions/main/in/SecondaryAttack", &m_ActionSecondaryAttack);

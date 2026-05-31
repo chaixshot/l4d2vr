@@ -872,6 +872,7 @@ public:
 	vr::VRActionHandle_t m_ActionWalk;
 	vr::VRActionHandle_t m_ActionTurn;
 	vr::VRActionHandle_t m_ActionUse;
+	vr::VRActionHandle_t m_ActionTeleport;
 	vr::VRActionHandle_t m_ActionNextItem;
 	vr::VRActionHandle_t m_ActionPrevItem;
 	vr::VRActionHandle_t m_ActionResetPosition;
@@ -1511,6 +1512,59 @@ public:
 	float m_Roomscale1To1StandingHmdZ = 0.0f;
 	bool m_Roomscale1To1StandingHmdZValid = false;
 	bool m_Roomscale1To1PhysicalCrouchActive = false;
+
+	// Alyx-style teleport locomotion. This is intentionally independent from the
+	// roomscale small-step movement queue: teleport targets must never degrade into
+	// ordinary CUserCmd movement when validation rejects the destination.
+	static constexpr int TELEPORT_ARC_SEGMENTS = 96;
+	static constexpr uint32_t TELEPORT_VIEWMODEL_SUPPRESS_MS = 75u;
+	// Config: TeleportMaxDistanceMeters. Shared by real teleport and camera-only scouting.
+	// Keep preview, client validation and server validation on the same runtime value.
+	float m_TeleportMaxDistanceMeters = 20.0f;
+	// Config: TeleportVisualScoutOnNonVRServerEnabled. Disabled by default.
+	// Only when enabled may a server without the VR SetOrigin path fall back to
+	// the detached camera-only scout mode. Real teleport behavior is unchanged.
+	bool m_TeleportVisualScoutOnNonVRServerEnabled = false;
+	std::array<Vector, TELEPORT_ARC_SEGMENTS + 1> m_TeleportArcPoints{};
+	int m_TeleportArcPointCount = 0;
+	bool m_TeleportTargetingActive = false;
+	bool m_TeleportCommitPending = false;
+	bool m_TeleportTargetValid = false;
+	// True when the server-side SetOrigin path is unavailable. This preview uses
+	// a collision-free controller ray; releasing teleport enters a camera-only scout view.
+	bool m_TeleportTargetVisualScoutOnly = false;
+	Vector m_TeleportTargetWorld = {};
+	Vector m_TeleportMarkerWorld = {};
+	float m_TeleportFacingYawOffset = 0.0f;
+	bool m_TeleportFacingTurnPressed = false;
+	std::mutex m_TeleportServerMoveMutex;
+	Vector m_TeleportPendingServerTarget = {};
+	bool m_TeleportPendingServerTargetValid = false;
+	Vector m_TeleportPendingVisualWorldDelta = {};
+	bool m_TeleportPendingVisualWorldDeltaValid = false;
+	Vector m_TeleportPendingVisualLandingTarget = {};
+	bool m_TeleportPendingVisualLandingTargetValid = false;
+	Vector m_TeleportPendingEngineAnchorWorldDelta = {};
+	int m_TeleportEngineAnchorCompensationFrames = 0;
+	// Applied after the current HMD local pose has been refreshed. This avoids
+	// using the previous tracking sample when recentering the camera on a real
+	// teleport landing point.
+	Vector m_TeleportPendingCameraPlanarRecenterTarget = {};
+	bool m_TeleportPendingCameraPlanarRecenterValid = false;
+	int m_TeleportCameraClipSuppressFrames = 0;
+	// Hide first-person viewmodels briefly while a teleport camera warp settles.
+	// DrawModelExecute may consume one queued frame produced before the new anchor was published.
+	std::atomic<uint32_t> m_TeleportViewmodelSuppressUntilMs{ 0 };
+	// Remote-server fallback: the rendered camera may scout without moving the
+	// authoritative player entity. Teleport may be used repeatedly while detached;
+	// a fresh Use press exits scouting and returns to the real body position.
+	bool m_TeleportVisualScoutActive = false;
+	bool m_TeleportVisualScoutUseExitArmed = false;
+	Vector m_TeleportVisualScoutCameraAnchor = {};
+	float m_TeleportVisualScoutReturnRotationOffset = 0.0f;
+	QAngle m_TeleportVisualScoutBodyViewAngles = {};
+	bool m_TeleportVisualScoutBodyViewAnglesValid = false;
+
 	// Debug logging for 1:1 roomscale cmd movement.
 	bool m_Roomscale1To1DebugLog = false;
 	float m_Roomscale1To1DebugLogHz = 4.0f; // max prints per second; 0 disables throttling
@@ -2775,6 +2829,22 @@ public:
 	void ApplyRoomscale1To1VisualWorldCorrection(const Vector& worldCorrection);
 	void CancelRoomscale1To1ServerMoveDelta();
 	void ClearRoomscale1To1ServerMoveDelta();
+	bool ShouldUseTeleportServerMove() const;
+	void BeginTeleportTargeting();
+	void EndTeleportTargeting(bool commit);
+	void CancelTeleportTargeting();
+	void UpdateTeleportTargeting();
+	void QueueTeleportServerTarget(const Vector& targetWorld);
+	bool ConsumeTeleportServerTarget(Vector& outTargetWorld);
+	void ClearTeleportServerTarget();
+	void QueueTeleportVisualWorldDelta(const Vector& worldDelta, const Vector& landingTarget);
+	void ApplyPendingTeleportVisualWorldDelta();
+	void ConsumeTeleportEngineAnchorCompensation(Vector& engineOriginDelta);
+	void SuppressTeleportViewmodelForMs(uint32_t durationMs);
+	bool ShouldSuppressTeleportViewmodelRender() const;
+	void EnterTeleportVisualScout(const Vector& targetWorld);
+	void ExitTeleportVisualScout();
+	void ClearTeleportVisualScout();
 	void OnPredictionRunCommand(CUserCmd* cmd);
 	void OnPrimaryAttackServerDecision(CUserCmd* cmd, bool fromSecondaryPrediction);
 	void StartSpecialInfectedWarningAction();

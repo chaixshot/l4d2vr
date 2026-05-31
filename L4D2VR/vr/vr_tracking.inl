@@ -25,6 +25,9 @@ void VR::UpdateTracking()
         // clear mounted-gun edge tracking so we don't trigger a bogus reset later.
         m_UsingMountedGunPrev = false;
         m_ResetPositionAfterMountedGunExitPending = false;
+        CancelTeleportTargeting();
+        ClearTeleportServerTarget();
+        ClearTeleportVisualScout();
         m_HadLocalPlayerPrev = false;
         m_ThirdPersonMapLoadCooldownPending = true;
         m_ThirdPersonMapLoadCooldownEnd = {};
@@ -66,6 +69,8 @@ void VR::UpdateTracking()
         }
         return;
     }
+    ApplyPendingTeleportVisualWorldDelta();
+
     if (Hooks::s_ServerUnderstandsVR)
     {
         m_ServerHookFallbackPending = false;
@@ -204,6 +209,30 @@ void VR::UpdateTracking()
     if (m_UsingMountedGunPrev && !usingMountedGunNow)
         m_ResetPositionAfterMountedGunExitPending = true;
     m_UsingMountedGunPrev = usingMountedGunNow;
+
+    // The scout camera is temporary and camera-only. If the real body enters any
+    // state that needs immediate feedback or authoritative camera placement, return
+    // before rendering another detached frame.
+    if (m_TeleportVisualScoutActive)
+    {
+        const bool incapacitated = (*reinterpret_cast<const unsigned char*>(base + kIsIncapacitatedOffset) != 0);
+        const bool hangingFromLedge = (*reinterpret_cast<const unsigned char*>(base + kIsHangingFromLedgeOffset) != 0);
+        const int tongueOwner = *reinterpret_cast<const int*>(base + kTongueOwnerOffset);
+        const bool hangingFromTongue = (*reinterpret_cast<const unsigned char*>(base + 0x1F84) != 0);
+        const int carryAttacker = *reinterpret_cast<const int*>(base + kCarryAttackerOffset);
+        const int pummelAttacker = *reinterpret_cast<const int*>(base + kPummelAttackerOffset);
+        const int pounceAttacker = *reinterpret_cast<const int*>(base + kPounceAttackerOffset);
+        const int jockeyAttacker = *reinterpret_cast<const int*>(base + kJockeyAttackerOffset);
+        const bool controlledBySpecialInfected =
+            hangingFromTongue || handleValid(tongueOwner) || handleValid(carryAttacker) ||
+            handleValid(pummelAttacker) || handleValid(pounceAttacker) || handleValid(jockeyAttacker);
+
+        if (isObserver || obsMode != 0 || incapacitated || hangingFromLedge ||
+            controlledBySpecialInfected || usingMountedGunNow)
+        {
+            ExitTeleportVisualScout();
+        }
+    }
 
     m_Game->m_IsMeleeWeaponActive = viewPlayer->IsMeleeWeaponActive();
 
@@ -479,6 +508,7 @@ void VR::UpdateTracking()
 
     // Roomscale setup
     Vector cameraMovingDirection = m_SetupOrigin - m_SetupOriginPrev;
+    ConsumeTeleportEngineAnchorCompensation(cameraMovingDirection);
     Vector cameraToPlayer = m_HmdPosAbsPrev - m_SetupOriginPrev;
     cameraMovingDirection.z = 0;
     cameraToPlayer.z = 0;
@@ -559,34 +589,69 @@ void VR::UpdateTracking()
             m_RoomscaleActive = false;
     }
 
-    if (!m_RoomscaleActive)
-        m_CameraAnchor += m_SetupOrigin - m_SetupOriginPrev;
+    if (m_TeleportVisualScoutActive)
+    {
+        // Keep the detached scout camera fixed at the chosen world-space anchor.
+        // HMD room motion still applies through m_HmdPosLocalInWorld below.
+        m_RoomscaleActive = true;
+        m_CameraAnchor = m_TeleportVisualScoutCameraAnchor;
+    }
+    else
+    {
+        if (!m_RoomscaleActive)
+            m_CameraAnchor += m_SetupOrigin - m_SetupOriginPrev;
 
-    m_CameraAnchor.z = m_SetupOrigin.z + m_HeightOffset;
+        m_CameraAnchor.z = m_SetupOrigin.z + m_HeightOffset;
+    }
+
+    // A real teleport is queued before this frame's local HMD pose is refreshed. Apply
+    // its final XY recenter here so the camera lands exactly on the accepted body origin
+    // instead of inheriting a stale forward/sideways roomscale offset.
+    if (!m_TeleportVisualScoutActive && m_TeleportPendingCameraPlanarRecenterValid)
+    {
+        if (IsFiniteTeleportVector(m_TeleportPendingCameraPlanarRecenterTarget) &&
+            IsFiniteTeleportVector(m_HmdPosLocalInWorld))
+        {
+            m_CameraAnchor.x = m_TeleportPendingCameraPlanarRecenterTarget.x - m_HmdPosLocalInWorld.x;
+            m_CameraAnchor.y = m_TeleportPendingCameraPlanarRecenterTarget.y - m_HmdPosLocalInWorld.y;
+        }
+        m_TeleportPendingCameraPlanarRecenterTarget = {};
+        m_TeleportPendingCameraPlanarRecenterValid = false;
+    }
+
+    const bool suppressTeleportCameraClip = m_TeleportCameraClipSuppressFrames > 0;
+    if (m_TeleportCameraClipSuppressFrames > 0)
+        --m_TeleportCameraClipSuppressFrames;
 
     m_HmdPosAbs = m_CameraAnchor - Vector(0, 0, 64) + m_HmdPosLocalInWorld;
 
-    // Check if camera is clipping inside wall
-    CGameTrace trace;
-    Ray_t ray;
-    CTraceFilterSkipNPCsAndPlayers tracefilter((IHandleEntity*)localPlayer, 0);
-
-    Vector extendedHmdPos = m_HmdPosAbs - m_SetupOrigin;
-    VectorNormalize(extendedHmdPos);
-    extendedHmdPos = m_HmdPosAbs + (extendedHmdPos * 10);
-    ray.Init(m_SetupOrigin, extendedHmdPos);
-
-    m_Game->m_EngineTrace->TraceRay(ray, STANDARD_TRACE_MASK, &tracefilter, &trace);
-    if (trace.fraction < 1 && trace.fraction > 0)
+    if (!m_TeleportVisualScoutActive && !suppressTeleportCameraClip)
     {
-        Vector distanceInsideWall = trace.endpos - extendedHmdPos;
-        m_CameraAnchor += distanceInsideWall;
-        m_HmdPosAbs = m_CameraAnchor - Vector(0, 0, 64) + m_HmdPosLocalInWorld;
+        // Check if camera is clipping inside wall. A detached scout camera deliberately
+        // crosses the space between the body and target, so this correction must not run
+        // while scouting.
+        CGameTrace trace;
+        Ray_t ray;
+        CTraceFilterSkipNPCsAndPlayers tracefilter((IHandleEntity*)localPlayer, 0);
+
+        Vector extendedHmdPos = m_HmdPosAbs - m_SetupOrigin;
+        VectorNormalize(extendedHmdPos);
+        extendedHmdPos = m_HmdPosAbs + (extendedHmdPos * 10);
+        ray.Init(m_SetupOrigin, extendedHmdPos);
+
+        m_Game->m_EngineTrace->TraceRay(ray, STANDARD_TRACE_MASK, &tracefilter, &trace);
+        if (trace.fraction < 1 && trace.fraction > 0)
+        {
+            Vector distanceInsideWall = trace.endpos - extendedHmdPos;
+            m_CameraAnchor += distanceInsideWall;
+            m_HmdPosAbs = m_CameraAnchor - Vector(0, 0, 64) + m_HmdPosLocalInWorld;
+        }
     }
 
-    // Reset camera if it somehow gets too far
+    // Reset camera if it somehow gets too far. Detached scout view is allowed to
+    // exceed the normal roomscale safety radius until the user presses teleport again.
     m_SetupOriginToHMD = m_HmdPosAbs - m_SetupOrigin;
-    if (VectorLength(m_SetupOriginToHMD) > 150)
+    if (!m_TeleportVisualScoutActive && !suppressTeleportCameraClip && VectorLength(m_SetupOriginToHMD) > 150)
         ResetPosition();
     // Observer in-eye: when switching spectated target, re-align anchors once.
     if (m_ResetPositionAfterObserverTargetSwitchPending)
