@@ -5135,21 +5135,17 @@ namespace dxvk {
                 vr->m_RenderedNewFrame.store(false, std::memory_order_release);
             }
 
-            // Source queued rendering can enter the D3D9 Present path from the material/render
-            // worker as part of MaterialSystem::EndFrame. In ReShadeVRCompat that thread must
-            // never resolve eye->submit or call VR::Update()/SubmitVRTextures: the real submit
-            // owner is the non-render Present path below. Otherwise complex scenes can consume
-            // the just-rendered frame twice and race ReShade/DXVK/OpenVR shared surfaces.
+            // Source queued rendering can enter the D3D9 Present path while the material
+            // worker is still finishing secondary render targets. Keep all queued eye copies
+            // out of the pre-Present window; the known-good pre-desktop-mirror path did the
+            // swapchain Present first, then resolved/submitted VR surfaces afterward.
             if (!suppressVRFrameConsumptionOnThisPresent) {
-                // The desktop swapchain is presented below. Do all eye-surface resolve and optional
-                // right/left-eye desktop mirroring before Present(), otherwise the window shows the old
-                // backbuffer for this frame.
-                // ReShade + Source queued rendering must not resolve eye -> submit before Present.
-                // In complex scenes the queued render worker can still be writing the eye RTs here;
-                // copying at this point produces half-written frames that later get submitted to VR.
-                // Defer the resolve until after the swapchain Present and an explicit DXVK idle wait.
+                // The desktop swapchain is presented below. Single-threaded rendering can still
+                // mirror the current eye before Present so the desktop window is live. Queued
+                // rendering must not resolve or mirror here: those StretchRect/backbuffer writes
+                // can overlap Source's water/shadow RTT work and corrupt the frame.
                 const bool deferEyeSubmitResolve =
-                    inGame && VrIsReShadeQueuedRiskWindow(vr, inGame, queued) && VrHasEyeSubmitSurfaces(vr);
+                    inGame && queued && VrHasEyeSubmitSurfaces(vr);
 
                 if (!inGame) {
                     vr->ClearD3DAimLineOverlay();
@@ -5167,7 +5163,8 @@ namespace dxvk {
                     VrResolveEyeSurfacesToSubmit(this, vr);
                 }
 
-                VrMirrorEyeToDesktopBackBuffer(this, vr, pDestRect, hDestWindowOverride);
+                if (!(inGame && queued))
+                    VrMirrorEyeToDesktopBackBuffer(this, vr, pDestRect, hDestWindowOverride);
             }
 
             // Do not wait the DXVK device idle before Present here.
@@ -5229,7 +5226,7 @@ namespace dxvk {
             std::unique_lock<std::recursive_mutex> reshadePresentSurfaceLock;
             bool skipPostPresentVRWork = false;
             const char* skipPostPresentVRWorkReason = "none";
-            if (postPresentResolveEyeSubmit && postPresentVR) {
+            if (postPresentResolveEyeSubmit && postPresentVR && postPresentVR->m_ReShadeVRCompat) {
                 reshadePresentSurfaceLock = std::unique_lock<std::recursive_mutex>(postPresentVR->m_ReShadeVRCompatSurfaceMutex, std::try_to_lock);
                 skipPostPresentVRWork = !reshadePresentSurfaceLock.owns_lock();
                 if (skipPostPresentVRWork)
@@ -5242,28 +5239,29 @@ namespace dxvk {
                 skipPostPresentVRWorkReason = "inactive-window-post";
             }
 
-            const bool deferredReShadeResolve = postPresentResolveEyeSubmit && postPresentVR;
-            if (!skipPostPresentVRWork && deferredReShadeResolve && postPresentVR->m_CreatedVRTextures.load(std::memory_order_acquire)) {
+            const bool deferredEyeSubmitResolve = postPresentResolveEyeSubmit && postPresentVR;
+            if (!skipPostPresentVRWork && deferredEyeSubmitResolve && postPresentVR->m_CreatedVRTextures.load(std::memory_order_acquire)) {
                 const uint32_t completedFrameId = postPresentVR->m_RenderCompletedFrameId.load(std::memory_order_acquire);
                 const uint32_t resolvedFrameId = postPresentVR->m_ReShadeVRCompatResolvedFrameId.load(std::memory_order_acquire);
-                if (completedFrameId != 0 && completedFrameId != resolvedFrameId) {
-                    // Do not idle-wait before the resolve.  In Source queued rendering this is the
-                    // dangerous lock inversion point during Alt-Tab/minimize.  The render-complete
-                    // state and surface mutex are the ownership signal; enqueue the eye->submit copy,
-                    // then make that copy visible before VR::Update submits to OpenVR/ALVR.
+                if (!postPresentVR->m_ReShadeVRCompat || (completedFrameId != 0 && completedFrameId != resolvedFrameId)) {
+                    // Do not idle-wait before the resolve. In Source queued rendering this is the
+                    // dangerous lock inversion point while secondary render targets are active.
+                    // Enqueue the eye->submit copy after Present, then flush before VR::Update
+                    // submits the textures to OpenVR/ALVR.
                     VrResolveEyeSurfacesToSubmit(this, postPresentVR);
                     VrItemModelLabelDrawOverlaysToSubmitTargets(this, postPresentVR);
                     VrAimLineDrawOverlaysToSubmitTargets(this, postPresentVR);
-                    postPresentVR->m_ReShadeVRCompatResolvedFrameId.store(completedFrameId, std::memory_order_release);
+                    if (postPresentVR->m_ReShadeVRCompat)
+                        postPresentVR->m_ReShadeVRCompatResolvedFrameId.store(completedFrameId, std::memory_order_release);
                     if (g_D3DVR9)
                         g_D3DVR9->WaitDeviceIdle();
                 }
             }
-            else if (!skipPostPresentVRWork && !deferredReShadeResolve && g_D3DVR9) {
+            else if (!skipPostPresentVRWork && !deferredEyeSubmitResolve && g_D3DVR9) {
                 g_D3DVR9->WaitDeviceIdle();
             }
 
-            if (!skipPostPresentVRWork && !deferredReShadeResolve && g_Game && g_Game->m_VR) {
+            if (!skipPostPresentVRWork && !deferredEyeSubmitResolve && g_Game && g_Game->m_VR) {
                 VR* vr = g_Game->m_VR;
                 const bool inGame = (g_Game->m_EngineClient && g_Game->m_EngineClient->IsInGame());
                 const bool queued = (g_Game->GetMatQueueMode() != 0);
