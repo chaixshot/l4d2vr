@@ -924,8 +924,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				bool relaxThisPose = false;
 				if (relaxPct > 0)
 				{
-					// Keep this budget across fresh-pose waits; otherwise sub-100 values never mature
-					// in the common case where each strict wait succeeds before the next duplicate.
 					s_poseRelaxAccumulator = std::min(199, s_poseRelaxAccumulator + relaxPct);
 					if (s_poseRelaxAccumulator >= 100)
 					{
@@ -944,6 +942,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				if (gotFreshPose)
 				{
 					s_poseReuseCount = 0;
+					s_poseRelaxAccumulator = 0;
 				}
 				else
 				{
@@ -1126,6 +1125,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			// Update last poseSeq even when we didn't enter the wait block.
 			if (havePoses && poseSeq != 0)
 			{
+				if (poseSeq != s_lastPoseSeq)
+					s_poseRelaxAccumulator = 0;
 				s_lastPoseSeq = poseSeq;
 			}
 			if (havePoses && poseSeq != 0)

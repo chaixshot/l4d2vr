@@ -430,8 +430,11 @@ static bool ValidateServerTeleportLanding(
 	CTraceFilterSkipSelf filter(static_cast<IHandleEntity*>(serverUnknown), 0);
 
 	Ray_t floorRay;
+	// Start close to the requested feet position. A 128-unit upward probe crosses
+	// ordinary indoor ceilings, bridge undersides and vehicle roofs before reaching
+	// the real floor below.
 	floorRay.Init(
-		requestedTarget + Vector(0.0f, 0.0f, 128.0f),
+		requestedTarget + Vector(0.0f, 0.0f, 4.0f),
 		requestedTarget - Vector(0.0f, 0.0f, 256.0f));
 	CGameTrace floorTrace{};
 	TraceRoomscaleServerRay(serverTrace, floorRay, kTeleportLandingStaticTraceMask, &filter, floorTrace);
@@ -440,26 +443,15 @@ static bool ValidateServerTeleportLanding(
 
 	const bool crouched = Hooks::m_VR->m_Roomscale1To1PhysicalCrouchActive;
 	const float hullHeight = crouched ? 36.0f : 72.0f;
-	// Match the client-side inset landing hull. Small contact tolerances are left to
+	// Match the client-side inset occupancy hull. Small contact tolerances are left to
 	// Source movement resolution instead of rejecting an otherwise valid location.
-	const Vector hullMins(-14.0f, -14.0f, 0.0f);
-	const Vector hullMaxs(14.0f, 14.0f, hullHeight - 2.0f);
 	const Vector occupancyMins(-14.0f, -14.0f, 1.0f);
 	const Vector occupancyMaxs(14.0f, 14.0f, hullHeight - 1.0f);
 
-	// Sweep the inset player hull down onto the candidate surface. This accepts ramps
-	// without treating the uphill side of the hull as an invalid stationary overlap.
-	const Vector hullSweepStart = floorTrace.endpos + Vector(0.0f, 0.0f, 128.0f);
-	const Vector hullSweepEnd = floorTrace.endpos + Vector(0.0f, 0.0f, 2.0f);
-	Ray_t landingHullSweep;
-	landingHullSweep.Init(hullSweepStart, hullSweepEnd, hullMins, hullMaxs);
-	CGameTrace landingHullTrace{};
-	TraceRoomscaleServerRay(serverTrace, landingHullSweep, kTeleportLandingStaticTraceMask, &filter, landingHullTrace);
-	if (landingHullTrace.startsolid || landingHullTrace.allsolid)
-		return false;
-
-	Vector landingTarget = (landingHullTrace.fraction < 0.999f) ? landingHullTrace.endpos : hullSweepEnd;
-	landingTarget.z += 2.0f;
+	// Validate occupancy from the floor upward. Sweeping a full-height hull down from
+	// 128 units above the floor intersects nearby ceilings before it reaches valid
+	// indoor landing space. The small lift loop below still resolves ramps and seams.
+	Vector landingTarget = floorTrace.endpos + Vector(0.0f, 0.0f, 2.0f);
 	if (!IsFiniteTeleportServerVector(landingTarget))
 		return false;
 

@@ -240,10 +240,13 @@ namespace
     constexpr float kTeleportArcGravityMetersPerSecondSq = 9.81f;
     constexpr float kTeleportArcStepSeconds = 0.055f;
     constexpr float kTeleportArcNominalTravelSeconds = 0.90f;
-    constexpr float kTeleportLandingFloorSearchUpUnits = 128.0f;
+    // Start the floor probe only slightly above the candidate. Starting 128 units
+    // above it crosses ordinary indoor ceilings, bridge undersides and vehicle roofs,
+    // causing those overhead surfaces to be mistaken for the landing floor.
+    constexpr float kTeleportLandingFloorSearchUpUnits = 4.0f;
     constexpr float kTeleportLandingFloorSearchDownUnits = 256.0f;
-    constexpr float kTeleportLandingHullSweepUpUnits = 128.0f;
     constexpr float kTeleportLandingFloorLiftUnits = 2.0f;
+    constexpr float kTeleportCeilingSlideEpsilonUnits = 1.0f;
     constexpr float kTeleportTwoPi = 6.28318530717958647692f;
 
     bool IsFiniteTeleportVector(const Vector& value)
@@ -297,30 +300,18 @@ namespace
 
         const bool crouched = vr->m_Roomscale1To1PhysicalCrouchActive;
         const float hullHeight = crouched ? 36.0f : 72.0f;
-        // Use a slightly inset landing hull. Source movement resolves small contact
+        // Use a slightly inset occupancy hull. Source movement resolves small contact
         // tolerances itself; requiring a zero-tolerance 32x32x72 static fit rejects
         // valid flat ground beside seams, tiny props and accumulated trace epsilon.
-        const Vector hullMins(-14.0f, -14.0f, 0.0f);
-        const Vector hullMaxs(14.0f, 14.0f, hullHeight - 2.0f);
         const Vector occupancyMins(-14.0f, -14.0f, 1.0f);
         const Vector occupancyMaxs(14.0f, 14.0f, hullHeight - 1.0f);
 
-        // Place the inset player hull by sweeping downward onto the surface. A
-        // stationary hull test at the center of a ramp is unreliable because the
-        // uphill side of the box can already overlap the slope. The sweep returns a
-        // usable origin above flat floors and ramps without imposing an artificial
-        // normal-angle or corner-height restriction.
-        const Vector hullSweepStart = floorTrace.endpos + Vector(0.0f, 0.0f, kTeleportLandingHullSweepUpUnits);
-        const Vector hullSweepEnd = floorTrace.endpos + Vector(0.0f, 0.0f, kTeleportLandingFloorLiftUnits);
-        Ray_t landingHullSweep;
-        landingHullSweep.Init(hullSweepStart, hullSweepEnd, hullMins, hullMaxs);
-        CGameTrace landingHullTrace{};
-        TraceTeleportClientRay(engineTrace, landingHullSweep, kTeleportLandingStaticTraceMask, &filter, landingHullTrace);
-        if (landingHullTrace.startsolid || landingHullTrace.allsolid)
-            return false;
-
-        Vector landingPoint = (landingHullTrace.fraction < 0.999f) ? landingHullTrace.endpos : hullSweepEnd;
-        landingPoint.z += kTeleportLandingFloorLiftUnits;
+        // Validate occupancy from the floor upward instead of sweeping the full hull
+        // down from far above the destination. A high sweep intersects nearby ceilings
+        // before it reaches an otherwise valid indoor floor. The small upward search
+        // below still resolves ramp contact tolerances without depending on overhead
+        // clearance beyond the player's actual hull height.
+        Vector landingPoint = floorTrace.endpos + Vector(0.0f, 0.0f, kTeleportLandingFloorLiftUnits);
         if (!IsFiniteTeleportVector(landingPoint))
             return false;
 
@@ -923,6 +914,28 @@ void VR::UpdateTeleportTargeting()
 
                 if (pathTrace.allsolid || pathTrace.startsolid || pathTrace.fraction < 0.999f)
                 {
+                    const bool hitCeilingUnderside =
+                        !pathTrace.allsolid &&
+                        !pathTrace.startsolid &&
+                        pathTrace.fraction < 0.999f &&
+                        IsFiniteTeleportVector(pathTrace.plane.normal) &&
+                        pathTrace.plane.normal.z < -0.5f;
+                    if (hitCeilingUnderside)
+                    {
+                        // Low ceilings should constrain the arc rather than terminate
+                        // teleport targeting. Remove only the velocity component pushing
+                        // into the underside, nudge back into free space, then let gravity
+                        // carry the trajectory forward and downward. Solid walls still stop it.
+                        const float inwardVelocity = velocity.Dot(pathTrace.plane.normal);
+                        if (std::isfinite(inwardVelocity) && inwardVelocity < 0.0f)
+                            velocity -= pathTrace.plane.normal * inwardVelocity;
+
+                        current = pathTrace.endpos + (pathTrace.plane.normal * kTeleportCeilingSlideEpsilonUnits);
+                        m_TeleportArcPoints[m_TeleportArcPointCount - 1] = current;
+                        m_TeleportMarkerWorld = current;
+                        continue;
+                    }
+
                     hitSurface = !pathTrace.allsolid && !pathTrace.startsolid;
                     hitPoint = pathTrace.endpos;
                     break;
@@ -946,9 +959,7 @@ void VR::UpdateTeleportTargeting()
         {
             m_TeleportTargetWorld = landingPoint;
             m_TeleportMarkerWorld = landingPoint;
-            // A non-VR server may still render the normal arc as a red unavailable
-            // preview when detached scouting is disabled, but must never queue SetOrigin.
-            m_TeleportTargetValid = canCommit && canUseServerMove;
+            m_TeleportTargetValid = canCommit;
             m_TeleportTargetVisualScoutOnly = false;
         }
     }
