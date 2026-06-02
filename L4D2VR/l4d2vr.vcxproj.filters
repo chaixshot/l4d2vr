@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -22,10 +22,34 @@
     <Filter Include="Source Files\hook">
       <UniqueIdentifier>{01923248-f7c8-42a6-bc85-a1e8cb5f8a54}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\vr_hands">
+      <UniqueIdentifier>{BC1A353A-568B-48A0-9B4A-7334169BEFEB}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="game.h">
       <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="vr_hands\vr_hand_asset_loader.h">
+      <Filter>Source Files\vr_hands</Filter>
+    </ClInclude>
+    <ClInclude Include="vr_hands\vr_hand_manifest.h">
+      <Filter>Source Files\vr_hands</Filter>
+    </ClInclude>
+    <ClInclude Include="vr_hands\vr_hand_math.h">
+      <Filter>Source Files\vr_hands</Filter>
+    </ClInclude>
+    <ClInclude Include="vr_hands\vr_hand_renderer_d3d9.h">
+      <Filter>Source Files\vr_hands</Filter>
+    </ClInclude>
+    <ClInclude Include="vr_hands\vr_hand_skeleton_runtime.h">
+      <Filter>Source Files\vr_hands</Filter>
+    </ClInclude>
+    <ClInclude Include="vr_hands\vr_hand_system.h">
+      <Filter>Source Files\vr_hands</Filter>
+    </ClInclude>
+    <ClInclude Include="vr_hands\vr_hand_types.h">
+      <Filter>Source Files\vr_hands</Filter>
     </ClInclude>
     <ClInclude Include="vr.h">
       <Filter>Source Files</Filter>
@@ -827,6 +851,24 @@
     <ClCompile Include="vr.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="vr_hands\vr_hand_asset_loader.cpp">
+      <Filter>Source Files\vr_hands</Filter>
+    </ClCompile>
+    <ClCompile Include="vr_hands\vr_hand_manifest.cpp">
+      <Filter>Source Files\vr_hands</Filter>
+    </ClCompile>
+    <ClCompile Include="vr_hands\vr_hand_renderer_d3d9.cpp">
+      <Filter>Source Files\vr_hands</Filter>
+    </ClCompile>
+    <ClCompile Include="vr_hands\vr_hand_skeleton_runtime.cpp">
+      <Filter>Source Files\vr_hands</Filter>
+    </ClCompile>
+    <ClCompile Include="vr_hands\vr_hand_system.cpp">
+      <Filter>Source Files\vr_hands</Filter>
+    </ClCompile>
+    <ClCompile Include="vr_hands\vr_hand_vr_bridge.cpp">
+      <Filter>Source Files\vr_hands</Filter>
+    </ClCompile>
     <ClCompile Include="game.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -1347,6 +1389,9 @@
     </None>
     <None Include="..\README.md">
       <Filter>Source Files</Filter>
+    </None>
+    <None Include="vr_config_overlay_embedded.inl">
+      <Filter>Source Files\vr</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>

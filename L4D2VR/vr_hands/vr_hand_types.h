@@ -1,0 +1,45 @@
+#pragma once
+
+#include <array>
+#include <cstdint>
+#include <string>
+#include <vector>
+
+struct VrHandMatrix4
+{
+    // Column-major matrix. Element(row, column) = m[column * 4 + row].
+    std::array<float, 16> m{};
+};
+
+struct VrHandMatrixRows3x4
+{
+    // Three affine rows consumed by the D3D9 vertex shader.
+    std::array<float, 12> v{};
+};
+
+struct VrHandVertex
+{
+    float position[3]{};
+    float normal[3]{};
+    float uv[2]{};
+    float weights[4]{};
+    std::uint8_t joints[4]{};
+};
+
+struct VrHandMeshAsset
+{
+    std::vector<VrHandVertex> vertices;
+    std::vector<std::uint16_t> indices;
+    std::vector<std::string> jointNames;
+    std::vector<VrHandMatrix4> inverseBindMatrices;
+    std::vector<std::uint8_t> baseColorTextureBytes;
+    std::string sourcePath;
+
+    bool IsValid() const
+    {
+        return !vertices.empty() &&
+            !indices.empty() &&
+            !jointNames.empty() &&
+            inverseBindMatrices.size() == jointNames.size();
+    }
+};

@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <string>
 #include <cstring>
+#include <cctype>
 #include <algorithm> // std::clamp
 #include <chrono>
 #include <atomic>

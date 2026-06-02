@@ -162,6 +162,190 @@ namespace vr_vm_stabilize
         }
         return false;
     }
+
+    inline bool TryGetStudioHdrFromDrawState(void* drawState, const uint8_t*& outStudioHdr)
+    {
+        outStudioHdr = nullptr;
+        if (!drawState)
+            return false;
+
+        void* studioHdr = nullptr;
+        if (!SafeRead(drawState, studioHdr) || !studioHdr)
+            return false;
+
+        outStudioHdr = reinterpret_cast<const uint8_t*>(studioHdr);
+        return true;
+    }
+
+    inline bool TryGetBoneTableLayout(void* drawState, int& outNumBones, int& outBoneIndex, int& outNumBonesOffset)
+    {
+        outNumBones = 0;
+        outBoneIndex = 0;
+        outNumBonesOffset = 0;
+
+        const uint8_t* studioHdr = nullptr;
+        if (!TryGetStudioHdrFromDrawState(drawState, studioHdr))
+            return false;
+
+        int studioLength = 0;
+        SafeRead(studioHdr + 0x4C, studioLength);
+
+        static const int kNumBoneOffsets[] = { 0x9C, 0xA0, 0x98, 0x94, 0xA4, 0xA8, 0x90, 0x8C, 0xB0 };
+        for (int off : kNumBoneOffsets)
+        {
+            int n = 0;
+            int boneIndex = 0;
+            if (!SafeRead(studioHdr + off, n) || !SafeRead(studioHdr + off + 4, boneIndex))
+                continue;
+            if (n <= 0 || n > 512 || boneIndex <= 0 || boneIndex > 0x200000)
+                continue;
+            if (studioLength > 0 && boneIndex >= studioLength)
+                continue;
+
+            outNumBones = n;
+            outBoneIndex = boneIndex;
+            outNumBonesOffset = off;
+            return true;
+        }
+        return false;
+    }
+
+    inline bool TryReadCStringSafe(const char* ptr, std::string& out, size_t maxLen = 96)
+    {
+        out.clear();
+        if (!ptr)
+            return false;
+
+        for (size_t i = 0; i < maxLen; ++i)
+        {
+            char c = '\0';
+            if (!SafeRead(ptr + i, c))
+                return false;
+            if (c == '\0')
+                return !out.empty();
+            const unsigned char uc = static_cast<unsigned char>(c);
+            if (uc < 32 || uc > 126)
+                return false;
+            out.push_back(c);
+        }
+        return false;
+    }
+
+    inline std::string ToLowerAscii(std::string value)
+    {
+        for (char& c : value)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return value;
+    }
+
+    inline bool TryGetBoneNameAtStride(
+        const uint8_t* studioHdr,
+        int boneIndex,
+        int numBones,
+        int stride,
+        int bone,
+        std::string& outName,
+        int& outParent)
+    {
+        outName.clear();
+        outParent = -1;
+        if (!studioHdr || bone < 0 || bone >= numBones || stride <= 0)
+            return false;
+
+        const uint8_t* boneBase = studioHdr + boneIndex + (static_cast<size_t>(stride) * static_cast<size_t>(bone));
+        int nameOffset = 0;
+        int parent = -1;
+        if (!SafeRead(boneBase + 0, nameOffset) || !SafeRead(boneBase + 4, parent))
+            return false;
+        if (nameOffset <= 0 || nameOffset > 0x10000)
+            return false;
+        if (parent < -1 || parent >= numBones)
+            return false;
+
+        std::string name;
+        if (!TryReadCStringSafe(reinterpret_cast<const char*>(boneBase + nameOffset), name))
+            return false;
+
+        outName = name;
+        outParent = parent;
+        return true;
+    }
+
+    inline bool TryCollectBoneNamesFromDrawState(
+        void* drawState,
+        std::vector<std::string>& outNames,
+        std::vector<int>& outParents,
+        int& outNumBones,
+        int& outBoneIndex,
+        int& outStride,
+        int& outNumBonesOffset)
+    {
+        outNames.clear();
+        outParents.clear();
+        outNumBones = 0;
+        outBoneIndex = 0;
+        outStride = 0;
+        outNumBonesOffset = 0;
+
+        const uint8_t* studioHdr = nullptr;
+        if (!TryGetStudioHdrFromDrawState(drawState, studioHdr))
+            return false;
+        if (!TryGetBoneTableLayout(drawState, outNumBones, outBoneIndex, outNumBonesOffset))
+            return false;
+
+        static const int kStrideCandidates[] = { 216, 224, 208, 200, 192, 184, 176, 232, 240, 256 };
+        int bestStride = 0;
+        int bestScore = -1;
+        std::vector<std::string> bestNames;
+        std::vector<int> bestParents;
+
+        for (int stride : kStrideCandidates)
+        {
+            std::vector<std::string> names(static_cast<size_t>(outNumBones));
+            std::vector<int> parents(static_cast<size_t>(outNumBones), -1);
+            int validNames = 0;
+            int semanticHits = 0;
+
+            for (int bone = 0; bone < outNumBones; ++bone)
+            {
+                std::string name;
+                int parent = -1;
+                if (!TryGetBoneNameAtStride(studioHdr, outBoneIndex, outNumBones, stride, bone, name, parent))
+                    continue;
+
+                names[static_cast<size_t>(bone)] = name;
+                parents[static_cast<size_t>(bone)] = parent;
+                ++validNames;
+
+                const std::string lower = ToLowerAscii(name);
+                if (lower.find("finger") != std::string::npos ||
+                    lower.find("hand") != std::string::npos ||
+                    lower.find("wrist") != std::string::npos ||
+                    lower.find("valvebiped") != std::string::npos ||
+                    lower.find("bip01") != std::string::npos)
+                {
+                    semanticHits += 4;
+                }
+            }
+
+            const int score = validNames * 2 + semanticHits;
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestStride = stride;
+                bestNames.swap(names);
+                bestParents.swap(parents);
+            }
+        }
+
+        if (bestStride <= 0 || bestScore < 6)
+            return false;
+
+        outStride = bestStride;
+        outNames.swap(bestNames);
+        outParents.swap(bestParents);
+        return true;
+    }
 }
 
 namespace
@@ -222,6 +406,109 @@ namespace
 
         last = now;
         return false;
+    }
+
+    inline bool HooksModelNameIsArmsOrHands(const std::string& modelName)
+    {
+        return
+            (modelName.find("models/weapons/arms/") != std::string::npos) ||
+            (modelName.find("/arms/") != std::string::npos) ||
+            (modelName.find("v_arms") != std::string::npos) ||
+            (modelName.find("models/weapons/hands/") != std::string::npos) ||
+            (modelName.find("/hands/") != std::string::npos) ||
+            (modelName.find("v_hands") != std::string::npos);
+    }
+
+    inline bool HooksModelNameIsViewmodel(const std::string& modelName)
+    {
+        return
+            (modelName.find("models/weapons/v_") != std::string::npos) ||
+            (modelName.find("/v_models/") != std::string::npos) ||
+            (modelName.find("models/v_models/") != std::string::npos) ||
+            (modelName.find("models/weapons/melee/v_") != std::string::npos) ||
+            (modelName.find("models/weapons/melee/") != std::string::npos && modelName.find("/v_") != std::string::npos) ||
+            (modelName.find("/melee/v_") != std::string::npos) ||
+            HooksModelNameIsArmsOrHands(modelName);
+    }
+
+    inline void MaybeLogVrHandsViewmodelBoneProbe(
+        void* drawState,
+        const std::string& modelName,
+        int entityIndex,
+        const char* className,
+        bool hasCustomBones)
+    {
+        if (!drawState || modelName.empty())
+            return;
+
+        static std::mutex s_probeMutex;
+        static std::unordered_map<std::string, bool> s_probeLoggedByModel;
+        {
+            std::lock_guard<std::mutex> lock(s_probeMutex);
+            if (s_probeLoggedByModel.find(modelName) != s_probeLoggedByModel.end())
+                return;
+            s_probeLoggedByModel.emplace(modelName, true);
+        }
+
+        std::vector<std::string> boneNames;
+        std::vector<int> boneParents;
+        int numBones = 0;
+        int boneIndex = 0;
+        int stride = 0;
+        int numBonesOffset = 0;
+        const bool ok = vr_vm_stabilize::TryCollectBoneNamesFromDrawState(
+            drawState,
+            boneNames,
+            boneParents,
+            numBones,
+            boneIndex,
+            stride,
+            numBonesOffset);
+
+        Game::logMsg(
+            "[VR][Hands][VMProbe] model=\"%s\" ent=%d class=%s customBones=%d ok=%d bones=%d boneIndex=0x%X numBonesOff=0x%X stride=%d",
+            modelName.c_str(),
+            entityIndex,
+            (className && *className) ? className : "<null>",
+            hasCustomBones ? 1 : 0,
+            ok ? 1 : 0,
+            numBones,
+            boneIndex,
+            numBonesOffset,
+            stride);
+
+        if (!ok)
+            return;
+
+        std::string chunk;
+        int chunkIndex = 0;
+        auto flushChunk = [&]()
+            {
+                if (chunk.empty())
+                    return;
+                Game::logMsg("[VR][Hands][VMProbe] bones[%d] model=\"%s\" %s", chunkIndex++, modelName.c_str(), chunk.c_str());
+                chunk.clear();
+            };
+
+        for (int i = 0; i < numBones && i < static_cast<int>(boneNames.size()); ++i)
+        {
+            if (boneNames[static_cast<size_t>(i)].empty())
+                continue;
+
+            char item[256]{};
+            std::snprintf(
+                item,
+                sizeof(item),
+                "%d:p%d:%s; ",
+                i,
+                (i < static_cast<int>(boneParents.size())) ? boneParents[static_cast<size_t>(i)] : -1,
+                boneNames[static_cast<size_t>(i)].c_str());
+
+            if (chunk.size() + std::strlen(item) > 850)
+                flushChunk();
+            chunk += item;
+        }
+        flushChunk();
     }
 
     inline std::string DescribeCallerAddress(const void* address)

@@ -1013,7 +1013,9 @@ int VR::SetActionManifest(const char* fileName)
     char path[MAX_STR_LEN];
     sprintf_s(path, MAX_STR_LEN, "%s\\VR\\SteamVRActionManifest\\%s", currentDir, fileName);
 
-    const vr::EVRInputError manifestResult = m_Input->SetActionManifestPath(path);
+    const std::string vrHandsManifestPath = BuildVrHandsActionManifestPath(path);
+    const char* effectiveManifestPath = vrHandsManifestPath.empty() ? path : vrHandsManifestPath.c_str();
+    const vr::EVRInputError manifestResult = m_Input->SetActionManifestPath(effectiveManifestPath);
     if (manifestResult != vr::VRInputError_None)
     {
         Game::errorMsg("SetActionManifestPath failed");

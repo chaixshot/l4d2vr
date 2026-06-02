@@ -416,11 +416,11 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	// If we keep using main-thread-computed m_HmdPosAbs/m_HmdAngAbs/m_RightControllerPosAbs inside rendering,
 	// we get tearing/jitter (data races) and head-turn ghosting (poses sampled on the wrong thread).
 	//
-	// Ported behavior from the old multicore branch: do a render-thread WaitGetPoses(), combine it with a
-	// main-thread seqlock snapshot of camera anchor/scale/offsets, then publish a render-thread snapshot
-	// that all render-time getters can read consistently during this dRenderView.
+	// Read the dedicated pose-waiter snapshot, combine it with the main-thread seqlock snapshot of
+	// camera anchor/scale/offsets, then publish a render-thread snapshot that all render-time getters
+	// can read consistently during this dRenderView. Strict submit filtering happens after rendering,
+	// so the queued render worker is not stalled waiting for a fresh pose token.
 	uint32_t renderPoseTokenUsed = 0;
-	bool renderPoseAllowDuplicateSubmit = false;
 	struct RenderSnapshotTLSGuard
 	{
 		bool enable = false;
@@ -876,7 +876,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			static thread_local uint32_t s_lastPoseSeq = 0;
 			static thread_local uint32_t s_lastWaitAttemptSeq = 0;
 			static thread_local int s_poseReuseCount = 0;
-			static thread_local int s_poseRelaxAccumulator = 0;
 
 			auto waitForNewPoseSnapshot = [&](uint32_t oldSeq, DWORD timeoutMs) -> bool
 				{
@@ -906,65 +905,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 					}
 					return false;
 				};
-
-			const bool strictRenderPosePacing =
-				(queueMode != 0) &&
-				m_VR->m_QueuedSubmitUseRenderPoseToken &&
-				havePoses &&
-				poseSeq != 0 &&
-				poseSeq == s_lastPoseSeq;
-			bool strictRenderPosePacingAttempted = false;
-			if (strictRenderPosePacing)
-			{
-				float hmdHz = m_VR->GetHmdDisplayFrequencyHz();
-				if (!(hmdHz > 1.0f))
-					hmdHz = 90.0f;
-				const DWORD strictWaitMs = static_cast<DWORD>(std::clamp((int)std::ceil(1000.0f / hmdHz) + 4, 6, 30));
-				const int relaxPct = std::clamp(m_VR->m_QueuedRenderPoseRelaxPercent, 0, 100);
-				bool relaxThisPose = false;
-				if (relaxPct > 0)
-				{
-					s_poseRelaxAccumulator = std::min(199, s_poseRelaxAccumulator + relaxPct);
-					if (s_poseRelaxAccumulator >= 100)
-					{
-						s_poseRelaxAccumulator -= 100;
-						relaxThisPose = true;
-						renderPoseAllowDuplicateSubmit = true;
-					}
-				}
-				else
-				{
-					s_poseRelaxAccumulator = 0;
-				}
-
-				strictRenderPosePacingAttempted = true;
-				const bool gotFreshPose = relaxThisPose ? false : waitForNewPoseSnapshot(poseSeq, strictWaitMs);
-				if (gotFreshPose)
-				{
-					s_poseReuseCount = 0;
-					s_poseRelaxAccumulator = 0;
-				}
-				else
-				{
-					if (m_VR->m_RenderPipelineDebugLog)
-					{
-						static thread_local std::chrono::steady_clock::time_point s_lastStrictPosePaceTimeoutLog{};
-						if (!ShouldThrottleLog(s_lastStrictPosePaceTimeoutLog, m_VR->m_RenderPipelineDebugLogHz))
-						{
-							Game::logMsg("[VR][Queued][RenderPosePace] tid=%lu q=%d waitMs=%lu poseSeq=%u lastPoseSeq=%u relaxPct=%d relaxed=%d submitPose=%u lastSubmitted=%u",
-								GetCurrentThreadId(),
-								queueMode,
-								static_cast<unsigned long>(strictWaitMs),
-								poseSeq,
-								s_lastPoseSeq,
-								relaxPct,
-								relaxThisPose ? 1 : 0,
-								m_VR->m_SubmitPoseToken.load(std::memory_order_acquire),
-								m_VR->m_LastSubmittedPoseToken.load(std::memory_order_acquire));
-						}
-					}
-				}
-			}
 
 			// Heuristic: treat fast HMD rotation as "active" (helps decide whether to nudge pose waiting).
 			bool headTurningNow = false;
@@ -1076,7 +1016,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				// If we already consumed this snapshot, optionally wait for the next one.
 				if (havePoses && poseSeq != 0 && poseSeq == s_lastPoseSeq && effectiveTimeoutMs > 0)
 				{
-					const bool shouldWaitNext = !strictRenderPosePacingAttempted && (exceededAhead || (timeoutMs > 0 && poseSeq != s_lastWaitAttemptSeq));
+					const bool shouldWaitNext = exceededAhead || (timeoutMs > 0 && poseSeq != s_lastWaitAttemptSeq);
 					if (shouldWaitNext)
 					{
 						// If the user didn't opt into waiting but we're moving/turning and reusing the same pose,
@@ -1125,8 +1065,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			// Update last poseSeq even when we didn't enter the wait block.
 			if (havePoses && poseSeq != 0)
 			{
-				if (poseSeq != s_lastPoseSeq)
-					s_poseRelaxAccumulator = 0;
 				s_lastPoseSeq = poseSeq;
 			}
 			if (havePoses && poseSeq != 0)
@@ -2317,6 +2255,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			if (drawPreViewLaser && m_VR->m_IsVREnabled)
 				m_VR->RenderDrawGameLaserSight(localPlayer);
 			callOriginalRenderView(eyeView, eyeHud, nClearFlags, whatToDraw);
+			if (m_VR->m_IsVREnabled)
+				m_VR->DrawVrHandsForEye(eyeView, eyeIndex == 1 ? 0 : 1);
 		};
 
 	const bool copyRightEyeFromLeft =
@@ -2345,7 +2285,9 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 	{
 		if (!rightEyeCopiedFromLeft)
+		{
 			renderEyeScene(2, m_VR->m_RightEyeTexture, m_VR->m_D9RightEyeSurface, rightEyeView, hudRight, false);
+		}
 		if (desktopMirrorHidePluginOverlaysSingleCopyActive && m_VR->m_DesktopMirrorEye != 0)
 			m_VR->CopyEyeToDesktopMirrorTexture(1);
 		if (m_VR->m_IsVREnabled)
@@ -2546,7 +2488,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			// stereo frame in complex scenes. Delay the completion signal until dEndFrame.
 			m_VR->m_ReShadeVRCompatPendingRenderPoseToken.store(renderPoseTokenUsed, std::memory_order_release);
 			m_VR->m_ReShadeVRCompatPendingRenderFrameSeq.store(m_VR->m_RenderFrameSeq.load(std::memory_order_acquire), std::memory_order_release);
-			m_VR->m_ReShadeVRCompatPendingDuplicatePose.store(renderPoseAllowDuplicateSubmit ? 1u : 0u, std::memory_order_release);
 			m_VR->m_ReShadeVRCompatPendingRenderReady.store(1, std::memory_order_release);
 
 			if (m_VR->m_RenderPipelineDebugLog)
@@ -2572,7 +2513,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	}
 
 	const uint32_t completedFrameId = m_VR->m_RenderCompletedFrameId.fetch_add(1, std::memory_order_acq_rel) + 1;
-	m_VR->m_RenderCompletedDuplicatePoseFrameId.store(renderPoseAllowDuplicateSubmit ? completedFrameId : 0u, std::memory_order_release);
 	m_VR->m_RenderedNewFrame.store(true, std::memory_order_release);
 	if (m_VR->m_RenderFrameReadyEvent)
 		SetEvent(m_VR->m_RenderFrameReadyEvent);

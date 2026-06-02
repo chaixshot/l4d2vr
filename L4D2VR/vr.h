@@ -28,6 +28,7 @@
 #include <vector>
 #include <atomic>
 #include <mutex>
+#include <memory>
 #include <thread>
 #include <cstring>
 #define MAX_STR_LEN 256
@@ -37,9 +38,9 @@ class C_BaseEntity;
 class C_BasePlayer;
 class C_WeaponCSBase;
 class CUserCmd;
-class IDirect3DDevice9;
-class IDirect3DTexture9;
-class IDirect3DSurface9;
+struct IDirect3DDevice9;
+struct IDirect3DTexture9;
+struct IDirect3DSurface9;
 class ITexture;
 class IMaterial;
 class IMatRenderContext;
@@ -47,6 +48,7 @@ class CViewSetup;
 class IGameEvent;
 class IGameEventListener2;
 class IGameEventManager2;
+class VrHandSystem;
 
 struct ViewmodelAdjustment
 {
@@ -1002,6 +1004,13 @@ public:
 	float m_ConfigOverlayDistanceMeters = 1.35f;
 	float m_ConfigOverlaySizeMeters = 2.05f;
 	bool m_HideArms = false;
+	// Independent GLB + ozz-animation VR hand renderer. The initial D3D9 draw path is
+	// deliberately limited to mat_queue_mode 0 until a queued DXVK submission point is added.
+	bool m_VrHandsEnabled = true;
+	bool m_VrHandsMotionRangeWithoutController = false;
+	bool m_VrHandsDebugLog = false;
+	float m_VrHandsModelScale = 1.0f;
+	std::unique_ptr<VrHandSystem> m_VrHands;
 	bool m_SplitArmsToControllers = false;
 	float m_HudDistance = 1.3f;
 	float m_FixedHudXOffset = 0.0f;
@@ -2532,8 +2541,9 @@ public:
 	bool   ShouldUpdateRearMirrorRTT();
 	void   NotifyRearMirrorSpecialWarning();
 
-	VR() {};
+	VR();
 	VR(Game* game);
+	~VR();
 	int SetActionManifest(const char* fileName);
 	void InstallApplicationManifest(const char* fileName);
 	void Update();
@@ -2553,6 +2563,8 @@ public:
 	void ResetShadowEntityOverrideTracking();
 	void UpdateAutoMatQueueMode();
 	void ReleaseVRRenderTargetsForDeviceReset();
+	void ReleaseVrHandsD3DResources();
+	void DrawVrHandsForEye(const CViewSetup& view, int eyeIndex);
 	bool RefreshBackBufferTexture(bool forceRefresh = false);
 	void CreateVRTextures();
 	void EnsureOpticsRTTTextures();

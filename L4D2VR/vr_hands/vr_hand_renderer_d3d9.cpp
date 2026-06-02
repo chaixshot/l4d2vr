@@ -1,0 +1,412 @@
+#include "vr_hand_renderer_d3d9.h"
+
+#include "vr_hand_math.h"
+
+#include <Windows.h>
+#include <d3d9.h>
+#include <d3dx9.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <cstring>
+#include <string>
+
+namespace
+{
+    constexpr int kMaxShaderBones = 64;
+    constexpr int kBoneConstantStart = 8;
+
+    const char* kVertexShaderSource = R"HLSL(
+float4 gWorldViewProjectionRows[4] : register(c0);
+float4 gLightDirectionAmbient : register(c4);
+float4 gWorldNormalRows[3] : register(c5);
+float4 gBoneRows[192] : register(c8);
+
+struct VS_INPUT
+{
+    float3 position : POSITION0;
+    float3 normal : NORMAL0;
+    float2 uv : TEXCOORD0;
+    float4 weights : BLENDWEIGHT0;
+    float4 joints : BLENDINDICES0;
+};
+
+struct VS_OUTPUT
+{
+    float4 position : POSITION0;
+    float2 uv : TEXCOORD0;
+    float light : TEXCOORD1;
+};
+
+float3 TransformBonePosition(float3 position, int joint)
+{
+    int row = joint * 3;
+    float4 v = float4(position, 1.0);
+    return float3(dot(v, gBoneRows[row + 0]), dot(v, gBoneRows[row + 1]), dot(v, gBoneRows[row + 2]));
+}
+
+float3 TransformBoneNormal(float3 normal, int joint)
+{
+    int row = joint * 3;
+    return float3(dot(normal, gBoneRows[row + 0].xyz), dot(normal, gBoneRows[row + 1].xyz), dot(normal, gBoneRows[row + 2].xyz));
+}
+
+VS_OUTPUT main(VS_INPUT input)
+{
+    VS_OUTPUT output;
+    int4 joints = int4(input.joints);
+    float3 skinnedPosition =
+        TransformBonePosition(input.position, joints.x) * input.weights.x +
+        TransformBonePosition(input.position, joints.y) * input.weights.y +
+        TransformBonePosition(input.position, joints.z) * input.weights.z +
+        TransformBonePosition(input.position, joints.w) * input.weights.w;
+    float3 skinnedNormal = normalize(
+        TransformBoneNormal(input.normal, joints.x) * input.weights.x +
+        TransformBoneNormal(input.normal, joints.y) * input.weights.y +
+        TransformBoneNormal(input.normal, joints.z) * input.weights.z +
+        TransformBoneNormal(input.normal, joints.w) * input.weights.w);
+    float3 worldNormal = normalize(float3(
+        dot(skinnedNormal, gWorldNormalRows[0].xyz),
+        dot(skinnedNormal, gWorldNormalRows[1].xyz),
+        dot(skinnedNormal, gWorldNormalRows[2].xyz)));
+    float4 p = float4(skinnedPosition, 1.0);
+    output.position = float4(
+        dot(p, gWorldViewProjectionRows[0]),
+        dot(p, gWorldViewProjectionRows[1]),
+        dot(p, gWorldViewProjectionRows[2]),
+        dot(p, gWorldViewProjectionRows[3]));
+    output.uv = input.uv;
+    output.light = saturate((gLightDirectionAmbient.w +
+        max(dot(worldNormal, -gLightDirectionAmbient.xyz), 0.0) * 0.62) * gWorldNormalRows[2].w);
+    return output;
+}
+)HLSL";
+
+    const char* kPixelShaderSource = R"HLSL(
+sampler2D gTexture : register(s0);
+
+float4 main(float2 uv : TEXCOORD0, float light : TEXCOORD1) : COLOR0
+{
+    float4 color = tex2D(gTexture, uv);
+    return float4(color.rgb * light, color.a);
+}
+)HLSL";
+
+    template <typename T>
+    void SafeRelease(T*& pointer)
+    {
+        if (!pointer)
+            return;
+        pointer->Release();
+        pointer = nullptr;
+    }
+
+    bool CompileVertexShader(IDirect3DDevice9* device, IDirect3DVertexShader9** outShader, std::string& outError)
+    {
+        ID3DXBuffer* bytecode = nullptr;
+        ID3DXBuffer* errors = nullptr;
+        const HRESULT compileResult = D3DXCompileShader(
+            kVertexShaderSource,
+            static_cast<UINT>(std::strlen(kVertexShaderSource)),
+            nullptr,
+            nullptr,
+            "main",
+            "vs_3_0",
+            0,
+            &bytecode,
+            &errors,
+            nullptr);
+        if (FAILED(compileResult) || !bytecode)
+        {
+            outError = errors ? static_cast<const char*>(errors->GetBufferPointer()) : "D3DXCompileShader failed for VR hand vertex shader";
+            SafeRelease(errors);
+            SafeRelease(bytecode);
+            return false;
+        }
+        SafeRelease(errors);
+        const HRESULT createResult = device->CreateVertexShader(static_cast<const DWORD*>(bytecode->GetBufferPointer()), outShader);
+        SafeRelease(bytecode);
+        if (FAILED(createResult) || !*outShader)
+        {
+            outError = "CreateVertexShader failed for VR hands";
+            return false;
+        }
+        return true;
+    }
+
+    bool CompilePixelShader(IDirect3DDevice9* device, IDirect3DPixelShader9** outShader, std::string& outError)
+    {
+        ID3DXBuffer* bytecode = nullptr;
+        ID3DXBuffer* errors = nullptr;
+        const HRESULT compileResult = D3DXCompileShader(
+            kPixelShaderSource,
+            static_cast<UINT>(std::strlen(kPixelShaderSource)),
+            nullptr,
+            nullptr,
+            "main",
+            "ps_3_0",
+            0,
+            &bytecode,
+            &errors,
+            nullptr);
+        if (FAILED(compileResult) || !bytecode)
+        {
+            outError = errors ? static_cast<const char*>(errors->GetBufferPointer()) : "D3DXCompileShader failed for VR hand pixel shader";
+            SafeRelease(errors);
+            SafeRelease(bytecode);
+            return false;
+        }
+        SafeRelease(errors);
+        const HRESULT createResult = device->CreatePixelShader(static_cast<const DWORD*>(bytecode->GetBufferPointer()), outShader);
+        SafeRelease(bytecode);
+        if (FAILED(createResult) || !*outShader)
+        {
+            outError = "CreatePixelShader failed for VR hands";
+            return false;
+        }
+        return true;
+    }
+}
+
+VrHandRendererD3D9::VrHandRendererD3D9() = default;
+
+VrHandRendererD3D9::~VrHandRendererD3D9()
+{
+    OnDeviceLost();
+}
+
+bool VrHandRendererD3D9::EnsureSharedResources(IDirect3DDevice9* device, std::string& outError)
+{
+    if (!device)
+    {
+        outError = "VR hand renderer received no D3D9 device";
+        return false;
+    }
+    if (m_Device != device)
+    {
+        OnDeviceLost();
+        m_Device = device;
+        m_Device->AddRef();
+    }
+    if (m_VertexDeclaration && m_VertexShader && m_PixelShader)
+        return true;
+
+    const D3DVERTEXELEMENT9 elements[] =
+    {
+        { 0, static_cast<WORD>(offsetof(VrHandVertex, position)), D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_POSITION, 0 },
+        { 0, static_cast<WORD>(offsetof(VrHandVertex, normal)), D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_NORMAL, 0 },
+        { 0, static_cast<WORD>(offsetof(VrHandVertex, uv)), D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0 },
+        { 0, static_cast<WORD>(offsetof(VrHandVertex, weights)), D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_BLENDWEIGHT, 0 },
+        { 0, static_cast<WORD>(offsetof(VrHandVertex, joints)), D3DDECLTYPE_UBYTE4, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_BLENDINDICES, 0 },
+        D3DDECL_END()
+    };
+
+    if (FAILED(device->CreateVertexDeclaration(elements, &m_VertexDeclaration)) || !m_VertexDeclaration)
+    {
+        outError = "CreateVertexDeclaration failed for VR hands";
+        return false;
+    }
+    if (!CompileVertexShader(device, &m_VertexShader, outError))
+        return false;
+    if (!CompilePixelShader(device, &m_PixelShader, outError))
+        return false;
+    return true;
+}
+
+bool VrHandRendererD3D9::CreateTexture(IDirect3DDevice9* device, const VrHandMeshAsset& asset, IDirect3DTexture9** outTexture, std::string& outError)
+{
+    *outTexture = nullptr;
+    if (!asset.baseColorTextureBytes.empty())
+    {
+        const HRESULT result = D3DXCreateTextureFromFileInMemory(
+            device,
+            asset.baseColorTextureBytes.data(),
+            static_cast<UINT>(asset.baseColorTextureBytes.size()),
+            outTexture);
+        if (SUCCEEDED(result) && *outTexture)
+            return true;
+    }
+
+    if (FAILED(device->CreateTexture(1, 1, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, outTexture, nullptr)) || !*outTexture)
+    {
+        outError = "cannot create VR hand fallback texture";
+        return false;
+    }
+
+    D3DLOCKED_RECT lock{};
+    if (FAILED((*outTexture)->LockRect(0, &lock, nullptr, 0)))
+    {
+        outError = "cannot initialize VR hand fallback texture";
+        SafeRelease(*outTexture);
+        return false;
+    }
+    *static_cast<DWORD*>(lock.pBits) = 0xFFFFFFFFu;
+    (*outTexture)->UnlockRect(0);
+    return true;
+}
+
+bool VrHandRendererD3D9::EnsureMeshResources(IDirect3DDevice9* device, int handIndex, const VrHandMeshAsset& asset, std::string& outError)
+{
+    if (handIndex < 0 || handIndex >= static_cast<int>(m_Meshes.size()))
+    {
+        outError = "invalid VR hand index";
+        return false;
+    }
+    if (!asset.IsValid())
+    {
+        outError = "VR hand mesh asset is invalid";
+        return false;
+    }
+
+    MeshResources& mesh = m_Meshes[static_cast<size_t>(handIndex)];
+    if (mesh.vertexBuffer && mesh.indexBuffer && mesh.texture && mesh.sourcePath == asset.sourcePath)
+        return true;
+    ReleaseMesh(mesh);
+
+    const UINT vertexBytes = static_cast<UINT>(asset.vertices.size() * sizeof(VrHandVertex));
+    const UINT indexBytes = static_cast<UINT>(asset.indices.size() * sizeof(std::uint16_t));
+    if (FAILED(device->CreateVertexBuffer(vertexBytes, D3DUSAGE_WRITEONLY, 0, D3DPOOL_MANAGED, &mesh.vertexBuffer, nullptr)) || !mesh.vertexBuffer)
+    {
+        outError = "CreateVertexBuffer failed for VR hands";
+        return false;
+    }
+    if (FAILED(device->CreateIndexBuffer(indexBytes, D3DUSAGE_WRITEONLY, D3DFMT_INDEX16, D3DPOOL_MANAGED, &mesh.indexBuffer, nullptr)) || !mesh.indexBuffer)
+    {
+        outError = "CreateIndexBuffer failed for VR hands";
+        ReleaseMesh(mesh);
+        return false;
+    }
+
+    void* vertexData = nullptr;
+    if (FAILED(mesh.vertexBuffer->Lock(0, vertexBytes, &vertexData, 0)) || !vertexData)
+    {
+        outError = "cannot lock VR hand vertex buffer";
+        ReleaseMesh(mesh);
+        return false;
+    }
+    std::memcpy(vertexData, asset.vertices.data(), vertexBytes);
+    mesh.vertexBuffer->Unlock();
+
+    void* indexData = nullptr;
+    if (FAILED(mesh.indexBuffer->Lock(0, indexBytes, &indexData, 0)) || !indexData)
+    {
+        outError = "cannot lock VR hand index buffer";
+        ReleaseMesh(mesh);
+        return false;
+    }
+    std::memcpy(indexData, asset.indices.data(), indexBytes);
+    mesh.indexBuffer->Unlock();
+
+    if (!CreateTexture(device, asset, &mesh.texture, outError))
+    {
+        ReleaseMesh(mesh);
+        return false;
+    }
+
+    mesh.sourcePath = asset.sourcePath;
+    mesh.vertexCount = static_cast<unsigned int>(asset.vertices.size());
+    mesh.indexCount = static_cast<unsigned int>(asset.indices.size());
+    return true;
+}
+
+bool VrHandRendererD3D9::Draw(
+    IDirect3DDevice9* device,
+    int handIndex,
+    const VrHandMeshAsset& asset,
+    const std::vector<VrHandMatrixRows3x4>& palette,
+    const VrHandMatrix4& world,
+    const VrHandMatrix4& worldViewProjection,
+    float sceneLightScale,
+    std::string& outError)
+{
+    outError.clear();
+    static_assert(sizeof(VrHandMatrixRows3x4) == sizeof(float) * 12u, "VR hand palette rows must be tightly packed");
+    if (palette.empty() || palette.size() > kMaxShaderBones)
+    {
+        outError = "VR hand skinning palette count is invalid";
+        return false;
+    }
+    if (!EnsureSharedResources(device, outError) || !EnsureMeshResources(device, handIndex, asset, outError))
+        return false;
+
+    IDirect3DStateBlock9* stateBlock = nullptr;
+    if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &stateBlock)) || !stateBlock)
+    {
+        outError = "CreateStateBlock failed before VR hand draw";
+        return false;
+    }
+    stateBlock->Capture();
+
+    const MeshResources& mesh = m_Meshes[static_cast<size_t>(handIndex)];
+    const std::array<float, 16> wvpRows = VrHandMath::ToRows4x4(worldViewProjection);
+    VrHandMatrixRows3x4 worldNormalRows = VrHandMath::ToRows3x4(world);
+    worldNormalRows.v[11] = std::clamp(sceneLightScale, 0.06f, 1.25f);
+    const float light[4] = { 0.35f, -0.45f, -0.82f, 0.14f };
+
+    device->SetRenderState(D3DRS_ZENABLE, TRUE);
+    device->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
+    device->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+    device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+    device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+    device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+    device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+    device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+    device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR);
+    device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP);
+    device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_WRAP);
+    device->SetFVF(0);
+    device->SetVertexDeclaration(m_VertexDeclaration);
+    device->SetVertexShader(m_VertexShader);
+    device->SetPixelShader(m_PixelShader);
+    device->SetTexture(0, mesh.texture);
+    device->SetStreamSource(0, mesh.vertexBuffer, 0, sizeof(VrHandVertex));
+    device->SetIndices(mesh.indexBuffer);
+    device->SetVertexShaderConstantF(0, wvpRows.data(), 4);
+    device->SetVertexShaderConstantF(4, light, 1);
+    device->SetVertexShaderConstantF(5, worldNormalRows.v.data(), 3);
+    device->SetVertexShaderConstantF(kBoneConstantStart, palette.front().v.data(), static_cast<UINT>(palette.size() * 3u));
+
+    const HRESULT drawResult = device->DrawIndexedPrimitive(
+        D3DPT_TRIANGLELIST,
+        0,
+        0,
+        mesh.vertexCount,
+        0,
+        mesh.indexCount / 3u);
+
+    stateBlock->Apply();
+    SafeRelease(stateBlock);
+    if (FAILED(drawResult))
+    {
+        outError = "DrawIndexedPrimitive failed for VR hands";
+        return false;
+    }
+    return true;
+}
+
+void VrHandRendererD3D9::ReleaseMesh(MeshResources& mesh)
+{
+    SafeRelease(mesh.vertexBuffer);
+    SafeRelease(mesh.indexBuffer);
+    SafeRelease(mesh.texture);
+    mesh.sourcePath.clear();
+    mesh.vertexCount = 0;
+    mesh.indexCount = 0;
+}
+
+void VrHandRendererD3D9::ReleaseShared()
+{
+    SafeRelease(m_VertexDeclaration);
+    SafeRelease(m_VertexShader);
+    SafeRelease(m_PixelShader);
+}
+
+void VrHandRendererD3D9::OnDeviceLost()
+{
+    for (MeshResources& mesh : m_Meshes)
+        ReleaseMesh(mesh);
+    ReleaseShared();
+    SafeRelease(m_Device);
+}
