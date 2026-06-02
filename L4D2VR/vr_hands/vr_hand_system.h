@@ -13,6 +13,7 @@
 
 class CViewSetup;
 struct IDirect3DDevice9;
+namespace VrHandVmPose { struct Snapshot; }
 
 class VrHandSystem
 {
@@ -23,7 +24,7 @@ public:
     VrHandSystem(const VrHandSystem&) = delete;
     VrHandSystem& operator=(const VrHandSystem&) = delete;
 
-    void DrawForEye(
+    bool DrawForEye(
         IDirect3DDevice9* device,
         vr::IVRInput* input,
         const CViewSetup& view,
@@ -31,14 +32,21 @@ public:
         float vrScale,
         float modelScale,
         bool motionRangeWithoutController,
+        bool rightUseViewmodelPose,
         bool allowControllerlessTestPose,
         bool debugLog,
         float sceneLightScale,
         const Vector& leftControllerPosition,
         const QAngle& leftControllerAngles,
         const Vector& rightControllerPosition,
-        const QAngle& rightControllerAngles);
+        const QAngle& rightControllerAngles,
+        const Vector& leftHandPoseOffsetMeters,
+        const Vector& leftHandPoseRotationOffsetDeg,
+        const Vector& rightHandPoseOffsetMeters,
+        const Vector& rightHandPoseRotationOffsetDeg,
+        VrHandDrawPass drawPass);
 
+    bool ClearViewmodelOcclusionStencil(IDirect3DDevice9* device);
     void OnDeviceLost();
 
 private:
@@ -51,19 +59,27 @@ private:
         VrHandSkeletonRuntime skeleton;
         std::vector<VrHandMatrixRows3x4> palette;
         bool paletteValid = false;
+        bool skeletonInitialized = false;
     };
 
     bool EnsureAssetsLoaded(bool debugLog);
-    bool EnsureInitialized(vr::IVRInput* input, bool debugLog);
+    bool EnsureInitialized(vr::IVRInput* input, bool rightUseViewmodelPose, bool debugLog);
     bool ResolveSteamVrAssetPath(const char* fileName, std::string& outPath) const;
-    void UpdatePoses(vr::IVRInput* input, bool motionRangeWithoutController, bool debugLog);
-    void DrawControllerlessTestPose(
+    void UpdatePoses(vr::IVRInput* input, bool motionRangeWithoutController, bool rightUseViewmodelPose, bool debugLog);
+    bool DrawControllerlessTestPose(
         IDirect3DDevice9* device,
         const CViewSetup& view,
         float vrScale,
         float modelScale,
+        bool rightUseViewmodelPose,
         float sceneLightScale,
-        bool debugLog);
+        bool debugLog,
+        const Vector& leftHandPoseOffsetMeters,
+        const Vector& leftHandPoseRotationOffsetDeg,
+        const Vector& rightHandPoseOffsetMeters,
+        const Vector& rightHandPoseRotationOffsetDeg,
+        VrHandDrawPass drawPass);
+    bool BuildRightViewmodelPalette(const VrHandVmPose::Snapshot& snapshot, std::vector<VrHandMatrixRows3x4>& outPalette);
     void ReportErrorOnce(const std::string& error);
 
     std::array<HandState, 2> m_Hands;
@@ -75,5 +91,17 @@ private:
     bool m_Initialized = false;
     bool m_DebugInitializationLogged = false;
     bool m_DebugTestPoseLogged = false;
-    bool m_DebugVmPoseLogged = false;
+    bool m_DebugRightViewmodelPoseLogged = false;
+    bool m_DebugRightViewmodelPoseMissingLogged = false;
+    bool m_RightViewmodelPoseWasEnabled = false;
+    bool m_RightViewmodelPalmWorldValid = false;
+    bool m_RightViewmodelAnchorValid = false;
+    std::string m_RightViewmodelPoseModel;
+    std::string m_RightViewmodelAnchorModel;
+    VrHandMatrix4 m_RightViewmodelPalmWorld{};
+    VrHandMatrix4 m_RightViewmodelPalmToGloveWorld{};
+    float m_RightViewmodelAnchorVrScale = 0.0f;
+    float m_RightViewmodelAnchorModelScale = 0.0f;
+    Vector m_RightViewmodelAnchorPoseOffsetMeters = { 0.0f, 0.0f, 0.0f };
+    Vector m_RightViewmodelAnchorPoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 };

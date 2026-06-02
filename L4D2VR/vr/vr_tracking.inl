@@ -788,6 +788,10 @@ void VR::UpdateTracking()
     m_RightControllerPosAbs = m_CameraAnchor - Vector(0, 0, 64) + rightControllerPosLocalInWorld;
     m_LeftControllerPosAbs = m_CameraAnchor - Vector(0, 0, 64) + leftControllerPosLocalInWorld;
 
+    leftControllerAngSmoothed.y += m_RotationOffset;
+    // Wrap angle from -180 to 180
+    leftControllerAngSmoothed.y -= 360 * std::floor((leftControllerAngSmoothed.y + 180) / 360);
+
     rightControllerAngSmoothed.y += m_RotationOffset;
     // Wrap angle from -180 to 180
     rightControllerAngSmoothed.y -= 360 * std::floor((rightControllerAngSmoothed.y + 180) / 360);

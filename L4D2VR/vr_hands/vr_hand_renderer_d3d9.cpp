@@ -15,6 +15,10 @@ namespace
 {
     constexpr int kMaxShaderBones = 64;
     constexpr int kBoneConstantStart = 8;
+    constexpr float kWorldDepthRangeMin = 0.0f;
+    constexpr float kWorldDepthRangeMax = 1.0f;
+    constexpr float kViewmodelDepthRangeMax = 0.1f;
+    constexpr DWORD kVrHandOcclusionStencilBit = 0x80u;
 
     const char* kVertexShaderSource = R"HLSL(
 float4 gWorldViewProjectionRows[4] : register(c0);
@@ -309,6 +313,98 @@ bool VrHandRendererD3D9::EnsureMeshResources(IDirect3DDevice9* device, int handI
     return true;
 }
 
+bool VrHandRendererD3D9::ClearViewmodelOcclusionStencil(IDirect3DDevice9* device, std::string& outError)
+{
+    outError.clear();
+    if (!device)
+    {
+        outError = "VR hand stencil clear received a null D3D9 device";
+        return false;
+    }
+
+    IDirect3DSurface9* depthStencil = nullptr;
+    D3DSURFACE_DESC depthStencilDesc{};
+    if (FAILED(device->GetDepthStencilSurface(&depthStencil)) || !depthStencil || FAILED(depthStencil->GetDesc(&depthStencilDesc)))
+    {
+        SafeRelease(depthStencil);
+        outError = "VR hand viewmodel occlusion requires an active depth-stencil surface";
+        return false;
+    }
+    const bool hasStencil =
+        depthStencilDesc.Format == D3DFMT_D15S1 ||
+        depthStencilDesc.Format == D3DFMT_D24S8 ||
+        depthStencilDesc.Format == D3DFMT_D24X4S4 ||
+        depthStencilDesc.Format == D3DFMT_D24FS8;
+    SafeRelease(depthStencil);
+    if (!hasStencil)
+    {
+        outError = "VR hand viewmodel occlusion requires a stencil-capable depth surface";
+        return false;
+    }
+
+    IDirect3DStateBlock9* stateBlock = nullptr;
+    if (FAILED(device->CreateStateBlock(D3DSBT_ALL, &stateBlock)) || !stateBlock)
+    {
+        outError = "CreateStateBlock failed before VR hand stencil-bit clear";
+        return false;
+    }
+    stateBlock->Capture();
+
+    D3DVIEWPORT9 viewport{};
+    const bool haveViewport = SUCCEEDED(device->GetViewport(&viewport));
+    HRESULT drawResult = E_FAIL;
+    if (haveViewport)
+    {
+        struct ClearStencilVertex
+        {
+            float x, y, z, rhw;
+        };
+        const float left = static_cast<float>(viewport.X) - 0.5f;
+        const float top = static_cast<float>(viewport.Y) - 0.5f;
+        const float right = static_cast<float>(viewport.X + viewport.Width) - 0.5f;
+        const float bottom = static_cast<float>(viewport.Y + viewport.Height) - 0.5f;
+        const ClearStencilVertex vertices[4] =
+        {
+            { left,  top,    0.0f, 1.0f },
+            { right, top,    0.0f, 1.0f },
+            { left,  bottom, 0.0f, 1.0f },
+            { right, bottom, 0.0f, 1.0f }
+        };
+
+        // Clear only the reserved VR-hand stencil bit. D3D9 Clear(D3DCLEAR_STENCIL)
+        // would erase every stencil bit and could disturb Source's own later passes.
+        device->SetRenderState(D3DRS_ZENABLE, FALSE);
+        device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+        device->SetRenderState(D3DRS_COLORWRITEENABLE, 0u);
+        device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+        device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+        device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+        device->SetRenderState(D3DRS_STENCILENABLE, TRUE);
+        device->SetRenderState(D3DRS_STENCILFUNC, D3DCMP_ALWAYS);
+        device->SetRenderState(D3DRS_STENCILREF, 0u);
+        device->SetRenderState(D3DRS_STENCILMASK, kVrHandOcclusionStencilBit);
+        device->SetRenderState(D3DRS_STENCILWRITEMASK, kVrHandOcclusionStencilBit);
+        device->SetRenderState(D3DRS_STENCILFAIL, D3DSTENCILOP_KEEP);
+        device->SetRenderState(D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP);
+        device->SetRenderState(D3DRS_STENCILPASS, D3DSTENCILOP_REPLACE);
+        device->SetVertexDeclaration(nullptr);
+        device->SetVertexShader(nullptr);
+        device->SetPixelShader(nullptr);
+        device->SetTexture(0, nullptr);
+        device->SetFVF(D3DFVF_XYZRHW);
+        drawResult = device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, vertices, sizeof(ClearStencilVertex));
+    }
+
+    stateBlock->Apply();
+    SafeRelease(stateBlock);
+    if (!haveViewport || FAILED(drawResult))
+    {
+        outError = "D3D9 reserved stencil-bit clear failed before VR hand world-depth mask";
+        return false;
+    }
+    return true;
+}
+
 bool VrHandRendererD3D9::Draw(
     IDirect3DDevice9* device,
     int handIndex,
@@ -316,6 +412,7 @@ bool VrHandRendererD3D9::Draw(
     const std::vector<VrHandMatrixRows3x4>& palette,
     const VrHandMatrix4& world,
     const VrHandMatrix4& worldViewProjection,
+    VrHandDrawPass drawPass,
     float sceneLightScale,
     std::string& outError)
 {
@@ -343,14 +440,31 @@ bool VrHandRendererD3D9::Draw(
     worldNormalRows.v[11] = std::clamp(sceneLightScale, 0.06f, 1.25f);
     const float light[4] = { 0.35f, -0.45f, -0.82f, 0.14f };
 
+    const bool maskPass = drawPass == VrHandDrawPass::WorldVisibilityMask;
+    const bool compositePass = drawPass == VrHandDrawPass::ViewmodelComposite;
     device->SetRenderState(D3DRS_ZENABLE, TRUE);
-    device->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
+    // The final color pass must write depth as well. Otherwise every triangle of the
+    // same glove blends through the others, so folded fingers remain visible through
+    // the palm. The stencil mask still preserves world occlusion, while the current
+    // viewmodel depth buffer preserves gun-versus-hand occlusion.
+    const bool writeDepth = drawPass == VrHandDrawPass::WorldDepth || compositePass;
+    device->SetRenderState(D3DRS_ZWRITEENABLE, writeDepth ? TRUE : FALSE);
     device->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
     device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
     device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
     device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
     device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
     device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+    device->SetRenderState(D3DRS_COLORWRITEENABLE,
+        maskPass ? 0u : (D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE | D3DCOLORWRITEENABLE_ALPHA));
+    device->SetRenderState(D3DRS_STENCILENABLE, (maskPass || compositePass) ? TRUE : FALSE);
+    device->SetRenderState(D3DRS_STENCILFUNC, maskPass ? D3DCMP_ALWAYS : D3DCMP_EQUAL);
+    device->SetRenderState(D3DRS_STENCILREF, kVrHandOcclusionStencilBit);
+    device->SetRenderState(D3DRS_STENCILMASK, kVrHandOcclusionStencilBit);
+    device->SetRenderState(D3DRS_STENCILWRITEMASK, maskPass ? kVrHandOcclusionStencilBit : 0u);
+    device->SetRenderState(D3DRS_STENCILFAIL, D3DSTENCILOP_KEEP);
+    device->SetRenderState(D3DRS_STENCILZFAIL, D3DSTENCILOP_KEEP);
+    device->SetRenderState(D3DRS_STENCILPASS, maskPass ? D3DSTENCILOP_REPLACE : D3DSTENCILOP_KEEP);
     device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
     device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
     device->SetSamplerState(0, D3DSAMP_MIPFILTER, D3DTEXF_LINEAR);
@@ -368,6 +482,16 @@ bool VrHandRendererD3D9::Draw(
     device->SetVertexShaderConstantF(5, worldNormalRows.v.data(), 3);
     device->SetVertexShaderConstantF(kBoneConstantStart, palette.front().v.data(), static_cast<UINT>(palette.size() * 3u));
 
+    D3DVIEWPORT9 oldViewport{};
+    const bool haveOldViewport = SUCCEEDED(device->GetViewport(&oldViewport));
+    if (haveOldViewport)
+    {
+        D3DVIEWPORT9 handViewport = oldViewport;
+        handViewport.MinZ = kWorldDepthRangeMin;
+        handViewport.MaxZ = compositePass ? kViewmodelDepthRangeMax : kWorldDepthRangeMax;
+        device->SetViewport(&handViewport);
+    }
+
     const HRESULT drawResult = device->DrawIndexedPrimitive(
         D3DPT_TRIANGLELIST,
         0,
@@ -375,6 +499,9 @@ bool VrHandRendererD3D9::Draw(
         mesh.vertexCount,
         0,
         mesh.indexCount / 3u);
+
+    if (haveOldViewport)
+        device->SetViewport(&oldViewport);
 
     stateBlock->Apply();
     SafeRelease(stateBlock);

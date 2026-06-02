@@ -528,7 +528,7 @@ namespace
         const std::string& modelName,
         const void* pCustomBoneToWorld)
     {
-        if (!vr || !vr->m_VrHandsEnabled || !vr->m_MouseModeEnabled)
+        if (!vr || !vr->m_VrHandsEnabled || !vr->m_VrHandsRightUseViewmodelPose)
             return;
         if (!drawState || !pCustomBoneToWorld || !HooksModelNameIsArmsOrHands(modelName))
             return;
@@ -788,6 +788,8 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 			(modelName.find("v_hands") != std::string::npos);
 		if (teleportSuppressibleViewmodel && m_VR->ShouldSuppressTeleportViewmodelRender())
 			return;
+		if (teleportSuppressibleViewmodel)
+			m_VR->DrawVrHandsWorldDepthMaskBeforeViewmodel();
 
 		const bool suppressDesktopMirrorPluginOverlays =
 			m_VR->m_DesktopMirrorCleanRenderingPass && m_VR->m_DesktopMirrorHidePluginOverlays;

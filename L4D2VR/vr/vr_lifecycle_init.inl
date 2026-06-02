@@ -1062,8 +1062,10 @@ int VR::SetActionManifest(const char* fileName)
     m_Input->GetActionHandle("/actions/main/in/CustomAction5", &m_CustomAction5);
 
     m_Input->GetActionSetHandle("/actions/main", &m_ActionSet);
-    m_ActiveActionSet = {};
-    m_ActiveActionSet.ulActionSet = m_ActionSet;
+    m_Input->GetActionSetHandle("/actions/base", &m_BaseActionSet);
+    m_ActiveActionSets = {};
+    m_ActiveActionSets[0].ulActionSet = m_ActionSet;
+    m_ActiveActionSets[1].ulActionSet = m_BaseActionSet;
 
     return 0;
 }

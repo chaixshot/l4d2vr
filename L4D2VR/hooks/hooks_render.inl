@@ -1215,7 +1215,9 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				vr::TrackedDeviceIndex_t leftIdx = m_VR->m_System->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
 				vr::TrackedDeviceIndex_t rightIdx = m_VR->m_System->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_RightHand);
 				if (m_VR->m_LeftHanded)
+				{
 					std::swap(leftIdx, rightIdx);
+				}
 
 				Vector leftCtrlPosAbs = m_VR->m_LeftControllerPosAbs;
 				QAngle leftCtrlAngAbs = m_VR->m_LeftControllerAngAbs;
@@ -2254,9 +2256,11 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			ScopedReShadeVRCompatD3D9StateGuard reshadeGuard(m_VR, reshadeSurface);
 			if (drawPreViewLaser && m_VR->m_IsVREnabled)
 				m_VR->RenderDrawGameLaserSight(localPlayer);
+			if (m_VR->m_IsVREnabled)
+				m_VR->BeginVrHandsEyeRender(eyeView, eyeIndex == 1 ? 0 : 1);
 			callOriginalRenderView(eyeView, eyeHud, nClearFlags, whatToDraw);
 			if (m_VR->m_IsVREnabled)
-				m_VR->DrawVrHandsForEye(eyeView, eyeIndex == 1 ? 0 : 1);
+				m_VR->FinishVrHandsEyeRender();
 		};
 
 	const bool copyRightEyeFromLeft =

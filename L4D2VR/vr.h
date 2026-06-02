@@ -49,6 +49,7 @@ class IGameEvent;
 class IGameEventListener2;
 class IGameEventManager2;
 class VrHandSystem;
+enum class VrHandDrawPass;
 
 struct ViewmodelAdjustment
 {
@@ -862,9 +863,12 @@ public:
 	std::string m_TextToSpeechWhitelistRegexes;
 	std::string m_TextToSpeechWhitelistSeparator = "__VR_REGEX_SPLIT__";
 
-	// action set
+	// action sets
+	// /actions/main contains gameplay inputs. /actions/base contains the existing
+	// SteamVR pose, haptic and skeletal bindings used by the independent hand renderer.
 	vr::VRActionSetHandle_t m_ActionSet;
-	vr::VRActiveActionSet_t m_ActiveActionSet;
+	vr::VRActionSetHandle_t m_BaseActionSet;
+	std::array<vr::VRActiveActionSet_t, 2> m_ActiveActionSets{};
 
 	// actions
 	vr::VRActionHandle_t m_ActionJump;
@@ -1000,6 +1004,13 @@ public:
 
 	float m_VRScale = 43.2f;
 	float m_IpdScale = 1.0f;
+	// Independent-GLB-hand render calibration only. These values never alter tracked controller poses,
+	// gameplay input, viewmodels, aim lines, gestures or inventory anchors.
+	// Hand-local axes: X=right, Y=up, Z=back. Position is meters; rotation is X/Y/Z degrees.
+	Vector m_VrHandsLeftPoseOffsetMeters = { 0.0f, 0.0f, 0.0f };
+	Vector m_VrHandsLeftPoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
+	Vector m_VrHandsRightPoseOffsetMeters = { 0.0f, 0.0f, 0.0f };
+	Vector m_VrHandsRightPoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	// Built-in config overlay placement. Parsed by ParseConfigFile() so config hot-reload can update it.
 	float m_ConfigOverlayDistanceMeters = 1.35f;
 	float m_ConfigOverlaySizeMeters = 2.05f;
@@ -1008,9 +1019,13 @@ public:
 	// deliberately limited to mat_queue_mode 0 until a queued DXVK submission point is added.
 	bool m_VrHandsEnabled = true;
 	bool m_VrHandsMotionRangeWithoutController = false;
+	bool m_VrHandsRightUseViewmodelPose = false;
 	bool m_VrHandsDebugLog = false;
 	float m_VrHandsModelScale = 1.0f;
 	std::unique_ptr<VrHandSystem> m_VrHands;
+	const CViewSetup* m_VrHandsActiveEyeView = nullptr;
+	int m_VrHandsActiveEyeIndex = -1;
+	bool m_VrHandsWorldMaskDrawn = false;
 	bool m_SplitArmsToControllers = false;
 	float m_HudDistance = 1.3f;
 	float m_FixedHudXOffset = 0.0f;
@@ -2564,7 +2579,10 @@ public:
 	void UpdateAutoMatQueueMode();
 	void ReleaseVRRenderTargetsForDeviceReset();
 	void ReleaseVrHandsD3DResources();
-	void DrawVrHandsForEye(const CViewSetup& view, int eyeIndex);
+	bool DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass drawPass);
+	void BeginVrHandsEyeRender(const CViewSetup& view, int eyeIndex);
+	void DrawVrHandsWorldDepthMaskBeforeViewmodel();
+	void FinishVrHandsEyeRender();
 	bool RefreshBackBufferTexture(bool forceRefresh = false);
 	void CreateVRTextures();
 	void EnsureOpticsRTTTextures();

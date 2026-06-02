@@ -14,6 +14,13 @@ struct IDirect3DVertexBuffer9;
 struct IDirect3DIndexBuffer9;
 struct IDirect3DTexture9;
 
+enum class VrHandDrawPass
+{
+    WorldDepth,
+    WorldVisibilityMask,
+    ViewmodelComposite
+};
+
 class VrHandRendererD3D9
 {
 public:
@@ -30,9 +37,11 @@ public:
         const std::vector<VrHandMatrixRows3x4>& palette,
         const VrHandMatrix4& world,
         const VrHandMatrix4& worldViewProjection,
+        VrHandDrawPass drawPass,
         float sceneLightScale,
         std::string& outError);
 
+    bool ClearViewmodelOcclusionStencil(IDirect3DDevice9* device, std::string& outError);
     void OnDeviceLost();
 
 private:

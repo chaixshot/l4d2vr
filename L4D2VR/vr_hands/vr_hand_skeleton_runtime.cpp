@@ -17,6 +17,7 @@
 #include <cctype>
 #include <cstdint>
 #include <functional>
+#include <cmath>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -47,6 +48,45 @@ namespace
         VrHandMatrix4 out{};
         for (int column = 0; column < 4; ++column)
             ozz::math::StorePtrU(matrix.cols[column], &out.m[static_cast<size_t>(column) * 4u]);
+        return out;
+    }
+
+    VrHandMatrix4 ToVrHandMatrix(const vr::VRBoneTransform_t& transform)
+    {
+        float x = transform.orientation.x;
+        float y = transform.orientation.y;
+        float z = transform.orientation.z;
+        float w = transform.orientation.w;
+        const float lengthSq = x * x + y * y + z * z + w * w;
+        if (lengthSq > 0.000001f)
+        {
+            const float invLength = 1.0f / std::sqrt(lengthSq);
+            x *= invLength;
+            y *= invLength;
+            z *= invLength;
+            w *= invLength;
+        }
+        else
+        {
+            x = 0.0f;
+            y = 0.0f;
+            z = 0.0f;
+            w = 1.0f;
+        }
+
+        VrHandMatrix4 out = VrHandMath::Identity();
+        VrHandMath::Set(out, 0, 0, 1.0f - 2.0f * (y * y + z * z));
+        VrHandMath::Set(out, 0, 1, 2.0f * (x * y - z * w));
+        VrHandMath::Set(out, 0, 2, 2.0f * (x * z + y * w));
+        VrHandMath::Set(out, 1, 0, 2.0f * (x * y + z * w));
+        VrHandMath::Set(out, 1, 1, 1.0f - 2.0f * (x * x + z * z));
+        VrHandMath::Set(out, 1, 2, 2.0f * (y * z - x * w));
+        VrHandMath::Set(out, 2, 0, 2.0f * (x * z - y * w));
+        VrHandMath::Set(out, 2, 1, 2.0f * (y * z + x * w));
+        VrHandMath::Set(out, 2, 2, 1.0f - 2.0f * (x * x + y * y));
+        VrHandMath::Set(out, 0, 3, transform.position.v[0]);
+        VrHandMath::Set(out, 1, 3, transform.position.v[1]);
+        VrHandMath::Set(out, 2, 3, transform.position.v[2]);
         return out;
     }
 }
@@ -218,7 +258,7 @@ bool VrHandSkeletonRuntime::Update(vr::IVRInput* input, vr::EVRSkeletalMotionRan
 
     if (input->GetSkeletalBoneData(
         m_Impl->action,
-        vr::VRSkeletalTransformSpace_Parent,
+        vr::VRSkeletalTransformSpace_Model,
         motionRange,
         m_Impl->transforms.data(),
         static_cast<uint32_t>(m_Impl->transforms.size())) != vr::VRInputError_None)
@@ -228,66 +268,10 @@ bool VrHandSkeletonRuntime::Update(vr::IVRInput* input, vr::EVRSkeletalMotionRan
         return false;
     }
 
-    for (size_t soa = 0; soa < m_Impl->locals.size(); ++soa)
-    {
-        float tx[4]{}, ty[4]{}, tz[4]{};
-        float qx[4]{}, qy[4]{}, qz[4]{}, qw[4]{ 1.0f, 1.0f, 1.0f, 1.0f };
-        float sx[4]{ 1.0f, 1.0f, 1.0f, 1.0f };
-        float sy[4]{ 1.0f, 1.0f, 1.0f, 1.0f };
-        float sz[4]{ 1.0f, 1.0f, 1.0f, 1.0f };
-        for (size_t lane = 0; lane < 4; ++lane)
-        {
-            const size_t ozzJointIndex = soa * 4u + lane;
-            if (ozzJointIndex >= m_Impl->ozzJointToOpenVrBone.size())
-                continue;
-            const int mappedBone = m_Impl->ozzJointToOpenVrBone[ozzJointIndex];
-            if (mappedBone < 0 || static_cast<size_t>(mappedBone) >= m_Impl->transforms.size())
-            {
-                outError = "ozz joint does not map to a valid OpenVR bone";
-                m_Impl->hasPose = false;
-                return false;
-            }
-            const size_t openVrBoneIndex = static_cast<size_t>(mappedBone);
-            const bool isRoot = m_Impl->parents[openVrBoneIndex] == vr::k_unInvalidBoneIndex;
-            const ozz::math::Transform transform = ToOzzTransform(m_Impl->transforms[openVrBoneIndex], isRoot);
-            tx[lane] = transform.translation.x;
-            ty[lane] = transform.translation.y;
-            tz[lane] = transform.translation.z;
-            qx[lane] = transform.rotation.x;
-            qy[lane] = transform.rotation.y;
-            qz[lane] = transform.rotation.z;
-            qw[lane] = transform.rotation.w;
-            sx[lane] = transform.scale.x;
-            sy[lane] = transform.scale.y;
-            sz[lane] = transform.scale.z;
-        }
-
-        ozz::math::SoaTransform& local = m_Impl->locals[soa];
-        local.translation = ozz::math::SoaFloat3::Load(
-            ozz::math::simd_float4::Load(tx[0], tx[1], tx[2], tx[3]),
-            ozz::math::simd_float4::Load(ty[0], ty[1], ty[2], ty[3]),
-            ozz::math::simd_float4::Load(tz[0], tz[1], tz[2], tz[3]));
-        local.rotation = ozz::math::SoaQuaternion::Load(
-            ozz::math::simd_float4::Load(qx[0], qx[1], qx[2], qx[3]),
-            ozz::math::simd_float4::Load(qy[0], qy[1], qy[2], qy[3]),
-            ozz::math::simd_float4::Load(qz[0], qz[1], qz[2], qz[3]),
-            ozz::math::simd_float4::Load(qw[0], qw[1], qw[2], qw[3]));
-        local.scale = ozz::math::SoaFloat3::Load(
-            ozz::math::simd_float4::Load(sx[0], sx[1], sx[2], sx[3]),
-            ozz::math::simd_float4::Load(sy[0], sy[1], sy[2], sy[3]),
-            ozz::math::simd_float4::Load(sz[0], sz[1], sz[2], sz[3]));
-    }
-
-    ozz::animation::LocalToModelJob job;
-    job.skeleton = m_Impl->skeleton.get();
-    job.input = ozz::make_span(m_Impl->locals);
-    job.output = ozz::make_span(m_Impl->models);
-    if (!job.Run())
-    {
-        outError = "ozz LocalToModelJob failed";
-        m_Impl->hasPose = false;
-        return false;
-    }
+    // OpenVR can return each bone already concatenated in model space.
+    // Use that representation directly instead of rebuilding the hierarchy through
+    // a second animation runtime; the SteamVR glove GLB inverse-bind matrices are
+    // authored for this model-space skeleton.
 
     m_Impl->hasPose = true;
     return true;
@@ -320,7 +304,7 @@ bool VrHandSkeletonRuntime::BuildSkinningPalette(const VrHandMeshAsset& asset, s
         if (found == m_Impl->jointIndexByName.end() && name.empty() && meshJoint < m_Impl->models.size())
         {
             found = m_Impl->jointIndexByName.end();
-            const VrHandMatrix4 model = ToVrHandMatrix(m_Impl->models[meshJoint]);
+            const VrHandMatrix4 model = ToVrHandMatrix(m_Impl->transforms[meshJoint]);
             outPalette[meshJoint] = VrHandMath::ToRows3x4(VrHandMath::Multiply(model, asset.inverseBindMatrices[meshJoint]));
             continue;
         }
@@ -331,7 +315,7 @@ bool VrHandSkeletonRuntime::BuildSkinningPalette(const VrHandMeshAsset& asset, s
             return false;
         }
 
-        const VrHandMatrix4 model = ToVrHandMatrix(m_Impl->models[static_cast<size_t>(found->second)]);
+        const VrHandMatrix4 model = ToVrHandMatrix(m_Impl->transforms[static_cast<size_t>(found->second)]);
         outPalette[meshJoint] = VrHandMath::ToRows3x4(VrHandMath::Multiply(model, asset.inverseBindMatrices[meshJoint]));
     }
     return true;

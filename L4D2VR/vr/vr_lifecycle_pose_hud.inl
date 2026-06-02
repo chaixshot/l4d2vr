@@ -2,14 +2,18 @@ void VR::GetPoses()
 {
     vr::TrackedDevicePose_t hmdPose = m_Poses[vr::k_unTrackedDeviceIndex_Hmd];
 
-    vr::TrackedDeviceIndex_t leftControllerIndex = m_System->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
-    vr::TrackedDeviceIndex_t rightControllerIndex = m_System->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_RightHand);
+    const vr::TrackedDeviceIndex_t leftControllerIndex = m_System->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
+    const vr::TrackedDeviceIndex_t rightControllerIndex = m_System->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_RightHand);
+
+    vr::TrackedDevicePose_t leftControllerPose{};
+    vr::TrackedDevicePose_t rightControllerPose{};
+    if (leftControllerIndex != vr::k_unTrackedDeviceIndexInvalid && leftControllerIndex < vr::k_unMaxTrackedDeviceCount)
+        leftControllerPose = m_Poses[leftControllerIndex];
+    if (rightControllerIndex != vr::k_unTrackedDeviceIndexInvalid && rightControllerIndex < vr::k_unMaxTrackedDeviceCount)
+        rightControllerPose = m_Poses[rightControllerIndex];
 
     if (m_LeftHanded)
-        std::swap(leftControllerIndex, rightControllerIndex);
-
-    vr::TrackedDevicePose_t leftControllerPose = m_Poses[leftControllerIndex];
-    vr::TrackedDevicePose_t rightControllerPose = m_Poses[rightControllerIndex];
+        std::swap(leftControllerPose, rightControllerPose);
 
     GetPoseData(hmdPose, m_HmdPose);
     GetPoseData(leftControllerPose, m_LeftControllerPose);
@@ -124,7 +128,7 @@ bool VR::UpdatePosesAndActions()
     if (!posesValid && m_CompositorExplicitTiming)
         m_CompositorNeedsHandoff = false;
 
-    m_Input->UpdateActionState(&m_ActiveActionSet, sizeof(vr::VRActiveActionSet_t), 1);
+    m_Input->UpdateActionState(m_ActiveActionSets.data(), sizeof(vr::VRActiveActionSet_t), static_cast<uint32_t>(m_ActiveActionSets.size()));
     return posesValid;
 }
 

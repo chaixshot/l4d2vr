@@ -1079,6 +1079,19 @@ void VR::ParseConfigFile()
     m_LeftHanded = getBool("LeftHanded", m_LeftHanded);
     m_VRScale = getFloat("VRScale", m_VRScale);
     m_IpdScale = getFloat("IPDScale", m_IpdScale);
+    {
+        auto clampVector = [](Vector value, float minValue, float maxValue)
+        {
+            value.x = std::clamp(value.x, minValue, maxValue);
+            value.y = std::clamp(value.y, minValue, maxValue);
+            value.z = std::clamp(value.z, minValue, maxValue);
+            return value;
+        };
+        m_VrHandsLeftPoseOffsetMeters = clampVector(getVector3("VrHandsLeftPoseOffsetMeters", m_VrHandsLeftPoseOffsetMeters), -1.0f, 1.0f);
+        m_VrHandsLeftPoseRotationOffsetDeg = clampVector(getVector3("VrHandsLeftPoseRotationOffsetDeg", m_VrHandsLeftPoseRotationOffsetDeg), -180.0f, 180.0f);
+        m_VrHandsRightPoseOffsetMeters = clampVector(getVector3("VrHandsRightPoseOffsetMeters", m_VrHandsRightPoseOffsetMeters), -1.0f, 1.0f);
+        m_VrHandsRightPoseRotationOffsetDeg = clampVector(getVector3("VrHandsRightPoseRotationOffsetDeg", m_VrHandsRightPoseRotationOffsetDeg), -180.0f, 180.0f);
+    }
     // Built-in config overlay placement. Keep this in the normal hot-reload path.
     m_ConfigOverlayDistanceMeters = std::clamp(getFloat("ConfigOverlayDistanceMeters", m_ConfigOverlayDistanceMeters), 0.6f, 3.0f);
     m_ConfigOverlaySizeMeters = std::clamp(getFloat("ConfigOverlaySizeMeters", m_ConfigOverlaySizeMeters), 0.8f, 4.0f);
@@ -1109,6 +1122,7 @@ void VR::ParseConfigFile()
     m_HideArms = getBool("HideArms", m_HideArms);
     m_VrHandsEnabled = getBool("VrHandsEnabled", m_VrHandsEnabled);
     m_VrHandsMotionRangeWithoutController = getBool("VrHandsMotionRangeWithoutController", m_VrHandsMotionRangeWithoutController);
+    m_VrHandsRightUseViewmodelPose = getBool("VrHandsRightUseViewmodelPose", m_VrHandsRightUseViewmodelPose);
     m_VrHandsDebugLog = getBool("VrHandsDebugLog", m_VrHandsDebugLog);
     m_VrHandsModelScale = std::clamp(getFloat("VrHandsModelScale", m_VrHandsModelScale), 0.25f, 4.0f);
     m_SplitArmsToControllers = getBool("SplitArmsToControllers", m_SplitArmsToControllers);

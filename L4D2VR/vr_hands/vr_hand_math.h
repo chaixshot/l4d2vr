@@ -118,7 +118,13 @@ namespace VrHandMath
         return value * invLen;
     }
 
-    inline VrHandMatrix4 BuildControllerWorld(const Vector& origin, const QAngle& angles, float scale)
+    inline VrHandMatrix4 BuildControllerWorld(
+        const Vector& origin,
+        const QAngle& angles,
+        float sourceUnitsPerMeter,
+        float modelScale,
+        const Vector& localPositionOffsetMeters,
+        const Vector& localRotationOffsetDeg)
     {
         Vector forward{};
         Vector right{};
@@ -129,22 +135,56 @@ namespace VrHandMath
         right = Normalize(right);
         up = Normalize(up);
 
-        // SteamVR glove meshes extend the fingers along +Z; map that to Source forward.
-        // Source uses forward/right/up. Keep the axis conversion at this boundary.
-        VrHandMatrix4 out = Identity();
-        Set(out, 0, 0, right.x * scale);
-        Set(out, 1, 0, right.y * scale);
-        Set(out, 2, 0, right.z * scale);
-        Set(out, 0, 1, up.x * scale);
-        Set(out, 1, 1, up.y * scale);
-        Set(out, 2, 1, up.z * scale);
-        Set(out, 0, 2, forward.x * scale);
-        Set(out, 1, 2, forward.y * scale);
-        Set(out, 2, 2, forward.z * scale);
-        Set(out, 0, 3, origin.x);
-        Set(out, 1, 3, origin.y);
-        Set(out, 2, 3, origin.z);
-        return out;
+        // This correction exists only inside the standalone GLB hand render matrix.
+        // It must not be written back into any tracked-controller pose.
+        constexpr float kDegToRad = 3.14159265358979323846f / 180.0f;
+        const float rx = localRotationOffsetDeg.x * kDegToRad;
+        const float ry = localRotationOffsetDeg.y * kDegToRad;
+        const float rz = localRotationOffsetDeg.z * kDegToRad;
+        const float sx = std::sin(rx), cx = std::cos(rx);
+        const float sy = std::sin(ry), cy = std::cos(ry);
+        const float sz = std::sin(rz), cz = std::cos(rz);
+
+        VrHandMatrix4 controllerBasis = Identity();
+        Set(controllerBasis, 0, 0, right.x);
+        Set(controllerBasis, 1, 0, right.y);
+        Set(controllerBasis, 2, 0, right.z);
+        Set(controllerBasis, 0, 1, up.x);
+        Set(controllerBasis, 1, 1, up.y);
+        Set(controllerBasis, 2, 1, up.z);
+        Set(controllerBasis, 0, 2, -forward.x);
+        Set(controllerBasis, 1, 2, -forward.y);
+        Set(controllerBasis, 2, 2, -forward.z);
+        Set(controllerBasis, 0, 3, origin.x);
+        Set(controllerBasis, 1, 3, origin.y);
+        Set(controllerBasis, 2, 3, origin.z);
+
+        // Local correction R = Rz * Ry * Rx. Translation is converted from meters
+        // before model scaling, so changing hand size never changes the calibration distance.
+        VrHandMatrix4 localCorrection = Identity();
+        Set(localCorrection, 0, 0, cz * cy);
+        Set(localCorrection, 0, 1, cz * sy * sx - sz * cx);
+        Set(localCorrection, 0, 2, cz * sy * cx + sz * sx);
+        Set(localCorrection, 1, 0, sz * cy);
+        Set(localCorrection, 1, 1, sz * sy * sx + cz * cx);
+        Set(localCorrection, 1, 2, sz * sy * cx - cz * sx);
+        Set(localCorrection, 2, 0, -sy);
+        Set(localCorrection, 2, 1, cy * sx);
+        Set(localCorrection, 2, 2, cy * cx);
+        Set(localCorrection, 0, 3, localPositionOffsetMeters.x * sourceUnitsPerMeter);
+        Set(localCorrection, 1, 3, localPositionOffsetMeters.y * sourceUnitsPerMeter);
+        Set(localCorrection, 2, 3, localPositionOffsetMeters.z * sourceUnitsPerMeter);
+
+        VrHandMatrix4 modelScaleMatrix = Identity();
+        Set(modelScaleMatrix, 0, 0, modelScale * sourceUnitsPerMeter);
+        Set(modelScaleMatrix, 1, 1, modelScale * sourceUnitsPerMeter);
+        Set(modelScaleMatrix, 2, 2, modelScale * sourceUnitsPerMeter);
+        return Multiply(Multiply(controllerBasis, localCorrection), modelScaleMatrix);
+    }
+
+    inline VrHandMatrix4 BuildControllerWorld(const Vector& origin, const QAngle& angles, float scale)
+    {
+        return BuildControllerWorld(origin, angles, scale, 1.0f, Vector{}, Vector{});
     }
 
     inline VrHandMatrix4 BuildSourceView(const Vector& origin, const Vector& angles)
