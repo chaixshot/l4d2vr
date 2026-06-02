@@ -511,6 +511,61 @@ namespace
         flushChunk();
     }
 
+    inline VrHandMatrix4 HooksMat3x4ToVrHandMatrix(const vr_vm_stabilize::Mat3x4& source)
+    {
+        VrHandMatrix4 out = VrHandMath::Identity();
+        for (int row = 0; row < 3; ++row)
+        {
+            for (int column = 0; column < 4; ++column)
+                VrHandMath::Set(out, row, column, source.m[row][column]);
+        }
+        return out;
+    }
+
+    inline void MaybeCaptureVrHandsVmPose(
+        VR* vr,
+        void* drawState,
+        const std::string& modelName,
+        const void* pCustomBoneToWorld)
+    {
+        if (!vr || !vr->m_VrHandsEnabled || !vr->m_MouseModeEnabled)
+            return;
+        if (!drawState || !pCustomBoneToWorld || !HooksModelNameIsArmsOrHands(modelName))
+            return;
+
+        std::vector<std::string> boneNames;
+        std::vector<int> boneParents;
+        int numBones = 0;
+        int boneIndex = 0;
+        int stride = 0;
+        int numBonesOffset = 0;
+        if (!vr_vm_stabilize::TryCollectBoneNamesFromDrawState(
+            drawState,
+            boneNames,
+            boneParents,
+            numBones,
+            boneIndex,
+            stride,
+            numBonesOffset))
+        {
+            return;
+        }
+        if (numBones <= 0 || numBones > 512 || static_cast<int>(boneNames.size()) < numBones)
+            return;
+
+        const auto* sourceBones = reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pCustomBoneToWorld);
+        std::vector<VrHandMatrix4> boneWorldMatrices(static_cast<size_t>(numBones));
+        for (int bone = 0; bone < numBones; ++bone)
+        {
+            vr_vm_stabilize::Mat3x4 source{};
+            if (!vr_vm_stabilize::SafeRead(sourceBones + bone, source))
+                return;
+            boneWorldMatrices[static_cast<size_t>(bone)] = HooksMat3x4ToVrHandMatrix(source);
+        }
+
+        VrHandVmPose::Capture(modelName.c_str(), boneNames, boneParents, boneWorldMatrices);
+    }
+
     inline std::string DescribeCallerAddress(const void* address)
     {
         if (!address)
@@ -703,6 +758,18 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 			className = HooksSafeGetNetworkClassName(m_Game, const_cast<C_BaseEntity*>(entity));
 			isPlayerClass = className && (std::strcmp(className, "CTerrorPlayer") == 0 || std::strcmp(className, "C_TerrorPlayer") == 0);
 		}
+		const bool isViewmodelClassForProbe = className &&
+			(std::strcmp(className, "CBaseViewModel") == 0 || std::strcmp(className, "C_BaseViewModel") == 0);
+		if (m_VR->m_VrHandsDebugLog && (isViewmodelClassForProbe || HooksModelNameIsViewmodel(modelName)))
+		{
+			MaybeLogVrHandsViewmodelBoneProbe(
+				state,
+				modelName,
+				info.entity_index,
+				className,
+				pCustomBoneToWorld != nullptr);
+		}
+		MaybeCaptureVrHandsVmPose(m_VR, state, modelName, pCustomBoneToWorld);
 		// A server SetOrigin teleport can leave one queued first-person viewmodel draw
 		// produced against the pre-teleport anchor. Drop that short transition window
 		// instead of rendering a weapon model that flashes once and disappears.

@@ -446,6 +446,7 @@
     <ClInclude Include="vr_hands\vr_hand_skeleton_runtime.h" />
     <ClInclude Include="vr_hands\vr_hand_system.h" />
     <ClInclude Include="vr_hands\vr_hand_types.h" />
+    <ClInclude Include="vr_hands\vr_hand_vm_pose.h" />
     <ClInclude Include="hooks.h" />
     <ClInclude Include="offsets.h" />
     <ClInclude Include="sdk\checksum_crc.h" />
@@ -651,6 +652,7 @@
     <ClCompile Include="vr_hands\vr_hand_renderer_d3d9.cpp" />
     <ClCompile Include="vr_hands\vr_hand_skeleton_runtime.cpp" />
     <ClCompile Include="vr_hands\vr_hand_system.cpp" />
+    <ClCompile Include="vr_hands\vr_hand_vm_pose.cpp" />
     <ClCompile Include="vr_hands\vr_hand_vr_bridge.cpp" />
   </ItemGroup>
   <ItemGroup>

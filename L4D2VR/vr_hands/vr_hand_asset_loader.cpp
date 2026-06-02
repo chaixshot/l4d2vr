@@ -122,6 +122,44 @@ namespace
         return true;
     }
 
+    bool CopyBindMatrices(
+        const std::vector<VrHandMatrix4>& inverseBindMatrices,
+        std::vector<VrHandMatrix4>& out,
+        std::string& outError)
+    {
+        out.resize(inverseBindMatrices.size());
+        for (size_t i = 0; i < inverseBindMatrices.size(); ++i)
+        {
+            if (!VrHandMath::Invert4x4(inverseBindMatrices[i], out[i]))
+            {
+                outError = "cannot invert hand GLB inverseBindMatrices accessor";
+                out.clear();
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void CopyJointParents(const cgltf_skin& skin, std::vector<int>& out)
+    {
+        out.assign(static_cast<size_t>(skin.joints_count), -1);
+        for (cgltf_size i = 0; i < skin.joints_count; ++i)
+        {
+            const cgltf_node* parent = skin.joints[i] ? skin.joints[i]->parent : nullptr;
+            if (!parent)
+                continue;
+
+            for (cgltf_size candidate = 0; candidate < skin.joints_count; ++candidate)
+            {
+                if (skin.joints[candidate] == parent)
+                {
+                    out[static_cast<size_t>(i)] = static_cast<int>(candidate);
+                    break;
+                }
+            }
+        }
+    }
+
     bool LoadPrimitive(const std::filesystem::path& path,
         const cgltf_primitive& primitive,
         const cgltf_skin& skin,
@@ -221,8 +259,11 @@ namespace
             const cgltf_node* joint = skin.joints[i];
             outAsset.jointNames.emplace_back((joint && joint->name) ? joint->name : "");
         }
+        CopyJointParents(skin, outAsset.jointParents);
 
         if (!CopyInverseBindMatrices(skin, outAsset.inverseBindMatrices, outError))
+            return false;
+        if (!CopyBindMatrices(outAsset.inverseBindMatrices, outAsset.bindMatrices, outError))
             return false;
         CopyMaterialTexture(primitive.material, path, outAsset.baseColorTextureBytes);
         return outAsset.IsValid();

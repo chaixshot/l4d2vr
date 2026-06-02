@@ -51,6 +51,9 @@
     <ClInclude Include="vr_hands\vr_hand_types.h">
       <Filter>Source Files\vr_hands</Filter>
     </ClInclude>
+    <ClInclude Include="vr_hands\vr_hand_vm_pose.h">
+      <Filter>Source Files\vr_hands</Filter>
+    </ClInclude>
     <ClInclude Include="vr.h">
       <Filter>Source Files</Filter>
     </ClInclude>
@@ -864,6 +867,9 @@
       <Filter>Source Files\vr_hands</Filter>
     </ClCompile>
     <ClCompile Include="vr_hands\vr_hand_system.cpp">
+      <Filter>Source Files\vr_hands</Filter>
+    </ClCompile>
+    <ClCompile Include="vr_hands\vr_hand_vm_pose.cpp">
       <Filter>Source Files\vr_hands</Filter>
     </ClCompile>
     <ClCompile Include="vr_hands\vr_hand_vr_bridge.cpp">

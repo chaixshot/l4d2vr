@@ -75,4 +75,5 @@ private:
     bool m_Initialized = false;
     bool m_DebugInitializationLogged = false;
     bool m_DebugTestPoseLogged = false;
+    bool m_DebugVmPoseLogged = false;
 };

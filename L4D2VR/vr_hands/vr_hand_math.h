@@ -44,6 +44,66 @@ namespace VrHandMath
         return out;
     }
 
+    inline bool Invert4x4(const VrHandMatrix4& input, VrHandMatrix4& output)
+    {
+        float a[4][8]{};
+        for (int row = 0; row < 4; ++row)
+        {
+            for (int column = 0; column < 4; ++column)
+                a[row][column] = Get(input, row, column);
+            a[row][row + 4] = 1.0f;
+        }
+
+        for (int column = 0; column < 4; ++column)
+        {
+            int pivotRow = column;
+            float pivotAbs = std::fabs(a[column][column]);
+            for (int row = column + 1; row < 4; ++row)
+            {
+                const float candidateAbs = std::fabs(a[row][column]);
+                if (candidateAbs > pivotAbs)
+                {
+                    pivotAbs = candidateAbs;
+                    pivotRow = row;
+                }
+            }
+
+            if (!(pivotAbs > 0.0000001f))
+                return false;
+
+            if (pivotRow != column)
+            {
+                for (int i = 0; i < 8; ++i)
+                    std::swap(a[column][i], a[pivotRow][i]);
+            }
+
+            const float invPivot = 1.0f / a[column][column];
+            for (int i = 0; i < 8; ++i)
+                a[column][i] *= invPivot;
+
+            for (int row = 0; row < 4; ++row)
+            {
+                if (row == column)
+                    continue;
+
+                const float factor = a[row][column];
+                if (factor == 0.0f)
+                    continue;
+
+                for (int i = 0; i < 8; ++i)
+                    a[row][i] -= factor * a[column][i];
+            }
+        }
+
+        output = Identity();
+        for (int row = 0; row < 4; ++row)
+        {
+            for (int column = 0; column < 4; ++column)
+                Set(output, row, column, a[row][column + 4]);
+        }
+        return true;
+    }
+
     inline float Dot(const Vector& left, const Vector& right)
     {
         return left.x * right.x + left.y * right.y + left.z * right.z;

@@ -31,6 +31,8 @@ struct VrHandMeshAsset
     std::vector<VrHandVertex> vertices;
     std::vector<std::uint16_t> indices;
     std::vector<std::string> jointNames;
+    std::vector<int> jointParents;
+    std::vector<VrHandMatrix4> bindMatrices;
     std::vector<VrHandMatrix4> inverseBindMatrices;
     std::vector<std::uint8_t> baseColorTextureBytes;
     std::string sourcePath;
@@ -40,6 +42,8 @@ struct VrHandMeshAsset
         return !vertices.empty() &&
             !indices.empty() &&
             !jointNames.empty() &&
+            jointParents.size() == jointNames.size() &&
+            bindMatrices.size() == jointNames.size() &&
             inverseBindMatrices.size() == jointNames.size();
     }
 };

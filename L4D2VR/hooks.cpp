@@ -7,6 +7,8 @@
 #include "vr.h"
 #include "trace.h"
 #include "offsets.h"
+#include "vr_hands/vr_hand_math.h"
+#include "vr_hands/vr_hand_vm_pose.h"
 #include <iostream>
 #include <cstdint>
 #include <string>
