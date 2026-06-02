@@ -769,7 +769,6 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 				className,
 				pCustomBoneToWorld != nullptr);
 		}
-		MaybeCaptureVrHandsVmPose(m_VR, state, modelName, pCustomBoneToWorld);
 		// A server SetOrigin teleport can leave one queued first-person viewmodel draw
 		// produced against the pre-teleport anchor. Drop that short transition window
 		// instead of rendering a weapon model that flashes once and disappears.
@@ -1200,6 +1199,11 @@ if (m_VR->m_IsVREnabled && queueMode == 2 && (m_VR->m_QueuedViewmodelStabilize |
 			}
 		}
 	}
+
+	// Capture the exact arm matrices submitted to Source. In queued rendering
+	// pBonesToWorldFinal contains the same stabilization delta as the visible gun,
+	// so the standalone right glove follows controller rotation and HMD movement.
+	MaybeCaptureVrHandsVmPose(m_VR, state, modelName, pBonesToWorldFinal);
 
 	if (info.pModel && hideArms && !m_Game->m_CachedArmsModel)
 	{

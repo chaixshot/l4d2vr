@@ -80,6 +80,12 @@ private:
         const Vector& rightHandPoseRotationOffsetDeg,
         VrHandDrawPass drawPass);
     bool BuildRightViewmodelPalette(const VrHandVmPose::Snapshot& snapshot, std::vector<VrHandMatrixRows3x4>& outPalette);
+    bool BuildRightViewmodelWorld(
+        float sourceUnitsPerMeter,
+        float modelScale,
+        const Vector& localPositionOffsetMeters,
+        const Vector& localRotationOffsetDeg,
+        VrHandMatrix4& outWorld) const;
     void ReportErrorOnce(const std::string& error);
 
     std::array<HandState, 2> m_Hands;
@@ -99,9 +105,6 @@ private:
     std::string m_RightViewmodelPoseModel;
     std::string m_RightViewmodelAnchorModel;
     VrHandMatrix4 m_RightViewmodelPalmWorld{};
-    VrHandMatrix4 m_RightViewmodelPalmToGloveWorld{};
-    float m_RightViewmodelAnchorVrScale = 0.0f;
-    float m_RightViewmodelAnchorModelScale = 0.0f;
-    Vector m_RightViewmodelAnchorPoseOffsetMeters = { 0.0f, 0.0f, 0.0f };
-    Vector m_RightViewmodelAnchorPoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
+    VrHandMatrix4 m_RightViewmodelPalmFromGloveWrist{};
+    VrHandMatrix4 m_RightViewmodelGloveWristBindInverse{};
 };

@@ -89,6 +89,125 @@ namespace
         VrHandMath::Set(out, 2, 3, transform.position.v[2]);
         return out;
     }
+
+    int FindNameIndex(const std::vector<std::string>& names, const std::string& name)
+    {
+        for (size_t i = 0; i < names.size(); ++i)
+        {
+            if (names[i] == name)
+                return static_cast<int>(i);
+        }
+        return -1;
+    }
+
+    VrHandMatrix4 BuildBindLocalMatrix(const VrHandMeshAsset& asset, int joint)
+    {
+        const int parent = asset.jointParents[static_cast<size_t>(joint)];
+        if (parent >= 0 && parent < static_cast<int>(asset.inverseBindMatrices.size()))
+        {
+            return VrHandMath::Multiply(
+                asset.inverseBindMatrices[static_cast<size_t>(parent)],
+                asset.bindMatrices[static_cast<size_t>(joint)]);
+        }
+        return asset.bindMatrices[static_cast<size_t>(joint)];
+    }
+
+    VrHandMatrix4 MakeLocalZRotation(float radians)
+    {
+        VrHandMatrix4 out = VrHandMath::Identity();
+        const float c = std::cos(radians);
+        const float s = std::sin(radians);
+        VrHandMath::Set(out, 0, 0, c);
+        VrHandMath::Set(out, 0, 1, -s);
+        VrHandMath::Set(out, 1, 0, s);
+        VrHandMath::Set(out, 1, 1, c);
+        return out;
+    }
+
+    bool BuildSummaryCurlPalette(
+        const VrHandMeshAsset& asset,
+        const vr::VRSkeletalSummaryData_t& summary,
+        std::vector<VrHandMatrixRows3x4>& outPalette)
+    {
+        const bool rightHand = FindNameIndex(asset.jointNames, "wrist_r") >= 0;
+        const bool leftHand = FindNameIndex(asset.jointNames, "wrist_l") >= 0;
+        if (!rightHand && !leftHand)
+            return false;
+
+        const char suffix = rightHand ? 'r' : 'l';
+        static const char* kFingerNames[vr::VRFinger_Count] =
+        {
+            "thumb",
+            "index",
+            "middle",
+            "ring",
+            "pinky"
+        };
+        static const float kMaxCurlRadians[vr::VRFinger_Count][3] =
+        {
+            { 0.75f, 0.90f, 0.65f },
+            { 1.15f, 1.25f, 0.90f },
+            { 1.15f, 1.25f, 0.90f },
+            { 1.15f, 1.25f, 0.90f },
+            { 1.15f, 1.25f, 0.90f },
+        };
+
+        std::vector<VrHandMatrix4> localMatrices(asset.jointNames.size(), VrHandMath::Identity());
+        for (size_t joint = 0; joint < asset.jointNames.size(); ++joint)
+            localMatrices[joint] = BuildBindLocalMatrix(asset, static_cast<int>(joint));
+
+        for (int finger = 0; finger < vr::VRFinger_Count; ++finger)
+        {
+            const float curl = std::clamp(summary.flFingerCurl[finger], 0.0f, 1.0f);
+            for (int segment = 0; segment < 3; ++segment)
+            {
+                const std::string jointName = std::string("finger_") +
+                    kFingerNames[finger] + "_" + static_cast<char>('0' + segment) + "_" + suffix;
+                const int joint = FindNameIndex(asset.jointNames, jointName);
+                if (joint < 0)
+                    return false;
+
+                localMatrices[static_cast<size_t>(joint)] = VrHandMath::Multiply(
+                    localMatrices[static_cast<size_t>(joint)],
+                    MakeLocalZRotation(curl * kMaxCurlRadians[finger][segment]));
+            }
+        }
+
+        std::vector<VrHandMatrix4> modelMatrices(asset.jointNames.size(), VrHandMath::Identity());
+        std::vector<bool> resolved(asset.jointNames.size(), false);
+        size_t unresolved = asset.jointNames.size();
+        for (size_t pass = 0; pass < asset.jointNames.size() && unresolved > 0; ++pass)
+        {
+            bool progressed = false;
+            for (size_t joint = 0; joint < asset.jointNames.size(); ++joint)
+            {
+                if (resolved[joint])
+                    continue;
+
+                const int parent = asset.jointParents[joint];
+                if (parent >= 0 && (parent >= static_cast<int>(resolved.size()) || !resolved[static_cast<size_t>(parent)]))
+                    continue;
+
+                modelMatrices[joint] = (parent >= 0)
+                    ? VrHandMath::Multiply(modelMatrices[static_cast<size_t>(parent)], localMatrices[joint])
+                    : localMatrices[joint];
+                resolved[joint] = true;
+                --unresolved;
+                progressed = true;
+            }
+            if (!progressed)
+                return false;
+        }
+
+        outPalette.resize(asset.jointNames.size());
+        for (size_t joint = 0; joint < asset.jointNames.size(); ++joint)
+        {
+            outPalette[joint] = VrHandMath::ToRows3x4(VrHandMath::Multiply(
+                modelMatrices[joint],
+                asset.inverseBindMatrices[joint]));
+        }
+        return true;
+    }
 }
 
 struct VrHandSkeletonRuntime::Impl
@@ -97,12 +216,14 @@ struct VrHandSkeletonRuntime::Impl
     std::vector<vr::BoneIndex_t> parents;
     std::vector<std::string> openVrJointNames;
     std::vector<vr::VRBoneTransform_t> transforms;
+    vr::VRSkeletalSummaryData_t summary{};
     ozz::unique_ptr<ozz::animation::Skeleton> skeleton;
     ozz::vector<ozz::math::SoaTransform> locals;
     ozz::vector<ozz::math::Float4x4> models;
     std::unordered_map<std::string, int> jointIndexByName;
     std::vector<int> ozzJointToOpenVrBone;
     bool hasPose = false;
+    bool hasSummary = false;
 };
 
 VrHandSkeletonRuntime::VrHandSkeletonRuntime()
@@ -253,17 +374,24 @@ bool VrHandSkeletonRuntime::Update(vr::IVRInput* input, vr::EVRSkeletalMotionRan
     if (input->GetSkeletalActionData(m_Impl->action, &actionData, sizeof(actionData)) != vr::VRInputError_None || !actionData.bActive)
     {
         m_Impl->hasPose = false;
+        m_Impl->hasSummary = false;
         return false;
     }
 
-    if (input->GetSkeletalBoneData(
+    m_Impl->hasSummary = input->GetSkeletalSummaryData(
+        m_Impl->action,
+        vr::VRSummaryType_FromAnimation,
+        &m_Impl->summary) == vr::VRInputError_None;
+
+    const bool hasBoneData = input->GetSkeletalBoneData(
         m_Impl->action,
         vr::VRSkeletalTransformSpace_Model,
         motionRange,
         m_Impl->transforms.data(),
-        static_cast<uint32_t>(m_Impl->transforms.size())) != vr::VRInputError_None)
+        static_cast<uint32_t>(m_Impl->transforms.size())) == vr::VRInputError_None;
+    if (!m_Impl->hasSummary && !hasBoneData)
     {
-        outError = "OpenVR GetSkeletalBoneData failed";
+        outError = "OpenVR GetSkeletalSummaryData and GetSkeletalBoneData failed";
         m_Impl->hasPose = false;
         return false;
     }
@@ -294,6 +422,9 @@ bool VrHandSkeletonRuntime::BuildSkinningPalette(const VrHandMeshAsset& asset, s
         return false;
     }
 
+    if (m_Impl->hasSummary && BuildSummaryCurlPalette(asset, m_Impl->summary, outPalette))
+        return true;
+
     outPalette.resize(asset.jointNames.size());
     for (size_t meshJoint = 0; meshJoint < asset.jointNames.size(); ++meshJoint)
     {
@@ -315,7 +446,17 @@ bool VrHandSkeletonRuntime::BuildSkinningPalette(const VrHandMeshAsset& asset, s
             return false;
         }
 
-        const VrHandMatrix4 model = ToVrHandMatrix(m_Impl->transforms[static_cast<size_t>(found->second)]);
+        int openVrBone = found->second;
+        if (openVrBone >= 0 && openVrBone < static_cast<int>(m_Impl->ozzJointToOpenVrBone.size()))
+            openVrBone = m_Impl->ozzJointToOpenVrBone[static_cast<size_t>(openVrBone)];
+        if (openVrBone < 0 || openVrBone >= static_cast<int>(m_Impl->transforms.size()))
+        {
+            outError = "hand skeleton joint does not map to a valid OpenVR bone: " + name;
+            outPalette.clear();
+            return false;
+        }
+
+        const VrHandMatrix4 model = ToVrHandMatrix(m_Impl->transforms[static_cast<size_t>(openVrBone)]);
         outPalette[meshJoint] = VrHandMath::ToRows3x4(VrHandMath::Multiply(model, asset.inverseBindMatrices[meshJoint]));
     }
     return true;

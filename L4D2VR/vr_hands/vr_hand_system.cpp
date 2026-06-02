@@ -115,6 +115,37 @@ namespace
         return out;
     }
 
+    VrHandMatrix4 BuildVrHandsLocalCorrection(
+        const Vector& localPositionOffsetMeters,
+        const Vector& localRotationOffsetDeg,
+        float sourceUnitsPerMeter)
+    {
+        constexpr float kDegToRad = 3.14159265358979323846f / 180.0f;
+        const float rx = localRotationOffsetDeg.x * kDegToRad;
+        const float ry = localRotationOffsetDeg.y * kDegToRad;
+        const float rz = localRotationOffsetDeg.z * kDegToRad;
+        const float sx = std::sin(rx), cx = std::cos(rx);
+        const float sy = std::sin(ry), cy = std::cos(ry);
+        const float sz = std::sin(rz), cz = std::cos(rz);
+
+        // Match the standalone OpenVR hand controls: R = Rz * Ry * Rx and
+        // translation is converted from meters before model scaling.
+        VrHandMatrix4 out = VrHandMath::Identity();
+        VrHandMath::Set(out, 0, 0, cz * cy);
+        VrHandMath::Set(out, 0, 1, cz * sy * sx - sz * cx);
+        VrHandMath::Set(out, 0, 2, cz * sy * cx + sz * sx);
+        VrHandMath::Set(out, 1, 0, sz * cy);
+        VrHandMath::Set(out, 1, 1, sz * sy * sx + cz * cx);
+        VrHandMath::Set(out, 1, 2, sz * sy * cx - cz * sx);
+        VrHandMath::Set(out, 2, 0, -sy);
+        VrHandMath::Set(out, 2, 1, cy * sx);
+        VrHandMath::Set(out, 2, 2, cy * cx);
+        VrHandMath::Set(out, 0, 3, localPositionOffsetMeters.x * sourceUnitsPerMeter);
+        VrHandMath::Set(out, 1, 3, localPositionOffsetMeters.y * sourceUnitsPerMeter);
+        VrHandMath::Set(out, 2, 3, localPositionOffsetMeters.z * sourceUnitsPerMeter);
+        return out;
+    }
+
     bool GetVrHandsVmBonePositionInPalmSpace(
         const VrHandVmPose::Snapshot& snapshot,
         const VrHandMatrix4& palmInverse,
@@ -158,9 +189,94 @@ namespace
         return true;
     }
 
-    bool VrHandsSameVector(const Vector& left, const Vector& right)
+    VrHandsVec3 VrHandsAdd(const VrHandsVec3& left, const VrHandsVec3& right)
     {
-        return left.x == right.x && left.y == right.y && left.z == right.z;
+        return { left.x + right.x, left.y + right.y, left.z + right.z };
+    }
+
+    VrHandsVec3 VrHandsScale(const VrHandsVec3& value, float scale)
+    {
+        return { value.x * scale, value.y * scale, value.z * scale };
+    }
+
+    VrHandsVec3 VrHandsCross(const VrHandsVec3& left, const VrHandsVec3& right)
+    {
+        return
+        {
+            left.y * right.z - left.z * right.y,
+            left.z * right.x - left.x * right.z,
+            left.x * right.y - left.y * right.x
+        };
+    }
+
+    bool VrHandsNormalize(VrHandsVec3& value)
+    {
+        const float lengthSq = VrHandsDot(value, value);
+        if (!(lengthSq > 0.000001f))
+            return false;
+        value = VrHandsScale(value, 1.0f / std::sqrt(lengthSq));
+        return true;
+    }
+
+    bool BuildVrHandsPalmBasis(
+        const std::array<VrHandsVec3, 4>& fingerRoots,
+        VrHandMatrix4& outBasis)
+    {
+        VrHandsVec3 forward{};
+        for (const VrHandsVec3& root : fingerRoots)
+            forward = VrHandsAdd(forward, root);
+        forward = VrHandsScale(forward, 0.25f);
+
+        VrHandsVec3 side = VrHandsSubtract(fingerRoots[0], fingerRoots[3]);
+        if (!VrHandsNormalize(forward) || !VrHandsNormalize(side))
+            return false;
+
+        VrHandsVec3 normal = VrHandsCross(forward, side);
+        if (!VrHandsNormalize(normal))
+            return false;
+
+        side = VrHandsCross(normal, forward);
+        if (!VrHandsNormalize(side))
+            return false;
+
+        outBasis = VrHandMath::Identity();
+        VrHandMath::Set(outBasis, 0, 0, forward.x);
+        VrHandMath::Set(outBasis, 1, 0, forward.y);
+        VrHandMath::Set(outBasis, 2, 0, forward.z);
+        VrHandMath::Set(outBasis, 0, 1, side.x);
+        VrHandMath::Set(outBasis, 1, 1, side.y);
+        VrHandMath::Set(outBasis, 2, 1, side.z);
+        VrHandMath::Set(outBasis, 0, 2, normal.x);
+        VrHandMath::Set(outBasis, 1, 2, normal.y);
+        VrHandMath::Set(outBasis, 2, 2, normal.z);
+        return true;
+    }
+
+    VrHandMatrix4 TransposeVrHandsRotation(const VrHandMatrix4& matrix)
+    {
+        VrHandMatrix4 out = VrHandMath::Identity();
+        for (int row = 0; row < 3; ++row)
+        {
+            for (int column = 0; column < 3; ++column)
+                VrHandMath::Set(out, row, column, VrHandMath::Get(matrix, column, row));
+        }
+        return out;
+    }
+
+    bool GetVrHandsAssetBindPositionInWristSpace(
+        const VrHandMeshAsset& asset,
+        const VrHandMatrix4& wristInverse,
+        const char* jointName,
+        VrHandsVec3& outPosition)
+    {
+        const int joint = FindVrHandsNameIndex(asset.jointNames, jointName);
+        if (joint < 0 || joint >= static_cast<int>(asset.bindMatrices.size()))
+            return false;
+
+        outPosition = VrHandsMatrixTranslation(VrHandMath::Multiply(
+            wristInverse,
+            asset.bindMatrices[static_cast<size_t>(joint)]));
+        return true;
     }
 }
 
@@ -332,6 +448,7 @@ bool VrHandSystem::BuildRightViewmodelPalette(
     if (m_RightViewmodelPoseModel != snapshot.modelName)
     {
         m_RightViewmodelPoseModel = snapshot.modelName;
+        m_RightViewmodelAnchorModel.clear();
         m_RightViewmodelAnchorValid = false;
     }
     m_RightViewmodelPalmWorld = snapshot.boneWorldMatrices[static_cast<size_t>(vmPalm)];
@@ -342,6 +459,69 @@ bool VrHandSystem::BuildRightViewmodelPalette(
     {
         m_RightViewmodelPalmWorldValid = false;
         return false;
+    }
+
+    if (!m_RightViewmodelAnchorValid || m_RightViewmodelAnchorModel != snapshot.modelName)
+    {
+        const int gloveWrist = FindVrHandsNameIndex(asset.jointNames, "wrist_r");
+        if (gloveWrist < 0 || gloveWrist >= static_cast<int>(asset.bindMatrices.size()) ||
+            !VrHandMath::Invert4x4(
+                asset.bindMatrices[static_cast<size_t>(gloveWrist)],
+                m_RightViewmodelGloveWristBindInverse))
+        {
+            m_RightViewmodelPalmWorldValid = false;
+            return false;
+        }
+
+        static const char* kVmFingerRoots[] =
+        {
+            "ValveBiped.Bip01_R_Finger1",
+            "ValveBiped.Bip01_R_Finger2",
+            "ValveBiped.Bip01_R_Finger3",
+            "ValveBiped.Bip01_R_Finger4"
+        };
+        static const char* kGloveFingerRoots[] =
+        {
+            "finger_index_meta_r",
+            "finger_middle_meta_r",
+            "finger_ring_meta_r",
+            "finger_pinky_meta_r"
+        };
+
+        std::array<VrHandsVec3, 4> vmFingerRoots{};
+        std::array<VrHandsVec3, 4> gloveFingerRoots{};
+        for (size_t finger = 0; finger < vmFingerRoots.size(); ++finger)
+        {
+            if (!GetVrHandsVmBonePositionInPalmSpace(
+                    snapshot,
+                    palmInverse,
+                    kVmFingerRoots[finger],
+                    vmFingerRoots[finger]) ||
+                !GetVrHandsAssetBindPositionInWristSpace(
+                    asset,
+                    m_RightViewmodelGloveWristBindInverse,
+                    kGloveFingerRoots[finger],
+                    gloveFingerRoots[finger]))
+            {
+                m_RightViewmodelPalmWorldValid = false;
+                return false;
+            }
+        }
+
+        VrHandMatrix4 vmPalmBasis{};
+        VrHandMatrix4 glovePalmBasis{};
+        if (!BuildVrHandsPalmBasis(vmFingerRoots, vmPalmBasis) ||
+            !BuildVrHandsPalmBasis(gloveFingerRoots, glovePalmBasis))
+        {
+            m_RightViewmodelPalmWorldValid = false;
+            return false;
+        }
+
+        m_RightViewmodelPalmFromGloveWrist = VrHandMath::Multiply(
+            vmPalmBasis,
+            TransposeVrHandsRotation(glovePalmBasis));
+        m_RightViewmodelAnchorModel = snapshot.modelName;
+        m_RightViewmodelAnchorValid = true;
     }
 
     std::vector<VrHandMatrix4> localMatrices(asset.jointNames.size(), VrHandMath::Identity());
@@ -433,6 +613,40 @@ bool VrHandSystem::BuildRightViewmodelPalette(
             modelMatrices[joint],
             asset.inverseBindMatrices[joint]));
     }
+    return true;
+}
+
+bool VrHandSystem::BuildRightViewmodelWorld(
+    float sourceUnitsPerMeter,
+    float modelScale,
+    const Vector& localPositionOffsetMeters,
+    const Vector& localRotationOffsetDeg,
+    VrHandMatrix4& outWorld) const
+{
+    if (!m_RightViewmodelPalmWorldValid || !m_RightViewmodelAnchorValid ||
+        !(sourceUnitsPerMeter > 0.0001f) || !(modelScale > 0.0001f))
+    {
+        return false;
+    }
+
+    const float uniformScale = sourceUnitsPerMeter * modelScale;
+    VrHandMatrix4 scale = VrHandMath::Identity();
+    VrHandMath::Set(scale, 0, 0, uniformScale);
+    VrHandMath::Set(scale, 1, 1, uniformScale);
+    VrHandMath::Set(scale, 2, 2, uniformScale);
+
+    const VrHandMatrix4 localCorrection = BuildVrHandsLocalCorrection(
+        localPositionOffsetMeters,
+        localRotationOffsetDeg,
+        sourceUnitsPerMeter);
+
+    outWorld = VrHandMath::Multiply(
+        m_RightViewmodelPalmWorld,
+        VrHandMath::Multiply(
+            m_RightViewmodelPalmFromGloveWrist,
+            VrHandMath::Multiply(
+                localCorrection,
+                VrHandMath::Multiply(scale, m_RightViewmodelGloveWristBindInverse))));
     return true;
 }
 
@@ -566,7 +780,7 @@ bool VrHandSystem::DrawForEye(
         return false;
     }
 
-    if (eyeIndex == 0 || (!m_Hands[0].paletteValid && !m_Hands[1].paletteValid))
+    if (rightUseViewmodelPose || eyeIndex == 0 || (!m_Hands[0].paletteValid && !m_Hands[1].paletteValid))
         UpdatePoses(input, motionRangeWithoutController, rightUseViewmodelPose, debugLog);
 
     float aspect = view.m_flAspectRatio;
@@ -588,53 +802,28 @@ bool VrHandSystem::DrawForEye(
         if (!hand.paletteValid)
             continue;
 
-        VrHandMatrix4 world = VrHandMath::BuildControllerWorld(
-            positions[handIndex],
-            angles[handIndex],
-            sourceUnitsPerMeter,
-            clampedModelScale,
-            positionOffsets[handIndex],
-            rotationOffsets[handIndex]);
-
+        VrHandMatrix4 world{};
         if (handIndex == 1 && rightUseViewmodelPose)
         {
-            if (!m_RightViewmodelPalmWorldValid)
+            // VM mode is bound directly to the captured viewmodel palm. Keep the
+            // existing right-hand controls as a final local micro-adjustment layer.
+            if (!BuildRightViewmodelWorld(
+                    sourceUnitsPerMeter,
+                    clampedModelScale,
+                    rightHandPoseOffsetMeters,
+                    rightHandPoseRotationOffsetDeg,
+                    world))
                 continue;
-
-            const bool calibrationChanged =
-                !m_RightViewmodelAnchorValid ||
-                m_RightViewmodelAnchorModel != m_RightViewmodelPoseModel ||
-                m_RightViewmodelAnchorVrScale != sourceUnitsPerMeter ||
-                m_RightViewmodelAnchorModelScale != clampedModelScale ||
-                !VrHandsSameVector(m_RightViewmodelAnchorPoseOffsetMeters, positionOffsets[handIndex]) ||
-                !VrHandsSameVector(m_RightViewmodelAnchorPoseRotationOffsetDeg, rotationOffsets[handIndex]);
-            if (calibrationChanged)
-            {
-                VrHandMatrix4 palmInverse{};
-                if (!VrHandMath::Invert4x4(m_RightViewmodelPalmWorld, palmInverse))
-                    continue;
-
-                // Keep the known-good OpenVR/controller placement as a one-time static
-                // calibration, then drive the complete glove world transform from the
-                // current VM palm matrix. This binds the glove to the weapon animation
-                // without feeding VM translation back through the scaled skinning palette.
-                m_RightViewmodelPalmToGloveWorld = VrHandMath::Multiply(palmInverse, world);
-                m_RightViewmodelAnchorModel = m_RightViewmodelPoseModel;
-                m_RightViewmodelAnchorVrScale = sourceUnitsPerMeter;
-                m_RightViewmodelAnchorModelScale = clampedModelScale;
-                m_RightViewmodelAnchorPoseOffsetMeters = positionOffsets[handIndex];
-                m_RightViewmodelAnchorPoseRotationOffsetDeg = rotationOffsets[handIndex];
-                m_RightViewmodelAnchorValid = true;
-
-                if (debugLog)
-                {
-                    Game::logMsg(
-                        "[VR][Hands] calibrated right VM palm anchor model=\"%s\"",
-                        m_RightViewmodelAnchorModel.c_str());
-                }
-            }
-
-            world = VrHandMath::Multiply(m_RightViewmodelPalmWorld, m_RightViewmodelPalmToGloveWorld);
+        }
+        else
+        {
+            world = VrHandMath::BuildControllerWorld(
+                positions[handIndex],
+                angles[handIndex],
+                sourceUnitsPerMeter,
+                clampedModelScale,
+                positionOffsets[handIndex],
+                rotationOffsets[handIndex]);
         }
 
         const VrHandMatrix4 wvp = VrHandMath::Multiply(projection, VrHandMath::Multiply(camera, world));
@@ -706,13 +895,29 @@ bool VrHandSystem::DrawControllerlessTestPose(
             }
         }
 
-        const VrHandMatrix4 world = VrHandMath::BuildControllerWorld(
-            positions[handIndex],
-            viewAngles,
-            sourceUnitsPerMeter,
-            clampedModelScale,
-            positionOffsets[handIndex],
-            rotationOffsets[handIndex]);
+        VrHandMatrix4 world{};
+        if (handIndex == 1 && rightUseViewmodelPose)
+        {
+            // VM mode stays attached to the captured viewmodel palm even when the
+            // controllerless mouse-mode test path is active.
+            if (!BuildRightViewmodelWorld(
+                    sourceUnitsPerMeter,
+                    clampedModelScale,
+                    rightHandPoseOffsetMeters,
+                    rightHandPoseRotationOffsetDeg,
+                    world))
+                continue;
+        }
+        else
+        {
+            world = VrHandMath::BuildControllerWorld(
+                positions[handIndex],
+                viewAngles,
+                sourceUnitsPerMeter,
+                clampedModelScale,
+                positionOffsets[handIndex],
+                rotationOffsets[handIndex]);
+        }
         const VrHandMatrix4 wvp = VrHandMath::Multiply(projection, VrHandMath::Multiply(camera, world));
         std::string error;
         if (!m_Renderer.Draw(device, handIndex, hand.asset, bindPalette, world, wvp, drawPass, sceneLightScale, error))
