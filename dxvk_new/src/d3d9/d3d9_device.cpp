@@ -5142,10 +5142,19 @@ namespace dxvk {
             if (!suppressVRFrameConsumptionOnThisPresent) {
                 // The desktop swapchain is presented below. Single-threaded rendering can still
                 // mirror the current eye before Present so the desktop window is live. Queued
-                // rendering must not resolve or mirror here: those StretchRect/backbuffer writes
-                // can overlap Source's water/shadow RTT work and corrupt the frame.
+                // rendering normally must not resolve or mirror here: those StretchRect/backbuffer
+                // writes can overlap Source's water/shadow RTT work and corrupt the frame.
+                //
+                // If ShadowTweaksEnabled is active and desktop mirror is actually enabled, the
+                // problematic shadow RTT path is disabled by the cvar profile, so allow the
+                // original queued desktop mirror path.
+                const bool useOriginalQueuedPresentPath =
+                    inGame && queued && vr->m_ShadowTweaksEnabled && vr->m_DesktopMirrorEnabled;
                 const bool deferEyeSubmitResolve =
-                    inGame && queued && VrHasEyeSubmitSurfaces(vr);
+                    inGame && VrHasEyeSubmitSurfaces(vr) &&
+                    (useOriginalQueuedPresentPath
+                        ? VrIsReShadeQueuedRiskWindow(vr, inGame, queued)
+                        : queued);
 
                 if (!inGame) {
                     vr->ClearD3DAimLineOverlay();
@@ -5163,7 +5172,7 @@ namespace dxvk {
                     VrResolveEyeSurfacesToSubmit(this, vr);
                 }
 
-                if (!(inGame && queued))
+                if (!(inGame && queued) || useOriginalQueuedPresentPath)
                     VrMirrorEyeToDesktopBackBuffer(this, vr, pDestRect, hDestWindowOverride);
             }
 
