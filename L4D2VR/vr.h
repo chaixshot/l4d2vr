@@ -12,6 +12,7 @@
 #endif
 #include "openvr.h"
 #include "vector.h"
+#include "vr_hands/vr_hand_types.h"
 #include <cstdint>
 #include <array>
 #include <chrono>
@@ -107,6 +108,15 @@ struct HapticMixState
 	float weight = 0.0f;
 	int priority = -1;
 	std::chrono::steady_clock::time_point lastSubmit{};
+};
+
+enum class ManualReloadState
+{
+	Idle,
+	WatchingNativeClipRemoval,
+	WaitingForFreshMagazineGrab,
+	HoldingFreshMagazine,
+	ResumingNativeReloadWithGlbMagazine
 };
 
 struct D3DAimLineOverlayEyeState
@@ -1026,6 +1036,51 @@ public:
 	const CViewSetup* m_VrHandsActiveEyeView = nullptr;
 	int m_VrHandsActiveEyeIndex = -1;
 	bool m_VrHandsWorldMaskDrawn = false;
+
+	// First manual-reload prototype: M16 / M16A1 only.
+	// The native v_weapon.M4A1_Clip bone exits through the original reload animation, then remains hidden
+	// while the player inserts a standalone GLB magazine with the left hand.
+	bool m_ManualReloadEnabled = false;
+	// Temporary controllerless validation path for MouseModeEnabled. It drives the GLB magazine
+	// with keyboard keys so the full state machine can be tested before physical hand input is available.
+	bool m_ManualReloadMouseTestMode = false;
+	std::string m_ManualReloadMagazineGlbPath = "VR\\manual_reload\\m16_clip.glb";
+	float m_ManualReloadMagazineModelScale = 1.0f;
+	float m_ManualReloadNativeClipLeaveDistanceMeters = 0.05f;
+	float m_ManualReloadMagazineGrabRangeMeters = 0.18f;
+	float m_ManualReloadMagazineGuideStartDepthMeters = 0.10f;
+	float m_ManualReloadMagazineFullInsertDepthMeters = 0.012f;
+	float m_ManualReloadMagazineCaptureRadiusMeters = 0.045f;
+	float m_ManualReloadMagazineCaptureAngleDeg = 35.0f;
+	Vector m_ManualReloadMagazineInsertionAxisLocal = { 0.0f, -1.0f, 0.0f };
+	Vector m_ManualReloadMagazineHandOffsetMeters = { 0.0f, 0.0f, 0.0f };
+	Vector m_ManualReloadMagazineHandRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
+	Vector m_ManualReloadMagazineSocketOffsetMeters = { 0.0f, 0.0f, 0.0f };
+	Vector m_ManualReloadMagazineSocketRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
+	ManualReloadState m_ManualReloadState = ManualReloadState::Idle;
+	C_WeaponCSBase* m_ManualReloadWeapon = nullptr;
+	void* m_ManualReloadViewmodelEntity = nullptr;
+	VrHandMatrix4 m_ManualReloadSocketLocal{};
+	VrHandMatrix4 m_ManualReloadSocketWorld{};
+	bool m_ManualReloadSocketValid = false;
+	bool m_ManualReloadHideNativeClip = false;
+	bool m_ManualReloadMagazineInsertionArmed = false;
+	int m_ManualReloadFrozenSequence = -1;
+	float m_ManualReloadFrozenCycle = 0.0f;
+	float m_ManualReloadOriginalPlaybackRate = 1.0f;
+	bool m_ManualReloadViewmodelFrozen = false;
+	std::chrono::steady_clock::time_point m_ManualReloadStarted{};
+	std::chrono::steady_clock::time_point m_ManualReloadResumeStarted{};
+	// Runtime-only keyboard test state. The offset is expressed in calibrated socket-local meters.
+	Vector m_ManualReloadMouseTestMagazineLocalOffsetMeters = { 0.0f, 0.0f, 0.0f };
+	Vector m_ManualReloadMouseTestMagazineLocalRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
+	bool m_ManualReloadMouseTestReloadKeyDownPrev = false;
+	bool m_ManualReloadMouseTestGrabKeyDownPrev = false;
+	bool m_ManualReloadMouseTestDropKeyDownPrev = false;
+	bool m_ManualReloadMouseTestResetKeyDownPrev = false;
+	bool m_ManualReloadMouseTestCancelKeyDownPrev = false;
+	bool m_ManualReloadMouseTestReloadPulseOwned = false;
+	std::chrono::steady_clock::time_point m_ManualReloadMouseTestLastUpdate{};
 	bool m_SplitArmsToControllers = false;
 	float m_HudDistance = 1.3f;
 	float m_FixedHudXOffset = 0.0f;
@@ -2580,6 +2635,19 @@ public:
 	void ReleaseVRRenderTargetsForDeviceReset();
 	void ReleaseVrHandsD3DResources();
 	bool DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass drawPass);
+	bool IsManualReloadActive() const;
+	bool IsManualReloadBlockingFire() const;
+	bool ShouldHideManualReloadNativeClip() const;
+	void BeginManualReload(C_BasePlayer* localPlayer);
+	void CancelManualReload();
+	void UpdateManualReloadMouseTestKeyboard(C_BasePlayer* localPlayer);
+	void UpdateManualReload(C_BasePlayer* localPlayer, bool leftGripDown, bool leftGripJustPressed);
+	void OnManualReloadViewmodelPose(
+		const char* modelName,
+		void* viewmodelEntity,
+		const VrHandMatrix4& rootWorld,
+		const VrHandMatrix4& nativeClipWorld);
+	bool GetManualReloadMagazineWorld(VrHandMatrix4& outWorld) const;
 	void BeginVrHandsEyeRender(const CViewSetup& view, int eyeIndex);
 	void DrawVrHandsWorldDepthMaskBeforeViewmodel();
 	void FinishVrHandsEyeRender();

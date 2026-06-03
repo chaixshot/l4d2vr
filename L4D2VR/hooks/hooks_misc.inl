@@ -321,6 +321,8 @@ namespace vr_vm_stabilize
                 if (lower.find("finger") != std::string::npos ||
                     lower.find("hand") != std::string::npos ||
                     lower.find("wrist") != std::string::npos ||
+                    lower.find("clip") != std::string::npos ||
+                    lower.find("weapon") != std::string::npos ||
                     lower.find("valvebiped") != std::string::npos ||
                     lower.find("bip01") != std::string::npos)
                 {
@@ -564,6 +566,250 @@ namespace
         }
 
         VrHandVmPose::Capture(modelName.c_str(), boneNames, boneParents, boneWorldMatrices);
+    }
+
+    struct ManualReloadFrozenViewmodelPoseEntry
+    {
+        std::string modelName;
+        int numBones = 0;
+        int rootBone = -1;
+        bool valid = false;
+        vr_vm_stabilize::Mat3x4 frozenModelAnchor{};
+        std::vector<vr_vm_stabilize::Mat3x4> frozenWorldBones;
+    };
+
+    struct ManualReloadFrozenViewmodelPoseCache
+    {
+        VR* owner = nullptr;
+        std::unordered_map<std::string, ManualReloadFrozenViewmodelPoseEntry> models;
+
+        void Reset()
+        {
+            owner = nullptr;
+            models.clear();
+        }
+    };
+
+    inline ManualReloadFrozenViewmodelPoseCache& GetManualReloadFrozenViewmodelPoseCache()
+    {
+        static ManualReloadFrozenViewmodelPoseCache cache;
+        return cache;
+    }
+
+    inline bool IsManualReloadViewmodelVisualPauseState(const VR* vr)
+    {
+        return vr &&
+            (vr->m_ManualReloadState == ManualReloadState::WaitingForFreshMagazineGrab ||
+                vr->m_ManualReloadState == ManualReloadState::HoldingFreshMagazine);
+    }
+
+    inline bool TryGetManualReloadModelAnchor(
+        const ModelRenderInfo_t& info,
+        vr_vm_stabilize::Mat3x4& outAnchor)
+    {
+        if (info.pModelToWorld &&
+            vr_vm_stabilize::SafeRead(
+                reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(info.pModelToWorld),
+                outAnchor))
+        {
+            return true;
+        }
+
+        vr_vm_stabilize::BuildFromOrgAngles(info.origin, info.angles, outAnchor);
+        return true;
+    }
+
+    inline int FindManualReloadTopLevelBone(const std::vector<int>& boneParents, int preferredBone)
+    {
+        const int numBones = static_cast<int>(boneParents.size());
+        if (numBones <= 0)
+            return -1;
+
+        int rootBone = (preferredBone >= 0 && preferredBone < numBones) ? preferredBone : 0;
+        for (int guard = 0; guard < numBones; ++guard)
+        {
+            const int parent = boneParents[static_cast<size_t>(rootBone)];
+            if (parent < 0 || parent >= numBones || parent == rootBone)
+                break;
+            rootBone = parent;
+        }
+        return rootBone;
+    }
+
+    inline void ApplyManualReloadViewmodelOverride(
+        VR* vr,
+        void* drawState,
+        const std::string& modelName,
+        const ModelRenderInfo_t& info,
+        void* viewmodelEntity,
+        void*& pCustomBoneToWorld)
+    {
+        ManualReloadFrozenViewmodelPoseCache& frozenCache = GetManualReloadFrozenViewmodelPoseCache();
+
+        if (!vr || !vr->IsManualReloadActive())
+        {
+            if (!vr || frozenCache.owner == vr)
+                frozenCache.Reset();
+            return;
+        }
+        if (!drawState || !pCustomBoneToWorld)
+            return;
+
+        const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
+        if (!HooksModelNameIsViewmodel(lowerModel))
+            return;
+
+        std::vector<std::string> boneNames;
+        std::vector<int> boneParents;
+        int numBones = 0;
+        int boneIndex = 0;
+        int stride = 0;
+        int numBonesOffset = 0;
+        if (!vr_vm_stabilize::TryCollectBoneNamesFromDrawState(
+            drawState,
+            boneNames,
+            boneParents,
+            numBones,
+            boneIndex,
+            stride,
+            numBonesOffset))
+        {
+            return;
+        }
+        if (numBones <= 0 || numBones > 512 || static_cast<int>(boneNames.size()) < numBones)
+            return;
+
+        int clipBone = -1;
+        for (int bone = 0; bone < numBones; ++bone)
+        {
+            if (vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(bone)]) == "v_weapon.m4a1_clip")
+            {
+                clipBone = bone;
+                break;
+            }
+        }
+
+        vr_vm_stabilize::Mat3x4 modelAnchor{};
+        if (!TryGetManualReloadModelAnchor(info, modelAnchor))
+            return;
+
+        const auto* sourceBones = reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pCustomBoneToWorld);
+        if (clipBone >= 0 && viewmodelEntity)
+        {
+            vr_vm_stabilize::Mat3x4 clip{};
+            if (!vr_vm_stabilize::SafeRead(sourceBones + clipBone, clip))
+                return;
+
+            // Derive the insertion socket from the model-level anchor, not from an
+            // animated weapon root bone. The root bone itself moves during reload,
+            // which made the supposedly fixed socket drift while the animation ran.
+            vr->OnManualReloadViewmodelPose(
+                modelName.c_str(),
+                viewmodelEntity,
+                HooksMat3x4ToVrHandMatrix(modelAnchor),
+                HooksMat3x4ToVrHandMatrix(clip));
+        }
+
+        const bool visuallyPauseViewmodel = IsManualReloadViewmodelVisualPauseState(vr);
+        const bool hideNativeClip = vr->ShouldHideManualReloadNativeClip() && clipBone >= 0;
+        if (!visuallyPauseViewmodel && !hideNativeClip)
+        {
+            if (frozenCache.owner == vr)
+            {
+                if (vr->m_ManualReloadState == ManualReloadState::WatchingNativeClipRemoval)
+                    frozenCache.Reset();
+                else
+                    frozenCache.models.erase(lowerModel);
+            }
+            return;
+        }
+
+        uint32_t seqEven = vr->m_RenderFrameSeq.load(std::memory_order_relaxed) & ~1u;
+        if (seqEven == 0)
+            seqEven = (static_cast<uint32_t>(GetTickCount()) << 1u) | 2u;
+        vr_vm_stabilize::Mat3x4* copiedBones = vr_vm_stabilize::AllocStableBones(numBones, seqEven);
+        if (!copiedBones)
+            return;
+
+        for (int bone = 0; bone < numBones; ++bone)
+        {
+            if (!vr_vm_stabilize::SafeRead(sourceBones + bone, copiedBones[bone]))
+                return;
+        }
+
+        if (visuallyPauseViewmodel)
+        {
+            if (frozenCache.owner != vr)
+            {
+                frozenCache.Reset();
+                frozenCache.owner = vr;
+            }
+
+            const int rootBone = FindManualReloadTopLevelBone(boneParents, clipBone);
+            ManualReloadFrozenViewmodelPoseEntry& frozenPose = frozenCache.models[lowerModel];
+            const bool needCapture =
+                !frozenPose.valid ||
+                frozenPose.modelName != modelName ||
+                frozenPose.numBones != numBones ||
+                frozenPose.rootBone != rootBone ||
+                static_cast<int>(frozenPose.frozenWorldBones.size()) != numBones;
+
+            if (needCapture)
+            {
+                frozenPose = {};
+                frozenPose.modelName = modelName;
+                frozenPose.numBones = numBones;
+                frozenPose.rootBone = rootBone;
+                frozenPose.valid = true;
+                frozenPose.frozenModelAnchor = modelAnchor;
+                frozenPose.frozenWorldBones.assign(copiedBones, copiedBones + numBones);
+                Game::logMsg(
+                    "[VR][ManualReload] cached frozen viewmodel pose model=%s bones=%d root=%d",
+                    modelName.c_str(),
+                    numBones,
+                    rootBone);
+            }
+
+            if (frozenPose.valid)
+            {
+                vr_vm_stabilize::Mat3x4 inverseFrozenAnchor{};
+                vr_vm_stabilize::Mat3x4 anchorDelta{};
+                vr_vm_stabilize::InvertTR(frozenPose.frozenModelAnchor, inverseFrozenAnchor);
+                vr_vm_stabilize::Mul(modelAnchor, inverseFrozenAnchor, anchorDelta);
+                for (int bone = 0; bone < numBones; ++bone)
+                    vr_vm_stabilize::Mul(anchorDelta, frozenPose.frozenWorldBones[static_cast<size_t>(bone)], copiedBones[bone]);
+            }
+        }
+        else if (frozenCache.owner == vr)
+        {
+            frozenCache.models.erase(lowerModel);
+        }
+
+        if (hideNativeClip)
+        {
+            auto isClipOrDescendant = [&](int bone)
+                {
+                    int current = bone;
+                    for (int guard = 0; guard < numBones && current >= 0 && current < numBones; ++guard)
+                    {
+                        if (current == clipBone)
+                            return true;
+                        current = boneParents[static_cast<size_t>(current)];
+                    }
+                    return false;
+                };
+
+            for (int bone = 0; bone < numBones; ++bone)
+            {
+                if (!isClipOrDescendant(bone))
+                    continue;
+                copiedBones[bone].m[0][3] += 100000.0f;
+                copiedBones[bone].m[1][3] += 100000.0f;
+                copiedBones[bone].m[2][3] += 100000.0f;
+            }
+        }
+
+        pCustomBoneToWorld = copiedBones;
     }
 
     inline std::string DescribeCallerAddress(const void* address)
@@ -1198,6 +1444,14 @@ if (m_VR->m_IsVREnabled && queueMode == 2 && (m_VR->m_QueuedViewmodelStabilize |
 				}
 			}
 		}
+
+		ApplyManualReloadViewmodelOverride(
+			m_VR,
+			state,
+			modelName,
+			info,
+			const_cast<C_BaseEntity*>(entity),
+			pBonesToWorldFinal);
 	}
 
 	// Capture the exact arm matrices submitted to Source. In queued rendering

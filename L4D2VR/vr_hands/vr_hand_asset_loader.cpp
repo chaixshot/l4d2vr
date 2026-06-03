@@ -6,6 +6,7 @@
 #include "vr_hand_math.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
@@ -158,6 +159,122 @@ namespace
                 }
             }
         }
+    }
+
+
+    void TransformStaticVertexByNode(const cgltf_float* matrix, VrHandVertex& vertex)
+    {
+        if (!matrix)
+            return;
+
+        const float px = vertex.position[0];
+        const float py = vertex.position[1];
+        const float pz = vertex.position[2];
+        vertex.position[0] = matrix[0] * px + matrix[4] * py + matrix[8] * pz + matrix[12];
+        vertex.position[1] = matrix[1] * px + matrix[5] * py + matrix[9] * pz + matrix[13];
+        vertex.position[2] = matrix[2] * px + matrix[6] * py + matrix[10] * pz + matrix[14];
+
+        // Exported magazine assets are expected to use ordinary Blender object
+        // transforms. Apply the node's linear part to normals and normalize it.
+        // This is exact for the usual rotation + uniform-scale case and keeps the
+        // static test asset visible when Blender stores its transform on the node.
+        const float nx = vertex.normal[0];
+        const float ny = vertex.normal[1];
+        const float nz = vertex.normal[2];
+        float tx = matrix[0] * nx + matrix[4] * ny + matrix[8] * nz;
+        float ty = matrix[1] * nx + matrix[5] * ny + matrix[9] * nz;
+        float tz = matrix[2] * nx + matrix[6] * ny + matrix[10] * nz;
+        const float lengthSquared = tx * tx + ty * ty + tz * tz;
+        if (lengthSquared > 0.0000001f)
+        {
+            const float inverseLength = 1.0f / std::sqrt(lengthSquared);
+            tx *= inverseLength;
+            ty *= inverseLength;
+            tz *= inverseLength;
+        }
+        vertex.normal[0] = tx;
+        vertex.normal[1] = ty;
+        vertex.normal[2] = tz;
+    }
+
+    bool LoadStaticPrimitive(const std::filesystem::path& path,
+        const cgltf_primitive& primitive,
+        const cgltf_float* nodeWorldTransform,
+        VrHandMeshAsset& outAsset,
+        std::string& outError)
+    {
+        const cgltf_accessor* positions = FindAttribute(primitive, cgltf_attribute_type_position);
+        const cgltf_accessor* normals = FindAttribute(primitive, cgltf_attribute_type_normal);
+        const cgltf_accessor* texcoords = FindAttribute(primitive, cgltf_attribute_type_texcoord, 0);
+        if (!positions || !normals || !texcoords)
+        {
+            outError = "static GLB primitive is missing POSITION, NORMAL or TEXCOORD_0";
+            return false;
+        }
+
+        const cgltf_size vertexCount = positions->count;
+        if (vertexCount == 0 || vertexCount > 65535 ||
+            normals->count != vertexCount || texcoords->count != vertexCount)
+        {
+            outError = "static GLB vertex accessor counts are invalid";
+            return false;
+        }
+
+        outAsset.vertices.assign(static_cast<size_t>(vertexCount), VrHandVertex{});
+        for (cgltf_size i = 0; i < vertexCount; ++i)
+        {
+            VrHandVertex& vertex = outAsset.vertices[static_cast<size_t>(i)];
+            if (!ReadFloatAccessor(positions, i, vertex.position, 3) ||
+                !ReadFloatAccessor(normals, i, vertex.normal, 3) ||
+                !ReadFloatAccessor(texcoords, i, vertex.uv, 2))
+            {
+                outError = "cannot read static GLB vertex accessor";
+                return false;
+            }
+
+            TransformStaticVertexByNode(nodeWorldTransform, vertex);
+            vertex.joints[0] = 0;
+            vertex.weights[0] = 1.0f;
+        }
+
+        if (primitive.indices)
+        {
+            const cgltf_size indexCount = primitive.indices->count;
+            if (indexCount == 0 || (indexCount % 3) != 0)
+            {
+                outError = "static GLB triangle index count is invalid";
+                return false;
+            }
+            outAsset.indices.resize(static_cast<size_t>(indexCount));
+            for (cgltf_size i = 0; i < indexCount; ++i)
+            {
+                const cgltf_size value = cgltf_accessor_read_index(primitive.indices, i);
+                if (value >= vertexCount || value > 65535u)
+                {
+                    outError = "static GLB contains an invalid triangle index";
+                    return false;
+                }
+                outAsset.indices[static_cast<size_t>(i)] = static_cast<std::uint16_t>(value);
+            }
+        }
+        else
+        {
+            if ((vertexCount % 3) != 0)
+            {
+                outError = "unindexed static GLB primitive is not a triangle list";
+                return false;
+            }
+            outAsset.indices.resize(static_cast<size_t>(vertexCount));
+            for (cgltf_size i = 0; i < vertexCount; ++i)
+                outAsset.indices[static_cast<size_t>(i)] = static_cast<std::uint16_t>(i);
+        }
+
+        outAsset.jointNames = { "root" };
+        outAsset.jointParents = { -1 };
+        outAsset.inverseBindMatrices = { VrHandMath::Identity() };
+        outAsset.bindMatrices = { VrHandMath::Identity() };
+        CopyMaterialTexture(primitive.material, path, outAsset.baseColorTextureBytes);
+        return outAsset.IsValid();
     }
 
     bool LoadPrimitive(const std::filesystem::path& path,
@@ -322,6 +439,75 @@ bool VrHandAssetLoader::LoadGlb(const std::string& path, VrHandMeshAsset& outAss
     {
         if (outError.empty())
             outError = "hand GLB has no supported skinned triangle primitive";
+        outAsset = {};
+        return false;
+    }
+
+    outAsset.sourcePath = path;
+    return true;
+}
+
+
+bool VrHandAssetLoader::LoadStaticGlb(const std::string& path, VrHandMeshAsset& outAsset, std::string& outError)
+{
+    outAsset = {};
+    outError.clear();
+
+    cgltf_options options{};
+    cgltf_data* data = nullptr;
+    const cgltf_result parseResult = cgltf_parse_file(&options, path.c_str(), &data);
+    if (parseResult != cgltf_result_success || !data)
+    {
+        outError = "cgltf cannot parse static GLB";
+        return false;
+    }
+
+    const auto freeData = [&]() { cgltf_free(data); };
+    if (cgltf_load_buffers(&options, data, path.c_str()) != cgltf_result_success)
+    {
+        outError = "cgltf cannot load static GLB buffers";
+        freeData();
+        return false;
+    }
+
+    if (cgltf_validate(data) != cgltf_result_success)
+    {
+        outError = "cgltf reports an invalid static GLB";
+        freeData();
+        return false;
+    }
+
+    bool loaded = false;
+    // Iterate mesh nodes rather than raw mesh definitions so object transforms
+    // written by Blender are baked into the standalone magazine vertices.
+    for (cgltf_size nodeIndex = 0; nodeIndex < data->nodes_count && !loaded; ++nodeIndex)
+    {
+        const cgltf_node& node = data->nodes[nodeIndex];
+        if (!node.mesh)
+            continue;
+
+        cgltf_float nodeWorldTransform[16]{};
+        cgltf_node_transform_world(&node, nodeWorldTransform);
+        const cgltf_mesh& mesh = *node.mesh;
+        for (cgltf_size primitiveIndex = 0; primitiveIndex < mesh.primitives_count && !loaded; ++primitiveIndex)
+        {
+            const cgltf_primitive& primitive = mesh.primitives[primitiveIndex];
+            if (primitive.type != cgltf_primitive_type_triangles)
+                continue;
+            loaded = LoadStaticPrimitive(
+                std::filesystem::path(path),
+                primitive,
+                nodeWorldTransform,
+                outAsset,
+                outError);
+        }
+    }
+
+    freeData();
+    if (!loaded)
+    {
+        if (outError.empty())
+            outError = "static GLB has no supported triangle primitive";
         outAsset = {};
         return false;
     }

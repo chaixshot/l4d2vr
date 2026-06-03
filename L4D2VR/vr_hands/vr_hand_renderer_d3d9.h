@@ -18,7 +18,10 @@ enum class VrHandDrawPass
 {
     WorldDepth,
     WorldVisibilityMask,
-    ViewmodelComposite
+    ViewmodelComposite,
+    // Standalone magazine anchored to Source viewmodel bones. It uses the
+    // viewmodel depth range but must not depend on the VR-hand stencil mask.
+    ViewmodelStandalone
 };
 
 class VrHandRendererD3D9
@@ -65,5 +68,5 @@ private:
     IDirect3DVertexDeclaration9* m_VertexDeclaration = nullptr;
     IDirect3DVertexShader9* m_VertexShader = nullptr;
     IDirect3DPixelShader9* m_PixelShader = nullptr;
-    std::array<MeshResources, 2> m_Meshes{};
+    std::array<MeshResources, 3> m_Meshes{};
 };

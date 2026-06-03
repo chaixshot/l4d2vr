@@ -1125,6 +1125,23 @@ void VR::ParseConfigFile()
     m_VrHandsRightUseViewmodelPose = getBool("VrHandsRightUseViewmodelPose", m_VrHandsRightUseViewmodelPose);
     m_VrHandsDebugLog = getBool("VrHandsDebugLog", m_VrHandsDebugLog);
     m_VrHandsModelScale = std::clamp(getFloat("VrHandsModelScale", m_VrHandsModelScale), 0.25f, 4.0f);
+    m_ManualReloadEnabled = getBool("ManualReloadEnabled", m_ManualReloadEnabled);
+    m_ManualReloadMouseTestMode = getBool("ManualReloadMouseTestMode", m_ManualReloadMouseTestMode);
+    m_ManualReloadMagazineGlbPath = getString("ManualReloadMagazineGlbPath", m_ManualReloadMagazineGlbPath);
+    m_ManualReloadMagazineModelScale = std::clamp(getFloat("ManualReloadMagazineModelScale", m_ManualReloadMagazineModelScale), 0.01f, 20.0f);
+    m_ManualReloadNativeClipLeaveDistanceMeters = std::clamp(getFloat("ManualReloadNativeClipLeaveDistanceMeters", m_ManualReloadNativeClipLeaveDistanceMeters), 0.001f, 0.50f);
+    m_ManualReloadMagazineGrabRangeMeters = std::clamp(getFloat("ManualReloadMagazineGrabRangeMeters", m_ManualReloadMagazineGrabRangeMeters), 0.01f, 0.50f);
+    m_ManualReloadMagazineGuideStartDepthMeters = std::clamp(getFloat("ManualReloadMagazineGuideStartDepthMeters", m_ManualReloadMagazineGuideStartDepthMeters), 0.01f, 0.50f);
+    m_ManualReloadMagazineFullInsertDepthMeters = std::clamp(getFloat("ManualReloadMagazineFullInsertDepthMeters", m_ManualReloadMagazineFullInsertDepthMeters), 0.0f, 0.10f);
+    m_ManualReloadMagazineCaptureRadiusMeters = std::clamp(getFloat("ManualReloadMagazineCaptureRadiusMeters", m_ManualReloadMagazineCaptureRadiusMeters), 0.001f, 0.20f);
+    m_ManualReloadMagazineCaptureAngleDeg = std::clamp(getFloat("ManualReloadMagazineCaptureAngleDeg", m_ManualReloadMagazineCaptureAngleDeg), 1.0f, 90.0f);
+    m_ManualReloadMagazineInsertionAxisLocal = getVector3("ManualReloadMagazineInsertionAxisLocal", m_ManualReloadMagazineInsertionAxisLocal);
+    m_ManualReloadMagazineHandOffsetMeters = getVector3("ManualReloadMagazineHandOffsetMeters", m_ManualReloadMagazineHandOffsetMeters);
+    m_ManualReloadMagazineHandRotationOffsetDeg = getVector3("ManualReloadMagazineHandRotationOffsetDeg", m_ManualReloadMagazineHandRotationOffsetDeg);
+    m_ManualReloadMagazineSocketOffsetMeters = getVector3("ManualReloadMagazineSocketOffsetMeters", m_ManualReloadMagazineSocketOffsetMeters);
+    m_ManualReloadMagazineSocketRotationOffsetDeg = getVector3("ManualReloadMagazineSocketRotationOffsetDeg", m_ManualReloadMagazineSocketRotationOffsetDeg);
+    if (!m_ManualReloadEnabled)
+        CancelManualReload();
     m_SplitArmsToControllers = getBool("SplitArmsToControllers", m_SplitArmsToControllers);
     m_HudDistance = getFloat("HudDistance", m_HudDistance);
     m_HudSize = getFloat("HudSize", m_HudSize);

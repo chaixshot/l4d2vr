@@ -437,21 +437,39 @@ bool VrHandRendererD3D9::Draw(
     const MeshResources& mesh = m_Meshes[static_cast<size_t>(handIndex)];
     const std::array<float, 16> wvpRows = VrHandMath::ToRows4x4(worldViewProjection);
     VrHandMatrixRows3x4 worldNormalRows = VrHandMath::ToRows3x4(world);
-    worldNormalRows.v[11] = std::clamp(sceneLightScale, 0.06f, 1.25f);
-    const float light[4] = { 0.35f, -0.45f, -0.82f, 0.14f };
 
     const bool maskPass = drawPass == VrHandDrawPass::WorldVisibilityMask;
     const bool compositePass = drawPass == VrHandDrawPass::ViewmodelComposite;
+    const bool standaloneViewmodelPass = drawPass == VrHandDrawPass::ViewmodelStandalone;
+    const bool viewmodelDepthPass = compositePass || standaloneViewmodelPass;
+    const bool opaqueStandaloneMagazine = handIndex == 2;
+
+    // VR gloves use a lightweight directional-light approximation. Reusing that
+    // approximation for a replacement magazine made the same exported texture
+    // visibly darker than Blender and the Source viewmodel material. Keep the
+    // standalone magazine opaque and sample its base-color texture at full
+    // intensity. Exact Source-material parity still depends on exporting the same
+    // skin texture used by the active weapon replacement.
+    worldNormalRows.v[11] = opaqueStandaloneMagazine
+        ? 1.0f
+        : std::clamp(sceneLightScale, 0.06f, 1.25f);
+    const float gloveLight[4] = { 0.35f, -0.45f, -0.82f, 0.14f };
+    const float magazineUnlit[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    const float* light = opaqueStandaloneMagazine ? magazineUnlit : gloveLight;
     device->SetRenderState(D3DRS_ZENABLE, TRUE);
     // The final color pass must write depth as well. Otherwise every triangle of the
     // same glove blends through the others, so folded fingers remain visible through
-    // the palm. The stencil mask still preserves world occlusion, while the current
-    // viewmodel depth buffer preserves gun-versus-hand occlusion.
-    const bool writeDepth = drawPass == VrHandDrawPass::WorldDepth || compositePass;
+    // the palm. The standalone magazine uses the same compressed depth range as
+    // Source viewmodels, but deliberately skips the VR-hand stencil test because it
+    // is a viewmodel component rather than a world-depth-masked glove.
+    const bool writeDepth = drawPass == VrHandDrawPass::WorldDepth || viewmodelDepthPass;
     device->SetRenderState(D3DRS_ZWRITEENABLE, writeDepth ? TRUE : FALSE);
     device->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
     device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
-    device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+    // The detached magazine is a solid test asset. Some exported materials keep
+    // an unused zero alpha channel, which made a successfully loaded GLB invisible.
+    // Hands retain normal alpha blending; the magazine is rendered opaque.
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE, opaqueStandaloneMagazine ? FALSE : TRUE);
     device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
     device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
     device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
@@ -488,7 +506,7 @@ bool VrHandRendererD3D9::Draw(
     {
         D3DVIEWPORT9 handViewport = oldViewport;
         handViewport.MinZ = kWorldDepthRangeMin;
-        handViewport.MaxZ = compositePass ? kViewmodelDepthRangeMax : kWorldDepthRangeMax;
+        handViewport.MaxZ = viewmodelDepthPass ? kViewmodelDepthRangeMax : kWorldDepthRangeMax;
         device->SetViewport(&handViewport);
     }
 
