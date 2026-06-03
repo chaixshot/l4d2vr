@@ -50,6 +50,8 @@ Hooks::Hooks(Game* game)
 		hkSayText2.enableHook();
 	if (hkTextMsg.pTarget)
 		hkTextMsg.enableHook();
+	// Disabled until the exact L4D2 IEngineSoundClient003 ABI is verified.
+	// Installing an unverified virtual EmitSound detour can corrupt the x86 call stack.
 	if (hkUpdateLaserSight.pTarget)
 		hkUpdateLaserSight.enableHook();
 	if (hkUpdateFlashlight.pTarget)
@@ -183,6 +185,11 @@ int Hooks::initSourceHooks()
 
 	LPVOID TextMsgAddr = reinterpret_cast<LPVOID>(m_Game->m_BaseClient + kClientTextMsgHandlerOffset);
 	hkTextMsg.createHook(TextMsgAddr, &dTextMsg);
+
+	// The Source SDK documents these EmitSound methods, but the current L4D2 binary ABI
+	// has not been verified yet. Keep hidden-tail sound delay disabled rather than hook
+	// an unverified x86 virtual call path.
+	Game::logMsg("[VR][ManualReload][Audio] disabled: current L4D2 IEngineSoundClient003 ABI is not verified");
 
 	if (m_Game->m_Offsets->UpdateLaserSight.valid)
 	{

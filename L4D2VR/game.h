@@ -58,6 +58,7 @@ public:
     IEngineTrace* m_EngineTrace = nullptr;
     IEngineTrace* m_EngineTraceServer = nullptr;
     IEngineClient* m_EngineClient = nullptr;
+    void* m_EngineSound = nullptr;
     IMaterialSystem* m_MaterialSystem = nullptr;
     IBaseClientDLL* m_BaseClientDll = nullptr;
     IModelInfo* m_ModelInfo = nullptr;

@@ -1443,6 +1443,12 @@ void __fastcall Hooks::dWriteUsercmdDeltaToBuffer(void* ecx, void* edx, int a1, 
 
 int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 {
+	// Final outgoing-command guard for manual reload. CreateMove already clears IN_ATTACK,
+	// but keep the wire path authoritative as well so standard and encoded server commands
+	// both remain decoupled from the local physical magazine interaction.
+	if (to && m_VR && m_VR->IsManualReloadBlockingFire())
+		to->buttons &= ~(1 << 0); // IN_ATTACK
+
 	// VR 未启用：原样走引擎
 	if (!m_VR->m_IsVREnabled)
 		return hkWriteUsercmd.fOriginal(buf, to, from);

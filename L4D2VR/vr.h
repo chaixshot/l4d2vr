@@ -116,7 +116,18 @@ enum class ManualReloadState
 	WatchingNativeClipRemoval,
 	WaitingForFreshMagazineGrab,
 	HoldingFreshMagazine,
+	// Player already inserted the detached copy. Keep the native magazine visibly snapped
+	// into the socket while the hidden Source animation advances to its real post-insert tail.
+	AwaitingNativePostInsertBoundary,
 	ResumingNativeReloadWithMagazine
+};
+
+struct ManualReloadDelayedSound
+{
+	std::string sample;
+	float offsetSeconds = 0.0f;
+	float volume = 1.0f;
+	int pitch = 100;
 };
 
 struct D3DAimLineOverlayEyeState
@@ -1070,6 +1081,7 @@ public:
 	ManualReloadState m_ManualReloadState = ManualReloadState::Idle;
 	C_WeaponCSBase* m_ManualReloadWeapon = nullptr;
 	void* m_ManualReloadViewmodelEntity = nullptr;
+	int m_ManualReloadViewmodelEntityIndex = -1;
 	// Locked per-reload detachable magazine bone. Workshop replacement viewmodels often keep
 	// legacy ValveBiped.weapon_clip helpers while the visible mesh is weighted to a different
 	// custom bone such as Magazine_Main or j_mag1, so the selected bone must remain stable
@@ -1094,9 +1106,27 @@ public:
 	// While the visible viewmodel is frozen, DrawModelExecute continues sampling the hidden native tail.
 	// After insertion those captured poses are replayed locally even if Source gameplay already returned to idle.
 	float m_ManualReloadVisualResumeDurationSeconds = 0.0f;
+	// Replay starts only after Source's hidden native animation has already reinserted its own magazine.
+	// This prevents the player-driven insertion from being followed by a duplicate native insertion animation.
+	float m_ManualReloadVisualReplayStartOffsetSeconds = 0.0f;
+	bool m_ManualReloadVisualReplayStartOffsetValid = false;
 	bool m_ManualReloadTailCaptureComplete = false;
+	// The visible custom magazine bone is the preferred reinsertion boundary probe.
+	// Legacy helper bones often return only when Source is already idle, which would skip the tail.
+	bool m_ManualReloadNativeVisualClipWasAway = false;
+	float m_ManualReloadNativeVisualClipMaxDistanceMeters = 0.0f;
+	float m_ManualReloadNativeMotionProbeMaxDistanceMeters = 0.0f;
 	std::chrono::steady_clock::time_point m_ManualReloadStarted{};
 	std::chrono::steady_clock::time_point m_ManualReloadResumeStarted{};
+	std::chrono::steady_clock::time_point m_ManualReloadPostInsertBoundaryWaitStarted{};
+	// Hidden native tail sound events are suppressed while the visible pose is paused, then
+	// replayed locally after the player inserts the fresh magazine. The audio hook may run
+	// outside the input thread, so its queue is protected independently.
+	mutable std::mutex m_ManualReloadSoundMutex;
+	std::vector<ManualReloadDelayedSound> m_ManualReloadDelayedSounds;
+	size_t m_ManualReloadDelayedSoundReplayIndex = 0;
+	std::chrono::steady_clock::time_point m_ManualReloadSoundCaptureStarted{};
+	std::chrono::steady_clock::time_point m_ManualReloadSoundReplayStarted{};
 	// Runtime-only keyboard test state. The offset is expressed in calibrated socket-local meters.
 	Vector m_ManualReloadMouseTestMagazineLocalOffsetMeters = { 0.0f, 0.0f, 0.0f };
 	Vector m_ManualReloadMouseTestMagazineLocalRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
@@ -2671,10 +2701,17 @@ public:
 	void OnManualReloadViewmodelPose(
 		const char* modelName,
 		void* viewmodelEntity,
+		int viewmodelEntityIndex,
 		const VrHandMatrix4& rootWorld,
 		const VrHandMatrix4& nativeClipWorld,
 		const VrHandMatrix4& nativeMotionProbeWorld);
 	bool GetManualReloadMagazineWorld(VrHandMatrix4& outWorld) const;
+	bool CaptureManualReloadSound(int entityIndex, const char* sample, float volume, int flags, int pitch);
+	void ReplayManualReloadDelayedSounds();
+	float GetManualReloadReplayDurationSeconds() const;
+	void StartManualReloadPostInsertReplay(const char* reason);
+	bool TryStartManualReloadPostInsertReplay(const char* reason);
+	void UseManualReloadPostInsertFallbackBoundary(const char* reason);
 	void BeginVrHandsEyeRender(const CViewSetup& view, int eyeIndex);
 	void DrawVrHandsWorldDepthMaskBeforeViewmodel();
 	void FinishVrHandsEyeRender();

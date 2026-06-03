@@ -406,6 +406,7 @@ Game::Game()
     m_EngineTrace = static_cast<IEngineTrace*>(GetInterfaceSafe("engine.dll", "EngineTraceClient003"));
     m_EngineTraceServer = static_cast<IEngineTrace*>(TryInterfaceNoError("engine.dll", "EngineTraceServer003"));
     m_EngineClient = static_cast<IEngineClient*>(GetInterfaceSafe("engine.dll", "VEngineClient013"));
+    m_EngineSound = TryInterfaceNoError("engine.dll", "IEngineSoundClient003");
     m_GameEventManager = static_cast<IGameEventManager2*>(TryInterfaceNoError("engine.dll", "GAMEEVENTSMANAGER002"));
     if (!m_GameEventManager)
         m_GameEventManager = static_cast<IGameEventManager2*>(TryInterfaceNoError("engine.dll", "GAMEEVENTSMANAGER001"));

@@ -10,8 +10,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cctype>
+#include <cstdio>
 #include <string>
 #include <memory>
+#include <vector>
 
 VR::VR() = default;
 
@@ -152,6 +154,8 @@ namespace
     constexpr int kManualReloadViewmodelCycleOffset = 0x65C;
     constexpr int kManualReloadViewmodelPlaybackRateOffset = 0x660;
     constexpr int kManualReloadViewmodelSequenceOffset = 0x8A4;
+    constexpr float kManualReloadMinimumPostInsertTailSeconds = 0.75f;
+    constexpr float kManualReloadPostInsertBoundaryWaitTimeoutSeconds = 8.25f;
 
     bool ManualReloadWeaponUsesDetachableMagazine(C_WeaponCSBase::WeaponID weaponId)
     {
@@ -319,6 +323,57 @@ namespace
 #endif
     }
 
+    bool ManualReloadSoundLooksWeaponRelated(const char* sample)
+    {
+        if (!sample || !*sample)
+            return false;
+
+        std::string lower(sample);
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return lower.find("weapon") != std::string::npos ||
+            lower.find("reload") != std::string::npos ||
+            lower.find("clip") != std::string::npos ||
+            lower.find("mag") != std::string::npos ||
+            lower.find("bolt") != std::string::npos ||
+            lower.find("slide") != std::string::npos ||
+            lower.find("rifle") != std::string::npos ||
+            lower.find("smg") != std::string::npos ||
+            lower.find("pistol") != std::string::npos ||
+            lower.find("sniper") != std::string::npos;
+    }
+
+    std::string ManualReloadPrepareConsoleSoundSample(const std::string& rawSample)
+    {
+        size_t start = 0;
+        while (start < rawSample.size())
+        {
+            const char c = rawSample[start];
+            if (c == '*' || c == '#' || c == '@' || c == '>' || c == '<' ||
+                c == '^' || c == ')' || c == '}' || c == '$' || c == '?' || c == '!')
+            {
+                ++start;
+                continue;
+            }
+            break;
+        }
+
+        std::string sample = rawSample.substr(start);
+        if (sample.rfind("sound/", 0) == 0 || sample.rfind("sound\\", 0) == 0)
+            sample.erase(0, 6);
+
+        std::string escaped;
+        escaped.reserve(sample.size());
+        for (char c : sample)
+        {
+            if (c == '"' || c == '\\')
+                escaped.push_back('\\');
+            if (c == '\r' || c == '\n' || c == ';')
+                continue;
+            escaped.push_back(c);
+        }
+        return escaped;
+    }
+
 }
 
 bool VR::IsManualReloadActive() const
@@ -328,14 +383,221 @@ bool VR::IsManualReloadActive() const
 
 bool VR::IsManualReloadBlockingFire() const
 {
-    return m_ManualReloadState == ManualReloadState::WaitingForFreshMagazineGrab ||
-        m_ManualReloadState == ManualReloadState::HoldingFreshMagazine ||
-        m_ManualReloadState == ManualReloadState::ResumingNativeReloadWithMagazine;
+    // The gameplay reload command is intentionally decoupled from the physical insertion.
+    // Block fire from the first reload frame until the delayed visual/audio tail has finished.
+    return IsManualReloadActive();
 }
 
 bool VR::ShouldHideManualReloadNativeClip() const
 {
     return m_ManualReloadHideNativeClip;
+}
+
+bool VR::CaptureManualReloadSound(int entityIndex, const char* sample, float volume, int flags, int pitch)
+{
+    // Do not swallow updates or stops for sounds that may already be playing. Only delay
+    // newly emitted hidden-tail events so ambient audio and previously-started clip-out audio stay live.
+    constexpr int kSoundChangeVolume = (1 << 0);
+    constexpr int kSoundChangePitch = (1 << 1);
+    constexpr int kSoundStop = (1 << 2);
+    constexpr int kSoundStopLooping = (1 << 5);
+    constexpr int kNonStartFlags = kSoundChangeVolume | kSoundChangePitch | kSoundStop | kSoundStopLooping;
+    if ((flags & kNonStartFlags) != 0)
+        return false;
+
+    if (!sample || !*sample || !m_Game ||
+        (m_ManualReloadState != ManualReloadState::WaitingForFreshMagazineGrab &&
+            m_ManualReloadState != ManualReloadState::HoldingFreshMagazine) ||
+        m_ManualReloadSoundCaptureStarted.time_since_epoch().count() == 0)
+    {
+        return false;
+    }
+
+    const int localPlayerIndex = (m_Game->m_EngineClient != nullptr)
+        ? m_Game->m_EngineClient->GetLocalPlayer()
+        : -1;
+    const bool fromViewmodel = m_ManualReloadViewmodelEntityIndex > 0 &&
+        entityIndex == m_ManualReloadViewmodelEntityIndex;
+    const bool fromLocalWeaponPath = (entityIndex == -1 || entityIndex == localPlayerIndex) &&
+        ManualReloadSoundLooksWeaponRelated(sample);
+    if (!fromViewmodel && !fromLocalWeaponPath)
+        return false;
+
+    ManualReloadDelayedSound event;
+    event.sample = sample;
+    event.offsetSeconds = std::clamp(
+        std::chrono::duration<float>(std::chrono::steady_clock::now() - m_ManualReloadSoundCaptureStarted).count(),
+        0.0f,
+        3.0f);
+    event.volume = std::clamp(volume, 0.0f, 1.0f);
+    event.pitch = std::clamp(pitch, 1, 255);
+
+    bool queued = false;
+    {
+        std::lock_guard<std::mutex> lock(m_ManualReloadSoundMutex);
+        if (m_ManualReloadDelayedSounds.size() < 64)
+        {
+            const bool duplicate = !m_ManualReloadDelayedSounds.empty() &&
+                m_ManualReloadDelayedSounds.back().sample == event.sample &&
+                std::fabs(m_ManualReloadDelayedSounds.back().offsetSeconds - event.offsetSeconds) < 0.015f;
+            if (!duplicate)
+            {
+                m_ManualReloadDelayedSounds.push_back(event);
+                queued = true;
+            }
+        }
+    }
+
+    if (queued)
+    {
+        Game::logMsg(
+            "[VR][ManualReload][Audio] delayed hidden-tail sound ent=%d offset=%.3fs sample=%s",
+            entityIndex,
+            event.offsetSeconds,
+            sample);
+    }
+    return true;
+}
+
+void VR::ReplayManualReloadDelayedSounds()
+{
+    if (m_ManualReloadState != ManualReloadState::ResumingNativeReloadWithMagazine ||
+        !m_Game ||
+        m_ManualReloadSoundReplayStarted.time_since_epoch().count() == 0)
+    {
+        return;
+    }
+
+    const float elapsedSeconds = std::chrono::duration<float>(
+        std::chrono::steady_clock::now() - m_ManualReloadSoundReplayStarted).count();
+    std::vector<ManualReloadDelayedSound> due;
+    {
+        std::lock_guard<std::mutex> lock(m_ManualReloadSoundMutex);
+        while (m_ManualReloadDelayedSoundReplayIndex < m_ManualReloadDelayedSounds.size() &&
+            m_ManualReloadDelayedSounds[m_ManualReloadDelayedSoundReplayIndex].offsetSeconds <= elapsedSeconds)
+        {
+            due.push_back(m_ManualReloadDelayedSounds[m_ManualReloadDelayedSoundReplayIndex]);
+            ++m_ManualReloadDelayedSoundReplayIndex;
+        }
+    }
+
+    for (const ManualReloadDelayedSound& event : due)
+    {
+        const std::string sample = ManualReloadPrepareConsoleSoundSample(event.sample);
+        if (sample.empty())
+            continue;
+
+        char volume[32] = {};
+        std::snprintf(volume, sizeof(volume), "%.3f", static_cast<double>(event.volume));
+        const std::string command = "playvol \"" + sample + "\" " + volume;
+        m_Game->ClientCmd_Unrestricted(command.c_str());
+        Game::logMsg(
+            "[VR][ManualReload][Audio] replayed delayed sound offset=%.3fs sample=%s",
+            event.offsetSeconds,
+            event.sample.c_str());
+    }
+}
+
+float VR::GetManualReloadReplayDurationSeconds() const
+{
+    const float replayStartOffsetSeconds = m_ManualReloadVisualReplayStartOffsetValid
+        ? std::max(0.0f, m_ManualReloadVisualReplayStartOffsetSeconds)
+        : 0.0f;
+    const float remainingVisualSeconds = std::max(
+        0.0f,
+        m_ManualReloadVisualResumeDurationSeconds - replayStartOffsetSeconds);
+    float durationSeconds = std::clamp(
+        std::max(0.10f, remainingVisualSeconds + 0.05f),
+        0.10f,
+        3.0f);
+    std::lock_guard<std::mutex> lock(m_ManualReloadSoundMutex);
+    if (!m_ManualReloadDelayedSounds.empty())
+        durationSeconds = std::max(durationSeconds, m_ManualReloadDelayedSounds.back().offsetSeconds + 0.05f);
+    return std::clamp(durationSeconds, 0.10f, 3.0f);
+}
+
+void VR::StartManualReloadPostInsertReplay(const char* reason)
+{
+    if (!m_ManualReloadVisualReplayStartOffsetValid)
+        return;
+
+    m_ManualReloadState = ManualReloadState::ResumingNativeReloadWithMagazine;
+    m_ManualReloadResumeStarted = std::chrono::steady_clock::now();
+    m_ManualReloadSoundReplayStarted = m_ManualReloadResumeStarted;
+    m_ManualReloadPostInsertBoundaryWaitStarted = {};
+    {
+        std::lock_guard<std::mutex> lock(m_ManualReloadSoundMutex);
+        m_ManualReloadDelayedSoundReplayIndex = 0;
+    }
+    m_ManualReloadViewmodelFrozen = false;
+    Game::logMsg(
+        "[VR][ManualReload] native magazine restored; replaying post-insert tail reason=%s offset=%.3fs duration=%.3fs",
+        reason ? reason : "unknown",
+        m_ManualReloadVisualReplayStartOffsetSeconds,
+        GetManualReloadReplayDurationSeconds());
+}
+
+bool VR::TryStartManualReloadPostInsertReplay(const char* reason)
+{
+    if (!m_ManualReloadVisualReplayStartOffsetValid)
+        return false;
+
+    const float capturedSeconds = std::max(0.0f, m_ManualReloadVisualResumeDurationSeconds);
+    float remainingSeconds = std::max(
+        0.0f,
+        capturedSeconds - std::max(0.0f, m_ManualReloadVisualReplayStartOffsetSeconds));
+
+    // Do not start playback as soon as the native magazine first reaches the socket.
+    // At that instant the cache usually contains no post-insert frames yet. Wait until
+    // a visible tail has actually been sampled, or until the hidden native sequence ends.
+    if (!m_ManualReloadTailCaptureComplete &&
+        remainingSeconds < kManualReloadMinimumPostInsertTailSeconds)
+    {
+        return false;
+    }
+
+    // Some replacement models report the visual magazine boundary only at the very end
+    // of their native sequence. Preserve a useful final window instead of jumping to idle.
+    // The native magazine subtree is pinned to the socket while this window replays, so
+    // shifting the replay point slightly earlier cannot redraw a second magazine insertion.
+    if (remainingSeconds < kManualReloadMinimumPostInsertTailSeconds && capturedSeconds > 0.0f)
+    {
+        const float previousOffset = m_ManualReloadVisualReplayStartOffsetSeconds;
+        m_ManualReloadVisualReplayStartOffsetSeconds = std::max(
+            0.0f,
+            capturedSeconds - kManualReloadMinimumPostInsertTailSeconds);
+        remainingSeconds = std::max(
+            0.0f,
+            capturedSeconds - m_ManualReloadVisualReplayStartOffsetSeconds);
+        Game::logMsg(
+            "[VR][ManualReload] post-insert replay boundary widened offset=%.3fs->%.3fs captured=%.3fs preservedTail=%.3fs",
+            previousOffset,
+            m_ManualReloadVisualReplayStartOffsetSeconds,
+            capturedSeconds,
+            remainingSeconds);
+    }
+
+    StartManualReloadPostInsertReplay(reason);
+    return true;
+}
+
+void VR::UseManualReloadPostInsertFallbackBoundary(const char* reason)
+{
+    if (m_ManualReloadVisualReplayStartOffsetValid)
+        return;
+
+    const float capturedSeconds = std::max(0.0f, m_ManualReloadVisualResumeDurationSeconds);
+    // Preserve a real tail instead of jumping straight to idle. This fallback is used only when
+    // the replacement model never exposes a reliable visual reinsertion boundary.
+    const float preservedTailSeconds = std::clamp(capturedSeconds * 0.25f, 0.35f, 0.75f);
+    m_ManualReloadVisualReplayStartOffsetSeconds = std::max(0.0f, capturedSeconds - preservedTailSeconds);
+    m_ManualReloadVisualReplayStartOffsetValid = true;
+    Game::logMsg(
+        "[VR][ManualReload] post-insert boundary fallback reason=%s captured=%.3fs offset=%.3fs preservedTail=%.3fs",
+        reason ? reason : "unknown",
+        capturedSeconds,
+        m_ManualReloadVisualReplayStartOffsetSeconds,
+        std::max(0.0f, capturedSeconds - m_ManualReloadVisualReplayStartOffsetSeconds));
 }
 
 void VR::BeginManualReload(C_BasePlayer* localPlayer)
@@ -353,11 +615,25 @@ void VR::BeginManualReload(C_BasePlayer* localPlayer)
     m_ManualReloadMagazineModelName.clear();
     m_ManualReloadMagazineBoneIndex = -1;
     m_ManualReloadMagazineMotionBoneIndex = -1;
+    m_ManualReloadViewmodelEntityIndex = -1;
     m_ManualReloadMotionProbeValid = false;
+    {
+        std::lock_guard<std::mutex> lock(m_ManualReloadSoundMutex);
+        m_ManualReloadDelayedSounds.clear();
+        m_ManualReloadDelayedSoundReplayIndex = 0;
+    }
+    m_ManualReloadSoundCaptureStarted = {};
+    m_ManualReloadSoundReplayStarted = {};
     m_ManualReloadState = ManualReloadState::WatchingNativeClipRemoval;
     m_ManualReloadStarted = std::chrono::steady_clock::now();
     m_ManualReloadResolvedInsertionAxisValid = false;
     m_ManualReloadVisualResumeDurationSeconds = 0.0f;
+    m_ManualReloadVisualReplayStartOffsetSeconds = 0.0f;
+    m_ManualReloadVisualReplayStartOffsetValid = false;
+    m_ManualReloadNativeVisualClipWasAway = false;
+    m_ManualReloadNativeVisualClipMaxDistanceMeters = 0.0f;
+    m_ManualReloadNativeMotionProbeMaxDistanceMeters = 0.0f;
+    m_ManualReloadPostInsertBoundaryWaitStarted = {};
     Game::logMsg(
         "[VR][ManualReload] begin weaponId=%d; scanning current viewmodel for detachable magazine bone",
         static_cast<int>(weapon->GetWeaponID()));
@@ -385,6 +661,7 @@ void VR::CancelManualReload()
     m_ManualReloadWeapon = nullptr;
     m_ManualReloadWeaponId = 0;
     m_ManualReloadViewmodelEntity = nullptr;
+    m_ManualReloadViewmodelEntityIndex = -1;
     m_ManualReloadMagazineModelName.clear();
     m_ManualReloadMagazineBoneIndex = -1;
     m_ManualReloadMagazineMotionBoneIndex = -1;
@@ -399,9 +676,22 @@ void VR::CancelManualReload()
     m_ManualReloadResolvedInsertionAxisLocal = { 0.0f, -1.0f, 0.0f };
     m_ManualReloadResolvedInsertionAxisValid = false;
     m_ManualReloadVisualResumeDurationSeconds = 0.0f;
+    m_ManualReloadVisualReplayStartOffsetSeconds = 0.0f;
+    m_ManualReloadVisualReplayStartOffsetValid = false;
     m_ManualReloadTailCaptureComplete = false;
+    m_ManualReloadNativeVisualClipWasAway = false;
+    m_ManualReloadNativeVisualClipMaxDistanceMeters = 0.0f;
+    m_ManualReloadNativeMotionProbeMaxDistanceMeters = 0.0f;
     m_ManualReloadStarted = {};
     m_ManualReloadResumeStarted = {};
+    m_ManualReloadPostInsertBoundaryWaitStarted = {};
+    {
+        std::lock_guard<std::mutex> lock(m_ManualReloadSoundMutex);
+        m_ManualReloadDelayedSounds.clear();
+        m_ManualReloadDelayedSoundReplayIndex = 0;
+    }
+    m_ManualReloadSoundCaptureStarted = {};
+    m_ManualReloadSoundReplayStarted = {};
     m_ManualReloadMouseTestMagazineLocalOffsetMeters = { 0.0f, 0.0f, 0.0f };
     m_ManualReloadMouseTestMagazineLocalRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
     m_ManualReloadMouseTestLastUpdate = {};
@@ -617,6 +907,8 @@ void VR::UpdateManualReload(C_BasePlayer* localPlayer, bool leftGripDown, bool l
     if (!IsManualReloadActive())
         return;
 
+    ReplayManualReloadDelayedSounds();
+
     if (!m_ManualReloadEnabled || !m_VrHandsEnabled || !m_Game || m_Game->GetMatQueueMode() != 0 || !localPlayer)
     {
         CancelManualReload();
@@ -716,25 +1008,35 @@ void VR::UpdateManualReload(C_BasePlayer* localPlayer, bool leftGripDown, bool l
     if (m_ManualReloadMagazineInsertionArmed && aligned &&
         axial <= m_ManualReloadMagazineFullInsertDepthMeters && axial >= -0.02f)
     {
-        m_ManualReloadState = ManualReloadState::ResumingNativeReloadWithMagazine;
-        m_ManualReloadResumeStarted = std::chrono::steady_clock::now();
         m_ManualReloadMagazineInsertionArmed = false;
-        // The detached Source-material copy is only needed while it is held. Once inserted,
-        // restore the native magazine immediately and replay the cached tail with that native copy.
+        // The detached Source-material copy disappears immediately. Restore the native magazine
+        // at the socket now, but do not jump to idle when the hidden animation has not reached
+        // its post-insert boundary yet. In that case the visible gun remains frozen briefly while
+        // DrawModelExecute keeps sampling the hidden Source tail.
         m_ManualReloadHideNativeClip = false;
-        // The server-side reload may already have completed while the visible pose was frozen.
-        // The DrawModelExecute hook now replays the captured native tail locally instead of
-        // expecting Source gameplay code to restart an already-finished sequence.
         m_ManualReloadViewmodelFrozen = false;
-        Game::logMsg(
-            "[VR][ManualReload] native magazine inserted; detached copy removed and native magazine restored; replaying captured reload tail duration=%.3fs",
-            std::clamp(std::max(0.25f, m_ManualReloadVisualResumeDurationSeconds + 0.05f), 0.25f, 3.0f));
+
+        m_ManualReloadState = ManualReloadState::AwaitingNativePostInsertBoundary;
+        m_ManualReloadPostInsertBoundaryWaitStarted = std::chrono::steady_clock::now();
+        if (!TryStartManualReloadPostInsertReplay("captured-boundary-ready-at-player-insert"))
+        {
+            const float capturedSeconds = std::max(0.0f, m_ManualReloadVisualResumeDurationSeconds);
+            const float replayOffsetSeconds = m_ManualReloadVisualReplayStartOffsetValid
+                ? std::max(0.0f, m_ManualReloadVisualReplayStartOffsetSeconds)
+                : 0.0f;
+            Game::logMsg(
+                "[VR][ManualReload] player inserted magazine; detached copy removed and native magazine restored at socket; waiting for hidden post-insert tail samples captured=%.3fs offset=%.3fs remaining=%.3fs",
+                capturedSeconds,
+                replayOffsetSeconds,
+                std::max(0.0f, capturedSeconds - replayOffsetSeconds));
+        }
     }
 }
 
 void VR::OnManualReloadViewmodelPose(
     const char* modelName,
     void* viewmodelEntity,
+    int viewmodelEntityIndex,
     const VrHandMatrix4& modelAnchorWorld,
     const VrHandMatrix4& nativeClipWorld,
     const VrHandMatrix4& nativeMotionProbeWorld)
@@ -744,6 +1046,8 @@ void VR::OnManualReloadViewmodelPose(
         return;
 
     m_ManualReloadViewmodelEntity = viewmodelEntity;
+    if (viewmodelEntityIndex > 0)
+        m_ManualReloadViewmodelEntityIndex = viewmodelEntityIndex;
     VrHandMatrix4 inverseModelAnchor{};
     if (!VrHandMath::Invert4x4(modelAnchorWorld, inverseModelAnchor))
         return;
@@ -792,7 +1096,28 @@ void VR::OnManualReloadViewmodelPose(
                 }
             }
             m_ManualReloadVisualResumeDurationSeconds = 0.0f;
+            m_ManualReloadVisualReplayStartOffsetSeconds = 0.0f;
+            m_ManualReloadVisualReplayStartOffsetValid = false;
             m_ManualReloadTailCaptureComplete = false;
+            const Vector currentVisualClip = ManualReloadMatrixTranslation(currentClipLocal);
+            const Vector initialVisualClip = ManualReloadMatrixTranslation(m_ManualReloadSocketLocal);
+            const float visualClipMovedMeters = ManualReloadVectorLength(currentVisualClip - initialVisualClip) /
+                std::max(0.001f, m_VRScale);
+            const float visualAwayThresholdMeters = std::clamp(
+                m_ManualReloadNativeClipLeaveDistanceMeters * 0.50f,
+                0.012f,
+                0.040f);
+            m_ManualReloadNativeVisualClipMaxDistanceMeters = visualClipMovedMeters;
+            m_ManualReloadNativeVisualClipWasAway = visualClipMovedMeters >= visualAwayThresholdMeters;
+            m_ManualReloadNativeMotionProbeMaxDistanceMeters = movedMeters;
+            m_ManualReloadPostInsertBoundaryWaitStarted = {};
+            {
+                std::lock_guard<std::mutex> lock(m_ManualReloadSoundMutex);
+                m_ManualReloadDelayedSounds.clear();
+                m_ManualReloadDelayedSoundReplayIndex = 0;
+            }
+            m_ManualReloadSoundCaptureStarted = std::chrono::steady_clock::now();
+            m_ManualReloadSoundReplayStarted = {};
             m_ManualReloadFrozenSequence = sequence;
             m_ManualReloadFrozenCycle = cycle;
             m_ManualReloadOriginalPlaybackRate = playbackRate;
@@ -813,8 +1138,51 @@ void VR::OnManualReloadViewmodelPose(
     }
 
     if (m_ManualReloadState == ManualReloadState::WaitingForFreshMagazineGrab ||
-        m_ManualReloadState == ManualReloadState::HoldingFreshMagazine)
+        m_ManualReloadState == ManualReloadState::HoldingFreshMagazine ||
+        m_ManualReloadState == ManualReloadState::AwaitingNativePostInsertBoundary)
     {
+        const Vector currentProbe = ManualReloadMatrixTranslation(currentMotionProbeLocal);
+        const Vector initialProbe = ManualReloadMatrixTranslation(m_ManualReloadMotionProbeLocal);
+        const float motionMovedMeters = ManualReloadVectorLength(currentProbe - initialProbe) /
+            std::max(0.001f, m_VRScale);
+        m_ManualReloadNativeMotionProbeMaxDistanceMeters = std::max(
+            m_ManualReloadNativeMotionProbeMaxDistanceMeters,
+            motionMovedMeters);
+
+        const Vector currentVisualClip = ManualReloadMatrixTranslation(currentClipLocal);
+        const Vector initialVisualClip = ManualReloadMatrixTranslation(m_ManualReloadSocketLocal);
+        const float visualClipMovedMeters = ManualReloadVectorLength(currentVisualClip - initialVisualClip) /
+            std::max(0.001f, m_VRScale);
+        m_ManualReloadNativeVisualClipMaxDistanceMeters = std::max(
+            m_ManualReloadNativeVisualClipMaxDistanceMeters,
+            visualClipMovedMeters);
+
+        const float visualAwayThresholdMeters = std::clamp(
+            m_ManualReloadNativeClipLeaveDistanceMeters * 0.50f,
+            0.012f,
+            0.040f);
+        const float visualReturnedThresholdMeters = std::clamp(
+            m_ManualReloadNativeClipLeaveDistanceMeters * 0.35f,
+            0.006f,
+            0.018f);
+        if (visualClipMovedMeters >= visualAwayThresholdMeters)
+            m_ManualReloadNativeVisualClipWasAway = true;
+
+        if (!m_ManualReloadVisualReplayStartOffsetValid &&
+            m_ManualReloadFrozenSequence >= 0 &&
+            m_ManualReloadNativeVisualClipWasAway &&
+            visualClipMovedMeters <= visualReturnedThresholdMeters)
+        {
+            m_ManualReloadVisualReplayStartOffsetSeconds =
+                std::max(0.0f, m_ManualReloadVisualResumeDurationSeconds + (1.0f / 90.0f));
+            m_ManualReloadVisualReplayStartOffsetValid = true;
+            Game::logMsg(
+                "[VR][ManualReload] hidden native visual magazine reinsertion boundary captured offset=%.3fs visualDistance=%.3fm motionDistance=%.3fm",
+                m_ManualReloadVisualReplayStartOffsetSeconds,
+                visualClipMovedMeters,
+                motionMovedMeters);
+        }
+
         if (!m_ManualReloadTailCaptureComplete &&
             m_ManualReloadFrozenSequence >= 0 &&
             sequence != m_ManualReloadFrozenSequence)
@@ -826,6 +1194,25 @@ void VR::OnManualReloadViewmodelPose(
                 m_ManualReloadFrozenSequence,
                 sequence);
         }
+
+        if (m_ManualReloadState == ManualReloadState::AwaitingNativePostInsertBoundary)
+        {
+            if (!TryStartManualReloadPostInsertReplay("visual-native-reinsertion-boundary"))
+            {
+                const float waitingSeconds =
+                    (m_ManualReloadPostInsertBoundaryWaitStarted.time_since_epoch().count() != 0)
+                    ? std::chrono::duration<float>(std::chrono::steady_clock::now() - m_ManualReloadPostInsertBoundaryWaitStarted).count()
+                    : 0.0f;
+                if (!m_ManualReloadVisualReplayStartOffsetValid &&
+                    (m_ManualReloadTailCaptureComplete ||
+                        waitingSeconds >= kManualReloadPostInsertBoundaryWaitTimeoutSeconds))
+                {
+                    UseManualReloadPostInsertFallbackBoundary(
+                        m_ManualReloadTailCaptureComplete ? "tail-finished-without-visual-boundary" : "boundary-wait-timeout");
+                    TryStartManualReloadPostInsertReplay("fallback-preserved-tail");
+                }
+            }
+        }
         return;
     }
 
@@ -833,10 +1220,8 @@ void VR::OnManualReloadViewmodelPose(
     {
         const auto now = std::chrono::steady_clock::now();
         const float resumedSeconds = std::chrono::duration<float>(now - m_ManualReloadResumeStarted).count();
-        const float replayDurationSeconds = std::clamp(
-            std::max(0.25f, m_ManualReloadVisualResumeDurationSeconds + 0.05f),
-            0.25f,
-            3.0f);
+        ReplayManualReloadDelayedSounds();
+        const float replayDurationSeconds = GetManualReloadReplayDurationSeconds();
         if (resumedSeconds >= replayDurationSeconds)
         {
             m_ManualReloadHideNativeClip = false;
@@ -844,6 +1229,7 @@ void VR::OnManualReloadViewmodelPose(
             m_ManualReloadWeapon = nullptr;
             m_ManualReloadWeaponId = 0;
             m_ManualReloadViewmodelEntity = nullptr;
+            m_ManualReloadViewmodelEntityIndex = -1;
             m_ManualReloadMagazineModelName.clear();
             m_ManualReloadMagazineBoneIndex = -1;
             m_ManualReloadMagazineMotionBoneIndex = -1;
@@ -856,9 +1242,22 @@ void VR::OnManualReloadViewmodelPose(
             m_ManualReloadViewmodelFrozen = false;
             m_ManualReloadResolvedInsertionAxisValid = false;
             m_ManualReloadVisualResumeDurationSeconds = 0.0f;
+            m_ManualReloadVisualReplayStartOffsetSeconds = 0.0f;
+            m_ManualReloadVisualReplayStartOffsetValid = false;
             m_ManualReloadTailCaptureComplete = false;
+            m_ManualReloadNativeVisualClipWasAway = false;
+            m_ManualReloadNativeVisualClipMaxDistanceMeters = 0.0f;
+            m_ManualReloadNativeMotionProbeMaxDistanceMeters = 0.0f;
             m_ManualReloadStarted = {};
             m_ManualReloadResumeStarted = {};
+            m_ManualReloadPostInsertBoundaryWaitStarted = {};
+            {
+                std::lock_guard<std::mutex> lock(m_ManualReloadSoundMutex);
+                m_ManualReloadDelayedSounds.clear();
+                m_ManualReloadDelayedSoundReplayIndex = 0;
+            }
+            m_ManualReloadSoundCaptureStarted = {};
+            m_ManualReloadSoundReplayStarted = {};
             Game::logMsg("[VR][ManualReload] captured reload tail finished; native viewmodel returned to live idle pose");
         }
     }

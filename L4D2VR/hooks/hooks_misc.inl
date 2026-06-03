@@ -1013,7 +1013,8 @@ namespace
     {
         return vr &&
             (vr->m_ManualReloadState == ManualReloadState::WaitingForFreshMagazineGrab ||
-                vr->m_ManualReloadState == ManualReloadState::HoldingFreshMagazine);
+                vr->m_ManualReloadState == ManualReloadState::HoldingFreshMagazine ||
+                vr->m_ManualReloadState == ManualReloadState::AwaitingNativePostInsertBoundary);
     }
 
     inline bool IsManualReloadViewmodelVisualReplayState(const VR* vr)
@@ -1085,6 +1086,8 @@ namespace
         std::vector<vr_vm_stabilize::Mat3x4> initialLocalBones;
         std::vector<std::string> boneNames;
         std::vector<int> boneParents;
+        int fallbackCandidateBone = -1;
+        int fallbackCandidateConfirmations = 0;
 
         void Reset()
         {
@@ -1095,6 +1098,8 @@ namespace
             initialLocalBones.clear();
             boneNames.clear();
             boneParents.clear();
+            fallbackCandidateBone = -1;
+            fallbackCandidateConfirmations = 0;
         }
     };
 
@@ -1218,7 +1223,55 @@ namespace
         return (current - initial).Length() / std::max(0.001f, unitsPerMeter);
     }
 
-    inline void LockManualReloadMagazineBone(
+    inline float ManualReloadLocalBoneDistanceMeters(
+        const vr_vm_stabilize::Mat3x4& local,
+        float unitsPerMeter)
+    {
+        return vr_vm_stabilize::GetOrigin(local).Length() / std::max(0.001f, unitsPerMeter);
+    }
+
+    inline bool ManualReloadConfirmFallbackCandidate(
+        ManualReloadMagazineResolverCache& cache,
+        int bone)
+    {
+        if (bone < 0)
+            return false;
+        if (cache.fallbackCandidateBone != bone)
+        {
+            cache.fallbackCandidateBone = bone;
+            cache.fallbackCandidateConfirmations = 1;
+            return false;
+        }
+        ++cache.fallbackCandidateConfirmations;
+        return cache.fallbackCandidateConfirmations >= 3;
+    }
+
+    inline bool ManualReloadFallbackMatchesPreviousModelChoice(
+        const std::string& modelName,
+        int visualBone)
+    {
+        static std::mutex s_mutex;
+        static std::unordered_map<std::string, int> s_previousFallbackBoneByModel;
+        std::lock_guard<std::mutex> lock(s_mutex);
+        const std::string key = vr_vm_stabilize::ToLowerAscii(modelName);
+        auto it = s_previousFallbackBoneByModel.find(key);
+        if (it == s_previousFallbackBoneByModel.end())
+        {
+            s_previousFallbackBoneByModel.emplace(key, visualBone);
+            return true;
+        }
+        if (it->second == visualBone)
+            return true;
+
+        Game::logMsg(
+            "[VR][ManualReload] rejected unstable unnamed fallback model=%s previousBone=%d newBone=%d; add ManualReloadMagazineBoneOverrides for this replacement model",
+            modelName.c_str(),
+            it->second,
+            visualBone);
+        return false;
+    }
+
+    inline bool LockManualReloadMagazineBone(
         VR* vr,
         const std::string& modelName,
         int visualBone,
@@ -1232,7 +1285,47 @@ namespace
         float motionMovedMeters)
     {
         if (!vr || visualBone < 0 || motionBone < 0)
-            return;
+            return false;
+
+        constexpr float kMaximumNamedMotionMeters = 1.50f;
+        constexpr float kMaximumUnnamedFallbackMotionMeters = 0.75f;
+        constexpr float kMaximumSocketFromModelAnchorMeters = 1.50f;
+        constexpr float kMaximumSocketFromCameraMeters = 4.00f;
+        const bool unnamedFallback = visualScore <= 0;
+        const float maximumMotionMeters = unnamedFallback
+            ? kMaximumUnnamedFallbackMotionMeters
+            : kMaximumNamedMotionMeters;
+        const float socketFromModelAnchorMeters = ManualReloadLocalBoneDistanceMeters(
+            initialMagazineLocal,
+            vr->m_VRScale);
+
+        vr_vm_stabilize::Mat3x4 socketWorld{};
+        vr_vm_stabilize::Mul(modelAnchor, initialMagazineLocal, socketWorld);
+        const float socketFromCameraMeters =
+            (vr_vm_stabilize::GetOrigin(socketWorld) - vr->m_CameraAnchor).Length() /
+            std::max(0.001f, vr->m_VRScale);
+
+        if (!std::isfinite(motionMovedMeters) ||
+            !std::isfinite(socketFromModelAnchorMeters) ||
+            !std::isfinite(socketFromCameraMeters) ||
+            motionMovedMeters > maximumMotionMeters ||
+            socketFromModelAnchorMeters > kMaximumSocketFromModelAnchorMeters ||
+            socketFromCameraMeters > kMaximumSocketFromCameraMeters)
+        {
+            Game::logMsg(
+                "[VR][ManualReload] rejected implausible magazine candidate model=%s visualBone=%d motionBone=%d visualScore=%d motionMoved=%.3fm socketFromModel=%.3fm socketFromCamera=%.3fm",
+                modelName.c_str(),
+                visualBone,
+                motionBone,
+                visualScore,
+                motionMovedMeters,
+                socketFromModelAnchorMeters,
+                socketFromCameraMeters);
+            return false;
+        }
+
+        if (unnamedFallback && !ManualReloadFallbackMatchesPreviousModelChoice(modelName, visualBone))
+            return false;
 
         vr->m_ManualReloadMagazineModelName = modelName;
         vr->m_ManualReloadMagazineBoneIndex = visualBone;
@@ -1254,7 +1347,7 @@ namespace
             ? boneNames[static_cast<size_t>(motionBone)].c_str()
             : "<unnamed>";
         Game::logMsg(
-            "[VR][ManualReload] locked detachable magazine model=%s visualBone=%d visualName=%s motionBone=%d motionName=%s reason=%s visualScore=%d motionMoved=%.3fm",
+            "[VR][ManualReload] locked detachable magazine model=%s visualBone=%d visualName=%s motionBone=%d motionName=%s reason=%s visualScore=%d motionMoved=%.3fm socketFromCamera=%.3fm",
             modelName.c_str(),
             visualBone,
             visualName,
@@ -1262,7 +1355,9 @@ namespace
             motionName,
             reason ? reason : "unknown",
             visualScore,
-            motionMovedMeters);
+            motionMovedMeters,
+            socketFromCameraMeters);
+        return true;
     }
 
     inline bool ManualReloadNameIsStrongCustomMagazineCandidate(const std::string& rawName)
@@ -1349,6 +1444,8 @@ namespace
             : 0.0f;
         const float leaveThreshold = std::max(0.02f, vr->m_ManualReloadNativeClipLeaveDistanceMeters);
         constexpr float kMinimumUsefulMotionMeters = 0.012f;
+        constexpr float kMinimumUnnamedFallbackMotionMeters = 0.025f;
+        constexpr float kMaximumUnnamedFallbackMotionMeters = 0.75f;
 
         struct Candidate
         {
@@ -1418,8 +1515,13 @@ namespace
                 bestConfiguredDriver = candidate;
             if (namedScore > 0 && betterByMotion(candidate, bestNamedDriver))
                 bestNamedDriver = candidate;
-            if (canMotionFallback && betterByMotion(candidate, bestMotionFallback))
+            if (canMotionFallback &&
+                movedMeters >= kMinimumUnnamedFallbackMotionMeters &&
+                movedMeters <= kMaximumUnnamedFallbackMotionMeters &&
+                betterByMotion(candidate, bestMotionFallback))
+            {
                 bestMotionFallback = candidate;
+            }
             if (strongCustomName && betterByNameThenMotion(candidate, strongestMovingVisual))
                 strongestMovingVisual = candidate;
             if (strongCustomName && movedMeters >= leaveThreshold && betterByNameThenMotion(candidate, strongestVisualPastLeave))
@@ -1445,17 +1547,15 @@ namespace
         }
         else if (elapsedSeconds >= 2.20f)
         {
-            // Some replacement animations only move the helper by a few centimeters.
-            // Near the end of the reload, accept the best meaningful motion instead of
-            // discarding the entire manual-reload path after a hard 5 cm requirement.
+            // Near the end of the animation, allow a named/configured helper with a small
+            // but meaningful movement. Never promote an unnamed late-small fallback: it is
+            // too easy to mistake a decorative part or root jitter for a detachable magazine.
             if (betterByMotion(bestConfiguredDriver, motionProbe))
                 motionProbe = bestConfiguredDriver;
             if (betterByMotion(bestNamedDriver, motionProbe))
                 motionProbe = bestNamedDriver;
-            if (betterByMotion(bestMotionFallback, motionProbe))
-                motionProbe = bestMotionFallback;
             if (motionProbe.bone >= 0 && motionProbe.movedMeters >= kMinimumUsefulMotionMeters)
-                reason = "late-small-motion-probe";
+                reason = "late-small-named-motion-probe";
         }
 
         if (motionProbe.bone < 0)
@@ -1495,6 +1595,11 @@ namespace
             visual = motionProbe;
         }
 
+        if (visual.nameScore <= 0 && !ManualReloadConfirmFallbackCandidate(cache, visual.bone))
+        {
+            return -1;
+        }
+
         // Climb only through another explicitly magazine-named parent. Never climb into
         // a generic gun parent such as v_weapon.M4A1_s_Parent, otherwise the detached
         // second Source pass would redraw the entire firearm instead of just the magazine.
@@ -1515,7 +1620,7 @@ namespace
             parent = boneParents[static_cast<size_t>(resolvedVisualBone)];
         }
 
-        LockManualReloadMagazineBone(
+        if (!LockManualReloadMagazineBone(
             vr,
             modelName,
             resolvedVisualBone,
@@ -1526,7 +1631,10 @@ namespace
             cache.initialLocalBones[static_cast<size_t>(motionProbe.bone)],
             reason,
             resolvedVisualScore,
-            motionProbe.movedMeters);
+            motionProbe.movedMeters))
+        {
+            return -1;
+        }
         return resolvedVisualBone;
     }
 
@@ -1569,8 +1677,21 @@ namespace
             entry.tailCaptureStarted = now;
 
         const float elapsed = std::chrono::duration<float>(now - entry.tailCaptureStarted).count();
-        if (elapsed > 3.0f || entry.tailSamples.size() >= 240)
+        constexpr float kManualReloadTailCaptureSafetyLimitSeconds = 8.0f;
+        constexpr size_t kManualReloadTailCaptureSafetyLimitSamples = 720;
+        if (elapsed > kManualReloadTailCaptureSafetyLimitSeconds ||
+            entry.tailSamples.size() >= kManualReloadTailCaptureSafetyLimitSamples)
+        {
+            if (!vr->m_ManualReloadTailCaptureComplete)
+            {
+                vr->m_ManualReloadTailCaptureComplete = true;
+                Game::logMsg(
+                    "[VR][ManualReload] hidden native reload tail capture reached safety limit duration=%.3fs samples=%zu",
+                    elapsed,
+                    entry.tailSamples.size());
+            }
             return;
+        }
 
         if (entry.tailLastSample.time_since_epoch().count() != 0 &&
             std::chrono::duration<float>(now - entry.tailLastSample).count() < (1.0f / 90.0f))
@@ -1600,19 +1721,22 @@ namespace
 
     inline const std::vector<vr_vm_stabilize::Mat3x4>* SelectManualReloadReplayLocalBones(
         const ManualReloadFrozenViewmodelPoseEntry& entry,
-        float elapsedSeconds)
+        float elapsedSeconds,
+        float replayStartOffsetSeconds)
     {
         if (entry.tailSamples.empty())
             return &entry.frozenLocalBones;
 
-        const ManualReloadTailPoseSample* selected = &entry.tailSamples.front();
+        const float targetSeconds = std::max(0.0f, replayStartOffsetSeconds + elapsedSeconds);
+        // Select the first captured pose at or after the target time. In particular, the
+        // first replayed frame must already be past Source's native magazine insertion.
+        // Selecting the previous sample would visibly replay the insertion transition once more.
         for (const ManualReloadTailPoseSample& sample : entry.tailSamples)
         {
-            if (sample.timeSeconds > elapsedSeconds)
-                break;
-            selected = &sample;
+            if (sample.timeSeconds >= targetSeconds)
+                return &sample.localBones;
         }
-        return &selected->localBones;
+        return &entry.tailSamples.back().localBones;
     }
 
     inline void ApplyManualReloadLocalPose(
@@ -1626,6 +1750,51 @@ namespace
 
         for (int bone = 0; bone < numBones; ++bone)
             vr_vm_stabilize::Mul(modelAnchor, localBones[static_cast<size_t>(bone)], outBones[bone]);
+    }
+
+    inline void SnapManualReloadNativeMagazineToSocket(
+        VR* vr,
+        const std::vector<int>& boneParents,
+        int clipBone,
+        vr_vm_stabilize::Mat3x4* bones,
+        int numBones)
+    {
+        if (!vr ||
+            (vr->m_ManualReloadState != ManualReloadState::AwaitingNativePostInsertBoundary &&
+                vr->m_ManualReloadState != ManualReloadState::ResumingNativeReloadWithMagazine) ||
+            !vr->m_ManualReloadSocketValid || !bones || clipBone < 0 || clipBone >= numBones ||
+            static_cast<int>(boneParents.size()) < numBones)
+        {
+            return;
+        }
+
+        const vr_vm_stabilize::Mat3x4 targetClipWorld = HooksVrHandMatrixToMat3x4(
+            HooksStripVrHandMatrixScale(vr->m_ManualReloadSocketWorld));
+        vr_vm_stabilize::Mat3x4 inverseCurrentClip{};
+        vr_vm_stabilize::Mat3x4 delta{};
+        vr_vm_stabilize::InvertTR(bones[clipBone], inverseCurrentClip);
+        vr_vm_stabilize::Mul(targetClipWorld, inverseCurrentClip, delta);
+
+        auto isClipOrDescendant = [&](int bone)
+            {
+                int current = bone;
+                for (int guard = 0; guard < numBones && current >= 0 && current < numBones; ++guard)
+                {
+                    if (current == clipBone)
+                        return true;
+                    current = boneParents[static_cast<size_t>(current)];
+                }
+                return false;
+            };
+
+        for (int bone = 0; bone < numBones; ++bone)
+        {
+            if (!isClipOrDescendant(bone))
+                continue;
+            vr_vm_stabilize::Mat3x4 moved{};
+            vr_vm_stabilize::Mul(delta, bones[bone], moved);
+            bones[bone] = moved;
+        }
     }
 
     inline void ApplyManualReloadViewmodelOverride(
@@ -1705,6 +1874,7 @@ namespace
             vr->OnManualReloadViewmodelPose(
                 modelName.c_str(),
                 viewmodelEntity,
+                info.entity_index,
                 HooksMat3x4ToVrHandMatrix(modelAnchor),
                 HooksMat3x4ToVrHandMatrix(clip),
                 HooksMat3x4ToVrHandMatrix(motionProbe));
@@ -1787,12 +1957,17 @@ namespace
                 {
                     const float elapsedSeconds = std::chrono::duration<float>(
                         std::chrono::steady_clock::now() - vr->m_ManualReloadResumeStarted).count();
-                    const auto* replayLocalBones = SelectManualReloadReplayLocalBones(frozenPose, elapsedSeconds);
+                    const auto* replayLocalBones = SelectManualReloadReplayLocalBones(
+                        frozenPose,
+                        elapsedSeconds,
+                        vr->m_ManualReloadVisualReplayStartOffsetSeconds);
                     if (replayLocalBones)
                         ApplyManualReloadLocalPose(modelAnchor, *replayLocalBones, copiedBones, numBones);
                 }
             }
         }
+
+        SnapManualReloadNativeMagazineToSocket(vr, boneParents, clipBone, copiedBones, numBones);
 
         if (hideNativeClip)
         {
@@ -2971,4 +3146,87 @@ void Hooks::dConVarInternalSetValueInt(void* ecx, void* edx, int value)
     sprintf_s(buffer, "%d", value);
     TraceTrackedConVarWrite(ecx, buffer, "ConVar::InternalSetValue(int)", _ReturnAddress(), false, false);
     hkConVarInternalSetValueInt.fOriginal(ecx, value);
+}
+
+
+void Hooks::dEmitSoundAttenuation(
+    void* ecx,
+    void* edx,
+    void* filter,
+    int entIndex,
+    int channel,
+    const char* sample,
+    float volume,
+    float attenuation,
+    int flags,
+    int pitch,
+    int specialDSP,
+    const Vector* origin,
+    const Vector* direction,
+    void* origins,
+    bool updatePositions,
+    float soundTime,
+    int speakerEntity)
+{
+    if (m_VR && m_VR->CaptureManualReloadSound(entIndex, sample, volume, flags, pitch))
+        return;
+
+    hkEmitSoundAttenuation.fOriginal(
+        ecx,
+        filter,
+        entIndex,
+        channel,
+        sample,
+        volume,
+        attenuation,
+        flags,
+        pitch,
+        specialDSP,
+        origin,
+        direction,
+        origins,
+        updatePositions,
+        soundTime,
+        speakerEntity);
+}
+
+void Hooks::dEmitSoundLevel(
+    void* ecx,
+    void* edx,
+    void* filter,
+    int entIndex,
+    int channel,
+    const char* sample,
+    float volume,
+    int soundLevel,
+    int flags,
+    int pitch,
+    int specialDSP,
+    const Vector* origin,
+    const Vector* direction,
+    void* origins,
+    bool updatePositions,
+    float soundTime,
+    int speakerEntity)
+{
+    if (m_VR && m_VR->CaptureManualReloadSound(entIndex, sample, volume, flags, pitch))
+        return;
+
+    hkEmitSoundLevel.fOriginal(
+        ecx,
+        filter,
+        entIndex,
+        channel,
+        sample,
+        volume,
+        soundLevel,
+        flags,
+        pitch,
+        specialDSP,
+        origin,
+        direction,
+        origins,
+        updatePositions,
+        soundTime,
+        speakerEntity);
 }

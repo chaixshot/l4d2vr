@@ -1307,6 +1307,14 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		cmd->buttons &= ~(1 << 0); // IN_ATTACK
 	}
 
+	// Manual reload is a local physical interaction layered over the ordinary server reload.
+	// Even if the server has already refilled the weapon, no shot may leave this client until
+	// the player inserts the magazine and the delayed local reload tail has finished.
+	if (m_VR->IsManualReloadBlockingFire())
+	{
+		cmd->buttons &= ~(1 << 0); // IN_ATTACK
+	}
+
 	{
 		constexpr int kIN_ATTACK = (1 << 0);
 		const bool autoFireAttackDown = m_VR->m_EffectiveAttackRangeAutoFireActive && ((cmd->buttons & kIN_ATTACK) != 0);
