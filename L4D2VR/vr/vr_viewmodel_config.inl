@@ -1502,6 +1502,9 @@ void VR::ParseConfigFile()
     // still auto-wait during real HMD motion to avoid reusing the same pose sample.
     // 1~3 = light wait, 5+ = prioritize stability, -1 = strong sync (wait up to ~50ms).
     m_QueuedRenderPoseWaitMs = std::clamp(getInt("QueuedRenderPoseWaitMs", m_QueuedRenderPoseWaitMs), -1, 20);
+    // 0 = fully strict pose-token submit. Higher values periodically bypass the strict fresh-pose
+    // wait and allow a new rendered frame from the same WaitGetPoses() snapshot to submit.
+    m_QueuedRenderPoseRelaxPercent = std::clamp(getInt("QueuedRenderPoseRelaxPercent", m_QueuedRenderPoseRelaxPercent), 0, 100);
     // Multicore rendering: present-side wait budget (ms) for a fresh dRenderView frame before submit.
     // 0 = no wait (max FPS, can increase stale-frame submits), 1~3 = usually best balance.
     m_QueuedSubmitWaitMs = std::clamp(getInt("QueuedSubmitWaitMs", m_QueuedSubmitWaitMs), 0, 20);
@@ -1556,6 +1559,8 @@ void VR::ParseConfigFile()
         m_ReShadeVRCompatPendingRenderReady.store(0, std::memory_order_release);
         m_ReShadeVRCompatPendingRenderPoseToken.store(0, std::memory_order_release);
         m_ReShadeVRCompatPendingRenderFrameSeq.store(0, std::memory_order_release);
+        m_ReShadeVRCompatPendingDuplicatePose.store(0, std::memory_order_release);
+        m_RenderCompletedDuplicatePoseFrameId.store(0, std::memory_order_release);
     }
     if (m_Compositor && oldReShadeVRCompat != m_ReShadeVRCompat)
         ConfigureExplicitTiming();
