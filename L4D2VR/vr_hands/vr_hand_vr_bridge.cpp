@@ -17,6 +17,11 @@ VR::VR() = default;
 
 VR::~VR() = default;
 
+namespace
+{
+    const std::string kNoManualReloadMagazineGlbPath;
+}
+
 bool VR::DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass drawPass)
 {
     // Raw D3D9 commands issued directly from Source RenderView are safe only in
@@ -71,7 +76,7 @@ bool VR::DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass 
         m_VrHandsLeftPoseRotationOffsetDeg,
         m_VrHandsRightPoseOffsetMeters,
         m_VrHandsRightPoseRotationOffsetDeg,
-        m_ManualReloadMagazineGlbPath,
+        kNoManualReloadMagazineGlbPath,
         manualReloadMagazineWorldPtr,
         manualReloadMagazineUseViewmodelLayer,
         drawPass);
@@ -147,6 +152,38 @@ namespace
     constexpr int kManualReloadViewmodelCycleOffset = 0x65C;
     constexpr int kManualReloadViewmodelPlaybackRateOffset = 0x660;
     constexpr int kManualReloadViewmodelSequenceOffset = 0x8A4;
+
+    bool ManualReloadWeaponUsesDetachableMagazine(C_WeaponCSBase::WeaponID weaponId)
+    {
+        switch (weaponId)
+        {
+        case C_WeaponCSBase::WeaponID::PISTOL:
+        case C_WeaponCSBase::WeaponID::UZI:
+        case C_WeaponCSBase::WeaponID::M16A1:
+        case C_WeaponCSBase::WeaponID::HUNTING_RIFLE:
+        case C_WeaponCSBase::WeaponID::MAC10:
+        case C_WeaponCSBase::WeaponID::SCAR:
+        case C_WeaponCSBase::WeaponID::SNIPER_MILITARY:
+        case C_WeaponCSBase::WeaponID::AK47:
+        case C_WeaponCSBase::WeaponID::MAGNUM:
+        case C_WeaponCSBase::WeaponID::MP5:
+        case C_WeaponCSBase::WeaponID::SG552:
+        case C_WeaponCSBase::WeaponID::AWP:
+        case C_WeaponCSBase::WeaponID::SCOUT:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    Vector ManualReloadGetInsertionAxisLocal(const VR* vr)
+    {
+        if (!vr)
+            return Vector(0.0f, -1.0f, 0.0f);
+        return vr->m_ManualReloadResolvedInsertionAxisValid
+            ? vr->m_ManualReloadResolvedInsertionAxisLocal
+            : vr->m_ManualReloadMagazineInsertionAxisLocal;
+    }
 
     float ManualReloadVectorLength(const Vector& value)
     {
@@ -293,7 +330,7 @@ bool VR::IsManualReloadBlockingFire() const
 {
     return m_ManualReloadState == ManualReloadState::WaitingForFreshMagazineGrab ||
         m_ManualReloadState == ManualReloadState::HoldingFreshMagazine ||
-        m_ManualReloadState == ManualReloadState::ResumingNativeReloadWithGlbMagazine;
+        m_ManualReloadState == ManualReloadState::ResumingNativeReloadWithMagazine;
 }
 
 bool VR::ShouldHideManualReloadNativeClip() const
@@ -307,14 +344,23 @@ void VR::BeginManualReload(C_BasePlayer* localPlayer)
         return;
 
     C_WeaponCSBase* weapon = reinterpret_cast<C_WeaponCSBase*>(localPlayer->GetActiveWeapon());
-    if (!weapon || weapon->GetWeaponID() != C_WeaponCSBase::WeaponID::M16A1)
+    if (!weapon || !ManualReloadWeaponUsesDetachableMagazine(weapon->GetWeaponID()))
         return;
 
     CancelManualReload();
     m_ManualReloadWeapon = weapon;
+    m_ManualReloadWeaponId = static_cast<int>(weapon->GetWeaponID());
+    m_ManualReloadMagazineModelName.clear();
+    m_ManualReloadMagazineBoneIndex = -1;
+    m_ManualReloadMagazineMotionBoneIndex = -1;
+    m_ManualReloadMotionProbeValid = false;
     m_ManualReloadState = ManualReloadState::WatchingNativeClipRemoval;
     m_ManualReloadStarted = std::chrono::steady_clock::now();
-    Game::logMsg("[VR][ManualReload] begin weapon=M16A1 clipBone=v_weapon.M4A1_Clip");
+    m_ManualReloadResolvedInsertionAxisValid = false;
+    m_ManualReloadVisualResumeDurationSeconds = 0.0f;
+    Game::logMsg(
+        "[VR][ManualReload] begin weaponId=%d; scanning current viewmodel for detachable magazine bone",
+        static_cast<int>(weapon->GetWeaponID()));
 }
 
 void VR::CancelManualReload()
@@ -337,14 +383,23 @@ void VR::CancelManualReload()
 
     m_ManualReloadState = ManualReloadState::Idle;
     m_ManualReloadWeapon = nullptr;
+    m_ManualReloadWeaponId = 0;
     m_ManualReloadViewmodelEntity = nullptr;
+    m_ManualReloadMagazineModelName.clear();
+    m_ManualReloadMagazineBoneIndex = -1;
+    m_ManualReloadMagazineMotionBoneIndex = -1;
     m_ManualReloadSocketValid = false;
+    m_ManualReloadMotionProbeValid = false;
     m_ManualReloadHideNativeClip = false;
     m_ManualReloadMagazineInsertionArmed = false;
     m_ManualReloadFrozenSequence = -1;
     m_ManualReloadFrozenCycle = 0.0f;
     m_ManualReloadOriginalPlaybackRate = 1.0f;
     m_ManualReloadViewmodelFrozen = false;
+    m_ManualReloadResolvedInsertionAxisLocal = { 0.0f, -1.0f, 0.0f };
+    m_ManualReloadResolvedInsertionAxisValid = false;
+    m_ManualReloadVisualResumeDurationSeconds = 0.0f;
+    m_ManualReloadTailCaptureComplete = false;
     m_ManualReloadStarted = {};
     m_ManualReloadResumeStarted = {};
     m_ManualReloadMouseTestMagazineLocalOffsetMeters = { 0.0f, 0.0f, 0.0f };
@@ -369,7 +424,7 @@ bool VR::GetManualReloadMagazineWorld(VrHandMatrix4& outWorld) const
                 false);
             const VrHandMatrix4 local = ManualReloadBuildLocalTransform(
                 m_VRScale,
-                std::clamp(m_ManualReloadMagazineModelScale, 0.01f, 20.0f),
+                1.0f,
                 m_ManualReloadMouseTestMagazineLocalOffsetMeters,
                 m_ManualReloadMouseTestMagazineLocalRotationOffsetDeg,
                 true);
@@ -383,17 +438,17 @@ bool VR::GetManualReloadMagazineWorld(VrHandMatrix4& outWorld) const
             m_LeftControllerPosAbs,
             m_LeftControllerAngAbs,
             m_VRScale,
-            std::clamp(m_ManualReloadMagazineModelScale, 0.01f, 20.0f),
+            1.0f,
             m_ManualReloadMagazineHandOffsetMeters,
             m_ManualReloadMagazineHandRotationOffsetDeg);
         return true;
     }
 
-    if (m_ManualReloadState == ManualReloadState::ResumingNativeReloadWithGlbMagazine)
+    if (m_ManualReloadState == ManualReloadState::ResumingNativeReloadWithMagazine)
     {
         const VrHandMatrix4 local = ManualReloadBuildLocalTransform(
             m_VRScale,
-            std::clamp(m_ManualReloadMagazineModelScale, 0.01f, 20.0f),
+            1.0f,
             m_ManualReloadMagazineSocketOffsetMeters,
             m_ManualReloadMagazineSocketRotationOffsetDeg,
             true);
@@ -468,18 +523,18 @@ void VR::UpdateManualReloadMouseTestKeyboard(C_BasePlayer* localPlayer)
         BeginManualReload(localPlayer);
         if (!IsManualReloadActive())
         {
-            Game::logMsg("[VR][ManualReload][MouseTest] F6 ignored: equip M16A1 and keep single-threaded rendering enabled");
+            Game::logMsg("[VR][ManualReload][MouseTest] F6 ignored: equip a detachable-magazine firearm and keep single-threaded rendering enabled");
             return;
         }
 
         m_Game->ClientCmd_Unrestricted("+reload");
         m_ManualReloadMouseTestReloadPulseOwned = true;
-        Game::logMsg("[VR][ManualReload][MouseTest] F6 started native reload; after pause press F7, then hold PageDown to push the GLB magazine into the socket");
+        Game::logMsg("[VR][ManualReload][MouseTest] F6 started native reload; after pause press F7, then hold PageDown to push the native Source magazine into the socket");
         Game::logMsg("[VR][ManualReload][MouseTest] controls: F7=grab  Home=reset alignment  arrows=lateral move  PageUp/PageDown=pull/push  numpad 8/2 4/6 7/9=rotate  Delete=drop  F9=cancel");
         return;
     }
 
-    const Vector insertionAxis = ManualReloadNormalize(m_ManualReloadMagazineInsertionAxisLocal);
+    const Vector insertionAxis = ManualReloadNormalize(ManualReloadGetInsertionAxisLocal(this));
     auto resetMagazineToGuideStart = [&]()
         {
             m_ManualReloadMouseTestMagazineLocalOffsetMeters = insertionAxis * m_ManualReloadMagazineGuideStartDepthMeters;
@@ -499,13 +554,13 @@ void VR::UpdateManualReloadMouseTestKeyboard(C_BasePlayer* localPlayer)
                 const Vector socketWorld = ManualReloadMatrixTranslation(m_ManualReloadSocketWorld);
                 const Vector guideWorld = ManualReloadMatrixTranslation(previewWorld);
                 Game::logMsg(
-                    "[VR][ManualReload][MouseTest] F7 spawned aligned GLB magazine socket=(%.2f %.2f %.2f) guide=(%.2f %.2f %.2f); hold PageDown to insert",
+                    "[VR][ManualReload][MouseTest] F7 spawned aligned native magazine socket=(%.2f %.2f %.2f) guide=(%.2f %.2f %.2f); hold PageDown to insert",
                     socketWorld.x, socketWorld.y, socketWorld.z,
                     guideWorld.x, guideWorld.y, guideWorld.z);
             }
             else
             {
-                Game::logMsg("[VR][ManualReload][MouseTest] F7 spawned aligned GLB magazine at guide start; hold PageDown to insert");
+                Game::logMsg("[VR][ManualReload][MouseTest] F7 spawned aligned native magazine at guide start; hold PageDown to insert");
             }
         }
         return;
@@ -518,14 +573,14 @@ void VR::UpdateManualReloadMouseTestKeyboard(C_BasePlayer* localPlayer)
     {
         m_ManualReloadState = ManualReloadState::WaitingForFreshMagazineGrab;
         m_ManualReloadMagazineInsertionArmed = false;
-        Game::logMsg("[VR][ManualReload][MouseTest] GLB magazine dropped; press F7 to spawn another one");
+        Game::logMsg("[VR][ManualReload][MouseTest] native magazine dropped; press F7 to spawn another one");
         return;
     }
 
     if (resetJustPressed)
     {
         resetMagazineToGuideStart();
-        Game::logMsg("[VR][ManualReload][MouseTest] GLB magazine reset to aligned guide start");
+        Game::logMsg("[VR][ManualReload][MouseTest] native magazine reset to aligned guide start");
     }
 
     const float moveStep = 0.12f * deltaSeconds;
@@ -569,7 +624,7 @@ void VR::UpdateManualReload(C_BasePlayer* localPlayer, bool leftGripDown, bool l
     }
 
     C_WeaponCSBase* weapon = reinterpret_cast<C_WeaponCSBase*>(localPlayer->GetActiveWeapon());
-    if (!weapon || weapon != m_ManualReloadWeapon || weapon->GetWeaponID() != C_WeaponCSBase::WeaponID::M16A1)
+    if (!weapon || weapon != m_ManualReloadWeapon || !ManualReloadWeaponUsesDetachableMagazine(weapon->GetWeaponID()))
     {
         CancelManualReload();
         return;
@@ -577,7 +632,7 @@ void VR::UpdateManualReload(C_BasePlayer* localPlayer, bool leftGripDown, bool l
 
     if (m_ManualReloadState == ManualReloadState::WatchingNativeClipRemoval &&
         m_ManualReloadStarted.time_since_epoch().count() != 0 &&
-        std::chrono::duration<float>(std::chrono::steady_clock::now() - m_ManualReloadStarted).count() >= 3.0f)
+        std::chrono::duration<float>(std::chrono::steady_clock::now() - m_ManualReloadStarted).count() >= 5.0f)
     {
         Game::logMsg("[VR][ManualReload] native clip did not leave weapon; manual reload canceled");
         CancelManualReload();
@@ -611,7 +666,7 @@ void VR::UpdateManualReload(C_BasePlayer* localPlayer, bool leftGripDown, bool l
         {
             m_ManualReloadState = ManualReloadState::HoldingFreshMagazine;
             m_ManualReloadMagazineInsertionArmed = false;
-            Game::logMsg("[VR][ManualReload] fresh GLB magazine grabbed from left waist");
+            Game::logMsg("[VR][ManualReload] fresh native magazine grabbed from left waist");
         }
         return;
     }
@@ -644,7 +699,7 @@ void VR::UpdateManualReload(C_BasePlayer* localPlayer, bool leftGripDown, bool l
     const VrHandMatrix4 heldRigid = ManualReloadStripScale(heldWorld);
     const VrHandMatrix4 magazineInSocket = VrHandMath::Multiply(inverseSocket, heldRigid);
     const Vector localPositionMeters = ManualReloadMatrixTranslation(magazineInSocket) * (1.0f / std::max(0.001f, m_VRScale));
-    const Vector insertionAxis = ManualReloadNormalize(m_ManualReloadMagazineInsertionAxisLocal);
+    const Vector insertionAxis = ManualReloadNormalize(ManualReloadGetInsertionAxisLocal(this));
     const float axial = VrHandMath::Dot(localPositionMeters, insertionAxis);
     const Vector lateralVector = localPositionMeters - insertionAxis * axial;
     const float lateral = ManualReloadVectorLength(lateralVector);
@@ -661,20 +716,19 @@ void VR::UpdateManualReload(C_BasePlayer* localPlayer, bool leftGripDown, bool l
     if (m_ManualReloadMagazineInsertionArmed && aligned &&
         axial <= m_ManualReloadMagazineFullInsertDepthMeters && axial >= -0.02f)
     {
-        m_ManualReloadState = ManualReloadState::ResumingNativeReloadWithGlbMagazine;
+        m_ManualReloadState = ManualReloadState::ResumingNativeReloadWithMagazine;
         m_ManualReloadResumeStarted = std::chrono::steady_clock::now();
         m_ManualReloadMagazineInsertionArmed = false;
-        if (m_ManualReloadViewmodelFrozen && m_ManualReloadViewmodelEntity)
-        {
-            const float playbackRate = (m_ManualReloadOriginalPlaybackRate > 0.0001f) ? m_ManualReloadOriginalPlaybackRate : 1.0f;
-            ManualReloadWriteViewmodelAnimation(
-                m_ManualReloadViewmodelEntity,
-                m_ManualReloadFrozenSequence,
-                m_ManualReloadFrozenCycle,
-                playbackRate);
-            m_ManualReloadViewmodelFrozen = false;
-        }
-        Game::logMsg("[VR][ManualReload] GLB magazine inserted; native reload resumed");
+        // The detached Source-material copy is only needed while it is held. Once inserted,
+        // restore the native magazine immediately and replay the cached tail with that native copy.
+        m_ManualReloadHideNativeClip = false;
+        // The server-side reload may already have completed while the visible pose was frozen.
+        // The DrawModelExecute hook now replays the captured native tail locally instead of
+        // expecting Source gameplay code to restart an already-finished sequence.
+        m_ManualReloadViewmodelFrozen = false;
+        Game::logMsg(
+            "[VR][ManualReload] native magazine inserted; detached copy removed and native magazine restored; replaying captured reload tail duration=%.3fs",
+            std::clamp(std::max(0.25f, m_ManualReloadVisualResumeDurationSeconds + 0.05f), 0.25f, 3.0f));
     }
 }
 
@@ -682,7 +736,8 @@ void VR::OnManualReloadViewmodelPose(
     const char* modelName,
     void* viewmodelEntity,
     const VrHandMatrix4& modelAnchorWorld,
-    const VrHandMatrix4& nativeClipWorld)
+    const VrHandMatrix4& nativeClipWorld,
+    const VrHandMatrix4& nativeMotionProbeWorld)
 {
     (void)modelName;
     if (!IsManualReloadActive() || !viewmodelEntity)
@@ -693,6 +748,7 @@ void VR::OnManualReloadViewmodelPose(
     if (!VrHandMath::Invert4x4(modelAnchorWorld, inverseModelAnchor))
         return;
     const VrHandMatrix4 currentClipLocal = VrHandMath::Multiply(inverseModelAnchor, nativeClipWorld);
+    const VrHandMatrix4 currentMotionProbeLocal = VrHandMath::Multiply(inverseModelAnchor, nativeMotionProbeWorld);
 
     if (!m_ManualReloadSocketValid)
     {
@@ -705,6 +761,12 @@ void VR::OnManualReloadViewmodelPose(
         m_ManualReloadSocketWorld = VrHandMath::Multiply(modelAnchorWorld, m_ManualReloadSocketLocal);
     }
 
+    if (!m_ManualReloadMotionProbeValid)
+    {
+        m_ManualReloadMotionProbeLocal = currentMotionProbeLocal;
+        m_ManualReloadMotionProbeValid = true;
+    }
+
     int sequence = -1;
     float cycle = 0.0f;
     float playbackRate = 1.0f;
@@ -713,18 +775,39 @@ void VR::OnManualReloadViewmodelPose(
 
     if (m_ManualReloadState == ManualReloadState::WatchingNativeClipRemoval)
     {
-        const Vector current = ManualReloadMatrixTranslation(currentClipLocal);
-        const Vector socket = ManualReloadMatrixTranslation(m_ManualReloadSocketLocal);
-        const float movedMeters = ManualReloadVectorLength(current - socket) / std::max(0.001f, m_VRScale);
+        const Vector currentProbe = ManualReloadMatrixTranslation(currentMotionProbeLocal);
+        const Vector initialProbe = ManualReloadMatrixTranslation(m_ManualReloadMotionProbeLocal);
+        const float movedMeters = ManualReloadVectorLength(currentProbe - initialProbe) / std::max(0.001f, m_VRScale);
         if (movedMeters >= m_ManualReloadNativeClipLeaveDistanceMeters)
         {
+            const Vector outwardModelLocal = currentProbe - initialProbe;
+            if (ManualReloadVectorLength(outwardModelLocal) > 0.0001f)
+            {
+                VrHandMatrix4 inverseSocketLocal{};
+                if (VrHandMath::Invert4x4(ManualReloadStripScale(m_ManualReloadSocketLocal), inverseSocketLocal))
+                {
+                    m_ManualReloadResolvedInsertionAxisLocal = ManualReloadNormalize(
+                        ManualReloadTransformDirection(inverseSocketLocal, outwardModelLocal));
+                    m_ManualReloadResolvedInsertionAxisValid = true;
+                }
+            }
+            m_ManualReloadVisualResumeDurationSeconds = 0.0f;
+            m_ManualReloadTailCaptureComplete = false;
             m_ManualReloadFrozenSequence = sequence;
             m_ManualReloadFrozenCycle = cycle;
             m_ManualReloadOriginalPlaybackRate = playbackRate;
-            m_ManualReloadViewmodelFrozen = ManualReloadWriteViewmodelAnimation(viewmodelEntity, sequence, cycle, 0.0f);
+            // Do not freeze Source's internal animation state. DrawModelExecute freezes only the visible
+            // submitted bones while the hidden native sequence keeps progressing so its tail can be sampled.
+            m_ManualReloadViewmodelFrozen = false;
             m_ManualReloadHideNativeClip = true;
             m_ManualReloadState = ManualReloadState::WaitingForFreshMagazineGrab;
-            Game::logMsg("[VR][ManualReload] native clip left weapon %.3fm; animation paused", movedMeters);
+            const Vector resolvedAxis = ManualReloadGetInsertionAxisLocal(this);
+            Game::logMsg(
+                "[VR][ManualReload] native clip left weapon %.3fm; animation paused; inferred insertion axis=(%.3f %.3f %.3f)",
+                movedMeters,
+                resolvedAxis.x,
+                resolvedAxis.y,
+                resolvedAxis.z);
         }
         return;
     }
@@ -732,37 +815,51 @@ void VR::OnManualReloadViewmodelPose(
     if (m_ManualReloadState == ManualReloadState::WaitingForFreshMagazineGrab ||
         m_ManualReloadState == ManualReloadState::HoldingFreshMagazine)
     {
-        if (m_ManualReloadFrozenSequence >= 0)
+        if (!m_ManualReloadTailCaptureComplete &&
+            m_ManualReloadFrozenSequence >= 0 &&
+            sequence != m_ManualReloadFrozenSequence)
         {
-            m_ManualReloadViewmodelFrozen = ManualReloadWriteViewmodelAnimation(
-                viewmodelEntity,
+            m_ManualReloadTailCaptureComplete = true;
+            Game::logMsg(
+                "[VR][ManualReload] hidden native reload tail capture finished duration=%.3fs sequence=%d->%d",
+                m_ManualReloadVisualResumeDurationSeconds,
                 m_ManualReloadFrozenSequence,
-                m_ManualReloadFrozenCycle,
-                0.0f);
+                sequence);
         }
         return;
     }
 
-    if (m_ManualReloadState == ManualReloadState::ResumingNativeReloadWithGlbMagazine)
+    if (m_ManualReloadState == ManualReloadState::ResumingNativeReloadWithMagazine)
     {
         const auto now = std::chrono::steady_clock::now();
         const float resumedSeconds = std::chrono::duration<float>(now - m_ManualReloadResumeStarted).count();
-        if (resumedSeconds >= 0.05f &&
-            (sequence != m_ManualReloadFrozenSequence || cycle >= 0.999f))
+        const float replayDurationSeconds = std::clamp(
+            std::max(0.25f, m_ManualReloadVisualResumeDurationSeconds + 0.05f),
+            0.25f,
+            3.0f);
+        if (resumedSeconds >= replayDurationSeconds)
         {
             m_ManualReloadHideNativeClip = false;
             m_ManualReloadState = ManualReloadState::Idle;
             m_ManualReloadWeapon = nullptr;
+            m_ManualReloadWeaponId = 0;
             m_ManualReloadViewmodelEntity = nullptr;
+            m_ManualReloadMagazineModelName.clear();
+            m_ManualReloadMagazineBoneIndex = -1;
+            m_ManualReloadMagazineMotionBoneIndex = -1;
             m_ManualReloadSocketValid = false;
+            m_ManualReloadMotionProbeValid = false;
             m_ManualReloadMagazineInsertionArmed = false;
             m_ManualReloadFrozenSequence = -1;
             m_ManualReloadFrozenCycle = 0.0f;
             m_ManualReloadOriginalPlaybackRate = 1.0f;
             m_ManualReloadViewmodelFrozen = false;
+            m_ManualReloadResolvedInsertionAxisValid = false;
+            m_ManualReloadVisualResumeDurationSeconds = 0.0f;
+            m_ManualReloadTailCaptureComplete = false;
             m_ManualReloadStarted = {};
             m_ManualReloadResumeStarted = {};
-            Game::logMsg("[VR][ManualReload] native reload animation finished; GLB hidden and native clip restored");
+            Game::logMsg("[VR][ManualReload] captured reload tail finished; native viewmodel returned to live idle pose");
         }
     }
 }

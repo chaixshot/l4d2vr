@@ -240,6 +240,7 @@ namespace vr_vm_stabilize
 
     inline bool TryGetBoneNameAtStride(
         const uint8_t* studioHdr,
+        int studioLength,
         int boneIndex,
         int numBones,
         int stride,
@@ -252,18 +253,38 @@ namespace vr_vm_stabilize
         if (!studioHdr || bone < 0 || bone >= numBones || stride <= 0)
             return false;
 
-        const uint8_t* boneBase = studioHdr + boneIndex + (static_cast<size_t>(stride) * static_cast<size_t>(bone));
+        const size_t boneOffset = static_cast<size_t>(boneIndex) +
+            (static_cast<size_t>(stride) * static_cast<size_t>(bone));
+        if (studioLength > 0 && boneOffset + 8u > static_cast<size_t>(studioLength))
+            return false;
+
+        const uint8_t* boneBase = studioHdr + boneOffset;
         int nameOffset = 0;
         int parent = -1;
         if (!SafeRead(boneBase + 0, nameOffset) || !SafeRead(boneBase + 4, parent))
             return false;
-        if (nameOffset <= 0 || nameOffset > 0x10000)
+        if (nameOffset <= 0)
             return false;
         if (parent < -1 || parent >= numBones)
             return false;
 
+        // mstudiobone_t::sznameindex is relative to the current bone structure.
+        // Workshop replacement models can place the string table well beyond 64 KiB.
+        // The previous fixed 0x10000 limit rejected valid bone names for most weapons,
+        // while the M16 happened to keep a small readable subset close enough to pass.
+        const size_t nameAddressOffset = boneOffset + static_cast<size_t>(nameOffset);
+        if (studioLength > 0)
+        {
+            if (nameAddressOffset >= static_cast<size_t>(studioLength))
+                return false;
+        }
+        else if (nameOffset > 0x400000)
+        {
+            return false;
+        }
+
         std::string name;
-        if (!TryReadCStringSafe(reinterpret_cast<const char*>(boneBase + nameOffset), name))
+        if (!TryReadCStringSafe(reinterpret_cast<const char*>(studioHdr + nameAddressOffset), name))
             return false;
 
         outName = name;
@@ -293,6 +314,9 @@ namespace vr_vm_stabilize
         if (!TryGetBoneTableLayout(drawState, outNumBones, outBoneIndex, outNumBonesOffset))
             return false;
 
+        int studioLength = 0;
+        SafeRead(studioHdr + 0x4C, studioLength);
+
         static const int kStrideCandidates[] = { 216, 224, 208, 200, 192, 184, 176, 232, 240, 256 };
         int bestStride = 0;
         int bestScore = -1;
@@ -310,7 +334,7 @@ namespace vr_vm_stabilize
             {
                 std::string name;
                 int parent = -1;
-                if (!TryGetBoneNameAtStride(studioHdr, outBoneIndex, outNumBones, stride, bone, name, parent))
+                if (!TryGetBoneNameAtStride(studioHdr, studioLength, outBoneIndex, outNumBones, stride, bone, name, parent))
                     continue;
 
                 names[static_cast<size_t>(bone)] = name;
@@ -555,11 +579,242 @@ namespace
         return out;
     }
 
+    inline bool ManualReloadNameContains(const std::string& value, const char* needle)
+    {
+        return needle && *needle && value.find(needle) != std::string::npos;
+    }
+
+    inline bool ManualReloadNameEndsWith(const std::string& value, const char* suffix)
+    {
+        if (!suffix || !*suffix)
+            return false;
+        const size_t suffixLength = std::strlen(suffix);
+        return value.size() >= suffixLength &&
+            value.compare(value.size() - suffixLength, suffixLength, suffix) == 0;
+    }
+
+    inline bool ManualReloadNameHasLooseMagToken(const std::string& name)
+    {
+        size_t pos = 0;
+        while ((pos = name.find("mag", pos)) != std::string::npos)
+        {
+            const bool prefixOk =
+                pos == 0 ||
+                name[pos - 1] == '_' ||
+                name[pos - 1] == '.' ||
+                name[pos - 1] == '-' ||
+                name[pos - 1] == ':';
+            const size_t after = pos + 3;
+            const bool suffixOk =
+                after >= name.size() ||
+                name[after] == '_' ||
+                name[after] == '.' ||
+                name[after] == '-' ||
+                std::isdigit(static_cast<unsigned char>(name[after])) != 0;
+            if (prefixOk && suffixOk)
+                return true;
+            pos = after;
+        }
+        return false;
+    }
+
+    inline bool ManualReloadNameIsLegacyValveBipedClip(const std::string& name)
+    {
+        return name == "valvebiped.weapon_clip" ||
+            name == "valvebiped.weapon_magazine" ||
+            name == "weapon_clip" ||
+            name == "weapon_magazine";
+    }
+
+    inline int ScoreManualReloadMagazineBoneName(const std::string& rawName)
+    {
+        const std::string name = vr_vm_stabilize::ToLowerAscii(rawName);
+        if (name.empty())
+            return 0;
+
+        // Ignore controls, helpers and visual children. We need the root bone that
+        // moves the whole detachable magazine.
+        if (ManualReloadNameContains(name, "release") ||
+            ManualReloadNameContains(name, "realease") ||
+            ManualReloadNameContains(name, "button") ||
+            ManualReloadNameContains(name, "trigger") ||
+            ManualReloadNameContains(name, "bullet") ||
+            ManualReloadNameContains(name, "round") ||
+            ManualReloadNameContains(name, "shell") ||
+            ManualReloadNameContains(name, "ammo") ||
+            ManualReloadNameContains(name, "helper") ||
+            ManualReloadNameContains(name, "attach"))
+        {
+            return 0;
+        }
+
+        const bool hasClip = ManualReloadNameContains(name, "clip");
+        const bool hasMagazine = ManualReloadNameContains(name, "magazine");
+        const bool hasLooseMag = ManualReloadNameHasLooseMagToken(name);
+        if (!hasClip && !hasMagazine && !hasLooseMag)
+            return 0;
+
+        // Replacement viewmodels frequently retain ValveBiped.weapon_clip as a
+        // compatibility helper while the visible magazine mesh is weighted to a
+        // custom bone such as Magazine_Main, Magazine or j_mag1. Keep the legacy
+        // helper as a fallback, but never let it beat an explicit custom bone.
+        if (ManualReloadNameIsLegacyValveBipedClip(name))
+            return 500;
+
+        int score = 200;
+        if (name.rfind("v_weapon.", 0) == 0 || name.rfind("v_weapon_", 0) == 0)
+            score += 1600;
+        else if (ManualReloadNameContains(name, "v_weapon"))
+            score += 1300;
+        else if (ManualReloadNameContains(name, "weapon"))
+            score += 650;
+
+        if (ManualReloadNameContains(name, "magazine_main") ||
+            ManualReloadNameContains(name, "magazine.main") ||
+            ManualReloadNameContains(name, "magazine-main"))
+        {
+            score += 1350;
+        }
+        else if (hasMagazine)
+        {
+            score += 1000;
+        }
+        else if (hasLooseMag)
+        {
+            score += 900;
+        }
+        else if (hasClip)
+        {
+            score += 700;
+        }
+
+        if (ManualReloadNameEndsWith(name, "_clip") || ManualReloadNameEndsWith(name, ".clip"))
+            score += 300;
+        else if (ManualReloadNameEndsWith(name, "_magazine") || ManualReloadNameEndsWith(name, ".magazine"))
+            score += 280;
+
+        return score;
+    }
+
+    inline int FindManualReloadMagazineBone(
+        const std::string& modelName,
+        const std::vector<std::string>& boneNames)
+    {
+        int bestBone = -1;
+        int bestScore = 0;
+        for (int bone = 0; bone < static_cast<int>(boneNames.size()); ++bone)
+        {
+            const int score = ScoreManualReloadMagazineBoneName(boneNames[static_cast<size_t>(bone)]);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestBone = bone;
+            }
+        }
+
+        if (bestBone >= 0)
+        {
+            static std::mutex s_logMutex;
+            static std::unordered_map<std::string, bool> s_loggedModels;
+            std::lock_guard<std::mutex> lock(s_logMutex);
+            if (s_loggedModels.emplace(modelName, true).second)
+            {
+                Game::logMsg(
+                    "[VR][ManualReload] name candidate model=%s bone=%d name=%s score=%d",
+                    modelName.c_str(),
+                    bestBone,
+                    boneNames[static_cast<size_t>(bestBone)].c_str(),
+                    bestScore);
+            }
+        }
+
+        return bestBone;
+    }
+
+    inline int FindManualReloadConfiguredMagazineBone(
+        const VR* vr,
+        const std::string& modelName,
+        const std::vector<std::string>& boneNames,
+        std::string& outConfiguredName)
+    {
+        outConfiguredName.clear();
+        if (!vr || vr->m_ManualReloadWeaponId <= 0)
+            return -1;
+
+        const auto overrideIt = vr->m_ManualReloadMagazineBoneOverrides.find(vr->m_ManualReloadWeaponId);
+        if (overrideIt == vr->m_ManualReloadMagazineBoneOverrides.end() || overrideIt->second.empty())
+            return -1;
+
+        for (const std::string& requestedName : overrideIt->second)
+        {
+            const std::string requestedLower = vr_vm_stabilize::ToLowerAscii(requestedName);
+            if (requestedLower.empty())
+                continue;
+
+            for (int bone = 0; bone < static_cast<int>(boneNames.size()); ++bone)
+            {
+                if (vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(bone)]) != requestedLower)
+                    continue;
+
+                outConfiguredName = requestedName;
+                Game::logMsg(
+                    "[VR][ManualReload] configured magazine bone override matched weaponId=%d model=%s bone=%d name=%s",
+                    vr->m_ManualReloadWeaponId,
+                    modelName.c_str(),
+                    bone,
+                    boneNames[static_cast<size_t>(bone)].c_str());
+                return bone;
+            }
+        }
+
+        static std::mutex s_overrideMissLogMutex;
+        static std::unordered_map<std::string, bool> s_overrideMissLogged;
+        const std::string logKey = std::to_string(vr->m_ManualReloadWeaponId) + "|" + modelName + "|" + vr->m_ManualReloadMagazineBoneOverridesSpec;
+        {
+            std::lock_guard<std::mutex> lock(s_overrideMissLogMutex);
+            if (s_overrideMissLogged.emplace(logKey, true).second)
+            {
+                Game::logMsg(
+                    "[VR][ManualReload] configured magazine bone override not found; falling back to automatic detection weaponId=%d model=%s spec=%s",
+                    vr->m_ManualReloadWeaponId,
+                    modelName.c_str(),
+                    vr->m_ManualReloadMagazineBoneOverridesSpec.c_str());
+            }
+        }
+        return -1;
+    }
+
+    inline bool ManualReloadModelMatchesLockedMagazine(const VR* vr, const std::string& modelName)
+    {
+        if (!vr || vr->m_ManualReloadMagazineBoneIndex < 0 || vr->m_ManualReloadMagazineModelName.empty())
+            return false;
+        return vr_vm_stabilize::ToLowerAscii(vr->m_ManualReloadMagazineModelName) ==
+            vr_vm_stabilize::ToLowerAscii(modelName);
+    }
+
+    inline int GetManualReloadLockedMagazineBone(const VR* vr, const std::string& modelName, int numBones)
+    {
+        if (!ManualReloadModelMatchesLockedMagazine(vr, modelName))
+            return -1;
+        const int bone = vr->m_ManualReloadMagazineBoneIndex;
+        return (bone >= 0 && bone < numBones) ? bone : -1;
+    }
+
+    inline int GetManualReloadLockedMagazineMotionBone(const VR* vr, const std::string& modelName, int numBones)
+    {
+        if (!ManualReloadModelMatchesLockedMagazine(vr, modelName))
+            return -1;
+        const int motionBone = vr->m_ManualReloadMagazineMotionBoneIndex;
+        if (motionBone >= 0 && motionBone < numBones)
+            return motionBone;
+        return GetManualReloadLockedMagazineBone(vr, modelName, numBones);
+    }
+
     inline bool ShouldDrawManualReloadNativeMagazine(const VR* vr)
     {
-        return vr &&
-            (vr->m_ManualReloadState == ManualReloadState::HoldingFreshMagazine ||
-                vr->m_ManualReloadState == ManualReloadState::ResumingNativeReloadWithGlbMagazine);
+        // The detached Source-material copy exists only while the fresh magazine is held.
+        // Once insertion completes, the native magazine is restored immediately.
+        return vr && vr->m_ManualReloadState == ManualReloadState::HoldingFreshMagazine;
     }
 
     inline bool BuildManualReloadNativeMagazineBones(
@@ -599,15 +854,7 @@ namespace
         if (numBones <= 0 || numBones > 512 || static_cast<int>(boneNames.size()) < numBones)
             return false;
 
-        int clipBone = -1;
-        for (int bone = 0; bone < numBones; ++bone)
-        {
-            if (vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(bone)]) == "v_weapon.m4a1_clip")
-            {
-                clipBone = bone;
-                break;
-            }
-        }
+        const int clipBone = GetManualReloadLockedMagazineBone(vr, modelName, numBones);
         if (clipBone < 0)
             return false;
 
@@ -665,14 +912,17 @@ namespace
             }
         }
 
-        static bool s_loggedSourceMagazineDraw = false;
-        if (!s_loggedSourceMagazineDraw)
+        static std::mutex s_sourceMagazineLogMutex;
+        static std::unordered_map<std::string, bool> s_sourceMagazineLoggedModels;
         {
-            s_loggedSourceMagazineDraw = true;
-            Game::logMsg(
-                "[VR][ManualReload] drawing detached magazine through Source viewmodel shader model=%s clipBone=%d",
-                modelName.c_str(),
-                clipBone);
+            std::lock_guard<std::mutex> lock(s_sourceMagazineLogMutex);
+            if (s_sourceMagazineLoggedModels.emplace(modelName, true).second)
+            {
+                Game::logMsg(
+                    "[VR][ManualReload] drawing detached magazine through Source viewmodel shader model=%s clipBone=%d",
+                    modelName.c_str(),
+                    clipBone);
+            }
         }
 
         outBones = isolatedBones;
@@ -723,14 +973,22 @@ namespace
         VrHandVmPose::Capture(modelName.c_str(), boneNames, boneParents, boneWorldMatrices);
     }
 
+    struct ManualReloadTailPoseSample
+    {
+        float timeSeconds = 0.0f;
+        std::vector<vr_vm_stabilize::Mat3x4> localBones;
+    };
+
     struct ManualReloadFrozenViewmodelPoseEntry
     {
         std::string modelName;
         int numBones = 0;
         int rootBone = -1;
         bool valid = false;
-        vr_vm_stabilize::Mat3x4 frozenModelAnchor{};
-        std::vector<vr_vm_stabilize::Mat3x4> frozenWorldBones;
+        std::vector<vr_vm_stabilize::Mat3x4> frozenLocalBones;
+        std::vector<ManualReloadTailPoseSample> tailSamples;
+        std::chrono::steady_clock::time_point tailCaptureStarted{};
+        std::chrono::steady_clock::time_point tailLastSample{};
     };
 
     struct ManualReloadFrozenViewmodelPoseCache
@@ -756,6 +1014,11 @@ namespace
         return vr &&
             (vr->m_ManualReloadState == ManualReloadState::WaitingForFreshMagazineGrab ||
                 vr->m_ManualReloadState == ManualReloadState::HoldingFreshMagazine);
+    }
+
+    inline bool IsManualReloadViewmodelVisualReplayState(const VR* vr)
+    {
+        return vr && vr->m_ManualReloadState == ManualReloadState::ResumingNativeReloadWithMagazine;
     }
 
     inline bool TryGetManualReloadModelAnchor(
@@ -791,6 +1054,580 @@ namespace
         return rootBone;
     }
 
+    inline bool BuildManualReloadLocalBones(
+        const vr_vm_stabilize::Mat3x4& modelAnchor,
+        const vr_vm_stabilize::Mat3x4* sourceBones,
+        int numBones,
+        std::vector<vr_vm_stabilize::Mat3x4>& outLocalBones)
+    {
+        if (!sourceBones || numBones <= 0)
+            return false;
+
+        vr_vm_stabilize::Mat3x4 inverseAnchor{};
+        vr_vm_stabilize::InvertTR(modelAnchor, inverseAnchor);
+        outLocalBones.resize(static_cast<size_t>(numBones));
+        for (int bone = 0; bone < numBones; ++bone)
+        {
+            vr_vm_stabilize::Mat3x4 source{};
+            if (!vr_vm_stabilize::SafeRead(sourceBones + bone, source))
+                return false;
+            vr_vm_stabilize::Mul(inverseAnchor, source, outLocalBones[static_cast<size_t>(bone)]);
+        }
+        return true;
+    }
+
+    struct ManualReloadMagazineResolverCache
+    {
+        VR* owner = nullptr;
+        std::string modelName;
+        int numBones = 0;
+        std::chrono::steady_clock::time_point reloadStarted{};
+        std::vector<vr_vm_stabilize::Mat3x4> initialLocalBones;
+        std::vector<std::string> boneNames;
+        std::vector<int> boneParents;
+
+        void Reset()
+        {
+            owner = nullptr;
+            modelName.clear();
+            numBones = 0;
+            reloadStarted = {};
+            initialLocalBones.clear();
+            boneNames.clear();
+            boneParents.clear();
+        }
+    };
+
+    inline ManualReloadMagazineResolverCache& GetManualReloadMagazineResolverCache()
+    {
+        static ManualReloadMagazineResolverCache cache;
+        return cache;
+    }
+
+    inline bool ManualReloadNameLooksLikeBodyOrNonMagazinePart(const std::string& rawName)
+    {
+        const std::string name = vr_vm_stabilize::ToLowerAscii(rawName);
+        if (name.empty())
+            return false;
+
+        return
+            ManualReloadNameContains(name, "valvebiped") ||
+            ManualReloadNameContains(name, "bip01") ||
+            ManualReloadNameContains(name, "finger") ||
+            ManualReloadNameContains(name, "hand") ||
+            ManualReloadNameContains(name, "wrist") ||
+            ManualReloadNameContains(name, "forearm") ||
+            ManualReloadNameContains(name, "upperarm") ||
+            ManualReloadNameContains(name, "clavicle") ||
+            ManualReloadNameContains(name, "spine") ||
+            ManualReloadNameContains(name, "camera") ||
+            ManualReloadNameContains(name, "attach") ||
+            ManualReloadNameContains(name, "muzzle") ||
+            ManualReloadNameContains(name, "shell") ||
+            ManualReloadNameContains(name, "trigger") ||
+            ManualReloadNameContains(name, "release") ||
+            ManualReloadNameContains(name, "realease") ||
+            ManualReloadNameContains(name, "safety") ||
+            ManualReloadNameContains(name, "bolt") ||
+            ManualReloadNameContains(name, "slide") ||
+            ManualReloadNameContains(name, "charger") ||
+            ManualReloadNameContains(name, "hammer") ||
+            ManualReloadNameContains(name, "root") ||
+            ManualReloadNameContains(name, "skeleton") ||
+            name == "j_gun" ||
+            name == "gun" ||
+            name == "base" ||
+            name == "def_c_base" ||
+            name == "jc_def_c_base";
+    }
+
+    inline bool ManualReloadNameLooksLikeGenericWeaponRoot(const std::string& rawName)
+    {
+        const std::string name = vr_vm_stabilize::ToLowerAscii(rawName);
+        if (name.empty())
+            return false;
+
+        return name == "j_gun" ||
+            name == "gun" ||
+            name == "root" ||
+            name == "skeleton" ||
+            name == "base" ||
+            name == "def_c_base" ||
+            name == "jc_def_c_base" ||
+            ManualReloadNameContains(name, "gun_root") ||
+            ManualReloadNameContains(name, "propgun") ||
+            ManualReloadNameEndsWith(name, "_root") ||
+            ManualReloadNameEndsWith(name, ".root") ||
+            ManualReloadNameEndsWith(name, "_base") ||
+            ManualReloadNameEndsWith(name, ".base");
+    }
+
+    inline bool ManualReloadBoneCanBeMotionFallback(
+        int bone,
+        const std::vector<std::string>& boneNames,
+        const std::vector<int>& boneParents)
+    {
+        const int numBones = static_cast<int>(boneParents.size());
+        if (bone < 0 || bone >= numBones)
+            return false;
+
+        const std::string boneName =
+            (bone < static_cast<int>(boneNames.size()))
+            ? boneNames[static_cast<size_t>(bone)]
+            : std::string();
+        if (ManualReloadNameLooksLikeBodyOrNonMagazinePart(boneName) ||
+            ManualReloadNameLooksLikeGenericWeaponRoot(boneName))
+        {
+            return false;
+        }
+
+        const int parent = boneParents[static_cast<size_t>(bone)];
+        // Some replacement models expose the detachable part as a top-level custom bone.
+        // Allow that case as long as the bone itself is not a body/gun root.
+        if (parent < 0 || parent >= numBones)
+            return true;
+
+        int current = parent;
+        for (int guard = 0; guard < numBones && current >= 0 && current < numBones; ++guard)
+        {
+            if (current < static_cast<int>(boneNames.size()) &&
+                ManualReloadNameLooksLikeBodyOrNonMagazinePart(boneNames[static_cast<size_t>(current)]))
+            {
+                // A custom part below a replacement-model weapon root such as j_gun,
+                // Gun_Root or def_c_base is valid. Body/camera ancestry is not.
+                const std::string lower = vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(current)]);
+                if (ManualReloadNameLooksLikeGenericWeaponRoot(lower))
+                    break;
+                return false;
+            }
+            const int next = boneParents[static_cast<size_t>(current)];
+            if (next == current)
+                break;
+            current = next;
+        }
+        return true;
+    }
+
+    inline float ManualReloadLocalBoneMovedMeters(
+        const vr_vm_stabilize::Mat3x4& initialLocal,
+        const vr_vm_stabilize::Mat3x4& currentLocal,
+        float unitsPerMeter)
+    {
+        const Vector initial = vr_vm_stabilize::GetOrigin(initialLocal);
+        const Vector current = vr_vm_stabilize::GetOrigin(currentLocal);
+        return (current - initial).Length() / std::max(0.001f, unitsPerMeter);
+    }
+
+    inline void LockManualReloadMagazineBone(
+        VR* vr,
+        const std::string& modelName,
+        int visualBone,
+        int motionBone,
+        const std::vector<std::string>& boneNames,
+        const vr_vm_stabilize::Mat3x4& modelAnchor,
+        const vr_vm_stabilize::Mat3x4& initialMagazineLocal,
+        const vr_vm_stabilize::Mat3x4& initialMotionProbeLocal,
+        const char* reason,
+        int visualScore,
+        float motionMovedMeters)
+    {
+        if (!vr || visualBone < 0 || motionBone < 0)
+            return;
+
+        vr->m_ManualReloadMagazineModelName = modelName;
+        vr->m_ManualReloadMagazineBoneIndex = visualBone;
+        vr->m_ManualReloadMagazineMotionBoneIndex = motionBone;
+        vr->m_ManualReloadSocketLocal = HooksMat3x4ToVrHandMatrix(initialMagazineLocal);
+        vr->m_ManualReloadSocketWorld = VrHandMath::Multiply(
+            HooksMat3x4ToVrHandMatrix(modelAnchor),
+            vr->m_ManualReloadSocketLocal);
+        vr->m_ManualReloadSocketValid = true;
+        vr->m_ManualReloadMotionProbeLocal = HooksMat3x4ToVrHandMatrix(initialMotionProbeLocal);
+        vr->m_ManualReloadMotionProbeValid = true;
+
+        const char* visualName =
+            (visualBone < static_cast<int>(boneNames.size()) && !boneNames[static_cast<size_t>(visualBone)].empty())
+            ? boneNames[static_cast<size_t>(visualBone)].c_str()
+            : "<unnamed>";
+        const char* motionName =
+            (motionBone < static_cast<int>(boneNames.size()) && !boneNames[static_cast<size_t>(motionBone)].empty())
+            ? boneNames[static_cast<size_t>(motionBone)].c_str()
+            : "<unnamed>";
+        Game::logMsg(
+            "[VR][ManualReload] locked detachable magazine model=%s visualBone=%d visualName=%s motionBone=%d motionName=%s reason=%s visualScore=%d motionMoved=%.3fm",
+            modelName.c_str(),
+            visualBone,
+            visualName,
+            motionBone,
+            motionName,
+            reason ? reason : "unknown",
+            visualScore,
+            motionMovedMeters);
+    }
+
+    inline bool ManualReloadNameIsStrongCustomMagazineCandidate(const std::string& rawName)
+    {
+        const std::string name = vr_vm_stabilize::ToLowerAscii(rawName);
+        if (name.empty() || ManualReloadNameIsLegacyValveBipedClip(name))
+            return false;
+
+        // These are explicit replacement-model magazine roots. If one exists, it is
+        // the preferred visual root even when a legacy helper is the actual animation driver.
+        return ScoreManualReloadMagazineBoneName(rawName) >= 900;
+    }
+
+    inline int ResolveManualReloadMagazineBone(
+        VR* vr,
+        const std::string& modelName,
+        const std::vector<std::string>& boneNames,
+        const std::vector<int>& boneParents,
+        const vr_vm_stabilize::Mat3x4& modelAnchor,
+        const vr_vm_stabilize::Mat3x4* sourceBones,
+        int numBones)
+    {
+        if (!vr || !sourceBones || numBones <= 0)
+            return -1;
+
+        const int lockedBone = GetManualReloadLockedMagazineBone(vr, modelName, numBones);
+        if (lockedBone >= 0)
+            return lockedBone;
+
+        if (vr->m_ManualReloadState != ManualReloadState::WatchingNativeClipRemoval ||
+            HooksModelNameIsArmsOrHands(vr_vm_stabilize::ToLowerAscii(modelName)))
+        {
+            return -1;
+        }
+
+        ManualReloadMagazineResolverCache& cache = GetManualReloadMagazineResolverCache();
+        const bool needReset =
+            cache.owner != vr ||
+            cache.modelName != modelName ||
+            cache.numBones != numBones ||
+            cache.reloadStarted != vr->m_ManualReloadStarted;
+        if (needReset)
+        {
+            cache.Reset();
+            cache.owner = vr;
+            cache.modelName = modelName;
+            cache.numBones = numBones;
+            cache.reloadStarted = vr->m_ManualReloadStarted;
+            cache.boneNames = boneNames;
+            cache.boneParents = boneParents;
+            if (!BuildManualReloadLocalBones(modelAnchor, sourceBones, numBones, cache.initialLocalBones))
+            {
+                cache.Reset();
+                return -1;
+            }
+        }
+
+        // A configured exact bone is the strongest visual hint. Automatic detection remains
+        // the default and is used when the current weapon has no override or the requested
+        // name does not exist in the active replacement viewmodel.
+        std::string configuredVisualName;
+        const int configuredVisualBone = FindManualReloadConfiguredMagazineBone(
+            vr,
+            modelName,
+            boneNames,
+            configuredVisualName);
+
+        // Name is only a visual hint. Workshop replacements frequently separate the
+        // visible magazine root from the helper bone that actually moves during reload.
+        const int strongestNameHintBone = FindManualReloadMagazineBone(modelName, boneNames);
+        const bool hasStrongCustomNameHint =
+            strongestNameHintBone >= 0 &&
+            strongestNameHintBone < static_cast<int>(boneNames.size()) &&
+            ManualReloadNameIsStrongCustomMagazineCandidate(
+                boneNames[static_cast<size_t>(strongestNameHintBone)]);
+
+        std::vector<vr_vm_stabilize::Mat3x4> currentLocalBones;
+        if (!BuildManualReloadLocalBones(modelAnchor, sourceBones, numBones, currentLocalBones))
+            return -1;
+
+        const float elapsedSeconds =
+            (vr->m_ManualReloadStarted.time_since_epoch().count() != 0)
+            ? std::chrono::duration<float>(std::chrono::steady_clock::now() - vr->m_ManualReloadStarted).count()
+            : 0.0f;
+        const float leaveThreshold = std::max(0.02f, vr->m_ManualReloadNativeClipLeaveDistanceMeters);
+        constexpr float kMinimumUsefulMotionMeters = 0.012f;
+
+        struct Candidate
+        {
+            int bone = -1;
+            int nameScore = 0;
+            float movedMeters = 0.0f;
+            bool strongCustomName = false;
+            bool canMotionFallback = false;
+        };
+
+        auto betterByNameThenMotion = [](const Candidate& candidate, const Candidate& best)
+            {
+                if (candidate.bone < 0)
+                    return false;
+                if (best.bone < 0)
+                    return true;
+                if (candidate.nameScore != best.nameScore)
+                    return candidate.nameScore > best.nameScore;
+                return candidate.movedMeters > best.movedMeters;
+            };
+        auto betterByMotion = [](const Candidate& candidate, const Candidate& best)
+            {
+                if (candidate.bone < 0)
+                    return false;
+                if (best.bone < 0)
+                    return true;
+                if (std::fabs(candidate.movedMeters - best.movedMeters) > 0.0005f)
+                    return candidate.movedMeters > best.movedMeters;
+                return candidate.nameScore > best.nameScore;
+            };
+
+        Candidate strongestMovingVisual;
+        Candidate strongestVisualPastLeave;
+        Candidate bestConfiguredDriver;
+        Candidate bestNamedDriver;
+        Candidate bestMotionFallback;
+        for (int bone = 0; bone < numBones; ++bone)
+        {
+            const int namedScore =
+                (bone < static_cast<int>(boneNames.size()))
+                ? ScoreManualReloadMagazineBoneName(boneNames[static_cast<size_t>(bone)])
+                : 0;
+            const bool strongCustomName =
+                namedScore > 0 &&
+                bone < static_cast<int>(boneNames.size()) &&
+                ManualReloadNameIsStrongCustomMagazineCandidate(boneNames[static_cast<size_t>(bone)]);
+            const bool isConfiguredVisual = bone == configuredVisualBone;
+            const bool canMotionFallback = ManualReloadBoneCanBeMotionFallback(bone, boneNames, boneParents);
+            if (namedScore <= 0 && !canMotionFallback && !isConfiguredVisual)
+                continue;
+
+            const float movedMeters = ManualReloadLocalBoneMovedMeters(
+                cache.initialLocalBones[static_cast<size_t>(bone)],
+                currentLocalBones[static_cast<size_t>(bone)],
+                vr->m_VRScale);
+            if (movedMeters < kMinimumUsefulMotionMeters)
+                continue;
+
+            Candidate candidate;
+            candidate.bone = bone;
+            candidate.nameScore = namedScore;
+            candidate.movedMeters = movedMeters;
+            candidate.strongCustomName = strongCustomName;
+            candidate.canMotionFallback = canMotionFallback;
+
+            if (isConfiguredVisual && betterByMotion(candidate, bestConfiguredDriver))
+                bestConfiguredDriver = candidate;
+            if (namedScore > 0 && betterByMotion(candidate, bestNamedDriver))
+                bestNamedDriver = candidate;
+            if (canMotionFallback && betterByMotion(candidate, bestMotionFallback))
+                bestMotionFallback = candidate;
+            if (strongCustomName && betterByNameThenMotion(candidate, strongestMovingVisual))
+                strongestMovingVisual = candidate;
+            if (strongCustomName && movedMeters >= leaveThreshold && betterByNameThenMotion(candidate, strongestVisualPastLeave))
+                strongestVisualPastLeave = candidate;
+        }
+
+        Candidate motionProbe;
+        const char* reason = nullptr;
+        if (bestConfiguredDriver.bone >= 0 && bestConfiguredDriver.movedMeters >= leaveThreshold)
+        {
+            motionProbe = bestConfiguredDriver;
+            reason = "configured-motion-probe";
+        }
+        else if (bestNamedDriver.bone >= 0 && bestNamedDriver.movedMeters >= leaveThreshold)
+        {
+            motionProbe = bestNamedDriver;
+            reason = "named-motion-probe";
+        }
+        else if (bestMotionFallback.bone >= 0 && bestMotionFallback.movedMeters >= leaveThreshold && elapsedSeconds >= 0.25f)
+        {
+            motionProbe = bestMotionFallback;
+            reason = "motion-fallback-probe";
+        }
+        else if (elapsedSeconds >= 2.20f)
+        {
+            // Some replacement animations only move the helper by a few centimeters.
+            // Near the end of the reload, accept the best meaningful motion instead of
+            // discarding the entire manual-reload path after a hard 5 cm requirement.
+            if (betterByMotion(bestConfiguredDriver, motionProbe))
+                motionProbe = bestConfiguredDriver;
+            if (betterByMotion(bestNamedDriver, motionProbe))
+                motionProbe = bestNamedDriver;
+            if (betterByMotion(bestMotionFallback, motionProbe))
+                motionProbe = bestMotionFallback;
+            if (motionProbe.bone >= 0 && motionProbe.movedMeters >= kMinimumUsefulMotionMeters)
+                reason = "late-small-motion-probe";
+        }
+
+        if (motionProbe.bone < 0)
+            return -1;
+
+        Candidate visual;
+        if (configuredVisualBone >= 0)
+        {
+            visual.bone = configuredVisualBone;
+            visual.nameScore = 100000;
+            visual.movedMeters = ManualReloadLocalBoneMovedMeters(
+                cache.initialLocalBones[static_cast<size_t>(configuredVisualBone)],
+                currentLocalBones[static_cast<size_t>(configuredVisualBone)],
+                vr->m_VRScale);
+            visual.strongCustomName = true;
+        }
+        else if (strongestVisualPastLeave.bone >= 0)
+        {
+            visual = strongestVisualPastLeave;
+        }
+        else if (hasStrongCustomNameHint)
+        {
+            visual.bone = strongestNameHintBone;
+            visual.nameScore = ScoreManualReloadMagazineBoneName(boneNames[static_cast<size_t>(strongestNameHintBone)]);
+            visual.movedMeters = ManualReloadLocalBoneMovedMeters(
+                cache.initialLocalBones[static_cast<size_t>(strongestNameHintBone)],
+                currentLocalBones[static_cast<size_t>(strongestNameHintBone)],
+                vr->m_VRScale);
+            visual.strongCustomName = true;
+        }
+        else if (strongestMovingVisual.bone >= 0)
+        {
+            visual = strongestMovingVisual;
+        }
+        else
+        {
+            visual = motionProbe;
+        }
+
+        // Climb only through another explicitly magazine-named parent. Never climb into
+        // a generic gun parent such as v_weapon.M4A1_s_Parent, otherwise the detached
+        // second Source pass would redraw the entire firearm instead of just the magazine.
+        int resolvedVisualBone = visual.bone;
+        int resolvedVisualScore = visual.nameScore;
+        int parent = boneParents[static_cast<size_t>(resolvedVisualBone)];
+        for (int guard = 0; guard < numBones && parent >= 0 && parent < numBones; ++guard)
+        {
+            const int parentNameScore =
+                (parent < static_cast<int>(boneNames.size()))
+                ? ScoreManualReloadMagazineBoneName(boneNames[static_cast<size_t>(parent)])
+                : 0;
+            if (parentNameScore <= 0)
+                break;
+
+            resolvedVisualBone = parent;
+            resolvedVisualScore = std::max(resolvedVisualScore, parentNameScore);
+            parent = boneParents[static_cast<size_t>(resolvedVisualBone)];
+        }
+
+        LockManualReloadMagazineBone(
+            vr,
+            modelName,
+            resolvedVisualBone,
+            motionProbe.bone,
+            boneNames,
+            modelAnchor,
+            cache.initialLocalBones[static_cast<size_t>(resolvedVisualBone)],
+            cache.initialLocalBones[static_cast<size_t>(motionProbe.bone)],
+            reason,
+            resolvedVisualScore,
+            motionProbe.movedMeters);
+        return resolvedVisualBone;
+    }
+
+    inline bool ManualReloadLocalBonesDiffer(
+        const std::vector<vr_vm_stabilize::Mat3x4>& a,
+        const std::vector<vr_vm_stabilize::Mat3x4>& b)
+    {
+        if (a.size() != b.size())
+            return true;
+
+        // Local matrices remove controller/camera motion. A small threshold is enough
+        // to detect actual Source animation progress while avoiding duplicate stereo draws.
+        constexpr float kDifferenceThreshold = 0.0005f;
+        for (size_t bone = 0; bone < a.size(); ++bone)
+        {
+            for (int row = 0; row < 3; ++row)
+            {
+                for (int column = 0; column < 4; ++column)
+                {
+                    if (std::fabs(a[bone].m[row][column] - b[bone].m[row][column]) > kDifferenceThreshold)
+                        return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    inline void CaptureManualReloadTailPose(
+        VR* vr,
+        ManualReloadFrozenViewmodelPoseEntry& entry,
+        const vr_vm_stabilize::Mat3x4& modelAnchor,
+        const vr_vm_stabilize::Mat3x4* sourceBones,
+        int numBones)
+    {
+        if (!vr || !sourceBones || numBones <= 0 || vr->m_ManualReloadTailCaptureComplete)
+            return;
+
+        const auto now = std::chrono::steady_clock::now();
+        if (entry.tailCaptureStarted.time_since_epoch().count() == 0)
+            entry.tailCaptureStarted = now;
+
+        const float elapsed = std::chrono::duration<float>(now - entry.tailCaptureStarted).count();
+        if (elapsed > 3.0f || entry.tailSamples.size() >= 240)
+            return;
+
+        if (entry.tailLastSample.time_since_epoch().count() != 0 &&
+            std::chrono::duration<float>(now - entry.tailLastSample).count() < (1.0f / 90.0f))
+        {
+            return;
+        }
+
+        std::vector<vr_vm_stabilize::Mat3x4> localBones;
+        if (!BuildManualReloadLocalBones(modelAnchor, sourceBones, numBones, localBones))
+            return;
+
+        if (!entry.tailSamples.empty() &&
+            !ManualReloadLocalBonesDiffer(localBones, entry.tailSamples.back().localBones))
+        {
+            return;
+        }
+
+        ManualReloadTailPoseSample sample;
+        sample.timeSeconds = elapsed;
+        sample.localBones.swap(localBones);
+        entry.tailSamples.push_back(sample);
+        entry.tailLastSample = now;
+        vr->m_ManualReloadVisualResumeDurationSeconds = std::max(
+            vr->m_ManualReloadVisualResumeDurationSeconds,
+            elapsed);
+    }
+
+    inline const std::vector<vr_vm_stabilize::Mat3x4>* SelectManualReloadReplayLocalBones(
+        const ManualReloadFrozenViewmodelPoseEntry& entry,
+        float elapsedSeconds)
+    {
+        if (entry.tailSamples.empty())
+            return &entry.frozenLocalBones;
+
+        const ManualReloadTailPoseSample* selected = &entry.tailSamples.front();
+        for (const ManualReloadTailPoseSample& sample : entry.tailSamples)
+        {
+            if (sample.timeSeconds > elapsedSeconds)
+                break;
+            selected = &sample;
+        }
+        return &selected->localBones;
+    }
+
+    inline void ApplyManualReloadLocalPose(
+        const vr_vm_stabilize::Mat3x4& modelAnchor,
+        const std::vector<vr_vm_stabilize::Mat3x4>& localBones,
+        vr_vm_stabilize::Mat3x4* outBones,
+        int numBones)
+    {
+        if (!outBones || static_cast<int>(localBones.size()) != numBones)
+            return;
+
+        for (int bone = 0; bone < numBones; ++bone)
+            vr_vm_stabilize::Mul(modelAnchor, localBones[static_cast<size_t>(bone)], outBones[bone]);
+    }
+
     inline void ApplyManualReloadViewmodelOverride(
         VR* vr,
         void* drawState,
@@ -805,6 +1642,9 @@ namespace
         {
             if (!vr || frozenCache.owner == vr)
                 frozenCache.Reset();
+            ManualReloadMagazineResolverCache& resolverCache = GetManualReloadMagazineResolverCache();
+            if (!vr || resolverCache.owner == vr)
+                resolverCache.Reset();
             return;
         }
         if (!drawState || !pCustomBoneToWorld)
@@ -834,40 +1674,46 @@ namespace
         if (numBones <= 0 || numBones > 512 || static_cast<int>(boneNames.size()) < numBones)
             return;
 
-        int clipBone = -1;
-        for (int bone = 0; bone < numBones; ++bone)
-        {
-            if (vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(bone)]) == "v_weapon.m4a1_clip")
-            {
-                clipBone = bone;
-                break;
-            }
-        }
-
         vr_vm_stabilize::Mat3x4 modelAnchor{};
         if (!TryGetManualReloadModelAnchor(info, modelAnchor))
             return;
 
         const auto* sourceBones = reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pCustomBoneToWorld);
+        int clipBone = GetManualReloadLockedMagazineBone(vr, modelName, numBones);
+        if (clipBone < 0)
+        {
+            clipBone = ResolveManualReloadMagazineBone(
+                vr,
+                modelName,
+                boneNames,
+                boneParents,
+                modelAnchor,
+                sourceBones,
+                numBones);
+        }
+
         if (clipBone >= 0 && viewmodelEntity)
         {
+            const int motionBone = GetManualReloadLockedMagazineMotionBone(vr, modelName, numBones);
             vr_vm_stabilize::Mat3x4 clip{};
+            vr_vm_stabilize::Mat3x4 motionProbe{};
             if (!vr_vm_stabilize::SafeRead(sourceBones + clipBone, clip))
                 return;
+            if (motionBone < 0 || !vr_vm_stabilize::SafeRead(sourceBones + motionBone, motionProbe))
+                motionProbe = clip;
 
-            // Derive the insertion socket from the model-level anchor, not from an
-            // animated weapon root bone. The root bone itself moves during reload,
-            // which made the supposedly fixed socket drift while the animation ran.
             vr->OnManualReloadViewmodelPose(
                 modelName.c_str(),
                 viewmodelEntity,
                 HooksMat3x4ToVrHandMatrix(modelAnchor),
-                HooksMat3x4ToVrHandMatrix(clip));
+                HooksMat3x4ToVrHandMatrix(clip),
+                HooksMat3x4ToVrHandMatrix(motionProbe));
         }
 
         const bool visuallyPauseViewmodel = IsManualReloadViewmodelVisualPauseState(vr);
+        const bool visuallyReplayViewmodel = IsManualReloadViewmodelVisualReplayState(vr);
         const bool hideNativeClip = vr->ShouldHideManualReloadNativeClip() && clipBone >= 0;
-        if (!visuallyPauseViewmodel && !hideNativeClip)
+        if (!visuallyPauseViewmodel && !visuallyReplayViewmodel && !hideNativeClip)
         {
             if (frozenCache.owner == vr)
             {
@@ -892,7 +1738,7 @@ namespace
                 return;
         }
 
-        if (visuallyPauseViewmodel)
+        if (visuallyPauseViewmodel || visuallyReplayViewmodel)
         {
             if (frozenCache.owner != vr)
             {
@@ -907,7 +1753,7 @@ namespace
                 frozenPose.modelName != modelName ||
                 frozenPose.numBones != numBones ||
                 frozenPose.rootBone != rootBone ||
-                static_cast<int>(frozenPose.frozenWorldBones.size()) != numBones;
+                static_cast<int>(frozenPose.frozenLocalBones.size()) != numBones;
 
             if (needCapture)
             {
@@ -915,29 +1761,37 @@ namespace
                 frozenPose.modelName = modelName;
                 frozenPose.numBones = numBones;
                 frozenPose.rootBone = rootBone;
-                frozenPose.valid = true;
-                frozenPose.frozenModelAnchor = modelAnchor;
-                frozenPose.frozenWorldBones.assign(copiedBones, copiedBones + numBones);
-                Game::logMsg(
-                    "[VR][ManualReload] cached frozen viewmodel pose model=%s bones=%d root=%d",
-                    modelName.c_str(),
+                frozenPose.valid = BuildManualReloadLocalBones(
+                    modelAnchor,
+                    sourceBones,
                     numBones,
-                    rootBone);
+                    frozenPose.frozenLocalBones);
+                if (frozenPose.valid)
+                {
+                    Game::logMsg(
+                        "[VR][ManualReload] cached frozen viewmodel pose model=%s bones=%d root=%d",
+                        modelName.c_str(),
+                        numBones,
+                        rootBone);
+                }
             }
 
             if (frozenPose.valid)
             {
-                vr_vm_stabilize::Mat3x4 inverseFrozenAnchor{};
-                vr_vm_stabilize::Mat3x4 anchorDelta{};
-                vr_vm_stabilize::InvertTR(frozenPose.frozenModelAnchor, inverseFrozenAnchor);
-                vr_vm_stabilize::Mul(modelAnchor, inverseFrozenAnchor, anchorDelta);
-                for (int bone = 0; bone < numBones; ++bone)
-                    vr_vm_stabilize::Mul(anchorDelta, frozenPose.frozenWorldBones[static_cast<size_t>(bone)], copiedBones[bone]);
+                if (visuallyPauseViewmodel)
+                {
+                    CaptureManualReloadTailPose(vr, frozenPose, modelAnchor, sourceBones, numBones);
+                    ApplyManualReloadLocalPose(modelAnchor, frozenPose.frozenLocalBones, copiedBones, numBones);
+                }
+                else
+                {
+                    const float elapsedSeconds = std::chrono::duration<float>(
+                        std::chrono::steady_clock::now() - vr->m_ManualReloadResumeStarted).count();
+                    const auto* replayLocalBones = SelectManualReloadReplayLocalBones(frozenPose, elapsedSeconds);
+                    if (replayLocalBones)
+                        ApplyManualReloadLocalPose(modelAnchor, *replayLocalBones, copiedBones, numBones);
+                }
             }
-        }
-        else if (frozenCache.owner == vr)
-        {
-            frozenCache.models.erase(lowerModel);
         }
 
         if (hideNativeClip)

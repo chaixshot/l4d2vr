@@ -116,7 +116,7 @@ enum class ManualReloadState
 	WatchingNativeClipRemoval,
 	WaitingForFreshMagazineGrab,
 	HoldingFreshMagazine,
-	ResumingNativeReloadWithGlbMagazine
+	ResumingNativeReloadWithMagazine
 };
 
 struct D3DAimLineOverlayEyeState
@@ -1037,22 +1037,32 @@ public:
 	int m_VrHandsActiveEyeIndex = -1;
 	bool m_VrHandsWorldMaskDrawn = false;
 
-	// First manual-reload prototype: M16 / M16A1 only.
-	// The native v_weapon.M4A1_Clip bone exits through the original reload animation, then remains hidden
-	// while the player inserts a standalone GLB magazine with the left hand.
+	// Manual magazine reload prototype for detachable-magazine firearms.
+	// The current viewmodel is scanned for a likely clip/magazine root bone. The old native magazine exits
+	// through the original animation, then a movable Source-rendered copy is inserted with the left hand.
 	bool m_ManualReloadEnabled = false;
-	// Temporary controllerless validation path for MouseModeEnabled. It drives the GLB magazine
-	// with keyboard keys so the full state machine can be tested before physical hand input is available.
+	// Temporary controllerless validation path for MouseModeEnabled. It drives the movable native
+	// magazine with keyboard keys so the full state machine can be tested before physical hand input is available.
 	bool m_ManualReloadMouseTestMode = false;
-	std::string m_ManualReloadMagazineGlbPath = "VR\\manual_reload\\m16_clip.glb";
-	float m_ManualReloadMagazineModelScale = 1.0f;
+	// Optional exact per-weapon visual magazine bone overrides. Empty keeps automatic detection.
+	// Config format: ak47:Magazine_Main,m16a1:v_weapon.M4A1_Clip,scar:j_mag1
+	std::string m_ManualReloadMagazineBoneOverridesSpec;
+	std::unordered_map<int, std::vector<std::string>> m_ManualReloadMagazineBoneOverrides;
+	// The active manual-reload weapon id is snapshotted at BeginManualReload so the render hook
+	// can resolve the configured override without dereferencing gameplay entity state.
+	int m_ManualReloadWeaponId = 0;
+	// The visible magazine reuses the active Source viewmodel model/material path.
+	// No standalone GLB magazine asset is required.
 	float m_ManualReloadNativeClipLeaveDistanceMeters = 0.05f;
 	float m_ManualReloadMagazineGrabRangeMeters = 0.18f;
 	float m_ManualReloadMagazineGuideStartDepthMeters = 0.10f;
 	float m_ManualReloadMagazineFullInsertDepthMeters = 0.012f;
 	float m_ManualReloadMagazineCaptureRadiusMeters = 0.045f;
 	float m_ManualReloadMagazineCaptureAngleDeg = 35.0f;
+	// Fallback only. Each reload derives its actual outward/insertion axis from the animated native clip movement.
 	Vector m_ManualReloadMagazineInsertionAxisLocal = { 0.0f, -1.0f, 0.0f };
+	Vector m_ManualReloadResolvedInsertionAxisLocal = { 0.0f, -1.0f, 0.0f };
+	bool m_ManualReloadResolvedInsertionAxisValid = false;
 	Vector m_ManualReloadMagazineHandOffsetMeters = { 0.0f, 0.0f, 0.0f };
 	Vector m_ManualReloadMagazineHandRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	Vector m_ManualReloadMagazineSocketOffsetMeters = { 0.0f, 0.0f, 0.0f };
@@ -1060,15 +1070,31 @@ public:
 	ManualReloadState m_ManualReloadState = ManualReloadState::Idle;
 	C_WeaponCSBase* m_ManualReloadWeapon = nullptr;
 	void* m_ManualReloadViewmodelEntity = nullptr;
+	// Locked per-reload detachable magazine bone. Workshop replacement viewmodels often keep
+	// legacy ValveBiped.weapon_clip helpers while the visible mesh is weighted to a different
+	// custom bone such as Magazine_Main or j_mag1, so the selected bone must remain stable
+	// after resolution instead of being rescored independently for every draw call.
+	std::string m_ManualReloadMagazineModelName;
+	// Visual magazine root used for hiding the native copy and drawing the detached Source-material copy.
+	int m_ManualReloadMagazineBoneIndex = -1;
+	// Motion probe may differ from the visible root. Replacement models often animate a legacy
+	// ValveBiped.weapon_clip helper while the visible mesh is weighted to a custom Magazine/j_mag bone.
+	int m_ManualReloadMagazineMotionBoneIndex = -1;
 	VrHandMatrix4 m_ManualReloadSocketLocal{};
 	VrHandMatrix4 m_ManualReloadSocketWorld{};
 	bool m_ManualReloadSocketValid = false;
+	VrHandMatrix4 m_ManualReloadMotionProbeLocal{};
+	bool m_ManualReloadMotionProbeValid = false;
 	bool m_ManualReloadHideNativeClip = false;
 	bool m_ManualReloadMagazineInsertionArmed = false;
 	int m_ManualReloadFrozenSequence = -1;
 	float m_ManualReloadFrozenCycle = 0.0f;
 	float m_ManualReloadOriginalPlaybackRate = 1.0f;
 	bool m_ManualReloadViewmodelFrozen = false;
+	// While the visible viewmodel is frozen, DrawModelExecute continues sampling the hidden native tail.
+	// After insertion those captured poses are replayed locally even if Source gameplay already returned to idle.
+	float m_ManualReloadVisualResumeDurationSeconds = 0.0f;
+	bool m_ManualReloadTailCaptureComplete = false;
 	std::chrono::steady_clock::time_point m_ManualReloadStarted{};
 	std::chrono::steady_clock::time_point m_ManualReloadResumeStarted{};
 	// Runtime-only keyboard test state. The offset is expressed in calibrated socket-local meters.
@@ -2646,7 +2672,8 @@ public:
 		const char* modelName,
 		void* viewmodelEntity,
 		const VrHandMatrix4& rootWorld,
-		const VrHandMatrix4& nativeClipWorld);
+		const VrHandMatrix4& nativeClipWorld,
+		const VrHandMatrix4& nativeMotionProbeWorld);
 	bool GetManualReloadMagazineWorld(VrHandMatrix4& outWorld) const;
 	void BeginVrHandsEyeRender(const CViewSetup& view, int eyeIndex);
 	void DrawVrHandsWorldDepthMaskBeforeViewmodel();

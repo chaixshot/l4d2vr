@@ -1,12 +1,5 @@
 void VR::ProcessInput()
 {
-    // Release the one-frame keyboard-test reload pulse before any early-return path.
-    if (m_ManualReloadMouseTestReloadPulseOwned && m_Game)
-    {
-        m_Game->ClientCmd_Unrestricted("-reload");
-        m_ManualReloadMouseTestReloadPulseOwned = false;
-    }
-
     if (!m_IsVREnabled)
         return;
 
@@ -436,8 +429,8 @@ void VR::ProcessInput()
     bool reloadButtonDown = false;
     bool reloadJustPressed = false;
     bool reloadDataValid = getActionState(&m_ActionReload, reloadActionData, reloadButtonDown, reloadJustPressed);
-    // The first manual-reload prototype intentionally reuses the existing left-hand Reload / grip binding.
-    // During the paused phase, a fresh press at the left waist grabs the standalone magazine GLB.
+    // Manual reload reuses the existing left-hand Reload / grip binding.
+    // During the paused phase, a fresh press at the left waist grabs a movable Source-rendered native magazine.
     // MouseMode can optionally drive the same state machine with temporary keyboard test controls.
     UpdateManualReloadMouseTestKeyboard(localPlayer);
     const bool manualReloadMouseTestActive = m_ManualReloadMouseTestMode && m_MouseModeEnabled;

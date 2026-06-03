@@ -1124,10 +1124,102 @@ void VR::ParseConfigFile()
     m_VrHandsMotionRangeWithoutController = getBool("VrHandsMotionRangeWithoutController", m_VrHandsMotionRangeWithoutController);
     m_VrHandsDebugLog = getBool("VrHandsDebugLog", m_VrHandsDebugLog);
     m_VrHandsModelScale = std::clamp(getFloat("VrHandsModelScale", m_VrHandsModelScale), 0.25f, 4.0f);
+    m_VrHandsRightUseViewmodelPose = getBool("VrHandsRightUseViewmodelPose", m_VrHandsRightUseViewmodelPose);
     m_ManualReloadEnabled = getBool("ManualReloadEnabled", m_ManualReloadEnabled);
     m_ManualReloadMouseTestMode = getBool("ManualReloadMouseTestMode", m_ManualReloadMouseTestMode);
-    m_ManualReloadMagazineGlbPath = getString("ManualReloadMagazineGlbPath", m_ManualReloadMagazineGlbPath);
-    m_ManualReloadMagazineModelScale = std::clamp(getFloat("ManualReloadMagazineModelScale", m_ManualReloadMagazineModelScale), 0.01f, 20.0f);
+    m_ManualReloadMagazineBoneOverridesSpec = getString("ManualReloadMagazineBoneOverrides", m_ManualReloadMagazineBoneOverridesSpec);
+    m_ManualReloadMagazineBoneOverrides.clear();
+    {
+        auto normalizeManualReloadWeaponKey = [&](std::string value)
+            {
+                trim(value);
+                std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                std::replace(value.begin(), value.end(), '-', '_');
+                std::replace(value.begin(), value.end(), ' ', '_');
+                return value;
+            };
+
+        const std::unordered_map<std::string, int> manualReloadWeaponAliases =
+        {
+            { "pistol", C_WeaponCSBase::WeaponID::PISTOL },
+            { "pistols", C_WeaponCSBase::WeaponID::PISTOL },
+            { "uzi", C_WeaponCSBase::WeaponID::UZI },
+            { "smg", C_WeaponCSBase::WeaponID::UZI },
+            { "m16", C_WeaponCSBase::WeaponID::M16A1 },
+            { "m16a", C_WeaponCSBase::WeaponID::M16A1 },
+            { "m16a1", C_WeaponCSBase::WeaponID::M16A1 },
+            { "rifle", C_WeaponCSBase::WeaponID::M16A1 },
+            { "hunting_rifle", C_WeaponCSBase::WeaponID::HUNTING_RIFLE },
+            { "huntingrifle", C_WeaponCSBase::WeaponID::HUNTING_RIFLE },
+            { "mac10", C_WeaponCSBase::WeaponID::MAC10 },
+            { "mac_10", C_WeaponCSBase::WeaponID::MAC10 },
+            { "scar", C_WeaponCSBase::WeaponID::SCAR },
+            { "desert_rifle", C_WeaponCSBase::WeaponID::SCAR },
+            { "sniper_military", C_WeaponCSBase::WeaponID::SNIPER_MILITARY },
+            { "military_sniper", C_WeaponCSBase::WeaponID::SNIPER_MILITARY },
+            { "ak", C_WeaponCSBase::WeaponID::AK47 },
+            { "ak47", C_WeaponCSBase::WeaponID::AK47 },
+            { "magnum", C_WeaponCSBase::WeaponID::MAGNUM },
+            { "deagle", C_WeaponCSBase::WeaponID::MAGNUM },
+            { "desert_eagle", C_WeaponCSBase::WeaponID::MAGNUM },
+            { "mp5", C_WeaponCSBase::WeaponID::MP5 },
+            { "sg552", C_WeaponCSBase::WeaponID::SG552 },
+            { "awp", C_WeaponCSBase::WeaponID::AWP },
+            { "scout", C_WeaponCSBase::WeaponID::SCOUT }
+        };
+
+        auto parseManualReloadWeaponId = [&](const std::string& rawKey, int& outWeaponId)
+            {
+                const std::string key = normalizeManualReloadWeaponKey(rawKey);
+                if (key.empty())
+                    return false;
+
+                char* end = nullptr;
+                const long numeric = std::strtol(key.c_str(), &end, 10);
+                if (end && *end == '\0' && numeric > 0 && numeric <= static_cast<long>(C_WeaponCSBase::WeaponID::UPGRADE_ITEM))
+                {
+                    outWeaponId = static_cast<int>(numeric);
+                    return true;
+                }
+
+                const auto it = manualReloadWeaponAliases.find(key);
+                if (it == manualReloadWeaponAliases.end())
+                    return false;
+
+                outWeaponId = it->second;
+                return true;
+            };
+
+        std::stringstream ss(m_ManualReloadMagazineBoneOverridesSpec);
+        std::string entry;
+        while (std::getline(ss, entry, ','))
+        {
+            trim(entry);
+            if (entry.empty())
+                continue;
+
+            const size_t separator = entry.find(':');
+            if (separator == std::string::npos)
+            {
+                Game::logMsg("[VR][ManualReload] ignored invalid magazine bone override entry=%s", entry.c_str());
+                continue;
+            }
+
+            std::string weaponKey = entry.substr(0, separator);
+            std::string boneName = entry.substr(separator + 1);
+            trim(weaponKey);
+            trim(boneName);
+
+            int weaponId = 0;
+            if (boneName.empty() || !parseManualReloadWeaponId(weaponKey, weaponId))
+            {
+                Game::logMsg("[VR][ManualReload] ignored invalid magazine bone override entry=%s", entry.c_str());
+                continue;
+            }
+
+            m_ManualReloadMagazineBoneOverrides[weaponId].push_back(boneName);
+        }
+    }
     m_ManualReloadNativeClipLeaveDistanceMeters = std::clamp(getFloat("ManualReloadNativeClipLeaveDistanceMeters", m_ManualReloadNativeClipLeaveDistanceMeters), 0.001f, 0.50f);
     m_ManualReloadMagazineGrabRangeMeters = std::clamp(getFloat("ManualReloadMagazineGrabRangeMeters", m_ManualReloadMagazineGrabRangeMeters), 0.01f, 0.50f);
     m_ManualReloadMagazineGuideStartDepthMeters = std::clamp(getFloat("ManualReloadMagazineGuideStartDepthMeters", m_ManualReloadMagazineGuideStartDepthMeters), 0.01f, 0.50f);
