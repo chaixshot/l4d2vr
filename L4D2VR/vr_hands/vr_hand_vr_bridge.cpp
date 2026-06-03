@@ -44,13 +44,12 @@ bool VR::DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass 
         sceneLightScale = std::clamp(localLuma / 110.0f, 0.08f, 1.0f);
     }
 
-    VrHandMatrix4 manualReloadMagazineWorld{};
-    const VrHandMatrix4* manualReloadMagazineWorldPtr =
-        GetManualReloadMagazineWorld(manualReloadMagazineWorld) ? &manualReloadMagazineWorld : nullptr;
-    const bool manualReloadMagazineUseViewmodelLayer =
-        manualReloadMagazineWorldPtr &&
-        ((m_ManualReloadMouseTestMode && m_MouseModeEnabled) ||
-            m_ManualReloadState == ManualReloadState::ResumingNativeReloadWithGlbMagazine);
+    // The detachable magazine is rendered by repeating the native Source
+    // viewmodel draw with every non-clip bone moved out of view. This reuses
+    // the weapon model's active materials, shader path and lighting exactly.
+    // Do not also draw the old standalone D3D9 GLB visual.
+    const VrHandMatrix4* manualReloadMagazineWorldPtr = nullptr;
+    const bool manualReloadMagazineUseViewmodelLayer = false;
 
     const bool drewAny = m_VrHands->DrawForEye(
         device,

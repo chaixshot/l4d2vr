@@ -524,6 +524,161 @@ namespace
         return out;
     }
 
+    inline vr_vm_stabilize::Mat3x4 HooksVrHandMatrixToMat3x4(const VrHandMatrix4& source)
+    {
+        vr_vm_stabilize::Mat3x4 out{};
+        for (int row = 0; row < 3; ++row)
+        {
+            for (int column = 0; column < 4; ++column)
+                out.m[row][column] = VrHandMath::Get(source, row, column);
+        }
+        return out;
+    }
+
+    inline VrHandMatrix4 HooksStripVrHandMatrixScale(const VrHandMatrix4& source)
+    {
+        VrHandMatrix4 out = source;
+        for (int column = 0; column < 3; ++column)
+        {
+            Vector axis(
+                VrHandMath::Get(out, 0, column),
+                VrHandMath::Get(out, 1, column),
+                VrHandMath::Get(out, 2, column));
+            const float length = axis.Length();
+            if (!(length > 0.000001f))
+                continue;
+            axis *= (1.0f / length);
+            VrHandMath::Set(out, 0, column, axis.x);
+            VrHandMath::Set(out, 1, column, axis.y);
+            VrHandMath::Set(out, 2, column, axis.z);
+        }
+        return out;
+    }
+
+    inline bool ShouldDrawManualReloadNativeMagazine(const VR* vr)
+    {
+        return vr &&
+            (vr->m_ManualReloadState == ManualReloadState::HoldingFreshMagazine ||
+                vr->m_ManualReloadState == ManualReloadState::ResumingNativeReloadWithGlbMagazine);
+    }
+
+    inline bool BuildManualReloadNativeMagazineBones(
+        VR* vr,
+        void* drawState,
+        const std::string& modelName,
+        const void* pCustomBoneToWorld,
+        vr_vm_stabilize::Mat3x4*& outBones)
+    {
+        outBones = nullptr;
+        if (!vr || !ShouldDrawManualReloadNativeMagazine(vr) || !drawState || !pCustomBoneToWorld)
+            return false;
+        if (!vr->m_Game || vr->m_Game->GetMatQueueMode() != 0)
+            return false;
+
+        const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
+        if (!HooksModelNameIsViewmodel(lowerModel))
+            return false;
+
+        std::vector<std::string> boneNames;
+        std::vector<int> boneParents;
+        int numBones = 0;
+        int boneIndex = 0;
+        int stride = 0;
+        int numBonesOffset = 0;
+        if (!vr_vm_stabilize::TryCollectBoneNamesFromDrawState(
+            drawState,
+            boneNames,
+            boneParents,
+            numBones,
+            boneIndex,
+            stride,
+            numBonesOffset))
+        {
+            return false;
+        }
+        if (numBones <= 0 || numBones > 512 || static_cast<int>(boneNames.size()) < numBones)
+            return false;
+
+        int clipBone = -1;
+        for (int bone = 0; bone < numBones; ++bone)
+        {
+            if (vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(bone)]) == "v_weapon.m4a1_clip")
+            {
+                clipBone = bone;
+                break;
+            }
+        }
+        if (clipBone < 0)
+            return false;
+
+        VrHandMatrix4 targetMagazineWorld{};
+        if (!vr->GetManualReloadMagazineWorld(targetMagazineWorld))
+            return false;
+        targetMagazineWorld = HooksStripVrHandMatrixScale(targetMagazineWorld);
+
+        const auto* sourceBones = reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pCustomBoneToWorld);
+        vr_vm_stabilize::Mat3x4 originalClipWorld{};
+        if (!vr_vm_stabilize::SafeRead(sourceBones + clipBone, originalClipWorld))
+            return false;
+
+        vr_vm_stabilize::Mat3x4 inverseOriginalClip{};
+        vr_vm_stabilize::Mat3x4 targetClipWorld = HooksVrHandMatrixToMat3x4(targetMagazineWorld);
+        vr_vm_stabilize::Mat3x4 targetDelta{};
+        vr_vm_stabilize::InvertTR(originalClipWorld, inverseOriginalClip);
+        vr_vm_stabilize::Mul(targetClipWorld, inverseOriginalClip, targetDelta);
+
+        uint32_t seqEven = vr->m_RenderFrameSeq.load(std::memory_order_relaxed) & ~1u;
+        if (seqEven == 0)
+            seqEven = (static_cast<uint32_t>(GetTickCount()) << 1u) | 2u;
+        vr_vm_stabilize::Mat3x4* isolatedBones = vr_vm_stabilize::AllocStableBones(numBones, seqEven);
+        if (!isolatedBones)
+            return false;
+
+        auto isClipOrDescendant = [&](int bone)
+            {
+                int current = bone;
+                for (int guard = 0; guard < numBones && current >= 0 && current < numBones; ++guard)
+                {
+                    if (current == clipBone)
+                        return true;
+                    current = boneParents[static_cast<size_t>(current)];
+                }
+                return false;
+            };
+
+        for (int bone = 0; bone < numBones; ++bone)
+        {
+            vr_vm_stabilize::Mat3x4 source{};
+            if (!vr_vm_stabilize::SafeRead(sourceBones + bone, source))
+                return false;
+
+            if (isClipOrDescendant(bone))
+            {
+                vr_vm_stabilize::Mul(targetDelta, source, isolatedBones[bone]);
+            }
+            else
+            {
+                isolatedBones[bone] = source;
+                isolatedBones[bone].m[0][3] += 100000.0f;
+                isolatedBones[bone].m[1][3] += 100000.0f;
+                isolatedBones[bone].m[2][3] += 100000.0f;
+            }
+        }
+
+        static bool s_loggedSourceMagazineDraw = false;
+        if (!s_loggedSourceMagazineDraw)
+        {
+            s_loggedSourceMagazineDraw = true;
+            Game::logMsg(
+                "[VR][ManualReload] drawing detached magazine through Source viewmodel shader model=%s clipBone=%d",
+                modelName.c_str(),
+                clipBone);
+        }
+
+        outBones = isolatedBones;
+        return true;
+    }
+
     inline void MaybeCaptureVrHandsVmPose(
         VR* vr,
         void* drawState,
@@ -972,6 +1127,8 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 	bool hideArms = m_Game->m_IsMeleeWeaponActive || m_VR->m_HideArms;
 
 	void* pBonesToWorldFinal = pCustomBoneToWorld;
+	vr_vm_stabilize::Mat3x4* manualReloadNativeMagazineBones = nullptr;
+	bool drawManualReloadNativeMagazine = false;
 
 	// Per-draw origin/angles override (used for multicore viewmodel stabilization).
 	// We never write into shared entity state here; we only override the ModelRenderInfo_t
@@ -1445,6 +1602,13 @@ if (m_VR->m_IsVREnabled && queueMode == 2 && (m_VR->m_QueuedViewmodelStabilize |
 			}
 		}
 
+		drawManualReloadNativeMagazine = BuildManualReloadNativeMagazineBones(
+			m_VR,
+			state,
+			modelName,
+			pBonesToWorldFinal,
+			manualReloadNativeMagazineBones);
+
 		ApplyManualReloadViewmodelOverride(
 			m_VR,
 			state,
@@ -1479,6 +1643,12 @@ if (m_VR->m_IsVREnabled && queueMode == 2 && (m_VR->m_QueuedViewmodelStabilize |
 	}
 
 	hkDrawModelExecute.fOriginal(ecx, state, *pDrawInfo, pBonesToWorldFinal);
+
+	// Draw the detached/new magazine as a second pass of the original weapon
+	// viewmodel. Every non-clip bone is moved out of view, so Source applies the
+	// same active material, shader, skin, lighting and post-processing as the gun.
+	if (drawManualReloadNativeMagazine && manualReloadNativeMagazineBones)
+		hkDrawModelExecute.fOriginal(ecx, state, *pDrawInfo, manualReloadNativeMagazineBones);
 }
 
 // Returns true if the engine RT being pushed looks like the HUD/VGUI render target.
