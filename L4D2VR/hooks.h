@@ -108,9 +108,9 @@ typedef void(__thiscall* tConVarInternalSetValueString)(void* thisptr, const cha
 typedef void(__thiscall* tConVarInternalSetValueFloat)(void* thisptr, float value);
 typedef void(__thiscall* tConVarInternalSetValueInt)(void* thisptr, int value);
 typedef void(__cdecl* tHudUserMessage)(void* msgData);
-// IEngineSoundClient003 vfuncs #4 and #5. The recipient filter reference is passed as a pointer at the ABI boundary.
-typedef void(__thiscall* tEmitSoundAttenuation)(void* thisptr, void* filter, int entIndex, int channel, const char* sample, float volume, float attenuation, int flags, int pitch, int specialDSP, const Vector* origin, const Vector* direction, void* origins, bool updatePositions, float soundTime, int speakerEntity);
-typedef void(__thiscall* tEmitSoundLevel)(void* thisptr, void* filter, int entIndex, int channel, const char* sample, float volume, int soundLevel, int flags, int pitch, int specialDSP, const Vector* origin, const Vector* direction, void* origins, bool updatePositions, float soundTime, int speakerEntity);
+// L4D2 IEngineSoundClient003 vfuncs #5 and #6. The recipient filter reference is passed as a pointer at the ABI boundary.
+typedef void(__thiscall* tEmitSoundAttenuation)(void* thisptr, void* filter, int entIndex, int channel, const char* sample, float volume, float attenuation, int flags, int pitch, const Vector* origin, const Vector* direction, void* origins, bool updatePositions, float soundTime, int speakerEntity);
+typedef void(__thiscall* tEmitSoundLevel)(void* thisptr, void* filter, int entIndex, int channel, const char* sample, float volume, int soundLevel, int flags, int pitch, const Vector* origin, const Vector* direction, void* origins, bool updatePositions, float soundTime, int speakerEntity);
 
 
 class Hooks
@@ -217,8 +217,8 @@ public:
 	static void dSayText(void* msgData);
 	static void dSayText2(void* msgData);
 	static void dTextMsg(void* msgData);
-	static void __fastcall dEmitSoundAttenuation(void* ecx, void* edx, void* filter, int entIndex, int channel, const char* sample, float volume, float attenuation, int flags, int pitch, int specialDSP, const Vector* origin, const Vector* direction, void* origins, bool updatePositions, float soundTime, int speakerEntity);
-	static void __fastcall dEmitSoundLevel(void* ecx, void* edx, void* filter, int entIndex, int channel, const char* sample, float volume, int soundLevel, int flags, int pitch, int specialDSP, const Vector* origin, const Vector* direction, void* origins, bool updatePositions, float soundTime, int speakerEntity);
+	static void __fastcall dEmitSoundAttenuation(void* ecx, void* edx, void* filter, int entIndex, int channel, const char* sample, float volume, float attenuation, int flags, int pitch, const Vector* origin, const Vector* direction, void* origins, bool updatePositions, float soundTime, int speakerEntity);
+	static void __fastcall dEmitSoundLevel(void* ecx, void* edx, void* filter, int entIndex, int channel, const char* sample, float volume, int soundLevel, int flags, int pitch, const Vector* origin, const Vector* direction, void* origins, bool updatePositions, float soundTime, int speakerEntity);
 
 	// HUD render-target interception uses a small state machine to detect the
 	// engine's "push HUD RT" sequence:

@@ -933,6 +933,7 @@ namespace
         VR* vr,
         void* drawState,
         const std::string& modelName,
+        const ModelRenderInfo_t& modelInfo,
         const void* pCustomBoneToWorld)
     {
         if (!vr || !vr->m_VrHandsEnabled || !vr->m_VrHandsRightUseViewmodelPose)
@@ -970,7 +971,14 @@ namespace
             boneWorldMatrices[static_cast<size_t>(bone)] = HooksMat3x4ToVrHandMatrix(source);
         }
 
-        VrHandVmPose::Capture(modelName.c_str(), boneNames, boneParents, boneWorldMatrices);
+        vr_vm_stabilize::Mat3x4 modelWorld{};
+        vr_vm_stabilize::BuildFromOrgAngles(modelInfo.origin, modelInfo.angles, modelWorld);
+        VrHandVmPose::Capture(
+            modelName.c_str(),
+            boneNames,
+            boneParents,
+            HooksMat3x4ToVrHandMatrix(modelWorld),
+            boneWorldMatrices);
     }
 
     struct ManualReloadTailPoseSample
@@ -2247,7 +2255,10 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 // In queued rendering (mat_queue_mode!=0), viewmodels are frequently submitted with custom bone matrices.
 // In that case, overriding ModelRenderInfo_t.origin/angles does NOT move the model (it stays "head-locked").
 // So we apply a rigid delta to the bone matrices for this draw call, based on our controller-anchored target.
-if (m_VR->m_IsVREnabled && queueMode == 2 && (m_VR->m_QueuedViewmodelStabilize || m_VR->m_ViewmodelDisableMoveBob))
+if (m_VR->m_IsVREnabled && queueMode == 2 &&
+	(m_VR->m_QueuedViewmodelStabilize ||
+	 m_VR->m_ViewmodelDisableMoveBob ||
+	 (!m_VR->m_MouseModeEnabled && m_VR->m_VrHandsRightUseViewmodelPose)))
 {
 	const bool isViewmodelClass = className &&
 		(std::strcmp(className, "CBaseViewModel") == 0 || std::strcmp(className, "C_BaseViewModel") == 0);
@@ -2650,7 +2661,7 @@ if (m_VR->m_IsVREnabled && queueMode == 2 && (m_VR->m_QueuedViewmodelStabilize |
 	// Capture the exact arm matrices submitted to Source. In queued rendering
 	// pBonesToWorldFinal contains the same stabilization delta as the visible gun,
 	// so the standalone right glove follows controller rotation and HMD movement.
-	MaybeCaptureVrHandsVmPose(m_VR, state, modelName, pBonesToWorldFinal);
+	MaybeCaptureVrHandsVmPose(m_VR, state, modelName, *pDrawInfo, pBonesToWorldFinal);
 
 	if (info.pModel && hideArms && !m_Game->m_CachedArmsModel)
 	{
@@ -3160,7 +3171,6 @@ void Hooks::dEmitSoundAttenuation(
     float attenuation,
     int flags,
     int pitch,
-    int specialDSP,
     const Vector* origin,
     const Vector* direction,
     void* origins,
@@ -3181,7 +3191,6 @@ void Hooks::dEmitSoundAttenuation(
         attenuation,
         flags,
         pitch,
-        specialDSP,
         origin,
         direction,
         origins,
@@ -3201,7 +3210,6 @@ void Hooks::dEmitSoundLevel(
     int soundLevel,
     int flags,
     int pitch,
-    int specialDSP,
     const Vector* origin,
     const Vector* direction,
     void* origins,
@@ -3222,7 +3230,6 @@ void Hooks::dEmitSoundLevel(
         soundLevel,
         flags,
         pitch,
-        specialDSP,
         origin,
         direction,
         origins,

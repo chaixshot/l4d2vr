@@ -1125,6 +1125,8 @@ public:
 	mutable std::mutex m_ManualReloadSoundMutex;
 	std::vector<ManualReloadDelayedSound> m_ManualReloadDelayedSounds;
 	size_t m_ManualReloadDelayedSoundReplayIndex = 0;
+	// Extraction sounds remain live. This gate opens only when an insertion-class sound starts.
+	bool m_ManualReloadSoundInsertTailStarted = false;
 	std::chrono::steady_clock::time_point m_ManualReloadSoundCaptureStarted{};
 	std::chrono::steady_clock::time_point m_ManualReloadSoundReplayStarted{};
 	// Runtime-only keyboard test state. The offset is expressed in calibrated socket-local meters.

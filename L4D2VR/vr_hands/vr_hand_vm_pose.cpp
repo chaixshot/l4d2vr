@@ -23,6 +23,7 @@ namespace VrHandVmPose
         const char* modelName,
         const std::vector<std::string>& boneNames,
         const std::vector<int>& boneParents,
+        const VrHandMatrix4& modelWorldMatrix,
         const std::vector<VrHandMatrix4>& boneWorldMatrices)
     {
         if (!modelName || !*modelName || boneNames.empty() || boneWorldMatrices.size() < boneNames.size())
@@ -32,6 +33,7 @@ namespace VrHandVmPose
         s_VmPoseSnapshot.modelName = modelName;
         s_VmPoseSnapshot.boneNames = boneNames;
         s_VmPoseSnapshot.boneParents = boneParents;
+        s_VmPoseSnapshot.modelWorldMatrix = modelWorldMatrix;
         s_VmPoseSnapshot.boneWorldMatrices = boneWorldMatrices;
         s_VmPoseSnapshot.tick = GetTickCount();
         s_VmPoseSnapshot.sequence = ++s_VmPoseSequence;

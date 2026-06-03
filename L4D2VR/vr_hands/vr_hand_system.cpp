@@ -115,6 +115,33 @@ namespace
         return out;
     }
 
+    VrHandMatrix4 BuildVrHandsSourceEntityWorld(const Vector& origin, const QAngle& angles)
+    {
+        Vector forward{};
+        Vector right{};
+        Vector up{};
+        QAngle::AngleVectors(angles, &forward, &right, &up);
+
+        forward = VrHandMath::Normalize(forward);
+        right = VrHandMath::Normalize(right);
+        up = VrHandMath::Normalize(up);
+
+        VrHandMatrix4 out = VrHandMath::Identity();
+        VrHandMath::Set(out, 0, 0, forward.x);
+        VrHandMath::Set(out, 1, 0, forward.y);
+        VrHandMath::Set(out, 2, 0, forward.z);
+        VrHandMath::Set(out, 0, 1, right.x);
+        VrHandMath::Set(out, 1, 1, right.y);
+        VrHandMath::Set(out, 2, 1, right.z);
+        VrHandMath::Set(out, 0, 2, up.x);
+        VrHandMath::Set(out, 1, 2, up.y);
+        VrHandMath::Set(out, 2, 2, up.z);
+        VrHandMath::Set(out, 0, 3, origin.x);
+        VrHandMath::Set(out, 1, 3, origin.y);
+        VrHandMath::Set(out, 2, 3, origin.z);
+        return out;
+    }
+
     VrHandMatrix4 BuildVrHandsLocalCorrection(
         const Vector& localPositionOffsetMeters,
         const Vector& localRotationOffsetDeg,
@@ -625,6 +652,18 @@ bool VrHandSystem::BuildRightViewmodelPalette(
     m_RightViewmodelPalmWorld = snapshot.boneWorldMatrices[static_cast<size_t>(vmPalm)];
     m_RightViewmodelPalmWorldValid = true;
 
+    VrHandMatrix4 modelWorldInverse{};
+    if (!VrHandMath::Invert4x4(snapshot.modelWorldMatrix, modelWorldInverse))
+    {
+        m_RightViewmodelPalmWorldValid = false;
+        m_RightViewmodelPalmFromModelRootValid = false;
+        return false;
+    }
+    m_RightViewmodelPalmFromModelRoot = VrHandMath::Multiply(
+        modelWorldInverse,
+        m_RightViewmodelPalmWorld);
+    m_RightViewmodelPalmFromModelRootValid = true;
+
     VrHandMatrix4 palmInverse{};
     if (!VrHandMath::Invert4x4(m_RightViewmodelPalmWorld, palmInverse))
     {
@@ -792,6 +831,9 @@ bool VrHandSystem::BuildRightViewmodelWorld(
     float modelScale,
     const Vector& localPositionOffsetMeters,
     const Vector& localRotationOffsetDeg,
+    bool anchorToCurrentViewmodelRoot,
+    const Vector& currentViewmodelPosition,
+    const QAngle& currentViewmodelAngles,
     VrHandMatrix4& outWorld) const
 {
     if (!m_RightViewmodelPalmWorldValid || !m_RightViewmodelAnchorValid ||
@@ -811,8 +853,18 @@ bool VrHandSystem::BuildRightViewmodelWorld(
         localRotationOffsetDeg,
         sourceUnitsPerMeter);
 
+    VrHandMatrix4 palmWorld = m_RightViewmodelPalmWorld;
+    if (anchorToCurrentViewmodelRoot)
+    {
+        if (!m_RightViewmodelPalmFromModelRootValid)
+            return false;
+        palmWorld = VrHandMath::Multiply(
+            BuildVrHandsSourceEntityWorld(currentViewmodelPosition, currentViewmodelAngles),
+            m_RightViewmodelPalmFromModelRoot);
+    }
+
     outWorld = VrHandMath::Multiply(
-        m_RightViewmodelPalmWorld,
+        palmWorld,
         VrHandMath::Multiply(
             m_RightViewmodelPalmFromGloveWrist,
             VrHandMath::Multiply(
@@ -831,6 +883,7 @@ void VrHandSystem::UpdatePoses(
     {
         m_RightViewmodelPoseWasEnabled = rightUseViewmodelPose;
         m_RightViewmodelPalmWorldValid = false;
+        m_RightViewmodelPalmFromModelRootValid = false;
         m_RightViewmodelAnchorValid = false;
         m_RightViewmodelPoseModel.clear();
         m_DebugRightViewmodelPoseLogged = false;
@@ -924,6 +977,8 @@ bool VrHandSystem::DrawForEye(
     const QAngle& leftControllerAngles,
     const Vector& rightControllerPosition,
     const QAngle& rightControllerAngles,
+    const Vector& currentViewmodelPosition,
+    const QAngle& currentViewmodelAngles,
     const Vector& leftHandPoseOffsetMeters,
     const Vector& leftHandPoseRotationOffsetDeg,
     const Vector& rightHandPoseOffsetMeters,
@@ -1003,6 +1058,9 @@ bool VrHandSystem::DrawForEye(
                     clampedModelScale,
                     rightHandPoseOffsetMeters,
                     rightHandPoseRotationOffsetDeg,
+                    !allowControllerlessTestPose,
+                    currentViewmodelPosition,
+                    currentViewmodelAngles,
                     world))
                 continue;
         }
@@ -1108,6 +1166,9 @@ bool VrHandSystem::DrawControllerlessTestPose(
                     clampedModelScale,
                     rightHandPoseOffsetMeters,
                     rightHandPoseRotationOffsetDeg,
+                    false,
+                    Vector{},
+                    QAngle{},
                     world))
                 continue;
         }

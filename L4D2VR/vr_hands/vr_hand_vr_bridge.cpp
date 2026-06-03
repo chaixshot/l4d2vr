@@ -57,6 +57,8 @@ bool VR::DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass 
     // Do not also draw the old standalone D3D9 GLB visual.
     const VrHandMatrix4* manualReloadMagazineWorldPtr = nullptr;
     const bool manualReloadMagazineUseViewmodelLayer = false;
+    const Vector currentViewmodelPosition = GetRecommendedViewmodelAbsPos();
+    const QAngle currentViewmodelAngles = GetRecommendedViewmodelAbsAngle();
 
     const bool drewAny = m_VrHands->DrawForEye(
         device,
@@ -74,6 +76,8 @@ bool VR::DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass 
         m_LeftControllerAngAbs,
         m_RightControllerPosAbs,
         m_RightControllerAngAbs,
+        currentViewmodelPosition,
+        currentViewmodelAngles,
         m_VrHandsLeftPoseOffsetMeters,
         m_VrHandsLeftPoseRotationOffsetDeg,
         m_VrHandsRightPoseOffsetMeters,
@@ -342,6 +346,213 @@ namespace
             lower.find("sniper") != std::string::npos;
     }
 
+    bool ManualReloadSoundStartsInsertTail(const char* sample)
+    {
+        if (!sample || !*sample)
+            return false;
+
+        std::string lower(sample);
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return lower.find("clip_in") != std::string::npos ||
+            lower.find("clip-in") != std::string::npos ||
+            lower.find("clipin") != std::string::npos ||
+            lower.find("clip.insert") != std::string::npos ||
+            lower.find("mag_in") != std::string::npos ||
+            lower.find("mag-in") != std::string::npos ||
+            lower.find("magin") != std::string::npos ||
+            lower.find("magazine_in") != std::string::npos ||
+            lower.find("magazine-in") != std::string::npos ||
+            lower.find("magazinein") != std::string::npos ||
+            lower.find("mag.insert") != std::string::npos ||
+            lower.find("insert") != std::string::npos ||
+            lower.find("clip_locked") != std::string::npos ||
+            lower.find("mag_locked") != std::string::npos ||
+            lower.find("magazine_locked") != std::string::npos;
+    }
+
+    enum class ManualReloadDelayedSoundStage
+    {
+        Other,
+        Insert,
+        Lock,
+        Ready,
+        SlideBack,
+        SlideForward
+    };
+
+    std::string ManualReloadLowerSoundSample(const std::string& sample)
+    {
+        std::string lower(sample);
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return lower;
+    }
+
+    ManualReloadDelayedSoundStage ManualReloadClassifyDelayedSound(const std::string& sample)
+    {
+        const std::string lower = ManualReloadLowerSoundSample(sample);
+        if (lower.find("clip_in") != std::string::npos ||
+            lower.find("clip-in") != std::string::npos ||
+            lower.find("clipin") != std::string::npos ||
+            lower.find("clip.insert") != std::string::npos ||
+            lower.find("mag_in") != std::string::npos ||
+            lower.find("mag-in") != std::string::npos ||
+            lower.find("magin") != std::string::npos ||
+            lower.find("magazine_in") != std::string::npos ||
+            lower.find("magazine-in") != std::string::npos ||
+            lower.find("magazinein") != std::string::npos ||
+            lower.find("mag.insert") != std::string::npos ||
+            lower.find("insert") != std::string::npos)
+        {
+            return ManualReloadDelayedSoundStage::Insert;
+        }
+        if (lower.find("clip_locked") != std::string::npos ||
+            lower.find("clip-locked") != std::string::npos ||
+            lower.find("cliplocked") != std::string::npos ||
+            lower.find("mag_locked") != std::string::npos ||
+            lower.find("mag-locked") != std::string::npos ||
+            lower.find("maglocked") != std::string::npos ||
+            lower.find("magazine_locked") != std::string::npos ||
+            lower.find("magazine-locked") != std::string::npos ||
+            lower.find("magazinelocked") != std::string::npos)
+        {
+            return ManualReloadDelayedSoundStage::Lock;
+        }
+        if (lower.find("slideback") != std::string::npos ||
+            lower.find("slide_back") != std::string::npos ||
+            lower.find("slide-back") != std::string::npos ||
+            lower.find("boltback") != std::string::npos ||
+            lower.find("bolt_back") != std::string::npos ||
+            lower.find("bolt-back") != std::string::npos)
+        {
+            return ManualReloadDelayedSoundStage::SlideBack;
+        }
+        if (lower.find("slideforward") != std::string::npos ||
+            lower.find("slide_forward") != std::string::npos ||
+            lower.find("slide-forward") != std::string::npos ||
+            lower.find("boltforward") != std::string::npos ||
+            lower.find("bolt_forward") != std::string::npos ||
+            lower.find("bolt-forward") != std::string::npos)
+        {
+            return ManualReloadDelayedSoundStage::SlideForward;
+        }
+        if (lower.find("ready") != std::string::npos)
+            return ManualReloadDelayedSoundStage::Ready;
+        return ManualReloadDelayedSoundStage::Other;
+    }
+
+    int ManualReloadSoundSpecificityScore(const std::string& sample)
+    {
+        const std::string lower = ManualReloadLowerSoundSample(sample);
+        if (lower.find("weapons/rifle/gunother/") != std::string::npos ||
+            lower.find("weapons\\rifle\\gunother\\") != std::string::npos ||
+            lower.find("weapons/smg/gunother/") != std::string::npos ||
+            lower.find("weapons\\smg\\gunother\\") != std::string::npos ||
+            lower.find("weapons/pistol/gunother/") != std::string::npos ||
+            lower.find("weapons\\pistol\\gunother\\") != std::string::npos ||
+            lower.find("weapons/sniper/gunother/") != std::string::npos ||
+            lower.find("weapons\\sniper\\gunother\\") != std::string::npos)
+        {
+            return 0;
+        }
+        return lower.find("weapon") != std::string::npos ? 1 : 0;
+    }
+
+    size_t ManualReloadNormalizeDelayedSoundsForReplay(std::vector<ManualReloadDelayedSound>& sounds)
+    {
+        if (sounds.empty())
+            return 0;
+
+        size_t selectedInsertIndex = sounds.size();
+        int selectedInsertScore = -1;
+        for (size_t i = 0; i < sounds.size(); ++i)
+        {
+            if (ManualReloadClassifyDelayedSound(sounds[i].sample) != ManualReloadDelayedSoundStage::Insert)
+                continue;
+
+            const int score = ManualReloadSoundSpecificityScore(sounds[i].sample);
+            if (selectedInsertIndex == sounds.size() || score > selectedInsertScore ||
+                (score == selectedInsertScore && i > selectedInsertIndex))
+            {
+                selectedInsertIndex = i;
+                selectedInsertScore = score;
+            }
+        }
+
+        if (selectedInsertIndex == sounds.size())
+            return 0;
+
+        struct StageChoice
+        {
+            ManualReloadDelayedSoundStage stage = ManualReloadDelayedSoundStage::Other;
+            size_t sourceIndex = 0;
+            int specificity = -1;
+        };
+
+        std::vector<StageChoice> classifiedChoices;
+        std::vector<size_t> otherChoices;
+        for (size_t i = selectedInsertIndex; i < sounds.size(); ++i)
+        {
+            const ManualReloadDelayedSoundStage stage = ManualReloadClassifyDelayedSound(sounds[i].sample);
+            if (stage == ManualReloadDelayedSoundStage::Other)
+            {
+                bool duplicate = false;
+                for (size_t selected : otherChoices)
+                {
+                    if (sounds[selected].sample == sounds[i].sample)
+                    {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (!duplicate)
+                    otherChoices.push_back(i);
+                continue;
+            }
+
+            const int specificity = ManualReloadSoundSpecificityScore(sounds[i].sample);
+            StageChoice* choice = nullptr;
+            for (StageChoice& existing : classifiedChoices)
+            {
+                if (existing.stage == stage)
+                {
+                    choice = &existing;
+                    break;
+                }
+            }
+            if (!choice)
+            {
+                classifiedChoices.push_back({ stage, i, specificity });
+                continue;
+            }
+            if (specificity > choice->specificity)
+            {
+                choice->sourceIndex = i;
+                choice->specificity = specificity;
+            }
+        }
+
+        std::vector<size_t> selectedIndices;
+        selectedIndices.reserve(classifiedChoices.size() + otherChoices.size());
+        for (const StageChoice& choice : classifiedChoices)
+            selectedIndices.push_back(choice.sourceIndex);
+        selectedIndices.insert(selectedIndices.end(), otherChoices.begin(), otherChoices.end());
+        std::sort(selectedIndices.begin(), selectedIndices.end());
+
+        const float rebaseSeconds = sounds[selectedInsertIndex].offsetSeconds;
+        std::vector<ManualReloadDelayedSound> normalized;
+        normalized.reserve(selectedIndices.size());
+        for (size_t selected : selectedIndices)
+        {
+            ManualReloadDelayedSound event = sounds[selected];
+            event.offsetSeconds = std::max(0.0f, event.offsetSeconds - rebaseSeconds);
+            normalized.push_back(std::move(event));
+        }
+
+        const size_t removedCount = sounds.size() - normalized.size();
+        sounds.swap(normalized);
+        return removedCount;
+    }
+
     std::string ManualReloadPrepareConsoleSoundSample(const std::string& rawSample)
     {
         size_t start = 0;
@@ -395,8 +606,9 @@ bool VR::ShouldHideManualReloadNativeClip() const
 
 bool VR::CaptureManualReloadSound(int entityIndex, const char* sample, float volume, int flags, int pitch)
 {
-    // Do not swallow updates or stops for sounds that may already be playing. Only delay
-    // newly emitted hidden-tail events so ambient audio and previously-started clip-out audio stay live.
+    // Do not swallow updates or stops for sounds that may already be playing. Clip-out audio belongs
+    // to the visible removal phase and stays live. Delay only the hidden post-insert tail, starting
+    // from the first actual magazine insertion sound.
     constexpr int kSoundChangeVolume = (1 << 0);
     constexpr int kSoundChangePitch = (1 << 1);
     constexpr int kSoundStop = (1 << 2);
@@ -407,8 +619,8 @@ bool VR::CaptureManualReloadSound(int entityIndex, const char* sample, float vol
 
     if (!sample || !*sample || !m_Game ||
         (m_ManualReloadState != ManualReloadState::WaitingForFreshMagazineGrab &&
-            m_ManualReloadState != ManualReloadState::HoldingFreshMagazine) ||
-        m_ManualReloadSoundCaptureStarted.time_since_epoch().count() == 0)
+            m_ManualReloadState != ManualReloadState::HoldingFreshMagazine &&
+            m_ManualReloadState != ManualReloadState::AwaitingNativePostInsertBoundary))
     {
         return false;
     }
@@ -423,18 +635,30 @@ bool VR::CaptureManualReloadSound(int entityIndex, const char* sample, float vol
     if (!fromViewmodel && !fromLocalWeaponPath)
         return false;
 
+    const auto now = std::chrono::steady_clock::now();
     ManualReloadDelayedSound event;
-    event.sample = sample;
-    event.offsetSeconds = std::clamp(
-        std::chrono::duration<float>(std::chrono::steady_clock::now() - m_ManualReloadSoundCaptureStarted).count(),
-        0.0f,
-        3.0f);
-    event.volume = std::clamp(volume, 0.0f, 1.0f);
-    event.pitch = std::clamp(pitch, 1, 255);
-
     bool queued = false;
+    bool insertTailStartedNow = false;
     {
         std::lock_guard<std::mutex> lock(m_ManualReloadSoundMutex);
+        if (!m_ManualReloadSoundInsertTailStarted)
+        {
+            if (!ManualReloadSoundStartsInsertTail(sample))
+                return false;
+
+            m_ManualReloadSoundInsertTailStarted = true;
+            m_ManualReloadSoundCaptureStarted = now;
+            insertTailStartedNow = true;
+        }
+
+        event.sample = sample;
+        event.offsetSeconds = std::clamp(
+            std::chrono::duration<float>(now - m_ManualReloadSoundCaptureStarted).count(),
+            0.0f,
+            3.0f);
+        event.volume = std::clamp(volume, 0.0f, 1.0f);
+        event.pitch = std::clamp(pitch, 1, 255);
+
         if (m_ManualReloadDelayedSounds.size() < 64)
         {
             const bool duplicate = !m_ManualReloadDelayedSounds.empty() &&
@@ -448,6 +672,13 @@ bool VR::CaptureManualReloadSound(int entityIndex, const char* sample, float vol
         }
     }
 
+    if (insertTailStartedNow)
+    {
+        Game::logMsg(
+            "[VR][ManualReload][Audio] insert-tail capture started ent=%d sample=%s",
+            entityIndex,
+            sample);
+    }
     if (queued)
     {
         Game::logMsg(
@@ -525,9 +756,20 @@ void VR::StartManualReloadPostInsertReplay(const char* reason)
     m_ManualReloadResumeStarted = std::chrono::steady_clock::now();
     m_ManualReloadSoundReplayStarted = m_ManualReloadResumeStarted;
     m_ManualReloadPostInsertBoundaryWaitStarted = {};
+    size_t prunedSoundCount = 0;
+    size_t replaySoundCount = 0;
     {
         std::lock_guard<std::mutex> lock(m_ManualReloadSoundMutex);
+        prunedSoundCount = ManualReloadNormalizeDelayedSoundsForReplay(m_ManualReloadDelayedSounds);
+        replaySoundCount = m_ManualReloadDelayedSounds.size();
         m_ManualReloadDelayedSoundReplayIndex = 0;
+    }
+    if (prunedSoundCount > 0)
+    {
+        Game::logMsg(
+            "[VR][ManualReload][Audio] normalized insert-tail replay kept=%u pruned=%u",
+            static_cast<unsigned int>(replaySoundCount),
+            static_cast<unsigned int>(prunedSoundCount));
     }
     m_ManualReloadViewmodelFrozen = false;
     Game::logMsg(
@@ -621,8 +863,9 @@ void VR::BeginManualReload(C_BasePlayer* localPlayer)
         std::lock_guard<std::mutex> lock(m_ManualReloadSoundMutex);
         m_ManualReloadDelayedSounds.clear();
         m_ManualReloadDelayedSoundReplayIndex = 0;
+        m_ManualReloadSoundInsertTailStarted = false;
+        m_ManualReloadSoundCaptureStarted = {};
     }
-    m_ManualReloadSoundCaptureStarted = {};
     m_ManualReloadSoundReplayStarted = {};
     m_ManualReloadState = ManualReloadState::WatchingNativeClipRemoval;
     m_ManualReloadStarted = std::chrono::steady_clock::now();
@@ -689,8 +932,9 @@ void VR::CancelManualReload()
         std::lock_guard<std::mutex> lock(m_ManualReloadSoundMutex);
         m_ManualReloadDelayedSounds.clear();
         m_ManualReloadDelayedSoundReplayIndex = 0;
+        m_ManualReloadSoundInsertTailStarted = false;
+        m_ManualReloadSoundCaptureStarted = {};
     }
-    m_ManualReloadSoundCaptureStarted = {};
     m_ManualReloadSoundReplayStarted = {};
     m_ManualReloadMouseTestMagazineLocalOffsetMeters = { 0.0f, 0.0f, 0.0f };
     m_ManualReloadMouseTestMagazineLocalRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
@@ -1115,8 +1359,9 @@ void VR::OnManualReloadViewmodelPose(
                 std::lock_guard<std::mutex> lock(m_ManualReloadSoundMutex);
                 m_ManualReloadDelayedSounds.clear();
                 m_ManualReloadDelayedSoundReplayIndex = 0;
+                m_ManualReloadSoundInsertTailStarted = false;
+                m_ManualReloadSoundCaptureStarted = {};
             }
-            m_ManualReloadSoundCaptureStarted = std::chrono::steady_clock::now();
             m_ManualReloadSoundReplayStarted = {};
             m_ManualReloadFrozenSequence = sequence;
             m_ManualReloadFrozenCycle = cycle;
@@ -1255,8 +1500,9 @@ void VR::OnManualReloadViewmodelPose(
                 std::lock_guard<std::mutex> lock(m_ManualReloadSoundMutex);
                 m_ManualReloadDelayedSounds.clear();
                 m_ManualReloadDelayedSoundReplayIndex = 0;
+                m_ManualReloadSoundInsertTailStarted = false;
+                m_ManualReloadSoundCaptureStarted = {};
             }
-            m_ManualReloadSoundCaptureStarted = {};
             m_ManualReloadSoundReplayStarted = {};
             Game::logMsg("[VR][ManualReload] captured reload tail finished; native viewmodel returned to live idle pose");
         }

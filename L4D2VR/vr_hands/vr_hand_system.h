@@ -40,6 +40,8 @@ public:
         const QAngle& leftControllerAngles,
         const Vector& rightControllerPosition,
         const QAngle& rightControllerAngles,
+        const Vector& currentViewmodelPosition,
+        const QAngle& currentViewmodelAngles,
         const Vector& leftHandPoseOffsetMeters,
         const Vector& leftHandPoseRotationOffsetDeg,
         const Vector& rightHandPoseOffsetMeters,
@@ -98,6 +100,9 @@ private:
         float modelScale,
         const Vector& localPositionOffsetMeters,
         const Vector& localRotationOffsetDeg,
+        bool anchorToCurrentViewmodelRoot,
+        const Vector& currentViewmodelPosition,
+        const QAngle& currentViewmodelAngles,
         VrHandMatrix4& outWorld) const;
     void ReportErrorOnce(const std::string& error);
 
@@ -122,6 +127,8 @@ private:
     std::string m_RightViewmodelPoseModel;
     std::string m_RightViewmodelAnchorModel;
     VrHandMatrix4 m_RightViewmodelPalmWorld{};
+    VrHandMatrix4 m_RightViewmodelPalmFromModelRoot{};
+    bool m_RightViewmodelPalmFromModelRootValid = false;
     VrHandMatrix4 m_RightViewmodelPalmFromGloveWrist{};
     VrHandMatrix4 m_RightViewmodelGloveWristBindInverse{};
 };

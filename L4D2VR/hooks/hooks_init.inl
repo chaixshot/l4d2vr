@@ -50,8 +50,10 @@ Hooks::Hooks(Game* game)
 		hkSayText2.enableHook();
 	if (hkTextMsg.pTarget)
 		hkTextMsg.enableHook();
-	// Disabled until the exact L4D2 IEngineSoundClient003 ABI is verified.
-	// Installing an unverified virtual EmitSound detour can corrupt the x86 call stack.
+	if (hkEmitSoundAttenuation.pTarget)
+		hkEmitSoundAttenuation.enableHook();
+	if (hkEmitSoundLevel.pTarget)
+		hkEmitSoundLevel.enableHook();
 	if (hkUpdateLaserSight.pTarget)
 		hkUpdateLaserSight.enableHook();
 	if (hkUpdateFlashlight.pTarget)
@@ -186,10 +188,53 @@ int Hooks::initSourceHooks()
 	LPVOID TextMsgAddr = reinterpret_cast<LPVOID>(m_Game->m_BaseClient + kClientTextMsgHandlerOffset);
 	hkTextMsg.createHook(TextMsgAddr, &dTextMsg);
 
-	// The Source SDK documents these EmitSound methods, but the current L4D2 binary ABI
-	// has not been verified yet. Keep hidden-tail sound delay disabled rather than hook
-	// an unverified x86 virtual call path.
-	Game::logMsg("[VR][ManualReload][Audio] disabled: current L4D2 IEngineSoundClient003 ABI is not verified");
+	// alliedmodders/hl2sdk l4d2 public/engine/IEngineSound.h defines:
+	//   #5 EmitSound(... float flAttenuation ...)
+	//   #6 EmitSound(... soundlevel_t iSoundlevel ...)
+	// No specialDSP stack argument exists in the L4D2 ABI. Hook both verified overloads
+	// so hidden manual-reload tail sounds can be swallowed and replayed after insertion.
+	if (m_Game->m_EngineSound)
+	{
+		void** engineSoundVTable = nullptr;
+#if defined(_MSC_VER)
+		__try
+		{
+			engineSoundVTable = *reinterpret_cast<void***>(m_Game->m_EngineSound);
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			engineSoundVTable = nullptr;
+		}
+#else
+		engineSoundVTable = *reinterpret_cast<void***>(m_Game->m_EngineSound);
+#endif
+
+		constexpr size_t kEmitSoundAttenuationVFunc = 5;
+		constexpr size_t kEmitSoundLevelVFunc = 6;
+		if (engineSoundVTable &&
+			engineSoundVTable[kEmitSoundAttenuationVFunc] &&
+			engineSoundVTable[kEmitSoundLevelVFunc])
+		{
+			const int attenuationHookResult = hkEmitSoundAttenuation.createHook(
+				engineSoundVTable[kEmitSoundAttenuationVFunc],
+				&dEmitSoundAttenuation);
+			const int levelHookResult = hkEmitSoundLevel.createHook(
+				engineSoundVTable[kEmitSoundLevelVFunc],
+				&dEmitSoundLevel);
+			if (attenuationHookResult == 0 && levelHookResult == 0)
+				Game::logMsg("[VR][ManualReload][Audio] verified L4D2 IEngineSoundClient003 EmitSound hooks installed");
+			else
+				Game::logMsg("[VR][ManualReload][Audio] warning: one or more verified EmitSound hooks failed to install");
+		}
+		else
+		{
+			Game::logMsg("[VR][ManualReload][Audio] disabled: IEngineSoundClient003 vtable unavailable");
+		}
+	}
+	else
+	{
+		Game::logMsg("[VR][ManualReload][Audio] disabled: IEngineSoundClient003 interface unavailable");
+	}
 
 	if (m_Game->m_Offsets->UpdateLaserSight.valid)
 	{

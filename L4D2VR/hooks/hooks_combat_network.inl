@@ -113,6 +113,11 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
 		const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
 		const bool multiCoreQueued = (queueMode == 2);
 		const bool forceDisableMoveBob = m_VR->m_ViewmodelDisableMoveBob;
+		// Real-controller VM-pose hands need a rigid shared root. Source may add
+		// viewmodel bob/lag after the controller pose is supplied, which makes the
+		// visible weapon drift relative to the standalone glove during wrist rotation.
+		const bool forceControllerHardLock =
+			!m_VR->m_MouseModeEnabled && m_VR->m_VrHandsRightUseViewmodelPose;
 
 		// ------------------------------------------------------------
 		// Single-thread path (mat_queue_mode 0/1)
@@ -127,7 +132,7 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
 		{
 			vecNewOrigin = m_VR->GetRecommendedViewmodelAbsPos();
 			vecNewAngles = m_VR->GetRecommendedViewmodelAbsAngle();
-			if (!forceDisableMoveBob)
+			if (!forceDisableMoveBob && !forceControllerHardLock)
 			{
 				hkCalcViewModelView.fOriginal(ecx, owner, vecNewOrigin, vecNewAngles);
 				return;
@@ -173,7 +178,7 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
 			}
 		} tlsGuard(true);
 
-		if (!m_VR->m_QueuedViewmodelStabilize && !forceDisableMoveBob)
+		if (!m_VR->m_QueuedViewmodelStabilize && !forceDisableMoveBob && !forceControllerHardLock)
 		{
 			CallCalcViewModelViewOriginal(ecx, owner, eyePosition, eyeAngles);
 			return;
