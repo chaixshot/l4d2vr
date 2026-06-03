@@ -648,6 +648,10 @@ bool VR::CaptureManualReloadSound(int entityIndex, const char* sample, float vol
 
             m_ManualReloadSoundInsertTailStarted = true;
             m_ManualReloadSoundCaptureStarted = now;
+            m_ManualReloadAudioInsertVisualOffsetSeconds = std::max(
+                0.0f,
+                m_ManualReloadVisualResumeDurationSeconds);
+            m_ManualReloadAudioInsertVisualOffsetValid = true;
             insertTailStartedNow = true;
         }
 
@@ -675,8 +679,9 @@ bool VR::CaptureManualReloadSound(int entityIndex, const char* sample, float vol
     if (insertTailStartedNow)
     {
         Game::logMsg(
-            "[VR][ManualReload][Audio] insert-tail capture started ent=%d sample=%s",
+            "[VR][ManualReload][Audio] insert-tail capture started ent=%d visualOffset=%.3fs sample=%s",
             entityIndex,
+            m_ManualReloadAudioInsertVisualOffsetSeconds,
             sample);
     }
     if (queued)
@@ -781,6 +786,34 @@ void VR::StartManualReloadPostInsertReplay(const char* reason)
 
 bool VR::TryStartManualReloadPostInsertReplay(const char* reason)
 {
+    float audioInsertVisualOffsetSeconds = 0.0f;
+    bool audioInsertVisualOffsetValid = false;
+    {
+        std::lock_guard<std::mutex> lock(m_ManualReloadSoundMutex);
+        audioInsertVisualOffsetSeconds = m_ManualReloadAudioInsertVisualOffsetSeconds;
+        audioInsertVisualOffsetValid = m_ManualReloadAudioInsertVisualOffsetValid;
+    }
+
+    // Workshop replacement models often return their visible magazine bone to the socket only
+    // after the useful hand/bolt tail has already elapsed. The first clip-in sound is emitted at
+    // the real insertion boundary, so prefer it whenever it moves the visual replay point earlier.
+    // SnapManualReloadNativeMagazineToSocket keeps the magazine subtree fixed at the socket while
+    // these earlier poses replay, preventing a second visible insertion.
+    if (audioInsertVisualOffsetValid &&
+        (!m_ManualReloadVisualReplayStartOffsetValid ||
+            audioInsertVisualOffsetSeconds < m_ManualReloadVisualReplayStartOffsetSeconds))
+    {
+        const bool hadVisualBoundary = m_ManualReloadVisualReplayStartOffsetValid;
+        const float previousOffsetSeconds = m_ManualReloadVisualReplayStartOffsetSeconds;
+        m_ManualReloadVisualReplayStartOffsetSeconds = std::max(0.0f, audioInsertVisualOffsetSeconds);
+        m_ManualReloadVisualReplayStartOffsetValid = true;
+        Game::logMsg(
+            "[VR][ManualReload] post-insert visual replay aligned to audio insert boundary offset=%.3fs previousVisualBoundary=%s%.3fs",
+            m_ManualReloadVisualReplayStartOffsetSeconds,
+            hadVisualBoundary ? "" : "unavailable/",
+            previousOffsetSeconds);
+    }
+
     if (!m_ManualReloadVisualReplayStartOffsetValid)
         return false;
 
@@ -865,6 +898,8 @@ void VR::BeginManualReload(C_BasePlayer* localPlayer)
         m_ManualReloadDelayedSoundReplayIndex = 0;
         m_ManualReloadSoundInsertTailStarted = false;
         m_ManualReloadSoundCaptureStarted = {};
+        m_ManualReloadAudioInsertVisualOffsetSeconds = 0.0f;
+        m_ManualReloadAudioInsertVisualOffsetValid = false;
     }
     m_ManualReloadSoundReplayStarted = {};
     m_ManualReloadState = ManualReloadState::WatchingNativeClipRemoval;
@@ -934,6 +969,8 @@ void VR::CancelManualReload()
         m_ManualReloadDelayedSoundReplayIndex = 0;
         m_ManualReloadSoundInsertTailStarted = false;
         m_ManualReloadSoundCaptureStarted = {};
+        m_ManualReloadAudioInsertVisualOffsetSeconds = 0.0f;
+        m_ManualReloadAudioInsertVisualOffsetValid = false;
     }
     m_ManualReloadSoundReplayStarted = {};
     m_ManualReloadMouseTestMagazineLocalOffsetMeters = { 0.0f, 0.0f, 0.0f };
@@ -1361,6 +1398,8 @@ void VR::OnManualReloadViewmodelPose(
                 m_ManualReloadDelayedSoundReplayIndex = 0;
                 m_ManualReloadSoundInsertTailStarted = false;
                 m_ManualReloadSoundCaptureStarted = {};
+                m_ManualReloadAudioInsertVisualOffsetSeconds = 0.0f;
+                m_ManualReloadAudioInsertVisualOffsetValid = false;
             }
             m_ManualReloadSoundReplayStarted = {};
             m_ManualReloadFrozenSequence = sequence;
@@ -1502,6 +1541,8 @@ void VR::OnManualReloadViewmodelPose(
                 m_ManualReloadDelayedSoundReplayIndex = 0;
                 m_ManualReloadSoundInsertTailStarted = false;
                 m_ManualReloadSoundCaptureStarted = {};
+                m_ManualReloadAudioInsertVisualOffsetSeconds = 0.0f;
+                m_ManualReloadAudioInsertVisualOffsetValid = false;
             }
             m_ManualReloadSoundReplayStarted = {};
             Game::logMsg("[VR][ManualReload] captured reload tail finished; native viewmodel returned to live idle pose");

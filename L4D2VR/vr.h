@@ -1106,10 +1106,15 @@ public:
 	// While the visible viewmodel is frozen, DrawModelExecute continues sampling the hidden native tail.
 	// After insertion those captured poses are replayed locally even if Source gameplay already returned to idle.
 	float m_ManualReloadVisualResumeDurationSeconds = 0.0f;
-	// Replay starts only after Source's hidden native animation has already reinserted its own magazine.
-	// This prevents the player-driven insertion from being followed by a duplicate native insertion animation.
+	// Visual-distance reinsertion remains a fallback boundary for models without a useful clip-in sound.
+	// Normally replay starts at the earlier clip-in audio boundary while the magazine subtree is socket-pinned.
 	float m_ManualReloadVisualReplayStartOffsetSeconds = 0.0f;
 	bool m_ManualReloadVisualReplayStartOffsetValid = false;
+	// The first hidden clip-in sound is a more reliable post-insert animation boundary than
+	// replacement-model magazine distance. The magazine subtree is snapped to the socket during
+	// replay, so starting from this earlier pose cannot redraw a duplicate insertion.
+	float m_ManualReloadAudioInsertVisualOffsetSeconds = 0.0f;
+	bool m_ManualReloadAudioInsertVisualOffsetValid = false;
 	bool m_ManualReloadTailCaptureComplete = false;
 	// The visible custom magazine bone is the preferred reinsertion boundary probe.
 	// Legacy helper bones often return only when Source is already idle, which would skip the tail.
