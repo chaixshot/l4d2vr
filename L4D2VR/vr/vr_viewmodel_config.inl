@@ -1122,7 +1122,6 @@ void VR::ParseConfigFile()
     m_HideArms = getBool("HideArms", m_HideArms);
     m_VrHandsEnabled = getBool("VrHandsEnabled", m_VrHandsEnabled);
     m_VrHandsMotionRangeWithoutController = getBool("VrHandsMotionRangeWithoutController", m_VrHandsMotionRangeWithoutController);
-    m_VrHandsRightUseViewmodelPose = getBool("VrHandsRightUseViewmodelPose", m_VrHandsRightUseViewmodelPose);
     m_VrHandsDebugLog = getBool("VrHandsDebugLog", m_VrHandsDebugLog);
     m_VrHandsModelScale = std::clamp(getFloat("VrHandsModelScale", m_VrHandsModelScale), 0.25f, 4.0f);
     m_ManualReloadEnabled = getBool("ManualReloadEnabled", m_ManualReloadEnabled);
