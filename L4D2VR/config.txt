@@ -15,6 +15,7 @@ AutoAirStrafeTurnResponsiveness=0.25
 AutoAirStrafeDebugLog=false
 AutoAirStrafeDebugLogHz=4
 AntiAliasing=0
+EyeRenderTargetMatchProjectionAspect=true
 
 ThirdPersonCameraFollowHmd=true
 ThirdPersonVRCameraOffset=38

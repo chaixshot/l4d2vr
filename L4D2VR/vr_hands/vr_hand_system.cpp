@@ -49,6 +49,39 @@ namespace
     constexpr std::uint32_t kVrHandsVmPoseMaxAgeMs = 500u;
     constexpr float kVrHandsVmCurlDeadZoneRadians = 0.08f;
 
+    float ResolveVrHandsSceneAspect(const CViewSetup& view)
+    {
+        float aspect = view.m_flAspectRatio;
+        if (!(aspect > 0.001f) && view.height > 0)
+            aspect = static_cast<float>(view.width) / static_cast<float>(view.height);
+        return (aspect > 0.001f) ? aspect : 1.0f;
+    }
+
+    float ResolveVrHandsViewmodelAspect(const CViewSetup& view)
+    {
+        // Source's viewmodel layer is projected against the actual eye viewport.
+        // On runtimes that recommend a non-square eye RT while reporting a square
+        // lens projection, view.m_flAspectRatio intentionally remains the lens
+        // aspect for the world layer. Reusing it for a VM-bound hand makes the
+        // glove drift away from the weapon as the hand moves vertically or rotates.
+        if (view.width > 0 && view.height > 0)
+            return static_cast<float>(view.width) / static_cast<float>(view.height);
+        return ResolveVrHandsSceneAspect(view);
+    }
+
+    VrHandMatrix4 BuildVrHandsProjection(const CViewSetup& view, bool useViewmodelLayer)
+    {
+        const float fov =
+            (useViewmodelLayer && view.fovViewmodel > 0.001f) ? view.fovViewmodel : view.fov;
+        const float aspect =
+            useViewmodelLayer ? ResolveVrHandsViewmodelAspect(view) : ResolveVrHandsSceneAspect(view);
+        const float zNear =
+            (useViewmodelLayer && view.zNearViewmodel > 0.001f) ? view.zNearViewmodel : view.zNear;
+        const float zFar =
+            (useViewmodelLayer && view.zFarViewmodel > zNear) ? view.zFarViewmodel : view.zFar;
+        return VrHandMath::BuildPerspective(fov, aspect, zNear, zFar);
+    }
+
     int FindVrHandsNameIndex(const std::vector<std::string>& names, const char* name)
     {
         if (!name || !*name)
@@ -455,10 +488,8 @@ bool VrHandSystem::DrawManualReloadMagazine(
     if (!EnsureManualReloadMagazineLoaded(relativePath, true))
         return false;
 
-    float aspect = view.m_flAspectRatio;
-    if (!(aspect > 0.001f) && view.height > 0)
-        aspect = static_cast<float>(view.width) / static_cast<float>(view.height);
-
+    const float projectionAspect =
+        useViewmodelLayer ? ResolveVrHandsViewmodelAspect(view) : ResolveVrHandsSceneAspect(view);
     const float projectionFov =
         (useViewmodelLayer && view.fovViewmodel > 0.001f) ? view.fovViewmodel : view.fov;
     // Source viewmodels are intentionally allowed very close to the camera.
@@ -470,7 +501,7 @@ bool VrHandSystem::DrawManualReloadMagazine(
 
     const VrHandMatrix4 projection = VrHandMath::BuildPerspective(
         projectionFov,
-        aspect,
+        projectionAspect,
         projectionNear,
         projectionFar);
     const VrHandMatrix4 camera = VrHandMath::BuildSourceView(view.origin, view.angles);
@@ -1029,10 +1060,9 @@ bool VrHandSystem::DrawForEye(
     if (rightUseViewmodelPose || eyeIndex == 0 || (!m_Hands[0].paletteValid && !m_Hands[1].paletteValid))
         UpdatePoses(input, motionRangeWithoutController, rightUseViewmodelPose, debugLog);
 
-    float aspect = view.m_flAspectRatio;
-    if (!(aspect > 0.001f) && view.height > 0)
-        aspect = static_cast<float>(view.width) / static_cast<float>(view.height);
-    const VrHandMatrix4 projection = VrHandMath::BuildPerspective(view.fov, aspect, view.zNear, view.zFar);
+    const VrHandMatrix4 sceneProjection = BuildVrHandsProjection(view, false);
+    const VrHandMatrix4 viewmodelProjection =
+        rightUseViewmodelPose ? BuildVrHandsProjection(view, true) : sceneProjection;
     const VrHandMatrix4 camera = VrHandMath::BuildSourceView(view.origin, view.angles);
     const float sourceUnitsPerMeter = vrScale;
     const float clampedModelScale = std::clamp(modelScale, 0.25f, 4.0f);
@@ -1075,6 +1105,8 @@ bool VrHandSystem::DrawForEye(
                 rotationOffsets[handIndex]);
         }
 
+        const bool useViewmodelLayer = handIndex == 1 && rightUseViewmodelPose;
+        const VrHandMatrix4& projection = useViewmodelLayer ? viewmodelProjection : sceneProjection;
         const VrHandMatrix4 wvp = VrHandMath::Multiply(projection, VrHandMath::Multiply(camera, world));
         std::string error;
         if (!m_Renderer.Draw(device, handIndex, hand.asset, hand.palette, world, wvp, drawPass, sceneLightScale, error))
@@ -1114,10 +1146,9 @@ bool VrHandSystem::DrawControllerlessTestPose(
     if (!EnsureAssetsLoaded(debugLog))
         return false;
 
-    float aspect = view.m_flAspectRatio;
-    if (!(aspect > 0.001f) && view.height > 0)
-        aspect = static_cast<float>(view.width) / static_cast<float>(view.height);
-    const VrHandMatrix4 projection = VrHandMath::BuildPerspective(view.fov, aspect, view.zNear, view.zFar);
+    const VrHandMatrix4 sceneProjection = BuildVrHandsProjection(view, false);
+    const VrHandMatrix4 viewmodelProjection =
+        rightUseViewmodelPose ? BuildVrHandsProjection(view, true) : sceneProjection;
     const VrHandMatrix4 camera = VrHandMath::BuildSourceView(view.origin, view.angles);
     const float sourceUnitsPerMeter = vrScale;
     const float clampedModelScale = std::clamp(modelScale, 0.25f, 4.0f);
@@ -1182,6 +1213,8 @@ bool VrHandSystem::DrawControllerlessTestPose(
                 positionOffsets[handIndex],
                 rotationOffsets[handIndex]);
         }
+        const bool useViewmodelLayer = handIndex == 1 && rightUseViewmodelPose;
+        const VrHandMatrix4& projection = useViewmodelLayer ? viewmodelProjection : sceneProjection;
         const VrHandMatrix4 wvp = VrHandMath::Multiply(projection, VrHandMath::Multiply(camera, world));
         std::string error;
         if (!m_Renderer.Draw(device, handIndex, hand.asset, bindPalette, world, wvp, drawPass, sceneLightScale, error))

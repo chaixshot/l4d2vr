@@ -19,6 +19,76 @@ namespace
         __except (EXCEPTION_EXECUTE_HANDLER) { out = 0.0f; return false; }
     }
 
+    inline bool ReadEarlyConfigBool(const char* key, bool defaultValue)
+    {
+        if (!key || !*key)
+            return defaultValue;
+
+        auto trim = [](std::string& s)
+            {
+                s.erase(s.begin(), std::find_if(s.begin(), s.end(),
+                    [](unsigned char ch) { return !std::isspace(ch); }));
+                s.erase(std::find_if(s.rbegin(), s.rend(),
+                    [](unsigned char ch) { return !std::isspace(ch); }).base(), s.end());
+            };
+
+        bool value = defaultValue;
+        auto parsePath = [&](const char* path)
+            {
+                std::ifstream configStream(path);
+                if (!configStream)
+                    return;
+
+                std::string line;
+                while (std::getline(configStream, line))
+                {
+                    size_t cut = std::string::npos;
+                    const size_t p1 = line.find("//");
+                    const size_t p2 = line.find('#');
+                    const size_t p3 = line.find(';');
+                    if (p1 != std::string::npos) cut = p1;
+                    if (p2 != std::string::npos) cut = (cut == std::string::npos) ? p2 : std::min(cut, p2);
+                    if (p3 != std::string::npos) cut = (cut == std::string::npos) ? p3 : std::min(cut, p3);
+                    if (cut != std::string::npos)
+                        line.erase(cut);
+
+                    trim(line);
+                    if (line.empty())
+                        continue;
+
+                    const size_t eq = line.find('=');
+                    if (eq == std::string::npos)
+                        continue;
+
+                    std::string parsedKey = line.substr(0, eq);
+                    std::string parsedValue = line.substr(eq + 1);
+                    trim(parsedKey);
+                    trim(parsedValue);
+                    if (parsedKey.size() >= 3 &&
+                        static_cast<unsigned char>(parsedKey[0]) == 0xEF &&
+                        static_cast<unsigned char>(parsedKey[1]) == 0xBB &&
+                        static_cast<unsigned char>(parsedKey[2]) == 0xBF)
+                    {
+                        parsedKey.erase(0, 3);
+                        trim(parsedKey);
+                    }
+                    if (parsedKey != key)
+                        continue;
+
+                    std::transform(parsedValue.begin(), parsedValue.end(), parsedValue.begin(),
+                        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    if (parsedValue == "1" || parsedValue == "true" || parsedValue == "on" || parsedValue == "yes")
+                        value = true;
+                    else if (parsedValue == "0" || parsedValue == "false" || parsedValue == "off" || parsedValue == "no")
+                        value = false;
+                }
+            };
+
+        parsePath("VR\\config.txt");
+        parsePath("VR\\config2.txt");
+        return value;
+    }
+
     // NOTE: This file uses a tiny 5x7 glyph set for UI labels (LC/RC, item abbreviations, etc.).
     // For player names (teammates / aim target), we also support UTF-8 via a GDI fallback renderer
     // so Chinese/JP/KR/etc names can display correctly on the HUD overlay.
@@ -906,6 +976,59 @@ VR::VR(Game* game)
 
     m_Aspect = tanHalfFov[0] / tanHalfFov[1];
     m_Fov = 2.0f * atan(tanHalfFov[0]) * 360 / (3.14159265358979323846 * 2);
+
+    const uint32_t recommendedRenderWidth = m_RenderWidth;
+    const uint32_t recommendedRenderHeight = m_RenderHeight;
+    m_EyeRenderTargetMatchProjectionAspect =
+        ReadEarlyConfigBool("EyeRenderTargetMatchProjectionAspect", m_EyeRenderTargetMatchProjectionAspect);
+
+    const float recommendedAspect = (recommendedRenderHeight > 0)
+        ? static_cast<float>(recommendedRenderWidth) / static_cast<float>(recommendedRenderHeight)
+        : 0.0f;
+    const bool validProjectionAspect =
+        std::isfinite(m_Aspect) && m_Aspect > 0.1f && m_Aspect < 10.0f;
+    if (m_EyeRenderTargetMatchProjectionAspect &&
+        validProjectionAspect &&
+        recommendedRenderWidth > 0 &&
+        recommendedRenderHeight > 0 &&
+        std::fabs(recommendedAspect - m_Aspect) > 0.01f)
+    {
+        const uint32_t preservedSide = (std::max)(recommendedRenderWidth, recommendedRenderHeight);
+        uint32_t adjustedWidth = recommendedRenderWidth;
+        uint32_t adjustedHeight = recommendedRenderHeight;
+        if (m_Aspect >= 1.0f)
+        {
+            adjustedWidth = preservedSide;
+            adjustedHeight = static_cast<uint32_t>(
+                (std::max)(1.0f, std::round(static_cast<float>(preservedSide) / m_Aspect)));
+        }
+        else
+        {
+            adjustedHeight = preservedSide;
+            adjustedWidth = static_cast<uint32_t>(
+                (std::max)(1.0f, std::round(static_cast<float>(preservedSide) * m_Aspect)));
+        }
+
+        m_RenderWidth = adjustedWidth;
+        m_RenderHeight = adjustedHeight;
+    }
+
+    const float finalRenderAspect = (m_RenderHeight > 0)
+        ? static_cast<float>(m_RenderWidth) / static_cast<float>(m_RenderHeight)
+        : 0.0f;
+    Game::logMsg(
+        "[VR][Projection] recommendedRT=%ux%u finalRT=%ux%u matchProjectionAspect=%d projectionAspect=%.6f recommendedAspect=%.6f finalAspect=%.6f fov=%.3f rawL=(%.4f %.4f %.4f %.4f) rawR=(%.4f %.4f %.4f %.4f)",
+        recommendedRenderWidth,
+        recommendedRenderHeight,
+        m_RenderWidth,
+        m_RenderHeight,
+        m_EyeRenderTargetMatchProjectionAspect ? 1 : 0,
+        m_Aspect,
+        recommendedAspect,
+        finalRenderAspect,
+        m_Fov,
+        l_left, l_right, l_top, l_bottom,
+        r_left, r_right, r_top, r_bottom);
 
     InstallApplicationManifest("manifest.vrmanifest");
     SetActionManifest("action_manifest.json");
