@@ -1545,6 +1545,8 @@ void VR::ParseConfigFile()
     m_QueuedViewmodelStabilizeDebugLogHz = std::max(0.0f, getFloat("QueuedViewmodelStabilizeDebugLogHz", m_QueuedViewmodelStabilizeDebugLogHz));
     m_RenderPipelineDebugLog = getBool("RenderPipelineDebugLog", m_RenderPipelineDebugLog);
     m_RenderPipelineDebugLogHz = std::clamp(getFloat("RenderPipelineDebugLogHz", m_RenderPipelineDebugLogHz), 0.0f, 60.0f);
+    m_QueuedSourceMarkerDebugLog = getBool("QueuedSourceMarkerDebugLog", m_QueuedSourceMarkerDebugLog);
+    m_QueuedSourceMarkerDebugLogHz = std::clamp(getFloat("QueuedSourceMarkerDebugLogHz", m_QueuedSourceMarkerDebugLogHz), 0.0f, 60.0f);
     m_RightEyeCopyFromLeft = getBool("RightEyeCopyFromLeft", m_RightEyeCopyFromLeft);
 
     // ReShade compatibility: ReShade's D3D9 runtime can leave the device/backbuffer state in

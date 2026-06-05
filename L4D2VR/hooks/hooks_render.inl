@@ -878,6 +878,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			static thread_local uint32_t s_lastWaitAttemptSeq = 0;
 			static thread_local int s_poseReuseCount = 0;
 			static thread_local int s_poseRelaxAccumulator = 0;
+			const uint32_t poseSeqBeforeRender = s_lastPoseSeq;
 
 			auto waitForNewPoseSnapshot = [&](uint32_t oldSeq, DWORD timeoutMs) -> bool
 				{
@@ -910,6 +911,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 			const bool strictRenderPosePacing =
 				(queueMode != 0) &&
+				m_VR->m_QueuedRenderPoseWaitMs != 0 &&
 				m_VR->m_QueuedSubmitUseRenderPoseToken &&
 				havePoses &&
 				poseSeq != 0 &&
@@ -988,7 +990,11 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			const int waitMsCfg = m_VR->m_QueuedRenderPoseWaitMs;
 			int waitMs = waitMsCfg;
 
-			const int maxAheadCfg = std::clamp(m_VR->m_QueuedRenderMaxFramesAhead, -1, 6);
+			const int maxAheadCfgRaw = std::clamp(m_VR->m_QueuedRenderMaxFramesAhead, -1, 6);
+			const bool fullSyncSubmitGate =
+				(queueMode != 0) &&
+				m_VR->m_QueuedSubmitUseRenderPoseToken;
+			const int maxAheadCfg = fullSyncSubmitGate ? 0 : maxAheadCfgRaw;
 
 			const bool motionNow = (locomotionNow || headTurningNow);
 
@@ -1015,12 +1021,14 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				}
 			}
 
-			// Auto-stabilize: in queued mode, if we're locomoting/turning but the render thread keeps reusing
-			// the same pose snapshot, it feels like "stutter + ghosting". A tiny wait here encourages a fresh pose.
-			if (waitMs == 0 && queueMode == 2 && motionNow)
-				waitMs = 2;
+			// Do not add an implicit pose wait here. With a Source call-queue completion marker,
+			// the compositor can keep reprojecting the last complete frame while the material
+			// worker catches up. Only explicit config knobs may trade throughput for waiting.
 
 			// Enforced frames-ahead limiter: if enabled, we may need to wait even when waitMs==0.
+			// Full-frame-sync submit rejects repeated render-pose frames, so render-side pacing
+			// must also stop at zero reuse; otherwise we spend CPU on frames SubmitVRTextures
+			// can only skip.
 			if ((waitMs != 0 || maxAheadCfg >= 0) && m_VR->m_PoseWaiterEvent)
 			{
 
@@ -1123,10 +1131,35 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				if (havePoses)
 					s_lastPoseSeq = poseSeq;
 			}
+			const bool finalPoseRepeatsPrevious =
+				havePoses &&
+				poseSeq != 0 &&
+				poseSeq == poseSeqBeforeRender;
+			if (!renderPoseAllowDuplicateSubmit &&
+				!strictRenderPosePacingAttempted &&
+				(queueMode != 0) &&
+				m_VR->m_QueuedSubmitUseRenderPoseToken &&
+				finalPoseRepeatsPrevious)
+			{
+				const int relaxPct = std::clamp(m_VR->m_QueuedRenderPoseRelaxPercent, 0, 100);
+				if (relaxPct > 0)
+				{
+					s_poseRelaxAccumulator = std::min(199, s_poseRelaxAccumulator + relaxPct);
+					if (s_poseRelaxAccumulator >= 100)
+					{
+						s_poseRelaxAccumulator -= 100;
+						renderPoseAllowDuplicateSubmit = true;
+					}
+				}
+				else
+				{
+					s_poseRelaxAccumulator = 0;
+				}
+			}
 			// Update last poseSeq even when we didn't enter the wait block.
 			if (havePoses && poseSeq != 0)
 			{
-				if (poseSeq != s_lastPoseSeq)
+				if (!finalPoseRepeatsPrevious)
 					s_poseRelaxAccumulator = 0;
 				s_lastPoseSeq = poseSeq;
 			}
@@ -2542,19 +2575,30 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	// Restore engine angles immediately after our stereo render (single-threaded only).
 	if (touchedEngineAngles && m_Game && m_Game->m_EngineClient)
 		m_Game->m_EngineClient->SetViewAngles(prevEngineAngles);
+
+	const uint32_t renderFrameSeq = m_VR->m_RenderFrameSeq.load(std::memory_order_acquire);
 	if (queueMode != 0)
 	{
 		if (renderPoseTokenUsed == 0)
 			renderPoseTokenUsed = m_VR->m_SubmitPoseToken.load(std::memory_order_acquire);
 
+		// Append a completion marker behind this stereo frame's material commands. The
+		// material worker publishes the frame only after the queued eye writes have run.
+		if (m_VR->QueueSourceRenderCompletionMarker(
+			rndrContext,
+			renderPoseTokenUsed,
+			renderFrameSeq,
+			renderPoseAllowDuplicateSubmit))
+		{
+			return;
+		}
+
 		if (m_VR->m_ReShadeVRCompat)
 		{
-			// In queued Source rendering, RenderView can return before MaterialSystem::EndFrame
-			// has submitted/flushed all D3D work. ReShadeVRCompat resolves eye RTs after
-			// Present; publishing completion here lets the submit thread copy a half-flushed
-			// stereo frame in complex scenes. Delay the completion signal until dEndFrame.
+			// Fallback for contexts that unexpectedly expose no Source call queue.
+			// ReShade resolves eye RTs after Present, so retain the older EndFrame gate.
 			m_VR->m_ReShadeVRCompatPendingRenderPoseToken.store(renderPoseTokenUsed, std::memory_order_release);
-			m_VR->m_ReShadeVRCompatPendingRenderFrameSeq.store(m_VR->m_RenderFrameSeq.load(std::memory_order_acquire), std::memory_order_release);
+			m_VR->m_ReShadeVRCompatPendingRenderFrameSeq.store(renderFrameSeq, std::memory_order_release);
 			m_VR->m_ReShadeVRCompatPendingDuplicatePose.store(renderPoseAllowDuplicateSubmit ? 1u : 0u, std::memory_order_release);
 			m_VR->m_ReShadeVRCompatPendingRenderReady.store(1, std::memory_order_release);
 
@@ -2563,10 +2607,10 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				static thread_local std::chrono::steady_clock::time_point s_lastRenderPendingLog{};
 				if (!ShouldThrottleLog(s_lastRenderPendingLog, m_VR->m_RenderPipelineDebugLogHz))
 				{
-					Game::logMsg("[VR][Queued][RenderCompletePending] tid=%lu q=%d completed=%u frameSeq=%u renderPose=%u poseSeq=%u submitPose=%u lastSubmitted=%u renderedNew=%d",
+					Game::logMsg("[VR][Queued][RenderCompletePendingFallback] tid=%lu q=%d completed=%u frameSeq=%u renderPose=%u poseSeq=%u submitPose=%u lastSubmitted=%u renderedNew=%d",
 						GetCurrentThreadId(), queueMode,
 						m_VR->m_RenderCompletedFrameId.load(std::memory_order_acquire),
-						m_VR->m_RenderFrameSeq.load(std::memory_order_acquire),
+						renderFrameSeq,
 						renderPoseTokenUsed,
 						m_VR->m_PoseWaiterSeq.load(std::memory_order_acquire),
 						m_VR->m_SubmitPoseToken.load(std::memory_order_acquire),
@@ -2576,29 +2620,11 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			}
 			return;
 		}
-
-		m_VR->m_RenderCompletedPoseToken.store(renderPoseTokenUsed, std::memory_order_release);
 	}
 
-	const uint32_t completedFrameId = m_VR->m_RenderCompletedFrameId.fetch_add(1, std::memory_order_acq_rel) + 1;
-	m_VR->m_RenderCompletedDuplicatePoseFrameId.store(renderPoseAllowDuplicateSubmit ? completedFrameId : 0u, std::memory_order_release);
-	m_VR->m_RenderedNewFrame.store(true, std::memory_order_release);
-	if (m_VR->m_RenderFrameReadyEvent)
-		SetEvent(m_VR->m_RenderFrameReadyEvent);
-	if (queueMode != 0 && m_VR->m_RenderPipelineDebugLog)
-	{
-		static thread_local std::chrono::steady_clock::time_point s_lastRenderCompleteLog{};
-		if (!ShouldThrottleLog(s_lastRenderCompleteLog, m_VR->m_RenderPipelineDebugLogHz))
-		{
-			Game::logMsg("[VR][Queued][RenderComplete] tid=%lu q=%d completed=%u frameSeq=%u renderPose=%u poseSeq=%u submitPose=%u lastSubmitted=%u renderedNew=%d",
-				GetCurrentThreadId(), queueMode,
-				completedFrameId,
-				m_VR->m_RenderFrameSeq.load(std::memory_order_acquire),
-				renderPoseTokenUsed,
-				m_VR->m_PoseWaiterSeq.load(std::memory_order_acquire),
-				m_VR->m_SubmitPoseToken.load(std::memory_order_acquire),
-				m_VR->m_LastSubmittedFrameId.load(std::memory_order_acquire),
-				m_VR->m_RenderedNewFrame.load(std::memory_order_acquire) ? 1 : 0);
-		}
-	}
+	m_VR->PublishRenderCompletedFrame(
+		renderPoseTokenUsed,
+		renderFrameSeq,
+		renderPoseAllowDuplicateSubmit,
+		queueMode != 0 ? "render-hook-fallback" : "single-thread");
 }

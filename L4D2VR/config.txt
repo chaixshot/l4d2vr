@@ -40,6 +40,8 @@ QueuedRenderHmdSmoothMs=0
 QueuedViewmodelStabilize=true
 QueuedViewmodelStabilizeDebugLog=false
 QueuedViewmodelStabilizeDebugLogHz=6
+QueuedSourceMarkerDebugLog=false
+QueuedSourceMarkerDebugLogHz=4
 
 HandHudDebugLog=false
 HandHudDebugLogHz=1

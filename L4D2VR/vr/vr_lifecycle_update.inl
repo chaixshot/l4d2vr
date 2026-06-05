@@ -17,6 +17,166 @@ namespace
         { 0x9b, 0x3a, 0xf1, 0x1a, 0xc3, 0x8c, 0x18, 0xb5 }
     };
 
+    class SourceRenderCompletionFunctor final : public CFunctor
+    {
+    public:
+        SourceRenderCompletionFunctor(
+            VR* vr,
+            uint32_t epoch,
+            uint32_t markerId,
+            uint32_t renderPoseToken,
+            uint32_t renderFrameSeq,
+            bool allowDuplicatePoseSubmit)
+            : m_VR(vr),
+            m_Epoch(epoch),
+            m_MarkerId(markerId),
+            m_RenderPoseToken(renderPoseToken),
+            m_RenderFrameSeq(renderFrameSeq),
+            m_AllowDuplicatePoseSubmit(allowDuplicatePoseSubmit)
+        {
+        }
+
+        int AddRef() override
+        {
+            return static_cast<int>(m_RefCount.fetch_add(1, std::memory_order_acq_rel) + 1);
+        }
+
+        int Release() override
+        {
+            const long remaining = m_RefCount.fetch_sub(1, std::memory_order_acq_rel) - 1;
+            if (remaining == 0)
+                delete this;
+            return static_cast<int>(remaining);
+        }
+
+        void operator()() override
+        {
+            VR* vr = m_VR;
+            if (!vr)
+                return;
+
+            if (vr->m_SourceRenderQueueMarkerEpoch.load(std::memory_order_acquire) != m_Epoch)
+                return;
+
+            vr->PublishRenderCompletedFrame(
+                m_RenderPoseToken,
+                m_RenderFrameSeq,
+                m_AllowDuplicatePoseSubmit,
+                "source-queue",
+                m_MarkerId);
+        }
+
+    private:
+        std::atomic<long> m_RefCount{ 0 };
+        VR* m_VR = nullptr;
+        uint32_t m_Epoch = 0;
+        uint32_t m_MarkerId = 0;
+        uint32_t m_RenderPoseToken = 0;
+        uint32_t m_RenderFrameSeq = 0;
+        bool m_AllowDuplicatePoseSubmit = false;
+    };
+
+    inline bool IsSourceQueueReadableProtection(DWORD protect)
+    {
+        if (protect & PAGE_GUARD)
+            return false;
+
+        switch (protect & 0xff)
+        {
+        case PAGE_READONLY:
+        case PAGE_READWRITE:
+        case PAGE_WRITECOPY:
+        case PAGE_EXECUTE_READ:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    inline bool IsSourceQueueReadableMemory(const void* ptr, size_t bytes)
+    {
+        if (!ptr || bytes == 0)
+            return false;
+
+        const uint8_t* p = reinterpret_cast<const uint8_t*>(ptr);
+        size_t remaining = bytes;
+
+        while (remaining > 0)
+        {
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (!VirtualQuery(p, &mbi, sizeof(mbi)))
+                return false;
+            if (mbi.State != MEM_COMMIT)
+                return false;
+            if (!IsSourceQueueReadableProtection(mbi.Protect))
+                return false;
+
+            const uintptr_t cur = reinterpret_cast<uintptr_t>(p);
+            const uintptr_t regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+            if (regionEnd <= cur)
+                return false;
+
+            const size_t chunk = std::min<size_t>(remaining, size_t(regionEnd - cur));
+            p += chunk;
+            remaining -= chunk;
+        }
+
+        return true;
+    }
+
+    inline bool IsSourceCallQueueUsable(ICallQueue* callQueue, void** outVtable)
+    {
+        if (outVtable)
+            *outVtable = nullptr;
+
+        if (!IsSourceQueueReadableMemory(callQueue, sizeof(void*)))
+            return false;
+
+        void* const vtable = *reinterpret_cast<void**>(callQueue);
+        if (outVtable)
+            *outVtable = vtable;
+
+        return IsSourceQueueReadableMemory(vtable, sizeof(void*));
+    }
+
+    inline ICallQueue* GetSourceRenderContextCallQueue(
+        IMatRenderContext* renderContext,
+        void** outContextVtable,
+        void** outGetCallQueueFn)
+    {
+        if (outContextVtable)
+            *outContextVtable = nullptr;
+        if (outGetCallQueueFn)
+            *outGetCallQueueFn = nullptr;
+
+        if (!IsSourceQueueReadableMemory(renderContext, sizeof(void*)))
+            return nullptr;
+
+        void** const contextVtable = *reinterpret_cast<void***>(renderContext);
+        if (outContextVtable)
+            *outContextVtable = contextVtable;
+
+        constexpr size_t kGetCallQueueAbsoluteSlot = 142;
+        if (!IsSourceQueueReadableMemory(contextVtable + kGetCallQueueAbsoluteSlot, sizeof(void*)))
+            return nullptr;
+
+        void* const getCallQueuePtr = contextVtable[kGetCallQueueAbsoluteSlot];
+        if (outGetCallQueueFn)
+            *outGetCallQueueFn = getCallQueuePtr;
+        if (!IsSourceQueueReadableMemory(getCallQueuePtr, 1))
+            return nullptr;
+
+        using GetCallQueueFn = ICallQueue*(__thiscall*)(IMatRenderContext*);
+        return reinterpret_cast<GetCallQueueFn>(getCallQueuePtr)(renderContext);
+    }
+
+    inline uint32_t SourceMarkerLag(uint32_t queuedMarkerId, uint32_t completedMarkerId)
+    {
+        return queuedMarkerId - completedMarkerId;
+    }
+
     inline float ComputePerceivedLuma(float r, float g, float b)
     {
         return 0.2126f * r +
@@ -1440,6 +1600,7 @@ void VR::ReleaseVRRenderTargetsForDeviceReset()
     m_BackBufferTextureValid = false;
     m_CreatingTextureID = Texture_None;
 
+    InvalidateSourceRenderQueueMarkers();
     m_RenderCompletedFrameId.store(0, std::memory_order_release);
     m_RenderCompletedPoseToken.store(0, std::memory_order_release);
     m_RenderCompletedDuplicatePoseFrameId.store(0, std::memory_order_release);
@@ -1701,6 +1862,7 @@ void VR::CreateVRTextures()
     ClearVRMenuTransitionResiduals(this, "CreateVRTextures");
 
     // New textures should not inherit old render/submit bookkeeping.
+    InvalidateSourceRenderQueueMarkers();
     m_RenderCompletedFrameId.store(0, std::memory_order_release);
     m_RenderCompletedPoseToken.store(0, std::memory_order_release);
     m_RenderCompletedDuplicatePoseFrameId.store(0, std::memory_order_release);
@@ -1768,6 +1930,171 @@ void VR::EnsureOpticsRTTTextures()
     m_Game->m_MaterialSystem->EndRenderTargetAllocation();
 
     LogVAS("after EnsureOpticsRTTTextures");
+}
+
+void VR::InvalidateSourceRenderQueueMarkers()
+{
+    m_SourceRenderQueueMarkerEpoch.fetch_add(1, std::memory_order_acq_rel);
+    m_SourceRenderQueueMarkerQueuedId.store(0, std::memory_order_release);
+    m_SourceRenderQueueMarkerCompletedId.store(0, std::memory_order_release);
+}
+
+bool VR::QueueSourceRenderCompletionMarker(
+    IMatRenderContext* renderContext,
+    uint32_t renderPoseToken,
+    uint32_t renderFrameSeq,
+    bool allowDuplicatePoseSubmit)
+{
+    if (!renderContext)
+        return false;
+
+    const bool sourceMarkerDebugLog = m_QueuedSourceMarkerDebugLog;
+    const bool queueDebugLog = m_RenderPipelineDebugLog || sourceMarkerDebugLog;
+    const float queueDebugHz = sourceMarkerDebugLog ? m_QueuedSourceMarkerDebugLogHz : m_RenderPipelineDebugLogHz;
+
+    void* contextVtable = nullptr;
+    void* getCallQueueFn = nullptr;
+    ICallQueue* callQueue = GetSourceRenderContextCallQueue(renderContext, &contextVtable, &getCallQueueFn);
+    if (!callQueue)
+    {
+        if (queueDebugLog)
+        {
+            static std::chrono::steady_clock::time_point s_lastMissingSourceQueueLog{};
+            if (!ShouldThrottle(s_lastMissingSourceQueueLog, queueDebugHz))
+            {
+                const uint32_t queuedMarkerId = m_SourceRenderQueueMarkerQueuedId.load(std::memory_order_acquire);
+                const uint32_t completedMarkerId = m_SourceRenderQueueMarkerCompletedId.load(std::memory_order_acquire);
+                Game::logMsg("[VR][Queued][SourceQueueMissing] tid=%lu ctx=%p ctxVtable=%p getCallQueue=%p queuedMarker=%u completedMarker=%u markerLag=%u frameSeq=%u renderPose=%u",
+                    GetCurrentThreadId(),
+                    renderContext,
+                    contextVtable,
+                    getCallQueueFn,
+                    queuedMarkerId,
+                    completedMarkerId,
+                    SourceMarkerLag(queuedMarkerId, completedMarkerId),
+                    renderFrameSeq,
+                    renderPoseToken);
+            }
+        }
+        return false;
+    }
+
+    void* callQueueVtable = nullptr;
+    if (!IsSourceCallQueueUsable(callQueue, &callQueueVtable))
+    {
+        if (queueDebugLog)
+        {
+            static std::chrono::steady_clock::time_point s_lastInvalidSourceQueueLog{};
+            if (!ShouldThrottle(s_lastInvalidSourceQueueLog, queueDebugHz))
+            {
+                const uint32_t queuedMarkerId = m_SourceRenderQueueMarkerQueuedId.load(std::memory_order_acquire);
+                const uint32_t completedMarkerId = m_SourceRenderQueueMarkerCompletedId.load(std::memory_order_acquire);
+                Game::logMsg("[VR][Queued][SourceQueueInvalid] tid=%lu ctx=%p ctxVtable=%p getCallQueue=%p queue=%p vtable=%p queuedMarker=%u completedMarker=%u markerLag=%u frameSeq=%u renderPose=%u",
+                    GetCurrentThreadId(),
+                    renderContext,
+                    contextVtable,
+                    getCallQueueFn,
+                    callQueue,
+                    callQueueVtable,
+                    queuedMarkerId,
+                    completedMarkerId,
+                    SourceMarkerLag(queuedMarkerId, completedMarkerId),
+                    renderFrameSeq,
+                    renderPoseToken);
+            }
+        }
+        return false;
+    }
+
+    const uint32_t epoch = m_SourceRenderQueueMarkerEpoch.load(std::memory_order_acquire);
+    const uint32_t markerId = m_SourceRenderQueueMarkerQueuedId.fetch_add(1, std::memory_order_acq_rel) + 1;
+    const uint32_t completedMarkerIdBeforeQueue = m_SourceRenderQueueMarkerCompletedId.load(std::memory_order_acquire);
+    callQueue->QueueFunctor(new SourceRenderCompletionFunctor(
+        this,
+        epoch,
+        markerId,
+        renderPoseToken,
+        renderFrameSeq,
+        allowDuplicatePoseSubmit));
+
+    if (sourceMarkerDebugLog)
+    {
+        static thread_local std::chrono::steady_clock::time_point s_lastSourceMarkerQueueLog{};
+        if (!ShouldThrottle(s_lastSourceMarkerQueueLog, m_QueuedSourceMarkerDebugLogHz))
+        {
+            const uint32_t queuedMarkerId = m_SourceRenderQueueMarkerQueuedId.load(std::memory_order_acquire);
+            const uint32_t completedMarkerId = m_SourceRenderQueueMarkerCompletedId.load(std::memory_order_acquire);
+            Game::logMsg("[VR][Queued][SourceMarkerQueue] tid=%lu marker=%u epoch=%u frameSeq=%u renderPose=%u allowDup=%d queuedBefore=%u completedBefore=%u lagBefore=%u queuedMarker=%u completedMarker=%u markerLag=%u completedFrame=%u submittedFrame=%u stale=%u ctx=%p queue=%p ctxVtable=%p getCallQueue=%p queueVtable=%p",
+                GetCurrentThreadId(),
+                markerId,
+                epoch,
+                renderFrameSeq,
+                renderPoseToken,
+                allowDuplicatePoseSubmit ? 1 : 0,
+                markerId - 1,
+                completedMarkerIdBeforeQueue,
+                SourceMarkerLag(markerId - 1, completedMarkerIdBeforeQueue),
+                queuedMarkerId,
+                completedMarkerId,
+                SourceMarkerLag(queuedMarkerId, completedMarkerId),
+                m_RenderCompletedFrameId.load(std::memory_order_acquire),
+                m_LastSubmittedFrameId.load(std::memory_order_acquire),
+                m_QueuedSubmitStaleStreak.load(std::memory_order_acquire),
+                renderContext,
+                callQueue,
+                contextVtable,
+                getCallQueueFn,
+                callQueueVtable);
+        }
+    }
+    return true;
+}
+
+void VR::PublishRenderCompletedFrame(
+    uint32_t renderPoseToken,
+    uint32_t renderFrameSeq,
+    bool allowDuplicatePoseSubmit,
+    const char* sourceTag,
+    uint32_t sourceQueueMarkerId)
+{
+    if (renderPoseToken == 0)
+        renderPoseToken = m_SubmitPoseToken.load(std::memory_order_acquire);
+
+    const uint32_t completedFrameId = m_RenderCompletedFrameId.fetch_add(1, std::memory_order_acq_rel) + 1;
+    m_RenderCompletedPoseToken.store(renderPoseToken, std::memory_order_release);
+    m_RenderCompletedDuplicatePoseFrameId.store(allowDuplicatePoseSubmit ? completedFrameId : 0u, std::memory_order_release);
+    if (sourceQueueMarkerId != 0)
+        m_SourceRenderQueueMarkerCompletedId.store(sourceQueueMarkerId, std::memory_order_release);
+    m_RenderedNewFrame.store(true, std::memory_order_release);
+    if (m_RenderFrameReadyEvent)
+        SetEvent(m_RenderFrameReadyEvent);
+
+    if (m_RenderPipelineDebugLog || m_QueuedSourceMarkerDebugLog)
+    {
+        static thread_local std::chrono::steady_clock::time_point s_lastSourceQueuePublishLog{};
+        const float logHz = m_QueuedSourceMarkerDebugLog ? m_QueuedSourceMarkerDebugLogHz : m_RenderPipelineDebugLogHz;
+        if (!ShouldThrottle(s_lastSourceQueuePublishLog, logHz))
+        {
+            const uint32_t queuedMarkerId = m_SourceRenderQueueMarkerQueuedId.load(std::memory_order_acquire);
+            const uint32_t completedMarkerId = m_SourceRenderQueueMarkerCompletedId.load(std::memory_order_acquire);
+            Game::logMsg("[VR][Queued][RenderComplete:%s] tid=%lu completed=%u frameSeq=%u renderPose=%u marker=%u queuedMarker=%u completedMarker=%u markerLag=%u poseSeq=%u submitPose=%u lastSubmitted=%u duplicateFrame=%u stale=%u renderedNew=%d",
+                (sourceTag && *sourceTag) ? sourceTag : "unknown",
+                GetCurrentThreadId(),
+                completedFrameId,
+                renderFrameSeq,
+                renderPoseToken,
+                sourceQueueMarkerId,
+                queuedMarkerId,
+                completedMarkerId,
+                SourceMarkerLag(queuedMarkerId, completedMarkerId),
+                m_PoseWaiterSeq.load(std::memory_order_acquire),
+                m_SubmitPoseToken.load(std::memory_order_acquire),
+                m_LastSubmittedFrameId.load(std::memory_order_acquire),
+                m_RenderCompletedDuplicatePoseFrameId.load(std::memory_order_acquire),
+                m_QueuedSubmitStaleStreak.load(std::memory_order_acquire),
+                m_RenderedNewFrame.load(std::memory_order_acquire) ? 1 : 0);
+        }
+    }
 }
 
 void VR::SubmitVRTextures()
@@ -1844,6 +2171,34 @@ void VR::SubmitVRTextures()
     const vr::VRTextureBounds_t* rightEyeSubmitBounds = reshadeSubmitPrebakedToFullBounds
         ? &fullEyeSubmitBounds
         : &(m_TextureBounds)[1];
+
+    if (m_QueuedSourceMarkerDebugLog && queued && sceneReadyForStaleResubmit)
+    {
+        static std::chrono::steady_clock::time_point s_lastSourceMarkerSubmitLog{};
+        if (!ShouldThrottle(s_lastSourceMarkerSubmitLog, m_QueuedSourceMarkerDebugLogHz))
+        {
+            const uint32_t queuedMarkerId = m_SourceRenderQueueMarkerQueuedId.load(std::memory_order_acquire);
+            const uint32_t completedMarkerId = m_SourceRenderQueueMarkerCompletedId.load(std::memory_order_acquire);
+            const uint32_t renderCompletedFrameId = m_RenderCompletedFrameId.load(std::memory_order_acquire);
+            const uint32_t lastSubmittedFrameId = m_LastSubmittedFrameId.load(std::memory_order_acquire);
+            Game::logMsg("[VR][Queued][SourceMarkerSubmit] tid=%lu renderedNew=%d completed=%u submitted=%u frameLag=%u queuedMarker=%u completedMarker=%u markerLag=%u submitPose=%u renderPose=%u lastPose=%u duplicateFrame=%u stale=%u submitWaitMs=%d useRenderPose=%d",
+                GetCurrentThreadId(),
+                renderedNewFrame ? 1 : 0,
+                renderCompletedFrameId,
+                lastSubmittedFrameId,
+                renderCompletedFrameId - lastSubmittedFrameId,
+                queuedMarkerId,
+                completedMarkerId,
+                SourceMarkerLag(queuedMarkerId, completedMarkerId),
+                m_SubmitPoseToken.load(std::memory_order_acquire),
+                m_RenderCompletedPoseToken.load(std::memory_order_acquire),
+                m_LastSubmittedPoseToken.load(std::memory_order_acquire),
+                m_RenderCompletedDuplicatePoseFrameId.load(std::memory_order_acquire),
+                m_QueuedSubmitStaleStreak.load(std::memory_order_acquire),
+                std::clamp(m_QueuedSubmitWaitMs, 0, 20),
+                m_QueuedSubmitUseRenderPoseToken ? 1 : 0);
+        }
+    }
 
     if (m_RenderPipelineDebugLog && !ShouldThrottle(m_RenderPipelineLastSubmitLog, m_RenderPipelineDebugLogHz))
     {
@@ -1964,19 +2319,27 @@ void VR::SubmitVRTextures()
         else
             m_QueuedSubmitStaleStreak.fetch_add(1, std::memory_order_acq_rel);
 
-        if (m_RenderPipelineDebugLog && (waitedForRenderFrame || !renderedNewFrame))
+        if ((m_RenderPipelineDebugLog || m_QueuedSourceMarkerDebugLog) && (waitedForRenderFrame || !renderedNewFrame))
         {
             static std::chrono::steady_clock::time_point s_lastQueuedSubmitWaitLog{};
-            if (!ShouldThrottle(s_lastQueuedSubmitWaitLog, m_RenderPipelineDebugLogHz))
+            const float logHz = m_QueuedSourceMarkerDebugLog ? m_QueuedSourceMarkerDebugLogHz : m_RenderPipelineDebugLogHz;
+            if (!ShouldThrottle(s_lastQueuedSubmitWaitLog, logHz))
             {
-                Game::logMsg("[VR][Queued][SubmitWait] tid=%lu waitMs=%d waited=%d waitResult=0x%08lX renderedNew=%d completed=%u submitted=%u pose=%u lastPose=%u stale=%u->%u",
+                const uint32_t queuedMarkerId = m_SourceRenderQueueMarkerQueuedId.load(std::memory_order_acquire);
+                const uint32_t completedMarkerId = m_SourceRenderQueueMarkerCompletedId.load(std::memory_order_acquire);
+                Game::logMsg("[VR][Queued][SubmitWait] tid=%lu waitMs=%d waited=%d waitResult=0x%08lX renderedNew=%d completed=%u submitted=%u frameLag=%u queuedMarker=%u completedMarker=%u markerLag=%u pose=%u renderPose=%u lastPose=%u stale=%u->%u",
                     GetCurrentThreadId(), submitWaitMs,
                     waitedForRenderFrame ? 1 : 0,
                     static_cast<unsigned long>(waitResult),
                     renderedNewFrame ? 1 : 0,
                     completedFrameId,
                     lastSubmittedFrameId,
+                    completedFrameId - lastSubmittedFrameId,
+                    queuedMarkerId,
+                    completedMarkerId,
+                    SourceMarkerLag(queuedMarkerId, completedMarkerId),
                     poseToken,
+                    m_RenderCompletedPoseToken.load(std::memory_order_acquire),
                     m_LastSubmittedPoseToken.load(std::memory_order_acquire),
                     staleStreakBefore,
                     m_QueuedSubmitStaleStreak.load(std::memory_order_acquire));
@@ -2001,7 +2364,7 @@ void VR::SubmitVRTextures()
 
         if (effectivePoseToken == lastSubmittedToken && poseToken != lastSubmittedToken && !allowDuplicatePoseSubmit && m_RenderFrameReadyEvent)
         {
-            const DWORD duplicatePoseWaitMs = static_cast<DWORD>(std::clamp(std::max(m_QueuedSubmitWaitMs, 2), 0, 20));
+            const DWORD duplicatePoseWaitMs = static_cast<DWORD>(std::clamp(m_QueuedSubmitWaitMs, 0, 20));
             if (duplicatePoseWaitMs > 0)
             {
                 const DWORD duplicateWaitResult = WaitForSingleObject(m_RenderFrameReadyEvent, duplicatePoseWaitMs);
@@ -2017,20 +2380,29 @@ void VR::SubmitVRTextures()
                     waitedCompletedFrameId != m_LastSubmittedFrameId.load(std::memory_order_acquire) &&
                     m_RenderCompletedDuplicatePoseFrameId.load(std::memory_order_acquire) == waitedCompletedFrameId;
 
-                if (m_RenderPipelineDebugLog)
+                if (m_RenderPipelineDebugLog || m_QueuedSourceMarkerDebugLog)
                 {
                     static std::chrono::steady_clock::time_point s_lastQueuedSubmitPoseWaitLog{};
-                    if (!ShouldThrottle(s_lastQueuedSubmitPoseWaitLog, m_RenderPipelineDebugLogHz))
+                    const float logHz = m_QueuedSourceMarkerDebugLog ? m_QueuedSourceMarkerDebugLogHz : m_RenderPipelineDebugLogHz;
+                    if (!ShouldThrottle(s_lastQueuedSubmitPoseWaitLog, logHz))
                     {
-                        Game::logMsg("[VR][Queued][SubmitPoseWait] tid=%lu waitMs=%lu result=0x%08lX currentPose=%u renderPose=%u lastPose=%u completed=%u submitted=%u renderedNew=%d",
+                        const uint32_t queuedMarkerId = m_SourceRenderQueueMarkerQueuedId.load(std::memory_order_acquire);
+                        const uint32_t completedMarkerId = m_SourceRenderQueueMarkerCompletedId.load(std::memory_order_acquire);
+                        const uint32_t completedNow = m_RenderCompletedFrameId.load(std::memory_order_acquire);
+                        const uint32_t submittedNow = m_LastSubmittedFrameId.load(std::memory_order_acquire);
+                        Game::logMsg("[VR][Queued][SubmitPoseWait] tid=%lu waitMs=%lu result=0x%08lX currentPose=%u renderPose=%u lastPose=%u completed=%u submitted=%u frameLag=%u queuedMarker=%u completedMarker=%u markerLag=%u renderedNew=%d",
                             GetCurrentThreadId(),
                             static_cast<unsigned long>(duplicatePoseWaitMs),
                             static_cast<unsigned long>(duplicateWaitResult),
                             poseToken,
                             renderPoseToken,
                             lastSubmittedToken,
-                            m_RenderCompletedFrameId.load(std::memory_order_acquire),
-                            m_LastSubmittedFrameId.load(std::memory_order_acquire),
+                            completedNow,
+                            submittedNow,
+                            completedNow - submittedNow,
+                            queuedMarkerId,
+                            completedMarkerId,
+                            SourceMarkerLag(queuedMarkerId, completedMarkerId),
                             m_RenderedNewFrame.load(std::memory_order_acquire) ? 1 : 0);
                     }
                 }
@@ -2039,35 +2411,54 @@ void VR::SubmitVRTextures()
 
         if (effectivePoseToken == 0 || (effectivePoseToken == lastSubmittedToken && !allowDuplicatePoseSubmit))
         {
-            if (m_RenderPipelineDebugLog)
+            if (m_RenderPipelineDebugLog || m_QueuedSourceMarkerDebugLog)
             {
                 static std::chrono::steady_clock::time_point s_lastQueuedSubmitSkipLog{};
-                if (!ShouldThrottle(s_lastQueuedSubmitSkipLog, m_RenderPipelineDebugLogHz))
+                const float logHz = m_QueuedSourceMarkerDebugLog ? m_QueuedSourceMarkerDebugLogHz : m_RenderPipelineDebugLogHz;
+                if (!ShouldThrottle(s_lastQueuedSubmitSkipLog, logHz))
                 {
-                    Game::logMsg("[VR][Queued][SubmitSkip] tid=%lu currentPose=%u renderPose=%u lastPose=%u completed=%u submitted=%u renderedNew=%d",
+                    const uint32_t queuedMarkerId = m_SourceRenderQueueMarkerQueuedId.load(std::memory_order_acquire);
+                    const uint32_t completedMarkerId = m_SourceRenderQueueMarkerCompletedId.load(std::memory_order_acquire);
+                    const uint32_t completedNow = m_RenderCompletedFrameId.load(std::memory_order_acquire);
+                    const uint32_t submittedNow = m_LastSubmittedFrameId.load(std::memory_order_acquire);
+                    Game::logMsg("[VR][Queued][SubmitSkip] tid=%lu currentPose=%u renderPose=%u lastPose=%u completed=%u submitted=%u frameLag=%u queuedMarker=%u completedMarker=%u markerLag=%u duplicateFrame=%u renderedNew=%d",
                         GetCurrentThreadId(),
                         poseToken,
                         renderPoseToken,
                         lastSubmittedToken,
-                        m_RenderCompletedFrameId.load(std::memory_order_acquire),
-                        m_LastSubmittedFrameId.load(std::memory_order_acquire),
+                        completedNow,
+                        submittedNow,
+                        completedNow - submittedNow,
+                        queuedMarkerId,
+                        completedMarkerId,
+                        SourceMarkerLag(queuedMarkerId, completedMarkerId),
+                        m_RenderCompletedDuplicatePoseFrameId.load(std::memory_order_acquire),
                         m_RenderedNewFrame.load(std::memory_order_acquire) ? 1 : 0);
                 }
             }
             return;
         }
-        if (effectivePoseToken == lastSubmittedToken && allowDuplicatePoseSubmit && m_RenderPipelineDebugLog)
+        if (effectivePoseToken == lastSubmittedToken && allowDuplicatePoseSubmit && (m_RenderPipelineDebugLog || m_QueuedSourceMarkerDebugLog))
         {
             static std::chrono::steady_clock::time_point s_lastQueuedSubmitDuplicatePoseLog{};
-            if (!ShouldThrottle(s_lastQueuedSubmitDuplicatePoseLog, m_RenderPipelineDebugLogHz))
+            const float logHz = m_QueuedSourceMarkerDebugLog ? m_QueuedSourceMarkerDebugLogHz : m_RenderPipelineDebugLogHz;
+            if (!ShouldThrottle(s_lastQueuedSubmitDuplicatePoseLog, logHz))
             {
-                Game::logMsg("[VR][Queued][SubmitDuplicatePose] tid=%lu currentPose=%u renderPose=%u lastPose=%u completed=%u submitted=%u duplicateFrame=%u",
+                const uint32_t queuedMarkerId = m_SourceRenderQueueMarkerQueuedId.load(std::memory_order_acquire);
+                const uint32_t completedMarkerId = m_SourceRenderQueueMarkerCompletedId.load(std::memory_order_acquire);
+                const uint32_t completedNow = m_RenderCompletedFrameId.load(std::memory_order_acquire);
+                const uint32_t submittedNow = m_LastSubmittedFrameId.load(std::memory_order_acquire);
+                Game::logMsg("[VR][Queued][SubmitDuplicatePose] tid=%lu currentPose=%u renderPose=%u lastPose=%u completed=%u submitted=%u frameLag=%u queuedMarker=%u completedMarker=%u markerLag=%u duplicateFrame=%u",
                     GetCurrentThreadId(),
                     poseToken,
                     renderPoseToken,
                     lastSubmittedToken,
-                    m_RenderCompletedFrameId.load(std::memory_order_acquire),
-                    m_LastSubmittedFrameId.load(std::memory_order_acquire),
+                    completedNow,
+                    submittedNow,
+                    completedNow - submittedNow,
+                    queuedMarkerId,
+                    completedMarkerId,
+                    SourceMarkerLag(queuedMarkerId, completedMarkerId),
                     m_RenderCompletedDuplicatePoseFrameId.load(std::memory_order_acquire));
             }
         }

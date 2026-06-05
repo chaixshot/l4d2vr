@@ -38,12 +38,12 @@ void __fastcall Hooks::dEndFrame(void* ecx, void* edx)
 			if (renderPoseToken == 0)
 				renderPoseToken = m_VR->m_SubmitPoseToken.load(std::memory_order_acquire);
 
-			const uint32_t completedFrameId = m_VR->m_RenderCompletedFrameId.fetch_add(1, std::memory_order_acq_rel) + 1;
-			m_VR->m_RenderCompletedPoseToken.store(renderPoseToken, std::memory_order_release);
-			m_VR->m_RenderCompletedDuplicatePoseFrameId.store(pendingDuplicatePose != 0 ? completedFrameId : 0u, std::memory_order_release);
-			m_VR->m_RenderedNewFrame.store(true, std::memory_order_release);
-			if (m_VR->m_RenderFrameReadyEvent)
-				SetEvent(m_VR->m_RenderFrameReadyEvent);
+			m_VR->PublishRenderCompletedFrame(
+				renderPoseToken,
+				pendingFrameSeq,
+				pendingDuplicatePose != 0,
+				"end-frame-fallback");
+			const uint32_t completedFrameId = m_VR->m_RenderCompletedFrameId.load(std::memory_order_acquire);
 
 			if (m_VR->m_RenderPipelineDebugLog)
 			{
@@ -954,8 +954,8 @@ namespace
 							angles.x, angles.y, angles.z);
 					}
 				}
-				return true;
-			}
+		return true;
+	}
 		}
 
 		if (!vr->m_BulletVisualsUseViewmodelPose)

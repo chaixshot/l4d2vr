@@ -457,7 +457,7 @@ public:
 	bool m_QueuedRenderMaxFpsSmart = true;
 	// Queued rendering: limit how many extra render frames may reuse the same WaitGetPoses() snapshot.
 	// -1 = disabled, 0 = never reuse (most stable), 1 = allow 1 reuse (2 frames per pose), etc.
-	int m_QueuedRenderMaxFramesAhead = 1;
+	int m_QueuedRenderMaxFramesAhead = -1;
 
 	// Queued rendering: render-thread smoothing time constant (ms) for cameraAnchor/rotationOffset.
 	// 0 = off (follow snapshot exactly), 20~80 = typical. Higher = smoother but more latency.
@@ -488,6 +488,9 @@ public:
 	// Render/HUD/multicore pipeline diagnostics. Default off; logs key frame boundaries only.
 	bool  m_RenderPipelineDebugLog = false;
 	float m_RenderPipelineDebugLogHz = 2.0f;
+	// Source material queue marker diagnostics for queued/multicore frame completion pacing.
+	bool  m_QueuedSourceMarkerDebugLog = false;
+	float m_QueuedSourceMarkerDebugLogHz = 4.0f;
 	// Performance mode: skip the real right-eye Source RenderView in single-threaded rendering
 	// and copy the completed left-eye render target into the right-eye render target.
 	// This improves CPU time but removes true stereo depth; default off.
@@ -782,9 +785,16 @@ public:
 	std::atomic<uint32_t> m_RenderCompletedDuplicatePoseFrameId{ 0 };
 	std::atomic<uint32_t> m_LastSubmittedFrameId{ 0 };
 	HANDLE m_RenderFrameReadyEvent = NULL;
+	// Source queued-render completion marker. Each full stereo render appends a tiny
+	// functor to IMatRenderContext::GetCallQueue(); the material worker publishes the
+	// frame only after all preceding Source render commands have executed. Epoch drops
+	// callbacks left behind by map transitions or D3D9 device resets.
+	std::atomic<uint32_t> m_SourceRenderQueueMarkerEpoch{ 1 };
+	std::atomic<uint32_t> m_SourceRenderQueueMarkerQueuedId{ 0 };
+	std::atomic<uint32_t> m_SourceRenderQueueMarkerCompletedId{ 0 };
 	// Present-side wait budget (ms) for a fresh rendered frame in mat_queue_mode!=0.
 	// 0 disables waiting. Used as an upper bound by adaptive submit-wait logic.
-	int m_QueuedSubmitWaitMs = 1;
+	int m_QueuedSubmitWaitMs = 0;
 	// Queued submit policy switch:
 	// true = submit only frames whose render-completed pose token advanced (less ghosting, may skip frames)
 	// false = original submit-pose-token path (smoother cadence, can submit stale render-pose frames)
@@ -2743,6 +2753,9 @@ public:
 	void LogVAS(const char* tag);
 	void HandleMissingRenderContext(const char* location);
 	void SubmitVRTextures();
+	void InvalidateSourceRenderQueueMarkers();
+	bool QueueSourceRenderCompletionMarker(IMatRenderContext* renderContext, uint32_t renderPoseToken, uint32_t renderFrameSeq, bool allowDuplicatePoseSubmit);
+	void PublishRenderCompletedFrame(uint32_t renderPoseToken, uint32_t renderFrameSeq, bool allowDuplicatePoseSubmit, const char* sourceTag, uint32_t sourceQueueMarkerId = 0);
 	void LogCompositorError(const char* action, vr::EVRCompositorError error);
 	void RepositionOverlays();
 	void UpdateHudLiftGestureState(bool inGame);
