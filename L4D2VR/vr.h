@@ -368,6 +368,15 @@ public:
 	std::atomic<float> m_RenderRecommendedViewmodelAngX{ 0.0f };
 	std::atomic<float> m_RenderRecommendedViewmodelAngY{ 0.0f };
 	std::atomic<float> m_RenderRecommendedViewmodelAngZ{ 0.0f };
+	std::atomic<uint32_t> m_ViewmodelMuzzleSmokePoseSeq{ 0 };
+	std::atomic<uint32_t> m_ViewmodelMuzzleSmokePoseTickMs{ 0 };
+	std::atomic<uint32_t> m_ViewmodelMuzzleSmokeRenderFrameSeq{ 0 };
+	std::atomic<float> m_ViewmodelMuzzleSmokePosX{ 0.0f };
+	std::atomic<float> m_ViewmodelMuzzleSmokePosY{ 0.0f };
+	std::atomic<float> m_ViewmodelMuzzleSmokePosZ{ 0.0f };
+	std::atomic<float> m_ViewmodelMuzzleSmokeAngX{ 0.0f };
+	std::atomic<float> m_ViewmodelMuzzleSmokeAngY{ 0.0f };
+	std::atomic<float> m_ViewmodelMuzzleSmokeAngZ{ 0.0f };
 
 	// Render thread id (captured in dRenderView) used to gate render-only snapshot reads.
 	std::atomic<uint32_t> m_RenderThreadId{ 0 };
@@ -491,6 +500,11 @@ public:
 	// Additional offset only when queued rendering is enabled (mat_queue_mode!=0).
 	// Lets you apply extra correction for render-thread decoupling without affecting single-thread.
 	Vector m_QueuedBulletVisualHitOffset = { 0.0f, 0.0f, 0.02f };
+	// Prefer the visible viewmodel's muzzlesmoke bone/empty for local client bullet/tracer FX.
+	bool m_BulletVisualsUseMuzzleSmoke = true;
+	// Client-side bullet/tracer FX can be emitted from the viewmodel pose when
+	// the visible gun is projected in Source's viewmodel layer. Visual-only.
+	bool m_BulletVisualsUseViewmodelPose = true;
 
 	Vector m_ViewmodelPosAdjust = { 0,0,0 };
 	QAngle m_ViewmodelAngAdjust = { 0,0,0 };

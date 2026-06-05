@@ -866,6 +866,138 @@ namespace
 
 		return true;
 	}
+
+	static inline bool ApplyLocalViewmodelBulletVisualPose(VR* vr, Vector& origin, QAngle& angles)
+	{
+		if (!vr || !vr->m_IsVREnabled || (!vr->m_BulletVisualsUseMuzzleSmoke && !vr->m_BulletVisualsUseViewmodelPose))
+			return false;
+		if (!vr->m_VrHandsRightUseViewmodelPose || vr->IsScopeActive())
+			return false;
+
+		const QAngle oldAngles = angles;
+		const Vector oldOrigin = origin;
+		const char* source = "viewmodel-root";
+		const char* muzzleFailReason = "disabled";
+		uint32_t muzzleFailAgeMs = 0;
+		uint32_t muzzleFailSeq = 0;
+
+		if (vr->m_BulletVisualsUseMuzzleSmoke)
+		{
+			muzzleFailReason = "no-cache";
+			for (int attempt = 0; attempt < 3; ++attempt)
+			{
+				const uint32_t s1 = vr->m_ViewmodelMuzzleSmokePoseSeq.load(std::memory_order_acquire);
+				muzzleFailSeq = s1;
+				if (s1 == 0)
+					break;
+				if (s1 & 1u)
+				{
+					muzzleFailReason = "writing";
+					continue;
+				}
+
+				const Vector muzzleOrigin(
+					vr->m_ViewmodelMuzzleSmokePosX.load(std::memory_order_relaxed),
+					vr->m_ViewmodelMuzzleSmokePosY.load(std::memory_order_relaxed),
+					vr->m_ViewmodelMuzzleSmokePosZ.load(std::memory_order_relaxed));
+				QAngle muzzleAngles(
+					vr->m_ViewmodelMuzzleSmokeAngX.load(std::memory_order_relaxed),
+					vr->m_ViewmodelMuzzleSmokeAngY.load(std::memory_order_relaxed),
+					vr->m_ViewmodelMuzzleSmokeAngZ.load(std::memory_order_relaxed));
+				const uint32_t tick = vr->m_ViewmodelMuzzleSmokePoseTickMs.load(std::memory_order_relaxed);
+				const uint32_t renderSeq = vr->m_ViewmodelMuzzleSmokeRenderFrameSeq.load(std::memory_order_relaxed);
+
+				const uint32_t s2 = vr->m_ViewmodelMuzzleSmokePoseSeq.load(std::memory_order_acquire);
+				if (s1 != s2 || (s2 & 1u))
+				{
+					muzzleFailReason = "torn";
+					continue;
+				}
+
+				const uint32_t ageMs = GetTickCount() - tick;
+				muzzleFailAgeMs = ageMs;
+				if (ageMs > 250u)
+				{
+					muzzleFailReason = "stale";
+					break;
+				}
+				if (!IsFiniteVector(muzzleOrigin) ||
+					!std::isfinite(muzzleAngles.x) ||
+					!std::isfinite(muzzleAngles.y) ||
+					!std::isfinite(muzzleAngles.z))
+				{
+					muzzleFailReason = "invalid";
+					break;
+				}
+
+				NormalizeAndClampViewAngles(muzzleAngles);
+				origin = muzzleOrigin;
+				angles = muzzleAngles;
+				source = "muzzlesmoke";
+
+				if (vr->m_NonVRServerMovementEffectsDebugLog || vr->m_BulletVisualsUseMuzzleSmoke)
+				{
+					static thread_local std::chrono::steady_clock::time_point s_lastMuzzleFx{};
+					const float logHz = vr->m_NonVRServerMovementEffectsDebugLog ? vr->m_NonVRServerMovementEffectsDebugLogHz : 2.0f;
+					if (!ShouldThrottleLog(s_lastMuzzleFx, logHz))
+					{
+						const uint32_t tid = static_cast<uint32_t>(GetCurrentThreadId());
+						Game::logMsg(
+							"[VR][FX][bullets][muzzlesmoke] tid=%u seq=%u renderSeq=%u ageMs=%u oldOrigin=(%.2f %.2f %.2f) muzzleOrigin=(%.2f %.2f %.2f) oldAngles=(%.2f %.2f %.2f) muzzleAngles=(%.2f %.2f %.2f)",
+							tid,
+							s2,
+							renderSeq,
+							ageMs,
+							oldOrigin.x, oldOrigin.y, oldOrigin.z,
+							origin.x, origin.y, origin.z,
+							oldAngles.x, oldAngles.y, oldAngles.z,
+							angles.x, angles.y, angles.z);
+					}
+				}
+				return true;
+			}
+		}
+
+		if (!vr->m_BulletVisualsUseViewmodelPose)
+			return false;
+
+		const Vector viewmodelOrigin = vr->GetRecommendedViewmodelAbsPos();
+		if (!IsFiniteVector(viewmodelOrigin))
+			return false;
+
+		QAngle viewmodelVisualAngles = vr->GetRecommendedViewmodelAbsAngle();
+		NormalizeAndClampViewAngles(viewmodelVisualAngles);
+
+		Vector viewmodelForward{};
+		QAngle::AngleVectors(viewmodelVisualAngles, &viewmodelForward, nullptr, nullptr);
+		if (viewmodelForward.IsZero())
+			return false;
+
+		origin = viewmodelOrigin;
+		angles = viewmodelVisualAngles;
+
+		if (vr->m_NonVRServerMovementEffectsDebugLog || vr->m_BulletVisualsUseMuzzleSmoke)
+		{
+			static thread_local std::chrono::steady_clock::time_point s_lastVmBulletFx{};
+			const float logHz = vr->m_NonVRServerMovementEffectsDebugLog ? vr->m_NonVRServerMovementEffectsDebugLogHz : 2.0f;
+			if (!ShouldThrottleLog(s_lastVmBulletFx, logHz))
+			{
+				const uint32_t tid = static_cast<uint32_t>(GetCurrentThreadId());
+				Game::logMsg(
+					"[VR][FX][bullets][viewmodel] tid=%u source=%s muzzleFail=%s muzzleSeq=%u muzzleAgeMs=%u oldOrigin=(%.2f %.2f %.2f) vmOrigin=(%.2f %.2f %.2f) oldAngles=(%.2f %.2f %.2f) newAngles=(%.2f %.2f %.2f)",
+					tid,
+					source,
+					muzzleFailReason,
+					muzzleFailSeq,
+					muzzleFailAgeMs,
+					oldOrigin.x, oldOrigin.y, oldOrigin.z,
+					origin.x, origin.y, origin.z,
+					oldAngles.x, oldAngles.y, oldAngles.z,
+					viewmodelVisualAngles.x, viewmodelVisualAngles.y, viewmodelVisualAngles.z);
+			}
+		}
+		return true;
+	}
 }
 
 void __fastcall Hooks::dUpdateFlashlight(void* ecx, void* edx, int entIndex, const Vector& origin, const Vector& forward, const Vector& right, const Vector& up, float fov, float farZ, float linearAtten, bool castsShadows, const char* textureName)
@@ -1221,6 +1353,10 @@ int Hooks::dClientFireTerrorBullets(
 
 
 
+		const Vector predictedHitOrigin = vecNewOrigin;
+		const QAngle predictedHitAngles = vecNewAngles;
+		ApplyLocalViewmodelBulletVisualPose(m_VR, vecNewOrigin, vecNewAngles);
+
 		if (m_VR->m_IsVREnabled && m_Game && m_Game->m_EngineClient
 			&& playerId == m_Game->m_EngineClient->GetLocalPlayer())
 		{
@@ -1247,7 +1383,7 @@ int Hooks::dClientFireTerrorBullets(
 			m_VR->BeginPredictedHitFeedbackShot(m_VR->m_CurrentPredictedHitFeedbackCmdNumber);
 			// Use the final VR-corrected shot ray for predicted hit feedback so the
 			// hit sound / hit indicator matches the actual VR muzzle origin and aim.
-			m_VR->RegisterPotentialKillSoundHit(vecNewOrigin, vecNewAngles);
+			m_VR->RegisterPotentialKillSoundHit(predictedHitOrigin, predictedHitAngles);
 		}
 
 		const auto original = hkClientFireTerrorBullets.fOriginal;

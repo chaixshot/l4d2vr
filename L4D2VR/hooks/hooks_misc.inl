@@ -537,6 +537,418 @@ namespace
         flushChunk();
     }
 
+    inline bool MuzzleNameEndsWithToken(const std::string& lower, const char* token)
+    {
+        const size_t len = std::strlen(token);
+        if (lower.size() < len)
+            return false;
+        if (lower.compare(lower.size() - len, len, token) != 0)
+            return false;
+        if (lower.size() == len)
+            return true;
+        const char prev = lower[lower.size() - len - 1];
+        return prev == '.' || prev == '_' || prev == ':' || prev == '/' || prev == '\\';
+    }
+
+    inline int MuzzlePointNameScore(const std::string& lower)
+    {
+        if (lower.empty())
+            return 0;
+
+        if (lower == "attach_muzzle" || MuzzleNameEndsWithToken(lower, "attach_muzzle"))
+            return 120;
+        if (lower == "muzzle" || MuzzleNameEndsWithToken(lower, "muzzle"))
+            return 110;
+        if (lower == "muzzlesmoke" || lower == "muzzle_smoke" || lower == "muzzle smoke" ||
+            lower.find("muzzlesmoke") != std::string::npos ||
+            lower.find("muzzle_smoke") != std::string::npos)
+        {
+            return 100;
+        }
+        if (lower == "flash" || MuzzleNameEndsWithToken(lower, "flash"))
+            return 90;
+        if (lower.find("muzzle") != std::string::npos &&
+            lower.find("shell") == std::string::npos &&
+            lower.find("eject") == std::string::npos)
+        {
+            return 70;
+        }
+        return 0;
+    }
+
+    inline Vector MuzzleMatrixColumn(const vr_vm_stabilize::Mat3x4& matrix, int column)
+    {
+        return Vector(matrix.m[0][column], matrix.m[1][column], matrix.m[2][column]);
+    }
+
+    inline bool BuildMuzzleAnglesFromMatrix(
+        const ModelRenderInfo_t& drawInfo,
+        const vr_vm_stabilize::Mat3x4& matrix,
+        QAngle& outAngles)
+    {
+        Vector referenceForward{};
+        QAngle::AngleVectors(drawInfo.angles, &referenceForward, nullptr, nullptr);
+        if (!referenceForward.IsZero())
+            VectorNormalize(referenceForward);
+
+        Vector bestForward{};
+        float bestDot = -FLT_MAX;
+        for (int column = 0; column < 3; ++column)
+        {
+            Vector axis = MuzzleMatrixColumn(matrix, column);
+            if (axis.IsZero())
+                continue;
+            VectorNormalize(axis);
+
+            const Vector candidates[2] = { axis, axis * -1.0f };
+            for (const Vector& candidate : candidates)
+            {
+                float score = 0.0f;
+                if (!referenceForward.IsZero())
+                    score = DotProduct(candidate, referenceForward);
+                else if (column == 0)
+                    score = 0.5f;
+
+                if (score > bestDot)
+                {
+                    bestDot = score;
+                    bestForward = candidate;
+                }
+            }
+        }
+
+        if (bestForward.IsZero())
+            return false;
+
+        if (!referenceForward.IsZero() && bestDot < 0.8660254f)
+            QAngle::AngleVectors(drawInfo.angles, &bestForward, nullptr, nullptr);
+
+        QAngle::VectorAngles(bestForward, outAngles);
+        NormalizeAndClampViewAngles(outAngles);
+        return std::isfinite(outAngles.x) && std::isfinite(outAngles.y) && std::isfinite(outAngles.z);
+    }
+
+    struct MuzzleSmokeAttachmentInfo
+    {
+        bool parsed = false;
+        bool found = false;
+        int attachment = -1;
+        int localBone = -1;
+        int numAttachments = 0;
+        int attachmentIndex = 0;
+        std::string name;
+        vr_vm_stabilize::Mat3x4 local{};
+    };
+
+    inline bool TryResolveMuzzleSmokeAttachment(
+        VR* vr,
+        void* drawState,
+        const std::string& modelName,
+        int numBones,
+        MuzzleSmokeAttachmentInfo& outInfo)
+    {
+        outInfo = {};
+        if (!drawState || modelName.empty() || numBones <= 0)
+            return false;
+
+        const std::string key = vr_vm_stabilize::ToLowerAscii(modelName);
+        static std::mutex s_mutex;
+        static std::unordered_map<std::string, MuzzleSmokeAttachmentInfo> s_cachedByModel;
+        {
+            std::lock_guard<std::mutex> lock(s_mutex);
+            auto it = s_cachedByModel.find(key);
+            if (it != s_cachedByModel.end())
+            {
+                outInfo = it->second;
+                return outInfo.parsed;
+            }
+        }
+
+        const uint8_t* studioHdr = nullptr;
+        if (!vr_vm_stabilize::TryGetStudioHdrFromDrawState(drawState, studioHdr))
+            return false;
+
+        int studioLength = 0;
+        vr_vm_stabilize::SafeRead(studioHdr + 0x4C, studioLength);
+
+        int numAttachments = 0;
+        int attachmentIndex = 0;
+        if (!vr_vm_stabilize::SafeRead(studioHdr + 0xF0, numAttachments) ||
+            !vr_vm_stabilize::SafeRead(studioHdr + 0xF4, attachmentIndex))
+        {
+            return false;
+        }
+        if (numAttachments <= 0 || numAttachments > 256 || attachmentIndex <= 0 || attachmentIndex > 0x200000)
+            return false;
+        if (studioLength > 0 &&
+            (attachmentIndex >= studioLength ||
+                static_cast<size_t>(attachmentIndex) + static_cast<size_t>(numAttachments) * 92u > static_cast<size_t>(studioLength)))
+        {
+            return false;
+        }
+
+        outInfo.parsed = true;
+        outInfo.numAttachments = numAttachments;
+        outInfo.attachmentIndex = attachmentIndex;
+
+        static constexpr int kAttachmentStride = 92; // mstudioattachment_t in L4D2: name, flags, localbone, matrix3x4, unused[8].
+        for (int attachment = 0; attachment < numAttachments; ++attachment)
+        {
+            const size_t attachmentOffset =
+                static_cast<size_t>(attachmentIndex) + static_cast<size_t>(attachment) * kAttachmentStride;
+            const uint8_t* attachmentBase = studioHdr + attachmentOffset;
+
+            int nameOffset = 0;
+            int localBone = -1;
+            if (!vr_vm_stabilize::SafeRead(attachmentBase + 0, nameOffset) ||
+                !vr_vm_stabilize::SafeRead(attachmentBase + 8, localBone))
+            {
+                continue;
+            }
+            if (nameOffset <= 0 || localBone < 0 || localBone >= numBones)
+                continue;
+
+            const size_t nameAddressOffset = attachmentOffset + static_cast<size_t>(nameOffset);
+            if (studioLength > 0 && nameAddressOffset >= static_cast<size_t>(studioLength))
+                continue;
+
+            std::string name;
+            if (!vr_vm_stabilize::TryReadCStringSafe(reinterpret_cast<const char*>(studioHdr + nameAddressOffset), name))
+                continue;
+
+            const int score = MuzzlePointNameScore(vr_vm_stabilize::ToLowerAscii(name));
+            if (score <= 0)
+                continue;
+
+            vr_vm_stabilize::Mat3x4 local{};
+            if (!vr_vm_stabilize::SafeRead(attachmentBase + 12, local))
+                continue;
+
+            const int oldScore = MuzzlePointNameScore(vr_vm_stabilize::ToLowerAscii(outInfo.name));
+            if (!outInfo.found || score > oldScore)
+            {
+                outInfo.found = true;
+                outInfo.attachment = attachment;
+                outInfo.localBone = localBone;
+                outInfo.name = name;
+                outInfo.local = local;
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(s_mutex);
+            s_cachedByModel[key] = outInfo;
+        }
+
+        if (vr && vr->m_BulletVisualsUseMuzzleSmoke)
+        {
+            if (outInfo.found)
+            {
+                Game::logMsg(
+                    "[VR][FX][muzzlesmoke] attachment model=%s attachment=%d name=%s localBone=%d attachments=%d table=0x%X",
+                    modelName.c_str(),
+                    outInfo.attachment,
+                    outInfo.name.c_str(),
+                    outInfo.localBone,
+                    outInfo.numAttachments,
+                    outInfo.attachmentIndex);
+            }
+            else
+            {
+                Game::logMsg(
+                    "[VR][FX][muzzlesmoke] no attachment model=%s attachments=%d table=0x%X",
+                    modelName.c_str(),
+                    outInfo.numAttachments,
+                    outInfo.attachmentIndex);
+            }
+        }
+
+        return outInfo.parsed;
+    }
+
+    inline int ResolveMuzzleSmokeBoneIndex(
+        VR* vr,
+        void* drawState,
+        const std::string& modelName)
+    {
+        if (!drawState || modelName.empty())
+            return -1;
+
+        const std::string key = vr_vm_stabilize::ToLowerAscii(modelName);
+        static std::mutex s_mutex;
+        static std::unordered_map<std::string, int> s_cachedBoneByModel;
+        {
+            std::lock_guard<std::mutex> lock(s_mutex);
+            auto it = s_cachedBoneByModel.find(key);
+            if (it != s_cachedBoneByModel.end())
+                return it->second;
+        }
+
+        std::vector<std::string> boneNames;
+        std::vector<int> boneParents;
+        int numBones = 0;
+        int boneIndex = 0;
+        int stride = 0;
+        int numBonesOffset = 0;
+        const bool ok = vr_vm_stabilize::TryCollectBoneNamesFromDrawState(
+            drawState,
+            boneNames,
+            boneParents,
+            numBones,
+            boneIndex,
+            stride,
+            numBonesOffset);
+
+        int resolved = -1;
+        int resolvedScore = 0;
+        if (ok)
+        {
+            for (int bone = 0; bone < numBones && bone < static_cast<int>(boneNames.size()); ++bone)
+            {
+                const std::string lower = vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(bone)]);
+                const int score = MuzzlePointNameScore(lower);
+                if (score > resolvedScore)
+                {
+                    resolved = bone;
+                    resolvedScore = score;
+                }
+            }
+        }
+
+        if (ok)
+        {
+            std::lock_guard<std::mutex> lock(s_mutex);
+            s_cachedBoneByModel[key] = resolved;
+        }
+
+        if (vr && vr->m_BulletVisualsUseMuzzleSmoke)
+        {
+            if (resolved >= 0)
+            {
+                Game::logMsg(
+                    "[VR][FX][muzzlesmoke] bone model=%s bone=%d name=%s score=%d bones=%d stride=%d",
+                    modelName.c_str(),
+                    resolved,
+                    (resolved < static_cast<int>(boneNames.size())) ? boneNames[static_cast<size_t>(resolved)].c_str() : "<unknown>",
+                    resolvedScore,
+                    numBones,
+                    stride);
+            }
+            else
+            {
+                Game::logMsg(
+                    "[VR][FX][muzzlesmoke] not found model=%s ok=%d bones=%d stride=%d",
+                    modelName.c_str(),
+                    ok ? 1 : 0,
+                    numBones,
+                    stride);
+            }
+        }
+        return resolved;
+    }
+
+    inline void PublishViewmodelMuzzleSmokePose(
+        VR* vr,
+        const Vector& origin,
+        const QAngle& angles)
+    {
+        if (!vr)
+            return;
+
+        uint32_t seq = vr->m_ViewmodelMuzzleSmokePoseSeq.load(std::memory_order_relaxed);
+        if (seq & 1u)
+            ++seq;
+        const uint32_t odd = seq + 1u;
+        const uint32_t even = odd + 1u;
+
+        vr->m_ViewmodelMuzzleSmokePoseSeq.store(odd, std::memory_order_release);
+        vr->m_ViewmodelMuzzleSmokePosX.store(origin.x, std::memory_order_relaxed);
+        vr->m_ViewmodelMuzzleSmokePosY.store(origin.y, std::memory_order_relaxed);
+        vr->m_ViewmodelMuzzleSmokePosZ.store(origin.z, std::memory_order_relaxed);
+        vr->m_ViewmodelMuzzleSmokeAngX.store(angles.x, std::memory_order_relaxed);
+        vr->m_ViewmodelMuzzleSmokeAngY.store(angles.y, std::memory_order_relaxed);
+        vr->m_ViewmodelMuzzleSmokeAngZ.store(angles.z, std::memory_order_relaxed);
+        vr->m_ViewmodelMuzzleSmokePoseTickMs.store(GetTickCount(), std::memory_order_relaxed);
+        vr->m_ViewmodelMuzzleSmokeRenderFrameSeq.store(vr->m_RenderFrameSeq.load(std::memory_order_relaxed), std::memory_order_relaxed);
+        vr->m_ViewmodelMuzzleSmokePoseSeq.store(even, std::memory_order_release);
+    }
+
+    inline void MaybeCaptureViewmodelMuzzleSmokePose(
+        VR* vr,
+        void* drawState,
+        const std::string& modelName,
+        const ModelRenderInfo_t& drawInfo,
+        const void* pBonesToWorldFinal)
+    {
+        if (!vr || !vr->m_IsVREnabled || !vr->m_BulletVisualsUseMuzzleSmoke || !pBonesToWorldFinal)
+            return;
+        if (modelName.empty() || !HooksModelNameIsViewmodel(modelName) || HooksModelNameIsArmsOrHands(modelName))
+            return;
+
+        int numBones = 0;
+        if (!vr_vm_stabilize::TryGetNumBonesFromDrawState(drawState, numBones) || numBones <= 0)
+            return;
+
+        const auto* bones = reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pBonesToWorldFinal);
+
+        vr_vm_stabilize::Mat3x4 muzzle{};
+        const char* poseSource = "bone";
+        const int muzzleBone = ResolveMuzzleSmokeBoneIndex(vr, drawState, modelName);
+        if (muzzleBone >= 0 && muzzleBone < numBones)
+        {
+            if (!vr_vm_stabilize::SafeRead(bones + muzzleBone, muzzle))
+                return;
+            poseSource = "bone";
+        }
+        else
+        {
+            MuzzleSmokeAttachmentInfo attachmentInfo{};
+            if (!TryResolveMuzzleSmokeAttachment(vr, drawState, modelName, numBones, attachmentInfo) ||
+                !attachmentInfo.found ||
+                attachmentInfo.localBone < 0 ||
+                attachmentInfo.localBone >= numBones)
+            {
+                return;
+            }
+
+            vr_vm_stabilize::Mat3x4 boneWorld{};
+            if (!vr_vm_stabilize::SafeRead(bones + attachmentInfo.localBone, boneWorld))
+                return;
+            vr_vm_stabilize::Mul(boneWorld, attachmentInfo.local, muzzle);
+            poseSource = "attachment";
+        }
+
+        Vector origin = vr_vm_stabilize::GetOrigin(muzzle);
+        QAngle angles{};
+        if (!BuildMuzzleAnglesFromMatrix(drawInfo, muzzle, angles))
+            return;
+        if (!std::isfinite(origin.x) || !std::isfinite(origin.y) || !std::isfinite(origin.z) ||
+            !std::isfinite(angles.x) || !std::isfinite(angles.y) || !std::isfinite(angles.z))
+        {
+            return;
+        }
+
+        PublishViewmodelMuzzleSmokePose(vr, origin, angles);
+
+        static std::mutex s_captureLogMutex;
+        static std::unordered_map<std::string, std::chrono::steady_clock::time_point> s_lastCaptureLogByModel;
+        {
+            const auto now = std::chrono::steady_clock::now();
+            std::lock_guard<std::mutex> lock(s_captureLogMutex);
+            auto& last = s_lastCaptureLogByModel[modelName];
+            if (last.time_since_epoch().count() == 0 || now - last > std::chrono::seconds(2))
+            {
+                last = now;
+                Game::logMsg(
+                    "[VR][FX][muzzlesmoke] capture source=%s model=%s origin=(%.2f %.2f %.2f) angles=(%.2f %.2f %.2f)",
+                    poseSource,
+                    modelName.c_str(),
+                    origin.x, origin.y, origin.z,
+                    angles.x, angles.y, angles.z);
+            }
+        }
+    }
+
     inline VrHandMatrix4 HooksMat3x4ToVrHandMatrix(const vr_vm_stabilize::Mat3x4& source)
     {
         VrHandMatrix4 out = VrHandMath::Identity();
@@ -2661,6 +3073,7 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 	// Capture the exact arm matrices submitted to Source. In queued rendering
 	// pBonesToWorldFinal contains the same stabilization delta as the visible gun,
 	// so the standalone right glove follows controller rotation and HMD movement.
+	MaybeCaptureViewmodelMuzzleSmokePose(m_VR, state, modelName, *pDrawInfo, pBonesToWorldFinal);
 	MaybeCaptureVrHandsVmPose(m_VR, state, modelName, *pDrawInfo, pBonesToWorldFinal);
 
 	if (info.pModel && hideArms && !m_Game->m_CachedArmsModel)

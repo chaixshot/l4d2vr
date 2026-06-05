@@ -1581,6 +1581,8 @@ void VR::ParseConfigFile()
     m_QueuedBulletVisualHitOffset.x = std::clamp(m_QueuedBulletVisualHitOffset.x, -1.0f, 1.0f);
     m_QueuedBulletVisualHitOffset.y = std::clamp(m_QueuedBulletVisualHitOffset.y, -1.0f, 1.0f);
     m_QueuedBulletVisualHitOffset.z = std::clamp(m_QueuedBulletVisualHitOffset.z, -1.0f, 1.0f);
+    m_BulletVisualsUseMuzzleSmoke = getBool("BulletVisualsUseMuzzleSmoke", m_BulletVisualsUseMuzzleSmoke);
+    m_BulletVisualsUseViewmodelPose = getBool("BulletVisualsUseViewmodelPose", m_BulletVisualsUseViewmodelPose);
 
     // Backward compatibility: older configs used only QueuedBulletVisualHitOffset.
     // If BulletVisualHitOffset is not set but QueuedBulletVisualHitOffset is set,

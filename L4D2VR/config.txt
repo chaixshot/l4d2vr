@@ -15,7 +15,7 @@ AutoAirStrafeTurnResponsiveness=0.25
 AutoAirStrafeDebugLog=false
 AutoAirStrafeDebugLogHz=4
 AntiAliasing=0
-EyeRenderTargetMatchProjectionAspect=true
+EyeRenderTargetMatchProjectionAspect=false
 
 ThirdPersonCameraFollowHmd=true
 ThirdPersonVRCameraOffset=38
@@ -85,6 +85,8 @@ RightAmmoHudYOffset=0.03
 RightAmmoHudZOffset=-0.09
 RightAmmoHudAngleOffset=-75,0,0
 QueuedBulletVisualHitOffset=0.0,0.0,0.02
+BulletVisualsUseMuzzleSmoke=true
+BulletVisualsUseViewmodelPose=true
 ForceNonVRServerMovement=false
 MoveDirectionFromController=false
 
