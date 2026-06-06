@@ -1535,12 +1535,11 @@ void VR::ProcessInput()
     const bool wantsTopHud = menuActive || cursorVisible || IsGameplayHudRequested();
     const int queueModeNow = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
     const bool queuedHudGate = (queueModeNow != 0);
-    const auto now = std::chrono::steady_clock::now();
     const bool renderedHudNow = m_RenderedHud.load(std::memory_order_acquire);
     if (queuedHudGate && renderedHudNow)
-        m_QueuedHudFreshUntil = now + std::chrono::milliseconds(300);
+        MarkQueuedHudFresh();
 
-    const bool hudReadyForDisplay = renderedHudNow || (queuedHudGate && now < m_QueuedHudFreshUntil);
+    const bool hudReadyForDisplay = renderedHudNow || (queuedHudGate && IsQueuedHudFresh());
     if ((wantsTopHud && hudReadyForDisplay) || menuActive)
     {
         RepositionOverlays();

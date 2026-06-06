@@ -710,7 +710,8 @@ namespace dxvk {
             D3D9DeviceEx* device,
             IDirect3DSurface9* backBuffer,
             IDirect3DSurface9* hudSurface,
-            const D3DSURFACE_DESC& backBufferDesc) {
+            const D3DSURFACE_DESC& backBufferDesc,
+            bool focusedInGameVgui) {
             if (!device || !backBuffer || !hudSurface || backBufferDesc.Width == 0 || backBufferDesc.Height == 0)
                 return;
 
@@ -759,8 +760,16 @@ namespace dxvk {
             device->SetRenderState(D3DRS_ZENABLE, FALSE);
             device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
             device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-            device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-            device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+            if (focusedInGameVgui) {
+                device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+                device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+            } else {
+                // Gameplay VGUI may leave alpha at the transparent clear value while
+                // still writing HUD RGB. Keep black clear pixels harmless, but do not
+                // make valid gameplay HUD pixels disappear on the desktop mirror.
+                device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_ONE);
+                device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+            }
             device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
             device->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
             device->SetRenderState(D3DRS_COLORWRITEENABLE,
@@ -828,7 +837,43 @@ namespace dxvk {
             // The HUD texture is persistent. If Present composites it unconditionally,
             // stale pause/chat pixels get redrawn onto the desktop mirror forever after
             // the focused VGUI closes. Only composite a freshly captured in-game HUD.
-            return vr->m_RenderedHud.load(std::memory_order_acquire);
+            const bool queued = vr->m_Game->GetMatQueueMode() != 0;
+            return vr->m_RenderedHud.load(std::memory_order_acquire) ||
+                (queued && vr->IsQueuedHudFresh());
+        }
+
+        static bool VrIsFocusedInGameVgui(const VR* vr) {
+            if (!vr || !vr->m_Game)
+                return false;
+
+            return (vr->m_Game->m_EngineClient && vr->m_Game->m_EngineClient->IsPaused()) ||
+                (vr->m_Game->m_VguiSurface && vr->m_Game->m_VguiSurface->IsCursorVisible());
+        }
+
+        static void VrCompositeNativeHudToDesktopBackBuffer(
+            D3D9DeviceEx* device,
+            VR* vr) {
+            if (!device || !vr || !vr->m_D9HUDSurface || !VrShouldCompositeNativeHudToDesktop(vr))
+                return;
+
+            if (vr->m_NativeDesktopHudPainted.exchange(false, std::memory_order_acq_rel))
+                return;
+
+            IDirect3DSurface9* backBuffer = nullptr;
+            HRESULT hr = device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &backBuffer);
+            if (FAILED(hr) || !backBuffer)
+                return;
+
+            D3DSURFACE_DESC backBufferDesc{};
+            if (SUCCEEDED(backBuffer->GetDesc(&backBufferDesc)))
+                VrDrawNativeHudToDesktopBackBuffer(
+                    device,
+                    backBuffer,
+                    vr->m_D9HUDSurface,
+                    backBufferDesc,
+                    VrIsFocusedInGameVgui(vr));
+
+            backBuffer->Release();
         }
 
         static void VrMirrorEyeToDesktopBackBuffer(
@@ -881,8 +926,17 @@ namespace dxvk {
 
             if (FAILED(hr))
                 Logger::warn(str::format("VR desktop mirror StretchRect failed: 0x", std::hex, hr));
-            else if (haveBackBufferDesc && vr->m_D9HUDSurface && VrShouldCompositeNativeHudToDesktop(vr))
-                VrDrawNativeHudToDesktopBackBuffer(device, backBuffer, vr->m_D9HUDSurface, backBufferDesc);
+            else
+            {
+                vr->m_NativeDesktopHudPainted.store(false, std::memory_order_release);
+                if (haveBackBufferDesc && vr->m_D9HUDSurface && VrShouldCompositeNativeHudToDesktop(vr))
+                    VrDrawNativeHudToDesktopBackBuffer(
+                        device,
+                        backBuffer,
+                        vr->m_D9HUDSurface,
+                        backBufferDesc,
+                        VrIsFocusedInGameVgui(vr));
+            }
 
             backBuffer->Release();
         }
@@ -5174,6 +5228,8 @@ namespace dxvk {
 
                 if (!(inGame && queued) || useOriginalQueuedPresentPath)
                     VrMirrorEyeToDesktopBackBuffer(this, vr, pDestRect, hDestWindowOverride);
+                else if (vr->m_DesktopMirrorEnabled)
+                    VrCompositeNativeHudToDesktopBackBuffer(this, vr);
             }
 
             // Do not wait the DXVK device idle before Present here.

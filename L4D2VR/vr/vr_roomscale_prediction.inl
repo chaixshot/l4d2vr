@@ -1475,6 +1475,7 @@ void VR::HandleMissingRenderContext(const char* location)
     m_CreatedVRTextures.store(false, std::memory_order_release);
     m_RenderedNewFrame.store(false, std::memory_order_release);
     m_RenderedHud.store(false, std::memory_order_release);
+    ClearQueuedHudFresh();
 }
 
 void VR::FinishFrame()

@@ -3408,6 +3408,7 @@ void Hooks::dVGui_Paint(void* ecx, void* edx, int mode)
                 hkViewport.fOriginal(ctx, oldX, oldY, oldW, oldH);
 
             m_VR->m_RenderedHud.store(true, std::memory_order_release);
+            m_VR->MarkQueuedHudFresh();
         };
 
     if (inGame)
@@ -3425,12 +3426,15 @@ void Hooks::dVGui_Paint(void* ecx, void* edx, int mode)
             // currently painting the native backbuffer. This does not weaken the capture-stop
             // rule: the branch is reached only while the HUD is explicitly requested.
             if (IsPaintingToNativeBackBuffer())
+            {
                 hkVgui_Paint.fOriginal(ecx, fullHudMode);
+                m_VR->m_NativeDesktopHudPainted.store(true, std::memory_order_release);
+            }
         }
         else
         {
             m_VR->m_RenderedHud.store(false, std::memory_order_release);
-            m_VR->m_QueuedHudFreshUntil = {};
+            m_VR->ClearQueuedHudFresh();
         }
         return;
     }

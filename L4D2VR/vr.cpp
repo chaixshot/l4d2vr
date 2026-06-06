@@ -513,7 +513,7 @@ void VR::UpdateHudLiftGestureState(bool inGame)
             m_HudLiftGestureVisibleUntil = {};
             if (clearCapturedHud)
             {
-                m_QueuedHudFreshUntil = {};
+                ClearQueuedHudFresh();
                 m_RenderedHud.store(false, std::memory_order_release);
                 m_HudPaintedThisFrame.store(false, std::memory_order_release);
             }
@@ -587,6 +587,28 @@ bool VR::IsGameplayHudRequested() const
 {
     return m_HudAlwaysVisible ||
         m_HudLiftGestureActive.load(std::memory_order_acquire) != 0;
+}
+
+void VR::MarkQueuedHudFresh(uint64_t holdMs)
+{
+    const uint64_t nowMs = static_cast<uint64_t>(GetTickCount64());
+    m_QueuedHudFreshUntilMs.store(nowMs + holdMs, std::memory_order_release);
+}
+
+void VR::ClearQueuedHudFresh()
+{
+    m_QueuedHudFreshUntilMs.store(0, std::memory_order_release);
+    m_NativeDesktopHudPainted.store(false, std::memory_order_release);
+}
+
+bool VR::IsQueuedHudFresh() const
+{
+    const uint64_t freshUntilMs = m_QueuedHudFreshUntilMs.load(std::memory_order_acquire);
+    if (freshUntilMs == 0)
+        return false;
+
+    const uint64_t nowMs = static_cast<uint64_t>(GetTickCount64());
+    return nowMs < freshUntilMs;
 }
 
 #include "vr/vr_lifecycle_init.inl"
@@ -10465,7 +10487,10 @@ bool VR::CompositeHudToDesktopMirrorTexture()
     if (!focusedInGameVgui && !gameplayHudRequested)
         return false;
 
-    if (!m_HudPaintedThisFrame.load(std::memory_order_acquire) && !m_RenderedHud.load(std::memory_order_acquire))
+    const bool queued = m_Game && m_Game->GetMatQueueMode() != 0;
+    if (!m_HudPaintedThisFrame.load(std::memory_order_acquire) &&
+        !m_RenderedHud.load(std::memory_order_acquire) &&
+        !(queued && IsQueuedHudFresh()))
         return false;
     if (!m_CreatedVRTextures.load(std::memory_order_acquire))
         return false;

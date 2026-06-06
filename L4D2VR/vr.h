@@ -765,6 +765,7 @@ public:
 	bool m_IsInitialized = false;
 	std::atomic<bool> m_RenderedNewFrame{ false };
 	std::atomic<bool> m_RenderedHud{ false };
+	std::atomic<bool> m_NativeDesktopHudPainted{ false };
 	// Main menu only needs one blank stereo submit to clear the last scene frame.
 	// After that, keep driving the menu with IVROverlay to avoid hammering the compositor.
 	bool m_MenuBlankSubmitted = false;
@@ -1187,7 +1188,7 @@ public:
 	// Queued rendering (mat_queue_mode!=0): keep HUD visibility stable for a short
 	// window after a successful HUD capture so transient render-thread misses don't
 	// cause top-HUD flicker when frame rate dips.
-	std::chrono::steady_clock::time_point m_QueuedHudFreshUntil{};
+	std::atomic<uint64_t> m_QueuedHudFreshUntilMs{ 0 };
 
 	// Hand HUD background opacity (0..1). Applies to the panel fill only (text/icons stay opaque).
 	float m_LeftWristHudBgAlpha = 0.85f;
@@ -2760,6 +2761,9 @@ public:
 	void RepositionOverlays();
 	void UpdateHudLiftGestureState(bool inGame);
 	bool IsGameplayHudRequested() const;
+	void MarkQueuedHudFresh(uint64_t holdMs = 300);
+	void ClearQueuedHudFresh();
+	bool IsQueuedHudFresh() const;
 	void UpdateRearMirrorOverlayTransform();
 	void UpdateScopeOverlayTransform();
 	void UpdateHandHudOverlays();

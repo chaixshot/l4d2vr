@@ -654,7 +654,7 @@ namespace
         vr->m_QueuedSubmitStaleStreak.store(0, std::memory_order_release);
         vr->m_RenderedHud.store(false, std::memory_order_release);
         vr->m_HudPaintedThisFrame.store(false, std::memory_order_release);
-        vr->m_QueuedHudFreshUntil = std::chrono::steady_clock::time_point{};
+        vr->ClearQueuedHudFresh();
         vr->m_MenuBlankSubmitted = false;
 
         if (vr->m_RenderPipelineDebugLog)
@@ -1618,6 +1618,7 @@ void VR::ReleaseVRRenderTargetsForDeviceReset()
     m_RenderedNewFrame.store(false, std::memory_order_release);
     m_RenderedHud.store(false, std::memory_order_release);
     m_HudPaintedThisFrame.store(false, std::memory_order_release);
+    ClearQueuedHudFresh();
 
     for (int eyeIndex = 0; eyeIndex < static_cast<int>(m_D3DAimLineOverlayBackupSurfaces.size()); ++eyeIndex)
     {
