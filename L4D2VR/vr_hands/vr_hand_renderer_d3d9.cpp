@@ -244,7 +244,7 @@ bool VrHandRendererD3D9::CreateTexture(IDirect3DDevice9* device, const VrHandMes
         SafeRelease(*outTexture);
         return false;
     }
-    *static_cast<DWORD*>(lock.pBits) = 0xFFFFFFFFu;
+    *static_cast<DWORD*>(lock.pBits) = asset.fallbackColorArgb;
     (*outTexture)->UnlockRect(0);
     return true;
 }
@@ -442,7 +442,10 @@ bool VrHandRendererD3D9::Draw(
     const bool compositePass = drawPass == VrHandDrawPass::ViewmodelComposite;
     const bool standaloneViewmodelPass = drawPass == VrHandDrawPass::ViewmodelStandalone;
     const bool viewmodelDepthPass = compositePass || standaloneViewmodelPass;
-    const bool opaqueStandaloneMagazine = handIndex == 2;
+    const bool standaloneGeneratedBox =
+        handIndex == 2 &&
+        asset.sourcePath.rfind("generated:magazine_box:", 0) == 0;
+    const bool opaqueStandaloneMagazine = handIndex == 2 && !standaloneGeneratedBox;
 
     // VR gloves use a lightweight directional-light approximation. Reusing that
     // approximation for a replacement magazine made the same exported texture
@@ -466,6 +469,7 @@ bool VrHandRendererD3D9::Draw(
     device->SetRenderState(D3DRS_ZWRITEENABLE, writeDepth ? TRUE : FALSE);
     device->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
     device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+    device->SetRenderState(D3DRS_FILLMODE, standaloneGeneratedBox ? D3DFILL_WIREFRAME : D3DFILL_SOLID);
     // The detached magazine is a solid test asset. Some exported materials keep
     // an unused zero alpha channel, which made a successfully loaded GLB invisible.
     // Hands retain normal alpha blending; the magazine is rendered opaque.

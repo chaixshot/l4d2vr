@@ -49,6 +49,19 @@ public:
         const std::string& manualReloadMagazineGlbPath,
         const VrHandMatrix4* manualReloadMagazineWorld,
         bool manualReloadMagazineUseViewmodelLayer,
+        const VrHandMatrix4* standaloneMagazineBoxWorld,
+        const Vector& standaloneMagazineBoxMins,
+        const Vector& standaloneMagazineBoxMaxs,
+        bool standaloneMagazineBoxUseViewmodelLayer,
+        const VrHandMatrix4* magazineSocketCaptureBoxWorld,
+        const Vector& magazineSocketCaptureBoxMins,
+        const Vector& magazineSocketCaptureBoxMaxs,
+        bool magazineSocketCaptureBoxUseViewmodelLayer,
+        const VrHandMatrix4* currentMagazineBoxWorld,
+        const Vector& currentMagazineBoxMins,
+        const Vector& currentMagazineBoxMaxs,
+        bool currentMagazineBoxUseViewmodelLayer,
+        bool leftHandMagazineGripPose,
         VrHandDrawPass drawPass);
 
     bool ClearViewmodelOcclusionStencil(IDirect3DDevice9* device);
@@ -80,7 +93,22 @@ private:
         const VrHandMatrix4* world,
         bool useViewmodelLayer,
         VrHandDrawPass drawPass);
-    void UpdatePoses(vr::IVRInput* input, bool motionRangeWithoutController, bool rightUseViewmodelPose, bool debugLog);
+    bool EnsureStandaloneMagazineBoxLoaded(const Vector& mins, const Vector& maxs, bool debugLog);
+    bool DrawStandaloneMagazineBox(
+        IDirect3DDevice9* device,
+        const CViewSetup& view,
+        float sceneLightScale,
+        const VrHandMatrix4* world,
+        const Vector& mins,
+        const Vector& maxs,
+        bool useViewmodelLayer,
+        VrHandDrawPass drawPass);
+    void UpdatePoses(
+        vr::IVRInput* input,
+        bool motionRangeWithoutController,
+        bool rightUseViewmodelPose,
+        bool leftHandMagazineGripPose,
+        bool debugLog);
     bool DrawControllerlessTestPose(
         IDirect3DDevice9* device,
         const CViewSetup& view,
@@ -118,12 +146,17 @@ private:
     bool m_DebugRightViewmodelPoseLogged = false;
     bool m_DebugRightViewmodelPoseMissingLogged = false;
     bool m_RightViewmodelPoseWasEnabled = false;
+    bool m_LeftHandMagazineGripPoseWasEnabled = false;
     bool m_RightViewmodelPalmWorldValid = false;
     bool m_RightViewmodelAnchorValid = false;
     VrHandMeshAsset m_ManualReloadMagazineAsset;
     std::vector<VrHandMatrixRows3x4> m_ManualReloadMagazinePalette;
     std::string m_ManualReloadMagazineLoadedRelativePath;
     bool m_ManualReloadMagazineDrawLogged = false;
+    VrHandMeshAsset m_StandaloneMagazineBoxAsset;
+    std::vector<VrHandMatrixRows3x4> m_StandaloneMagazineBoxPalette;
+    std::string m_StandaloneMagazineBoxKey;
+    bool m_StandaloneMagazineBoxDrawLogged = false;
     std::string m_RightViewmodelPoseModel;
     std::string m_RightViewmodelAnchorModel;
     VrHandMatrix4 m_RightViewmodelPalmWorld{};

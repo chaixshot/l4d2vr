@@ -18,7 +18,11 @@ public:
 
     bool Initialize(vr::IVRInput* input, vr::VRActionHandle_t action, std::string& outError);
     bool Update(vr::IVRInput* input, vr::EVRSkeletalMotionRange motionRange, std::string& outError);
-    bool BuildSkinningPalette(const VrHandMeshAsset& asset, std::vector<VrHandMatrixRows3x4>& outPalette, std::string& outError) const;
+    bool BuildSkinningPalette(
+        const VrHandMeshAsset& asset,
+        std::vector<VrHandMatrixRows3x4>& outPalette,
+        std::string& outError,
+        const VrHandFingerCurlOverride* fingerCurlOverride = nullptr) const;
 
     bool IsInitialized() const;
     bool HasPose() const;

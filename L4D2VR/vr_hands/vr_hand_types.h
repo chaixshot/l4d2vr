@@ -17,6 +17,13 @@ struct VrHandMatrixRows3x4
     std::array<float, 12> v{};
 };
 
+struct VrHandFingerCurlOverride
+{
+    bool enabled = false;
+    std::array<float, 5> minCurl{};
+    std::array<float, 5> maxCurl{};
+};
+
 struct VrHandVertex
 {
     float position[3]{};
@@ -35,6 +42,7 @@ struct VrHandMeshAsset
     std::vector<VrHandMatrix4> bindMatrices;
     std::vector<VrHandMatrix4> inverseBindMatrices;
     std::vector<std::uint8_t> baseColorTextureBytes;
+    std::uint32_t fallbackColorArgb = 0xFFFFFFFFu;
     std::string sourcePath;
 
     bool IsValid() const

@@ -2,12 +2,14 @@
 
 #include "game.h"
 #include "sdk.h"
+#include "sdk/ivdebugoverlay.h"
 #include "vr_hand_system.h"
 #include "vr_hand_math.h"
 
 #include <d3d9.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cctype>
 #include <cstdio>
@@ -22,6 +24,1636 @@ VR::~VR() = default;
 namespace
 {
     const std::string kNoManualReloadMagazineGlbPath;
+
+    size_t ManualReloadNormalizeDelayedSoundsForReplay(
+        std::vector<ManualReloadDelayedSound>& sounds,
+        float* outRebaseSeconds = nullptr);
+
+    Vector MagazineInteractionNormalizeAxis(const Vector& axis, const Vector& fallback)
+    {
+        const Vector normalized = VrHandMath::Normalize(axis);
+        return normalized.Length() > 0.0001f ? normalized : fallback;
+    }
+
+    int MagazineInteractionDominantAxis(const Vector& value)
+    {
+        const float ax = std::fabs(value.x);
+        const float ay = std::fabs(value.y);
+        const float az = std::fabs(value.z);
+        if (ay >= ax && ay >= az)
+            return 1;
+        if (az >= ax && az >= ay)
+            return 2;
+        return 0;
+    }
+
+    float MagazineInteractionDistanceToBoxSourceUnits(
+        const MagazineInteractionBoxSnapshot& box,
+        const Vector& worldPoint)
+    {
+        const Vector delta = worldPoint - box.origin;
+        const Vector local(
+            VrHandMath::Dot(delta, box.axisX),
+            VrHandMath::Dot(delta, box.axisY),
+            VrHandMath::Dot(delta, box.axisZ));
+        const Vector closest(
+            std::clamp(local.x, box.mins.x, box.maxs.x),
+            std::clamp(local.y, box.mins.y, box.maxs.y),
+            std::clamp(local.z, box.mins.z, box.maxs.z));
+        return (local - closest).Length();
+    }
+
+    float MagazineInteractionNearestLeftHandProbeDistanceSourceUnits(
+        const MagazineInteractionBoxSnapshot& box,
+        const Vector& controllerOrigin,
+        const QAngle& controllerAngles,
+        float sourceUnitsPerMeter)
+    {
+        Vector forward{};
+        Vector right{};
+        Vector up{};
+        QAngle::AngleVectors(controllerAngles, &forward, &right, &up);
+        forward = VrHandMath::Normalize(forward);
+        right = VrHandMath::Normalize(right);
+        up = VrHandMath::Normalize(up);
+
+        const float nearOffset = 0.06f * sourceUnitsPerMeter;
+        const float farOffset = 0.12f * sourceUnitsPerMeter;
+        const Vector probes[] =
+        {
+            controllerOrigin,
+            controllerOrigin + forward * nearOffset,
+            controllerOrigin - forward * nearOffset,
+            controllerOrigin + right * nearOffset,
+            controllerOrigin - right * nearOffset,
+            controllerOrigin + up * nearOffset,
+            controllerOrigin - up * nearOffset,
+            controllerOrigin + forward * farOffset,
+            controllerOrigin - forward * farOffset,
+            controllerOrigin + up * farOffset,
+            controllerOrigin - up * farOffset
+        };
+
+        float nearest = FLT_MAX;
+        for (const Vector& probe : probes)
+            nearest = std::min(nearest, MagazineInteractionDistanceToBoxSourceUnits(box, probe));
+        return nearest;
+    }
+
+    VrHandMatrix4 MagazineInteractionBuildBoxWorld(const MagazineInteractionBoxSnapshot& box)
+    {
+        VrHandMatrix4 out = VrHandMath::Identity();
+        VrHandMath::Set(out, 0, 0, box.axisX.x);
+        VrHandMath::Set(out, 1, 0, box.axisX.y);
+        VrHandMath::Set(out, 2, 0, box.axisX.z);
+        VrHandMath::Set(out, 0, 1, box.axisY.x);
+        VrHandMath::Set(out, 1, 1, box.axisY.y);
+        VrHandMath::Set(out, 2, 1, box.axisY.z);
+        VrHandMath::Set(out, 0, 2, box.axisZ.x);
+        VrHandMath::Set(out, 1, 2, box.axisZ.y);
+        VrHandMath::Set(out, 2, 2, box.axisZ.z);
+        VrHandMath::Set(out, 0, 3, box.origin.x);
+        VrHandMath::Set(out, 1, 3, box.origin.y);
+        VrHandMath::Set(out, 2, 3, box.origin.z);
+        return out;
+    }
+
+    VrHandMatrix4 MagazineInteractionBuildControllerWorldFromAxes(
+        const Vector& origin,
+        const Vector& forwardIn,
+        const Vector& rightIn,
+        const Vector& upIn)
+    {
+        Vector forward = VrHandMath::Normalize(forwardIn);
+        Vector right = VrHandMath::Normalize(rightIn);
+        Vector up = VrHandMath::Normalize(upIn);
+        if (forward.Length() <= 0.0001f)
+            forward = Vector(1.0f, 0.0f, 0.0f);
+        if (right.Length() <= 0.0001f)
+            right = Vector(0.0f, -1.0f, 0.0f);
+        if (up.Length() <= 0.0001f)
+            up = Vector(0.0f, 0.0f, 1.0f);
+
+        VrHandMatrix4 out = VrHandMath::Identity();
+        VrHandMath::Set(out, 0, 0, right.x);
+        VrHandMath::Set(out, 1, 0, right.y);
+        VrHandMath::Set(out, 2, 0, right.z);
+        VrHandMath::Set(out, 0, 1, up.x);
+        VrHandMath::Set(out, 1, 1, up.y);
+        VrHandMath::Set(out, 2, 1, up.z);
+        VrHandMath::Set(out, 0, 2, -forward.x);
+        VrHandMath::Set(out, 1, 2, -forward.y);
+        VrHandMath::Set(out, 2, 2, -forward.z);
+        VrHandMath::Set(out, 0, 3, origin.x);
+        VrHandMath::Set(out, 1, 3, origin.y);
+        VrHandMath::Set(out, 2, 3, origin.z);
+        return out;
+    }
+
+    bool MagazineInteractionBuildFreshMagazinePickupBox(
+        const VR* vr,
+        MagazineInteractionBoxSnapshot& outBox,
+        QAngle& outAngles)
+    {
+        if (!vr)
+            return false;
+
+        Vector bodyForward = vr->m_HmdForward;
+        bodyForward.z = 0.0f;
+        bodyForward = VrHandMath::Normalize(bodyForward);
+        if (bodyForward.Length() <= 0.0001f)
+            bodyForward = Vector(1.0f, 0.0f, 0.0f);
+
+        const Vector worldUp(0.0f, 0.0f, 1.0f);
+        Vector bodyRight(
+            bodyForward.y * worldUp.z - bodyForward.z * worldUp.y,
+            bodyForward.z * worldUp.x - bodyForward.x * worldUp.z,
+            bodyForward.x * worldUp.y - bodyForward.y * worldUp.x);
+        bodyRight = VrHandMath::Normalize(bodyRight);
+        if (bodyRight.Length() <= 0.0001f)
+            bodyRight = Vector(0.0f, -1.0f, 0.0f);
+
+        const Vector bodyOrigin = vr->m_CameraAnchor
+            + bodyForward * (vr->m_InventoryBodyOriginOffset.x * vr->m_VRScale)
+            + bodyRight * (vr->m_InventoryBodyOriginOffset.y * vr->m_VRScale)
+            + worldUp * (vr->m_InventoryBodyOriginOffset.z * vr->m_VRScale);
+        const Vector pickup = bodyOrigin
+            + bodyForward * (vr->m_InventoryLeftWaistOffset.x * vr->m_VRScale)
+            + bodyRight * (vr->m_InventoryLeftWaistOffset.y * vr->m_VRScale)
+            + worldUp * (vr->m_InventoryLeftWaistOffset.z * vr->m_VRScale);
+
+        const Vector half(
+            std::max(0.005f, vr->m_MagazineInteractionFreshMagazineBoxHalfExtentsMeters.x) * vr->m_VRScale,
+            std::max(0.005f, vr->m_MagazineInteractionFreshMagazineBoxHalfExtentsMeters.y) * vr->m_VRScale,
+            std::max(0.005f, vr->m_MagazineInteractionFreshMagazineBoxHalfExtentsMeters.z) * vr->m_VRScale);
+
+        outBox = {};
+        outBox.origin = pickup;
+        outBox.axisX = bodyForward;
+        outBox.axisY = bodyRight;
+        outBox.axisZ = worldUp;
+        outBox.mins = Vector(-half.x, -half.y, -half.z);
+        outBox.maxs = Vector(half.x, half.y, half.z);
+        outBox.publishedAt = std::chrono::steady_clock::now();
+
+        QAngle::VectorAngles(bodyForward, outAngles);
+        outAngles.x = 0.0f;
+        outAngles.z = 0.0f;
+        return true;
+    }
+
+    void MagazineInteractionDrawFreshMagazinePickupBox(const VR* vr, const MagazineInteractionBoxSnapshot& box, const QAngle& angles)
+    {
+        if (!vr || !vr->m_MagazineBoxDebugEnabled || !vr->m_Game || !vr->m_Game->m_DebugOverlay)
+            return;
+
+        const float duration = std::max(0.02f, vr->m_LastFrameDuration * 2.0f);
+        vr->m_Game->m_DebugOverlay->AddBoxOverlay(
+            box.origin,
+            box.mins,
+            box.maxs,
+            angles,
+            40,
+            210,
+            255,
+            170,
+            duration);
+    }
+
+    VrHandMatrix4 MagazineInteractionBuildLocalTransform(
+        float sourceUnitsPerMeter,
+        const Vector& localPositionOffsetMeters,
+        const Vector& localRotationOffsetDeg)
+    {
+        constexpr float kDegToRad = 3.14159265358979323846f / 180.0f;
+        const float rx = localRotationOffsetDeg.x * kDegToRad;
+        const float ry = localRotationOffsetDeg.y * kDegToRad;
+        const float rz = localRotationOffsetDeg.z * kDegToRad;
+        const float sx = std::sin(rx), cx = std::cos(rx);
+        const float sy = std::sin(ry), cy = std::cos(ry);
+        const float sz = std::sin(rz), cz = std::cos(rz);
+
+        VrHandMatrix4 local = VrHandMath::Identity();
+        VrHandMath::Set(local, 0, 0, cz * cy);
+        VrHandMath::Set(local, 0, 1, cz * sy * sx - sz * cx);
+        VrHandMath::Set(local, 0, 2, cz * sy * cx + sz * sx);
+        VrHandMath::Set(local, 1, 0, sz * cy);
+        VrHandMath::Set(local, 1, 1, sz * sy * sx + cz * cx);
+        VrHandMath::Set(local, 1, 2, sz * sy * cx - cz * sx);
+        VrHandMath::Set(local, 2, 0, -sy);
+        VrHandMath::Set(local, 2, 1, cy * sx);
+        VrHandMath::Set(local, 2, 2, cy * cx);
+        VrHandMath::Set(local, 0, 3, localPositionOffsetMeters.x * sourceUnitsPerMeter);
+        VrHandMath::Set(local, 1, 3, localPositionOffsetMeters.y * sourceUnitsPerMeter);
+        VrHandMath::Set(local, 2, 3, localPositionOffsetMeters.z * sourceUnitsPerMeter);
+        return local;
+    }
+
+    VrHandMatrix4 MagazineInteractionBuildFreshHandMagazineWorld(const VR* vr)
+    {
+        if (!vr)
+            return VrHandMath::Identity();
+
+        const VrHandMatrix4 controllerWorld = MagazineInteractionBuildControllerWorldFromAxes(
+            vr->m_LeftControllerPosAbs,
+            vr->m_LeftControllerForward,
+            vr->m_LeftControllerRight,
+            vr->m_LeftControllerUp);
+        const VrHandMatrix4 local = MagazineInteractionBuildLocalTransform(
+            vr->m_VRScale,
+            vr->m_ManualReloadMagazineHandOffsetMeters,
+            vr->m_ManualReloadMagazineHandRotationOffsetDeg);
+        return VrHandMath::Multiply(controllerWorld, local);
+    }
+
+    bool MagazineInteractionMatrixBasisLooksValid(const VrHandMatrix4& matrix)
+    {
+        for (int column = 0; column < 3; ++column)
+        {
+            const Vector axis(
+                VrHandMath::Get(matrix, 0, column),
+                VrHandMath::Get(matrix, 1, column),
+                VrHandMath::Get(matrix, 2, column));
+            const float length = axis.Length();
+            if (!std::isfinite(length) || length < 0.001f || length > 100.0f)
+                return false;
+        }
+        return true;
+    }
+
+    bool MagazineInteractionMatrixLooksRenderable(const VrHandMatrix4& matrix)
+    {
+        for (float value : matrix.m)
+        {
+            if (!std::isfinite(value))
+                return false;
+        }
+
+        const Vector origin(
+            VrHandMath::Get(matrix, 0, 3),
+            VrHandMath::Get(matrix, 1, 3),
+            VrHandMath::Get(matrix, 2, 3));
+        if (std::fabs(origin.x) > 1000000.0f ||
+            std::fabs(origin.y) > 1000000.0f ||
+            std::fabs(origin.z) > 1000000.0f)
+        {
+            return false;
+        }
+
+        for (int column = 0; column < 3; ++column)
+        {
+            const Vector axis(
+                VrHandMath::Get(matrix, 0, column),
+                VrHandMath::Get(matrix, 1, column),
+                VrHandMath::Get(matrix, 2, column));
+            const float length = axis.Length();
+            if (!std::isfinite(length) || length < 0.001f || length > 100.0f)
+                return false;
+        }
+        return true;
+    }
+
+    VrHandMatrix4 MagazineInteractionBuildSocketOrientedMagazineWorldAtCenter(const VR* vr, const Vector& desiredCenter)
+    {
+        if (!vr)
+            return VrHandMath::Identity();
+
+        VrHandMatrix4 out = vr->m_MagazineInteractionSocketValid
+            ? vr->m_MagazineInteractionSocketWorld
+            : VrHandMath::Identity();
+        const Vector centerLocal = (vr->m_MagazineInteractionSocketBox.mins +
+            vr->m_MagazineInteractionSocketBox.maxs) * 0.5f;
+        const Vector axisX = MagazineInteractionNormalizeAxis(
+            Vector(VrHandMath::Get(out, 0, 0), VrHandMath::Get(out, 1, 0), VrHandMath::Get(out, 2, 0)),
+            Vector(1.0f, 0.0f, 0.0f));
+        const Vector axisY = MagazineInteractionNormalizeAxis(
+            Vector(VrHandMath::Get(out, 0, 1), VrHandMath::Get(out, 1, 1), VrHandMath::Get(out, 2, 1)),
+            Vector(0.0f, 1.0f, 0.0f));
+        const Vector axisZ = MagazineInteractionNormalizeAxis(
+            Vector(VrHandMath::Get(out, 0, 2), VrHandMath::Get(out, 1, 2), VrHandMath::Get(out, 2, 2)),
+            Vector(0.0f, 0.0f, 1.0f));
+        const Vector targetClipOrigin =
+            desiredCenter -
+            axisX * centerLocal.x -
+            axisY * centerLocal.y -
+            axisZ * centerLocal.z;
+        VrHandMath::Set(out, 0, 3, targetClipOrigin.x);
+        VrHandMath::Set(out, 1, 3, targetClipOrigin.y);
+        VrHandMath::Set(out, 2, 3, targetClipOrigin.z);
+        return out;
+    }
+
+    VrHandMatrix4 MagazineInteractionBuildFreshSocketOrientedMagazineWorld(const VR* vr)
+    {
+        if (!vr)
+            return VrHandMath::Identity();
+
+        const VrHandMatrix4 handPlaced = MagazineInteractionBuildFreshHandMagazineWorld(vr);
+        return MagazineInteractionBuildSocketOrientedMagazineWorldAtCenter(
+            vr,
+            Vector(
+                VrHandMath::Get(handPlaced, 0, 3),
+                VrHandMath::Get(handPlaced, 1, 3),
+                VrHandMath::Get(handPlaced, 2, 3)));
+    }
+
+    Vector MagazineInteractionMatrixOrigin(const VrHandMatrix4& matrix)
+    {
+        return Vector(
+            VrHandMath::Get(matrix, 0, 3),
+            VrHandMath::Get(matrix, 1, 3),
+            VrHandMath::Get(matrix, 2, 3));
+    }
+
+    Vector MagazineInteractionMatrixAxis(const VrHandMatrix4& matrix, int column)
+    {
+        return VrHandMath::Normalize(Vector(
+            VrHandMath::Get(matrix, 0, column),
+            VrHandMath::Get(matrix, 1, column),
+            VrHandMath::Get(matrix, 2, column)));
+    }
+
+    Vector MagazineInteractionWorldVectorToMatrixLocal(
+        const VrHandMatrix4& matrix,
+        const Vector& worldVector)
+    {
+        return Vector(
+            VrHandMath::Dot(worldVector, MagazineInteractionMatrixAxis(matrix, 0)),
+            VrHandMath::Dot(worldVector, MagazineInteractionMatrixAxis(matrix, 1)),
+            VrHandMath::Dot(worldVector, MagazineInteractionMatrixAxis(matrix, 2)));
+    }
+
+    Vector MagazineInteractionMatrixLocalVectorToWorld(
+        const VrHandMatrix4& matrix,
+        const Vector& localVector)
+    {
+        return
+            MagazineInteractionMatrixAxis(matrix, 0) * localVector.x +
+            MagazineInteractionMatrixAxis(matrix, 1) * localVector.y +
+            MagazineInteractionMatrixAxis(matrix, 2) * localVector.z;
+    }
+
+    VrHandMatrix4 MagazineInteractionBuildControllerRelation(
+        const VrHandMatrix4& controllerWorld,
+        const VrHandMatrix4& magazineWorld)
+    {
+        VrHandMatrix4 relation = VrHandMath::Identity();
+
+        const Vector controllerOrigin = MagazineInteractionMatrixOrigin(controllerWorld);
+        const Vector controllerAxes[3] =
+        {
+            MagazineInteractionMatrixAxis(controllerWorld, 0),
+            MagazineInteractionMatrixAxis(controllerWorld, 1),
+            MagazineInteractionMatrixAxis(controllerWorld, 2)
+        };
+        const Vector magazineOrigin = MagazineInteractionMatrixOrigin(magazineWorld);
+        const Vector delta = magazineOrigin - controllerOrigin;
+        const Vector localOrigin(
+            VrHandMath::Dot(delta, controllerAxes[0]),
+            VrHandMath::Dot(delta, controllerAxes[1]),
+            VrHandMath::Dot(delta, controllerAxes[2]));
+
+        for (int column = 0; column < 3; ++column)
+        {
+            const Vector magazineAxis = MagazineInteractionMatrixAxis(magazineWorld, column);
+            VrHandMath::Set(relation, 0, column, VrHandMath::Dot(magazineAxis, controllerAxes[0]));
+            VrHandMath::Set(relation, 1, column, VrHandMath::Dot(magazineAxis, controllerAxes[1]));
+            VrHandMath::Set(relation, 2, column, VrHandMath::Dot(magazineAxis, controllerAxes[2]));
+        }
+        VrHandMath::Set(relation, 0, 3, localOrigin.x);
+        VrHandMath::Set(relation, 1, 3, localOrigin.y);
+        VrHandMath::Set(relation, 2, 3, localOrigin.z);
+        return relation;
+    }
+
+    VrHandMatrix4 MagazineInteractionBuildWorldFromControllerRelation(
+        const VrHandMatrix4& controllerWorld,
+        const VrHandMatrix4& relation)
+    {
+        VrHandMatrix4 out = VrHandMath::Identity();
+
+        const Vector controllerOrigin = MagazineInteractionMatrixOrigin(controllerWorld);
+        const Vector controllerAxes[3] =
+        {
+            MagazineInteractionMatrixAxis(controllerWorld, 0),
+            MagazineInteractionMatrixAxis(controllerWorld, 1),
+            MagazineInteractionMatrixAxis(controllerWorld, 2)
+        };
+
+        for (int column = 0; column < 3; ++column)
+        {
+            const Vector localAxis(
+                VrHandMath::Get(relation, 0, column),
+                VrHandMath::Get(relation, 1, column),
+                VrHandMath::Get(relation, 2, column));
+            const Vector worldAxis =
+                controllerAxes[0] * localAxis.x +
+                controllerAxes[1] * localAxis.y +
+                controllerAxes[2] * localAxis.z;
+            VrHandMath::Set(out, 0, column, worldAxis.x);
+            VrHandMath::Set(out, 1, column, worldAxis.y);
+            VrHandMath::Set(out, 2, column, worldAxis.z);
+        }
+
+        const Vector localOrigin(
+            VrHandMath::Get(relation, 0, 3),
+            VrHandMath::Get(relation, 1, 3),
+            VrHandMath::Get(relation, 2, 3));
+        const Vector worldOrigin =
+            controllerOrigin +
+            controllerAxes[0] * localOrigin.x +
+            controllerAxes[1] * localOrigin.y +
+            controllerAxes[2] * localOrigin.z;
+        VrHandMath::Set(out, 0, 3, worldOrigin.x);
+        VrHandMath::Set(out, 1, 3, worldOrigin.y);
+        VrHandMath::Set(out, 2, 3, worldOrigin.z);
+        return out;
+    }
+
+    Vector MagazineInteractionBoxCenterLocal(const MagazineInteractionBoxSnapshot& box)
+    {
+        return (box.mins + box.maxs) * 0.5f;
+    }
+
+    Vector MagazineInteractionMatrixPointWorld(const VrHandMatrix4& matrix, const Vector& localPoint)
+    {
+        return MagazineInteractionMatrixOrigin(matrix) +
+            MagazineInteractionMatrixAxis(matrix, 0) * localPoint.x +
+            MagazineInteractionMatrixAxis(matrix, 1) * localPoint.y +
+            MagazineInteractionMatrixAxis(matrix, 2) * localPoint.z;
+    }
+
+    void MagazineInteractionProjectBoxOntoAxis(
+        const VrHandMatrix4& world,
+        const MagazineInteractionBoxSnapshot& box,
+        const Vector& axis,
+        float& outMin,
+        float& outMax)
+    {
+        outMin = FLT_MAX;
+        outMax = -FLT_MAX;
+        for (int z = 0; z <= 1; ++z)
+        {
+            for (int y = 0; y <= 1; ++y)
+            {
+                for (int x = 0; x <= 1; ++x)
+                {
+                    const Vector local(
+                        x ? box.maxs.x : box.mins.x,
+                        y ? box.maxs.y : box.mins.y,
+                        z ? box.maxs.z : box.mins.z);
+                    const float projected = VrHandMath::Dot(
+                        MagazineInteractionMatrixPointWorld(world, local),
+                        axis);
+                    outMin = std::min(outMin, projected);
+                    outMax = std::max(outMax, projected);
+                }
+            }
+        }
+    }
+
+    float MagazineInteractionIntervalOverlap(float aMin, float aMax, float bMin, float bMax)
+    {
+        return std::max(0.0f, std::min(aMax, bMax) - std::max(aMin, bMin));
+    }
+
+    VrHandMatrix4 MagazineInteractionBuildWorldAtBoxCenter(
+        const VrHandMatrix4& orientationWorld,
+        const MagazineInteractionBoxSnapshot& box,
+        const Vector& desiredCenter)
+    {
+        VrHandMatrix4 out = orientationWorld;
+        const Vector axisX = MagazineInteractionMatrixAxis(orientationWorld, 0);
+        const Vector axisY = MagazineInteractionMatrixAxis(orientationWorld, 1);
+        const Vector axisZ = MagazineInteractionMatrixAxis(orientationWorld, 2);
+        const Vector centerLocal = MagazineInteractionBoxCenterLocal(box);
+        const Vector origin =
+            desiredCenter -
+            axisX * centerLocal.x -
+            axisY * centerLocal.y -
+            axisZ * centerLocal.z;
+
+        VrHandMath::Set(out, 0, 0, axisX.x);
+        VrHandMath::Set(out, 1, 0, axisX.y);
+        VrHandMath::Set(out, 2, 0, axisX.z);
+        VrHandMath::Set(out, 0, 1, axisY.x);
+        VrHandMath::Set(out, 1, 1, axisY.y);
+        VrHandMath::Set(out, 2, 1, axisY.z);
+        VrHandMath::Set(out, 0, 2, axisZ.x);
+        VrHandMath::Set(out, 1, 2, axisZ.y);
+        VrHandMath::Set(out, 2, 2, axisZ.z);
+        VrHandMath::Set(out, 0, 3, origin.x);
+        VrHandMath::Set(out, 1, 3, origin.y);
+        VrHandMath::Set(out, 2, 3, origin.z);
+        return out;
+    }
+
+    bool MagazineInteractionTryReadInt(const void* entity, int offset, int& out)
+    {
+        if (!entity || offset < 0)
+            return false;
+#if defined(_MSC_VER)
+        __try
+        {
+#endif
+            out = *reinterpret_cast<const int*>(reinterpret_cast<const unsigned char*>(entity) + offset);
+            return true;
+#if defined(_MSC_VER)
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            out = 0;
+            return false;
+        }
+#endif
+    }
+
+    bool MagazineInteractionWeaponUsesDetachableMagazine(C_WeaponCSBase::WeaponID weaponId)
+    {
+        switch (weaponId)
+        {
+        case C_WeaponCSBase::WeaponID::PISTOL:
+        case C_WeaponCSBase::WeaponID::UZI:
+        case C_WeaponCSBase::WeaponID::M16A1:
+        case C_WeaponCSBase::WeaponID::HUNTING_RIFLE:
+        case C_WeaponCSBase::WeaponID::MAC10:
+        case C_WeaponCSBase::WeaponID::SCAR:
+        case C_WeaponCSBase::WeaponID::SNIPER_MILITARY:
+        case C_WeaponCSBase::WeaponID::AK47:
+        case C_WeaponCSBase::WeaponID::MAGNUM:
+        case C_WeaponCSBase::WeaponID::MP5:
+        case C_WeaponCSBase::WeaponID::SG552:
+        case C_WeaponCSBase::WeaponID::AWP:
+        case C_WeaponCSBase::WeaponID::SCOUT:
+        case C_WeaponCSBase::WeaponID::M60:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    int MagazineInteractionDefaultMaxClip(C_WeaponCSBase::WeaponID weaponId, int currentClip)
+    {
+        switch (weaponId)
+        {
+        case C_WeaponCSBase::WeaponID::PISTOL: return currentClip > 15 ? 30 : 15;
+        case C_WeaponCSBase::WeaponID::MAGNUM: return 8;
+        case C_WeaponCSBase::WeaponID::UZI: return 50;
+        case C_WeaponCSBase::WeaponID::MAC10: return 50;
+        case C_WeaponCSBase::WeaponID::MP5: return 50;
+        case C_WeaponCSBase::WeaponID::M16A1: return 50;
+        case C_WeaponCSBase::WeaponID::AK47: return 40;
+        case C_WeaponCSBase::WeaponID::SCAR: return 60;
+        case C_WeaponCSBase::WeaponID::SG552: return 50;
+        case C_WeaponCSBase::WeaponID::HUNTING_RIFLE: return 15;
+        case C_WeaponCSBase::WeaponID::SNIPER_MILITARY: return 30;
+        case C_WeaponCSBase::WeaponID::AWP: return 20;
+        case C_WeaponCSBase::WeaponID::SCOUT: return 15;
+        case C_WeaponCSBase::WeaponID::M60: return 150;
+        default: return 0;
+        }
+    }
+
+    std::string MagazineInteractionClipOutSoundSample(const VR* vr)
+    {
+        if (!vr)
+            return std::string();
+
+        std::string lowerModel = vr->m_MagazineInteractionMagazineModelName;
+        std::transform(lowerModel.begin(), lowerModel.end(), lowerModel.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (lowerModel.find("dual_pistol") != std::string::npos ||
+            lowerModel.find("dual_pistola") != std::string::npos)
+        {
+            return "weapons/dual_pistol/gunother/dualpistol_clip_out_1.wav";
+        }
+        if (lowerModel.find("desert_eagle") != std::string::npos ||
+            lowerModel.find("magnum") != std::string::npos)
+        {
+            return "weapons/magnum/gunother/pistol_clip_out_1.wav";
+        }
+        if (lowerModel.find("pistol") != std::string::npos)
+            return "weapons/pistol/gunother/pistol_clip_out_1.wav";
+        if (lowerModel.find("rifle_ak47") != std::string::npos ||
+            lowerModel.find("ak47") != std::string::npos)
+        {
+            return "weapons/rifle_ak47/gunother/rifle_clip_out_1.wav";
+        }
+        if (lowerModel.find("desert_rifle") != std::string::npos)
+            return "weapons/rifle_desert/gunother/rifle_clip_out_1.wav";
+        if (lowerModel.find("sg552") != std::string::npos)
+            return "weapons/sg552/gunother/sg552_clipout.wav";
+        if (lowerModel.find("silenced_smg") != std::string::npos ||
+            lowerModel.find("smg_silenced") != std::string::npos)
+        {
+            return "weapons/smg_silenced/gunother/smg_clip_out_1.wav";
+        }
+        if (lowerModel.find("mp5") != std::string::npos)
+            return "weapons/mp5navy/gunother/mp5_clipout.wav";
+        if (lowerModel.find("smg") != std::string::npos ||
+            lowerModel.find("uzi") != std::string::npos)
+        {
+            return "weapons/smg/gunother/smg_clip_out_1.wav";
+        }
+        if (lowerModel.find("huntingrifle") != std::string::npos ||
+            lowerModel.find("hunting_rifle") != std::string::npos)
+        {
+            return "weapons/hunting_rifle/gunother/hunting_rifle_clipout.wav";
+        }
+        if (lowerModel.find("sniper_military") != std::string::npos)
+            return "weapons/sniper_military/gunother/sniper_military_clip_out_1.wav";
+        if (lowerModel.find("awp") != std::string::npos)
+            return "weapons/awp/gunother/awp_clipout.wav";
+        if (lowerModel.find("scout") != std::string::npos)
+            return "weapons/scout/gunother/scout_clipout.wav";
+        if (lowerModel.find("m60") != std::string::npos ||
+            lowerModel.find("machinegun_m60") != std::string::npos)
+        {
+            return "weapons/machinegun_m60/gunother/rifle_clip_out_1.wav";
+        }
+        if (lowerModel.find("rifle") != std::string::npos ||
+            lowerModel.find("sg552") != std::string::npos)
+        {
+            return "weapons/rifle/gunother/rifle_clip_out_1.wav";
+        }
+        return std::string();
+    }
+
+    std::string MagazineInteractionClipInSoundSample(const VR* vr)
+    {
+        if (!vr)
+            return std::string();
+
+        std::string lowerModel = vr->m_MagazineInteractionMagazineModelName;
+        std::transform(lowerModel.begin(), lowerModel.end(), lowerModel.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (lowerModel.find("dual_pistol") != std::string::npos ||
+            lowerModel.find("dual_pistola") != std::string::npos)
+        {
+            return "weapons/dual_pistol/gunother/dualpistol_clip_in_1.wav";
+        }
+        if (lowerModel.find("desert_eagle") != std::string::npos ||
+            lowerModel.find("magnum") != std::string::npos)
+        {
+            return "weapons/magnum/gunother/pistol_clip_in_1.wav";
+        }
+        if (lowerModel.find("pistol") != std::string::npos)
+            return "weapons/pistol/gunother/pistol_clip_in_1.wav";
+        if (lowerModel.find("rifle_ak47") != std::string::npos ||
+            lowerModel.find("ak47") != std::string::npos)
+        {
+            return "weapons/rifle_ak47/gunother/rifle_clip_in_1.wav";
+        }
+        if (lowerModel.find("desert_rifle") != std::string::npos)
+            return "weapons/rifle_desert/gunother/rifle_clip_in_1.wav";
+        if (lowerModel.find("sg552") != std::string::npos)
+            return "weapons/sg552/gunother/sg552_clipin.wav";
+        if (lowerModel.find("silenced_smg") != std::string::npos ||
+            lowerModel.find("smg_silenced") != std::string::npos)
+        {
+            return "weapons/smg_silenced/gunother/smg_clip_in_1.wav";
+        }
+        if (lowerModel.find("mp5") != std::string::npos)
+            return "weapons/mp5navy/gunother/mp5_clipin.wav";
+        if (lowerModel.find("smg") != std::string::npos ||
+            lowerModel.find("uzi") != std::string::npos)
+        {
+            return "weapons/smg/gunother/smg_clip_in_1.wav";
+        }
+        if (lowerModel.find("huntingrifle") != std::string::npos ||
+            lowerModel.find("hunting_rifle") != std::string::npos)
+        {
+            return "weapons/hunting_rifle/gunother/hunting_rifle_clipin.wav";
+        }
+        if (lowerModel.find("sniper_military") != std::string::npos)
+            return "weapons/sniper_military/gunother/sniper_military_clip_in_1.wav";
+        if (lowerModel.find("awp") != std::string::npos)
+            return "weapons/awp/gunother/awp_clipin.wav";
+        if (lowerModel.find("scout") != std::string::npos)
+            return "weapons/scout/gunother/scout_clipin.wav";
+        if (lowerModel.find("m60") != std::string::npos ||
+            lowerModel.find("machinegun_m60") != std::string::npos)
+        {
+            return "weapons/machinegun_m60/gunother/rifle_clip_in_1.wav";
+        }
+        if (lowerModel.find("rifle") != std::string::npos)
+            return "weapons/rifle/gunother/rifle_clip_in_1.wav";
+        return std::string();
+    }
+
+    std::string MagazineInteractionLowerAscii(std::string value)
+    {
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return value;
+    }
+
+    bool MagazineInteractionSoundMatchesCurrentWeapon(const VR* vr, const char* sample)
+    {
+        if (!vr || !sample || !*sample)
+            return false;
+
+        const std::string lower = MagazineInteractionLowerAscii(sample);
+        const std::string model = MagazineInteractionLowerAscii(vr->m_MagazineInteractionMagazineModelName);
+        auto has = [&](const char* token) -> bool
+            {
+                return token && *token && lower.find(token) != std::string::npos;
+            };
+        auto modelHas = [&](const char* token) -> bool
+            {
+                return token && *token && model.find(token) != std::string::npos;
+            };
+
+        const bool knownSpecificWeapon =
+            has("hunting_rifle") ||
+            has("sniper_military") ||
+            has("rifle_ak47") ||
+            has("ak47") ||
+            has("rifle_desert") ||
+            has("desert_rifle") ||
+            has("smg_silenced") ||
+            has("silenced_smg") ||
+            has("smg_mp5") ||
+            has("mp5") ||
+            has("desert_eagle") ||
+            has("magnum") ||
+            has("dual_pistol") ||
+            has("dualpistol") ||
+            has("snip_awp") ||
+            has("awp") ||
+            has("snip_scout") ||
+            has("scout") ||
+            has("machinegun_m60") ||
+            has("m60");
+
+        switch (static_cast<C_WeaponCSBase::WeaponID>(vr->m_MagazineInteractionWeaponId))
+        {
+        case C_WeaponCSBase::WeaponID::PISTOL:
+            return has("pistol") && !has("magnum") && !has("desert_eagle");
+        case C_WeaponCSBase::WeaponID::MAGNUM:
+            return has("magnum") || has("desert_eagle") ||
+                (has("pistol") && modelHas("desert_eagle"));
+        case C_WeaponCSBase::WeaponID::UZI:
+            return has("weapons/smg/gunother/") || has("weapons\\smg\\gunother\\") ||
+                (has("smg") && !has("silenced") && !has("mp5"));
+        case C_WeaponCSBase::WeaponID::MAC10:
+            return has("smg_silenced") || has("silenced_smg") ||
+                (has("smg") && modelHas("silenced_smg"));
+        case C_WeaponCSBase::WeaponID::MP5:
+            return has("mp5") || has("smg_mp5");
+        case C_WeaponCSBase::WeaponID::M16A1:
+            return has("weapons/rifle/gunother/") || has("weapons\\rifle\\gunother\\") ||
+                (has("rifle") && modelHas("v_rifle.mdl"));
+        case C_WeaponCSBase::WeaponID::AK47:
+            return has("rifle_ak47") || has("ak47") ||
+                ((has("weapons/rifle/gunother/") || has("weapons\\rifle\\gunother\\")) && modelHas("ak47"));
+        case C_WeaponCSBase::WeaponID::SCAR:
+            return has("rifle_desert") || has("desert_rifle") || has("scar");
+        case C_WeaponCSBase::WeaponID::SG552:
+            return has("sg552") ||
+                ((has("weapons/rifle/gunother/") || has("weapons\\rifle\\gunother\\")) && modelHas("sg552"));
+        case C_WeaponCSBase::WeaponID::HUNTING_RIFLE:
+            return has("hunting_rifle") || has("huntingrifle");
+        case C_WeaponCSBase::WeaponID::SNIPER_MILITARY:
+            if (has("hunting_rifle") || has("huntingrifle"))
+                return false;
+            return has("sniper_military") || has("military_sniper");
+        case C_WeaponCSBase::WeaponID::AWP:
+            return has("awp") || has("snip_awp");
+        case C_WeaponCSBase::WeaponID::SCOUT:
+            return has("scout") || has("snip_scout");
+        case C_WeaponCSBase::WeaponID::M60:
+            return has("m60") || has("machinegun_m60") ||
+                ((has("weapons/rifle/gunother/") || has("weapons\\rifle\\gunother\\")) && modelHas("m60"));
+        default:
+            break;
+        }
+
+        return !knownSpecificWeapon;
+    }
+
+    void MagazineInteractionPlayClipOutSound(VR* vr)
+    {
+        if (!vr || !vr->m_Game)
+            return;
+
+        const std::string sample = MagazineInteractionClipOutSoundSample(vr);
+        if (sample.empty())
+        {
+            Game::logMsg(
+                "[VR][MagazineInteraction][Audio] no synthetic clip-out sample for model=%s weaponId=%d",
+                vr->m_MagazineInteractionMagazineModelName.c_str(),
+                vr->m_MagazineInteractionWeaponId);
+            return;
+        }
+
+        const std::string command = "playvol \"" + sample + "\" 1.000";
+        vr->m_MagazineInteractionSyntheticClipOutSample = sample;
+        vr->m_MagazineInteractionSyntheticClipOutStarted = std::chrono::steady_clock::now();
+        vr->m_Game->ClientCmd_Unrestricted(command.c_str());
+        Game::logMsg(
+            "[VR][MagazineInteraction][Audio] played synthetic clip-out sample=%s",
+            sample.c_str());
+    }
+
+    void MagazineInteractionPlayClipInSound(VR* vr)
+    {
+        if (!vr || !vr->m_Game)
+            return;
+
+        const std::string sample = MagazineInteractionClipInSoundSample(vr);
+        if (sample.empty())
+        {
+            Game::logMsg(
+                "[VR][MagazineInteraction][Audio] no synthetic clip-in sample for model=%s weaponId=%d",
+                vr->m_MagazineInteractionMagazineModelName.c_str(),
+                vr->m_MagazineInteractionWeaponId);
+            return;
+        }
+
+        const std::string command = "playvol \"" + sample + "\" 1.000";
+        vr->m_MagazineInteractionSyntheticClipInSample = sample;
+        vr->m_MagazineInteractionSyntheticClipInStarted = std::chrono::steady_clock::now();
+        vr->m_Game->ClientCmd_Unrestricted(command.c_str());
+        Game::logMsg(
+            "[VR][MagazineInteraction][Audio] played synthetic clip-in sample=%s",
+            sample.c_str());
+    }
+
+    bool MagazineInteractionReadActiveWeapon(
+        C_BasePlayer* localPlayer,
+        C_WeaponCSBase*& outWeapon,
+        C_WeaponCSBase::WeaponID& outWeaponId,
+        int& outClip)
+    {
+        outWeapon = nullptr;
+        outWeaponId = C_WeaponCSBase::WeaponID::NONE;
+        outClip = -1;
+        if (!localPlayer)
+            return false;
+#if defined(_MSC_VER)
+        __try
+        {
+#endif
+            outWeapon = reinterpret_cast<C_WeaponCSBase*>(localPlayer->GetActiveWeapon());
+            if (!outWeapon)
+                return false;
+            outWeaponId = outWeapon->GetWeaponID();
+            if (!MagazineInteractionTryReadInt(outWeapon, VR::kClip1Offset, outClip))
+                return false;
+            return true;
+#if defined(_MSC_VER)
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            outWeapon = nullptr;
+            outWeaponId = C_WeaponCSBase::WeaponID::NONE;
+            outClip = -1;
+            return false;
+        }
+#endif
+    }
+}
+
+void VR::PublishMagazineInteractionBox(
+    const Vector& origin,
+    const Vector& axisX,
+    const Vector& axisY,
+    const Vector& axisZ,
+    const Vector& mins,
+    const Vector& maxs,
+    uint32_t frameSeq,
+    int entityIndex,
+    int boneIndex,
+    const char* modelName)
+{
+    if (!m_MagazineInteractionEnabled && !m_MagazineBoxDebugEnabled)
+        return;
+
+    MagazineInteractionBoxSnapshot snapshot{};
+    snapshot.origin = origin;
+    snapshot.axisX = MagazineInteractionNormalizeAxis(axisX, Vector(1.0f, 0.0f, 0.0f));
+    snapshot.axisY = MagazineInteractionNormalizeAxis(axisY, Vector(0.0f, 1.0f, 0.0f));
+    snapshot.axisZ = MagazineInteractionNormalizeAxis(axisZ, Vector(0.0f, 0.0f, 1.0f));
+    snapshot.mins = mins;
+    snapshot.maxs = maxs;
+    snapshot.frameSeq = frameSeq;
+    snapshot.entityIndex = entityIndex;
+    snapshot.boneIndex = boneIndex;
+    snapshot.modelName = modelName ? modelName : "";
+    snapshot.publishedAt = std::chrono::steady_clock::now();
+
+    std::lock_guard<std::mutex> lock(m_MagazineInteractionBoxMutex);
+    snapshot.publishSeq = ++m_MagazineInteractionPublishSeq;
+    m_MagazineInteractionBox = snapshot;
+    m_MagazineInteractionBoxValid = true;
+}
+
+bool VR::GetMagazineInteractionBox(MagazineInteractionBoxSnapshot& outSnapshot) const
+{
+    std::lock_guard<std::mutex> lock(m_MagazineInteractionBoxMutex);
+    if (!m_MagazineInteractionBoxValid)
+        return false;
+    outSnapshot = m_MagazineInteractionBox;
+    return true;
+}
+
+bool VR::IsMagazineInteractionLeftHandActive() const
+{
+    return m_MagazineInteractionState == MagazineInteractionManualState::HoldingOldMagazine ||
+        m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine ||
+        m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBackendReload ||
+        m_MagazineInteractionSuppressLeftInputUntilRelease ||
+        m_MagazineInteractionLeftHandHolding;
+}
+
+bool VR::IsMagazineInteractionManualActive() const
+{
+    return m_MagazineInteractionState != MagazineInteractionManualState::Idle;
+}
+
+void VR::MarkMagazineInteractionReloadCommandIssued()
+{
+    if (m_MagazineInteractionReloadCommandPending && !m_MagazineInteractionReloadCommandIssued)
+    {
+        Game::logMsg(
+            "[VR][MagazineInteraction] backend reload command issued after physical old magazine pull");
+    }
+    m_MagazineInteractionReloadCommandPending = false;
+    m_MagazineInteractionReloadCommandIssued = true;
+}
+
+bool VR::IsMagazineInteractionReloadCommandActive() const
+{
+    return m_MagazineInteractionReloadCommandPending ||
+        (m_MagazineInteractionReloadTriggered && m_MagazineInteractionReloadCommandIssued &&
+            m_MagazineInteractionReloadCommandHoldUntil.time_since_epoch().count() != 0 &&
+            std::chrono::steady_clock::now() < m_MagazineInteractionReloadCommandHoldUntil);
+}
+
+bool VR::ShouldSuppressMagazineInteractionEmptyClipAutoReload(C_BasePlayer* localPlayer) const
+{
+    if (!m_MagazineInteractionEnabled ||
+        !m_MagazineInteractionSuppressEmptyClipAutoReload ||
+        !m_IsVREnabled ||
+        !m_VrHandsEnabled)
+    {
+        return false;
+    }
+
+    C_BasePlayer* player = localPlayer;
+    if (!player && m_Game && m_Game->m_EngineClient)
+    {
+        const int localPlayerIndex = m_Game->m_EngineClient->GetLocalPlayer();
+        if (localPlayerIndex > 0)
+            player = reinterpret_cast<C_BasePlayer*>(m_Game->GetClientEntity(localPlayerIndex));
+    }
+
+    C_WeaponCSBase* activeWeapon = nullptr;
+    C_WeaponCSBase::WeaponID activeWeaponId = C_WeaponCSBase::WeaponID::NONE;
+    int activeClip = -1;
+    if (!MagazineInteractionReadActiveWeapon(player, activeWeapon, activeWeaponId, activeClip) ||
+        !activeWeapon ||
+        !MagazineInteractionWeaponUsesDetachableMagazine(activeWeaponId) ||
+        activeClip != 0)
+    {
+        return false;
+    }
+
+    static std::chrono::steady_clock::time_point s_lastLog{};
+    const auto now = std::chrono::steady_clock::now();
+    if (s_lastLog.time_since_epoch().count() == 0 ||
+        std::chrono::duration<float>(now - s_lastLog).count() >= 1.0f)
+    {
+        s_lastLog = now;
+        Game::logMsg(
+            "[VR][MagazineInteraction] suppressing empty-clip automatic reload weaponId=%d clip=%d; physical magazine reload required",
+            static_cast<int>(activeWeaponId),
+            activeClip);
+    }
+    return true;
+}
+
+bool VR::IsMagazineInteractionBlockingFire() const
+{
+    return IsMagazineInteractionManualActive() &&
+        m_MagazineInteractionState != MagazineInteractionManualState::WaitingForBackendReload;
+}
+
+bool VR::ShouldFreezeMagazineInteractionViewmodel() const
+{
+    return m_MagazineInteractionState == MagazineInteractionManualState::HoldingOldMagazine ||
+        m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
+        m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine ||
+        m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBackendReload;
+}
+
+bool VR::ShouldHideMagazineInteractionNativeClip() const
+{
+    return m_MagazineInteractionState == MagazineInteractionManualState::HoldingOldMagazine ||
+        m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
+        m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine;
+}
+
+bool VR::ShouldDrawMagazineInteractionDetachedMagazine() const
+{
+    return m_MagazineInteractionState == MagazineInteractionManualState::HoldingOldMagazine ||
+        m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
+        m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine;
+}
+
+bool VR::GetMagazineInteractionDetachedMagazineWorld(VrHandMatrix4& outWorld) const
+{
+    if (!ShouldDrawMagazineInteractionDetachedMagazine())
+        return false;
+    std::lock_guard<std::mutex> lock(m_MagazineInteractionPoseMutex);
+    outWorld = m_MagazineInteractionDetachedMagazineWorld;
+    return MagazineInteractionMatrixLooksRenderable(outWorld);
+}
+
+void VR::CancelMagazineInteractionManual()
+{
+    const bool wasActive = IsMagazineInteractionManualActive() || m_MagazineInteractionLeftHandHolding;
+    m_MagazineInteractionState = MagazineInteractionManualState::Idle;
+    m_MagazineInteractionLeftHandHolding = false;
+    m_MagazineInteractionReloadTriggered = false;
+    m_MagazineInteractionReloadCommandPending = false;
+    m_MagazineInteractionReloadCommandIssued = false;
+    m_MagazineInteractionReloadCommandHoldUntil = {};
+    m_MagazineInteractionOldMagazinePulled = false;
+    m_MagazineInteractionWeapon = nullptr;
+    m_MagazineInteractionWeaponId = 0;
+    m_MagazineInteractionStartClip = -1;
+    m_MagazineInteractionMagazineBoneIndex = -1;
+    m_MagazineInteractionViewmodelEntityIndex = -1;
+    m_MagazineInteractionMagazineModelName.clear();
+    m_MagazineInteractionSocketValid = false;
+    m_MagazineInteractionSocketWorld = {};
+    m_MagazineInteractionControllerToMagazine = {};
+    {
+        std::lock_guard<std::mutex> lock(m_MagazineInteractionPoseMutex);
+        m_MagazineInteractionDetachedMagazineWorld = {};
+    }
+    m_MagazineInteractionGrabStartLeftControllerPosAbs = {};
+    m_MagazineInteractionHeldMagazineCenterOffsetLocal = {};
+    m_MagazineInteractionStarted = {};
+    m_MagazineInteractionFreshGrabbedAt = {};
+    m_MagazineInteractionPostInsertStarted = {};
+    m_MagazineInteractionSyntheticClipOutSample.clear();
+    m_MagazineInteractionSyntheticClipOutStarted = {};
+    m_MagazineInteractionSyntheticClipInSample.clear();
+    m_MagazineInteractionSyntheticClipInStarted = {};
+    m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
+    if (wasActive)
+        Game::logMsg("[VR][MagazineInteraction] reset manual magazine interaction state");
+}
+
+bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown, bool leftGripJustPressed)
+{
+    const auto now = std::chrono::steady_clock::now();
+    if (m_MagazineInteractionSuppressLeftInputUntilRelease && !leftGripDown)
+    {
+        m_MagazineInteractionSuppressLeftInputUntilRelease = false;
+        Game::logMsg("[VR][MagazineInteraction] left grip released after physical reload; normal left-hand input restored");
+    }
+    if (m_MagazineInteractionSuppressLeftInputUntilRelease)
+        return false;
+    constexpr float kMagazineInteractionReloadCommandHoldSeconds = 0.35f;
+    auto reloadCommandPending = [&]() -> bool
+    {
+        if (m_MagazineInteractionReloadCommandPending && !m_MagazineInteractionReloadCommandIssued)
+            return true;
+        return m_MagazineInteractionReloadTriggered &&
+            m_MagazineInteractionReloadCommandIssued &&
+            m_MagazineInteractionReloadCommandHoldUntil.time_since_epoch().count() != 0 &&
+            now < m_MagazineInteractionReloadCommandHoldUntil;
+    };
+
+    auto startImmediateReloadCommand = [&](const char* reason)
+    {
+        m_MagazineInteractionReloadTriggered = true;
+        m_MagazineInteractionReloadCommandPending = true;
+        m_MagazineInteractionReloadCommandIssued = false;
+        m_MagazineInteractionReloadCommandHoldUntil =
+            now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<float>(kMagazineInteractionReloadCommandHoldSeconds));
+        Game::logMsg(
+            "[VR][MagazineInteraction] clip-out accepted; immediate backend reload command queued reason=%s hold=%.2fs",
+            reason ? reason : "unknown",
+            kMagazineInteractionReloadCommandHoldSeconds);
+    };
+
+    auto setDetachedMagazineWorld = [&](const VrHandMatrix4& world)
+    {
+        if (!MagazineInteractionMatrixLooksRenderable(world))
+        {
+            static std::chrono::steady_clock::time_point s_lastBadWorldLog{};
+            if (s_lastBadWorldLog.time_since_epoch().count() == 0 ||
+                std::chrono::duration<float>(now - s_lastBadWorldLog).count() >= 0.50f)
+            {
+                s_lastBadWorldLog = now;
+                Game::logMsg(
+                    "[VR][MagazineInteraction] ignored invalid detached magazine world origin=(%.2f %.2f %.2f)",
+                    VrHandMath::Get(world, 0, 3),
+                    VrHandMath::Get(world, 1, 3),
+                    VrHandMath::Get(world, 2, 3));
+            }
+            return;
+        }
+        std::lock_guard<std::mutex> lock(m_MagazineInteractionPoseMutex);
+        m_MagazineInteractionDetachedMagazineWorld = world;
+    };
+
+    auto buildHeldMagazineWorldFromLeftHand = [&]() -> VrHandMatrix4
+    {
+        const VrHandMatrix4 controllerWorld = MagazineInteractionBuildControllerWorldFromAxes(
+            m_LeftControllerPosAbs,
+            m_LeftControllerForward,
+            m_LeftControllerRight,
+            m_LeftControllerUp);
+        VrHandMatrix4 orientationWorld = MagazineInteractionBuildWorldFromControllerRelation(
+            controllerWorld,
+            m_MagazineInteractionControllerToMagazine);
+        if (!MagazineInteractionMatrixBasisLooksValid(orientationWorld))
+            orientationWorld = MagazineInteractionBuildFreshHandMagazineWorld(this);
+
+        const Vector desiredCenter =
+            MagazineInteractionMatrixOrigin(controllerWorld) +
+            MagazineInteractionMatrixLocalVectorToWorld(
+                controllerWorld,
+                m_MagazineInteractionHeldMagazineCenterOffsetLocal);
+        return MagazineInteractionBuildWorldAtBoxCenter(
+            orientationWorld,
+            m_MagazineInteractionSocketBox,
+            desiredCenter);
+    };
+
+    auto updateDetachedMagazineFromLeftHand = [&]()
+    {
+        setDetachedMagazineWorld(buildHeldMagazineWorldFromLeftHand());
+    };
+
+    auto updateFreshDetachedMagazineFromLeftHand = [&]()
+    {
+        setDetachedMagazineWorld(buildHeldMagazineWorldFromLeftHand());
+    };
+
+    auto refreshSocketFromPublishedViewmodelBox = [&]()
+    {
+        if (!m_MagazineInteractionSocketValid)
+            return;
+
+        MagazineInteractionBoxSnapshot box{};
+        if (!GetMagazineInteractionBox(box))
+            return;
+
+        const float ageSeconds = std::chrono::duration<float>(now - box.publishedAt).count();
+        if (ageSeconds > std::max(0.02f, m_MagazineInteractionStaleSeconds))
+            return;
+        if (m_MagazineInteractionViewmodelEntityIndex >= 0 &&
+            box.entityIndex != m_MagazineInteractionViewmodelEntityIndex)
+        {
+            return;
+        }
+        if (m_MagazineInteractionMagazineBoneIndex >= 0 &&
+            box.boneIndex != m_MagazineInteractionMagazineBoneIndex)
+        {
+            return;
+        }
+        if (!m_MagazineInteractionMagazineModelName.empty() &&
+            !box.modelName.empty() &&
+            box.modelName != m_MagazineInteractionMagazineModelName)
+        {
+            return;
+        }
+
+        const VrHandMatrix4 boxWorld = MagazineInteractionBuildBoxWorld(box);
+        if (!MagazineInteractionMatrixLooksRenderable(boxWorld))
+            return;
+
+        m_MagazineInteractionSocketBox = box;
+        m_MagazineInteractionSocketWorld = boxWorld;
+    };
+
+    auto detachedMagazineFitsSocket = [&]() -> bool
+    {
+        if (!m_MagazineInteractionSocketValid)
+            return false;
+
+        const VrHandMatrix4 socketWorld = m_MagazineInteractionSocketWorld;
+        const VrHandMatrix4 detachedWorld = m_MagazineInteractionDetachedMagazineWorld;
+        if (!MagazineInteractionMatrixLooksRenderable(socketWorld) ||
+            !MagazineInteractionMatrixLooksRenderable(detachedWorld))
+        {
+            return false;
+        }
+
+        const float minDot = std::cos(std::clamp(m_MagazineInteractionSocketCaptureAngleDeg, 0.0f, 89.0f) *
+            3.14159265358979323846f / 180.0f);
+        const Vector detachedAxes[3] =
+        {
+            MagazineInteractionMatrixAxis(detachedWorld, 0),
+            MagazineInteractionMatrixAxis(detachedWorld, 1),
+            MagazineInteractionMatrixAxis(detachedWorld, 2)
+        };
+        const Vector socketAxes[3] =
+        {
+            MagazineInteractionMatrixAxis(socketWorld, 0),
+            MagazineInteractionMatrixAxis(socketWorld, 1),
+            MagazineInteractionMatrixAxis(socketWorld, 2)
+        };
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            if (std::fabs(VrHandMath::Dot(detachedAxes[axis], socketAxes[axis])) < minDot)
+                return false;
+        }
+
+        const int insertionAxis = std::clamp(
+            MagazineInteractionDominantAxis(m_ManualReloadMagazineInsertionAxisLocal),
+            0,
+            2);
+        const float overlapFraction = std::clamp(
+            m_MagazineInteractionSocketRequiredOverlapFraction,
+            0.0f,
+            1.0f);
+        const float requiredDepth = std::max(
+            0.0f,
+            m_MagazineInteractionSocketRequiredDepthMeters) * m_VRScale;
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            float socketMin = 0.0f;
+            float socketMax = 0.0f;
+            float detachedMin = 0.0f;
+            float detachedMax = 0.0f;
+            MagazineInteractionProjectBoxOntoAxis(
+                socketWorld,
+                m_MagazineInteractionSocketBox,
+                socketAxes[axis],
+                socketMin,
+                socketMax);
+            MagazineInteractionProjectBoxOntoAxis(
+                detachedWorld,
+                m_MagazineInteractionSocketBox,
+                socketAxes[axis],
+                detachedMin,
+                detachedMax);
+
+            const float socketSpan = std::max(0.001f, socketMax - socketMin);
+            const float detachedSpan = std::max(0.001f, detachedMax - detachedMin);
+            const float overlap = MagazineInteractionIntervalOverlap(
+                socketMin,
+                socketMax,
+                detachedMin,
+                detachedMax);
+            const float requiredOverlap = (axis == insertionAxis)
+                ? std::max(requiredDepth, std::min(socketSpan, detachedSpan) * overlapFraction)
+                : std::min(socketSpan, detachedSpan) * overlapFraction;
+            if (overlap < requiredOverlap)
+                return false;
+        }
+        return true;
+    };
+
+    C_WeaponCSBase* activeWeapon = nullptr;
+    C_WeaponCSBase::WeaponID activeWeaponId = C_WeaponCSBase::WeaponID::NONE;
+    int activeClip = -1;
+    const bool hasActiveWeapon = MagazineInteractionReadActiveWeapon(
+        localPlayer,
+        activeWeapon,
+        activeWeaponId,
+        activeClip);
+
+    if (!m_MagazineInteractionEnabled || !m_IsVREnabled || !m_VrHandsEnabled || !hasActiveWeapon)
+    {
+        CancelMagazineInteractionManual();
+        return false;
+    }
+
+    if (IsMagazineInteractionManualActive() && activeWeapon != m_MagazineInteractionWeapon)
+    {
+        Game::logMsg("[VR][MagazineInteraction] active weapon changed; canceling manual magazine interaction");
+        CancelMagazineInteractionManual();
+        return false;
+    }
+
+    if (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
+        m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine)
+    {
+        refreshSocketFromPublishedViewmodelBox();
+    }
+
+    if (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBackendReload)
+    {
+        const float elapsed = std::chrono::duration<float>(now - m_MagazineInteractionPostInsertStarted).count();
+        const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, activeClip);
+        const bool clipUpdated =
+            activeClip > m_MagazineInteractionStartClip ||
+            (maxClip > 0 && activeClip >= maxClip && activeClip != m_MagazineInteractionStartClip);
+        if ((elapsed >= 0.20f && clipUpdated) || elapsed >= 3.0f)
+        {
+            const bool suppressLeftInputUntilRelease = leftGripDown;
+            Game::logMsg(
+                "[VR][MagazineInteraction] native reload animation skipped; backend reload wait complete elapsed=%.3fs clip=%d startClip=%d max=%d updated=%d",
+                elapsed,
+                activeClip,
+                m_MagazineInteractionStartClip,
+                maxClip,
+                clipUpdated ? 1 : 0);
+            CancelMagazineInteractionManual();
+            if (suppressLeftInputUntilRelease)
+            {
+                m_MagazineInteractionSuppressLeftInputUntilRelease = true;
+                Game::logMsg("[VR][MagazineInteraction] backend reload complete while left grip is still held; suppressing normal reload until release");
+            }
+        }
+        return reloadCommandPending();
+    }
+
+    if (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine)
+    {
+        m_MagazineInteractionLeftHandHolding = false;
+        m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
+        MagazineInteractionBoxSnapshot pickupBox{};
+        QAngle pickupAngles{};
+        const bool hasPickupBox = MagazineInteractionBuildFreshMagazinePickupBox(this, pickupBox, pickupAngles);
+        VrHandMatrix4 pickupMagazineWorld{};
+        if (hasPickupBox)
+        {
+            if (m_MagazineBoxDebugEnabled)
+                MagazineInteractionDrawFreshMagazinePickupBox(this, pickupBox, pickupAngles);
+            pickupMagazineWorld = MagazineInteractionBuildSocketOrientedMagazineWorldAtCenter(this, pickupBox.origin);
+            setDetachedMagazineWorld(pickupMagazineWorld);
+        }
+
+        if (leftGripDown && leftGripJustPressed)
+        {
+            if (!hasPickupBox)
+                return reloadCommandPending();
+
+            const float grabDistance = MagazineInteractionNearestLeftHandProbeDistanceSourceUnits(
+                pickupBox,
+                m_LeftControllerPosAbs,
+                m_LeftControllerAngAbs,
+                m_VRScale);
+            const float grabRange = std::max(0.0f, m_MagazineInteractionFreshMagazineGrabRangeMeters) * m_VRScale;
+            if (grabDistance > grabRange)
+            {
+                Game::logMsg(
+                    "[VR][MagazineInteraction] fresh magazine grab ignored; left hand outside pickup box distance=%.2f range=%.2f",
+                    grabDistance,
+                    grabRange);
+                return reloadCommandPending();
+            }
+
+            m_MagazineInteractionState = MagazineInteractionManualState::HoldingFreshMagazine;
+            m_MagazineInteractionLeftHandHolding = true;
+            const VrHandMatrix4 controllerWorld = MagazineInteractionBuildControllerWorldFromAxes(
+                m_LeftControllerPosAbs,
+                m_LeftControllerForward,
+                m_LeftControllerRight,
+                m_LeftControllerUp);
+            const VrHandMatrix4 freshMagazineWorld = pickupMagazineWorld;
+            m_MagazineInteractionControllerToMagazine =
+                MagazineInteractionBuildControllerRelation(controllerWorld, freshMagazineWorld);
+            const bool relationCaptured =
+                MagazineInteractionMatrixBasisLooksValid(m_MagazineInteractionControllerToMagazine);
+            setDetachedMagazineWorld(freshMagazineWorld);
+            m_MagazineInteractionFreshGrabbedAt = now;
+            m_MagazineInteractionLeftHandPoseActive.store(1, std::memory_order_relaxed);
+            const Vector freshClipOrigin = MagazineInteractionMatrixOrigin(freshMagazineWorld);
+            const Vector freshCenterLocal = MagazineInteractionBoxCenterLocal(m_MagazineInteractionSocketBox);
+            const Vector freshCenterWorld = MagazineInteractionMatrixPointWorld(freshMagazineWorld, freshCenterLocal);
+            m_MagazineInteractionHeldMagazineCenterOffsetLocal =
+                MagazineInteractionWorldVectorToMatrixLocal(
+                    controllerWorld,
+                    freshCenterWorld - MagazineInteractionMatrixOrigin(controllerWorld));
+            Game::logMsg(
+                "[VR][MagazineInteraction] fresh magazine grabbed from pickup box distance=%.2f range=%.2f relationCaptured=%d clipOrigin=(%.2f %.2f %.2f) visibleCenter=(%.2f %.2f %.2f) centerLocalOffset=(%.2f %.2f %.2f) centerLocal=(%.2f %.2f %.2f) model=%s; move it into MagazineSocket",
+                grabDistance,
+                grabRange,
+                relationCaptured ? 1 : 0,
+                freshClipOrigin.x,
+                freshClipOrigin.y,
+                freshClipOrigin.z,
+                freshCenterWorld.x,
+                freshCenterWorld.y,
+                freshCenterWorld.z,
+                m_MagazineInteractionHeldMagazineCenterOffsetLocal.x,
+                m_MagazineInteractionHeldMagazineCenterOffsetLocal.y,
+                m_MagazineInteractionHeldMagazineCenterOffsetLocal.z,
+                freshCenterLocal.x,
+                freshCenterLocal.y,
+                freshCenterLocal.z,
+                m_MagazineInteractionMagazineModelName.c_str());
+        }
+        return reloadCommandPending();
+    }
+
+    if (m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine)
+    {
+        const float freshGrabAgeSeconds =
+            (m_MagazineInteractionFreshGrabbedAt.time_since_epoch().count() != 0)
+            ? std::chrono::duration<float>(now - m_MagazineInteractionFreshGrabbedAt).count()
+            : 999.0f;
+        if (!leftGripDown && freshGrabAgeSeconds >= 0.18f)
+        {
+            m_MagazineInteractionState = MagazineInteractionManualState::WaitingForFreshMagazine;
+            m_MagazineInteractionLeftHandHolding = false;
+            m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
+            Game::logMsg(
+                "[VR][MagazineInteraction] fresh magazine dropped before socket insertion age=%.3fs",
+                freshGrabAgeSeconds);
+            return reloadCommandPending();
+        }
+
+        updateFreshDetachedMagazineFromLeftHand();
+        m_MagazineInteractionLeftHandPoseActive.store(1, std::memory_order_relaxed);
+        if (detachedMagazineFitsSocket())
+        {
+            MagazineInteractionPlayClipInSound(this);
+            m_MagazineInteractionState = MagazineInteractionManualState::WaitingForBackendReload;
+            m_MagazineInteractionLeftHandHolding = false;
+            m_MagazineInteractionPostInsertStarted = now;
+            m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
+            Game::logMsg(
+                "[VR][MagazineInteraction] fresh magazine inserted into MagazineSocket; waiting for backend reload clip=%d startClip=%d",
+                activeClip,
+                m_MagazineInteractionStartClip);
+        }
+        return reloadCommandPending();
+    }
+
+    if (m_MagazineInteractionState == MagazineInteractionManualState::HoldingOldMagazine)
+    {
+        if (!leftGripDown)
+        {
+            if (m_MagazineInteractionReloadTriggered)
+            {
+                m_MagazineInteractionState = MagazineInteractionManualState::WaitingForFreshMagazine;
+                m_MagazineInteractionLeftHandHolding = false;
+                m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
+                Game::logMsg("[VR][MagazineInteraction] pulled old magazine released; old magazine stays hidden, waiting for fresh magazine");
+                return reloadCommandPending();
+            }
+            else
+            {
+                Game::logMsg("[VR][MagazineInteraction] old magazine released before pull threshold; restoring native magazine");
+                CancelMagazineInteractionManual();
+            }
+            return false;
+        }
+
+        const VrHandMatrix4 heldMagazineWorld = buildHeldMagazineWorldFromLeftHand();
+        setDetachedMagazineWorld(heldMagazineWorld);
+        m_MagazineInteractionLeftHandPoseActive.store(1, std::memory_order_relaxed);
+        const float handPullDistance = (m_LeftControllerPosAbs - m_MagazineInteractionGrabStartLeftControllerPosAbs).Length();
+        const float handTriggerDistance = std::max(0.0f, m_MagazineInteractionPullTriggerMeters) * m_VRScale;
+        float magazinePullDistance = 0.0f;
+        if (m_MagazineInteractionSocketValid &&
+            MagazineInteractionMatrixLooksRenderable(m_MagazineInteractionSocketWorld) &&
+            MagazineInteractionMatrixLooksRenderable(heldMagazineWorld))
+        {
+            const Vector centerLocal = MagazineInteractionBoxCenterLocal(m_MagazineInteractionSocketBox);
+            const Vector socketCenter = MagazineInteractionMatrixPointWorld(
+                m_MagazineInteractionSocketWorld,
+                centerLocal);
+            const Vector heldCenter = MagazineInteractionMatrixPointWorld(
+                heldMagazineWorld,
+                centerLocal);
+            magazinePullDistance = (heldCenter - socketCenter).Length();
+        }
+        const float magazineTriggerDistance =
+            std::max(0.0f, m_MagazineInteractionPullTriggerByMagazineMeters) * m_VRScale;
+        const bool handPulled = handTriggerDistance <= 0.0f || handPullDistance >= handTriggerDistance;
+        const bool magazinePulled = magazineTriggerDistance <= 0.0f || magazinePullDistance >= magazineTriggerDistance;
+        if (!m_MagazineInteractionReloadTriggered && (handPulled || magazinePulled))
+        {
+            m_MagazineInteractionOldMagazinePulled = true;
+            MagazineInteractionPlayClipOutSound(this);
+            startImmediateReloadCommand("clip-out");
+            Game::logMsg(
+                "[VR][MagazineInteraction] old magazine pull threshold reached after clip-out handDistance=%.2f handThreshold=%.2f magazineDistance=%.2f magazineThreshold=%.2f",
+                handPullDistance,
+                handTriggerDistance,
+                magazinePullDistance,
+                magazineTriggerDistance);
+            return reloadCommandPending();
+        }
+        return reloadCommandPending();
+    }
+
+    if (!leftGripDown)
+        return false;
+
+    if (!MagazineInteractionWeaponUsesDetachableMagazine(activeWeaponId))
+        return false;
+
+    const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, activeClip);
+    if (maxClip > 0 && activeClip >= maxClip)
+    {
+        if (leftGripJustPressed)
+        {
+            Game::logMsg(
+                "[VR][MagazineInteraction] ignored full magazine weaponId=%d clip=%d max=%d",
+                static_cast<int>(activeWeaponId),
+                activeClip,
+                maxClip);
+        }
+        return false;
+    }
+
+    MagazineInteractionBoxSnapshot box{};
+    if (!GetMagazineInteractionBox(box))
+        return false;
+
+    const float ageSeconds = std::chrono::duration<float>(now - box.publishedAt).count();
+    if (ageSeconds > std::max(0.02f, m_MagazineInteractionStaleSeconds))
+        return false;
+
+    const float grabPadding = std::max(0.0f, m_MagazineInteractionGrabPaddingMeters) * m_VRScale;
+    const float distance = MagazineInteractionNearestLeftHandProbeDistanceSourceUnits(
+        box,
+        m_LeftControllerPosAbs,
+        m_LeftControllerAngAbs,
+        m_VRScale);
+    if (distance > grabPadding)
+    {
+        static std::chrono::steady_clock::time_point s_lastMissLog{};
+        if (s_lastMissLog.time_since_epoch().count() == 0 ||
+            std::chrono::duration<float>(now - s_lastMissLog).count() >= 0.50f)
+        {
+            s_lastMissLog = now;
+            Game::logMsg(
+                "[VR][MagazineInteraction] left grip held but magazine box is out of reach nearest=%.2f padding=%.2f ent=%d bone=%d age=%.3fs",
+                distance,
+                grabPadding,
+                box.entityIndex,
+                box.boneIndex,
+                ageSeconds);
+        }
+        return false;
+    }
+
+    m_MagazineInteractionState = MagazineInteractionManualState::HoldingOldMagazine;
+    m_MagazineInteractionLeftHandHolding = true;
+    m_MagazineInteractionReloadTriggered = false;
+    m_MagazineInteractionReloadCommandPending = false;
+    m_MagazineInteractionReloadCommandIssued = false;
+    m_MagazineInteractionReloadCommandHoldUntil = {};
+    m_MagazineInteractionSuppressLeftInputUntilRelease = false;
+    m_MagazineInteractionOldMagazinePulled = false;
+    m_MagazineInteractionWeapon = activeWeapon;
+    m_MagazineInteractionWeaponId = static_cast<int>(activeWeaponId);
+    m_MagazineInteractionStartClip = activeClip;
+    m_MagazineInteractionMagazineBoneIndex = box.boneIndex;
+    m_MagazineInteractionViewmodelEntityIndex = box.entityIndex;
+    m_MagazineInteractionMagazineModelName = box.modelName;
+    m_MagazineInteractionSocketBox = box;
+    m_MagazineInteractionSocketValid = true;
+    m_MagazineInteractionSocketWorld = MagazineInteractionBuildBoxWorld(box);
+    setDetachedMagazineWorld(m_MagazineInteractionSocketWorld);
+    m_MagazineInteractionGrabStartLeftControllerPosAbs = m_LeftControllerPosAbs;
+    m_MagazineInteractionStarted = now;
+    m_MagazineInteractionPostInsertStarted = {};
+    {
+        const VrHandMatrix4 controllerWorld = MagazineInteractionBuildControllerWorldFromAxes(
+            m_LeftControllerPosAbs,
+            m_LeftControllerForward,
+            m_LeftControllerRight,
+            m_LeftControllerUp);
+        m_MagazineInteractionControllerToMagazine =
+            MagazineInteractionBuildControllerRelation(controllerWorld, m_MagazineInteractionSocketWorld);
+    }
+    const Vector socketCenterLocal = MagazineInteractionBoxCenterLocal(m_MagazineInteractionSocketBox);
+    const Vector socketCenterWorld = MagazineInteractionMatrixPointWorld(
+        m_MagazineInteractionSocketWorld,
+        socketCenterLocal);
+    {
+        const VrHandMatrix4 controllerWorld = MagazineInteractionBuildControllerWorldFromAxes(
+            m_LeftControllerPosAbs,
+            m_LeftControllerForward,
+            m_LeftControllerRight,
+            m_LeftControllerUp);
+        m_MagazineInteractionHeldMagazineCenterOffsetLocal =
+            MagazineInteractionWorldVectorToMatrixLocal(
+                controllerWorld,
+                socketCenterWorld - MagazineInteractionMatrixOrigin(controllerWorld));
+    }
+    m_MagazineInteractionSyntheticClipOutSample.clear();
+    m_MagazineInteractionSyntheticClipOutStarted = {};
+    m_MagazineInteractionSyntheticClipInSample.clear();
+    m_MagazineInteractionSyntheticClipInStarted = {};
+    m_MagazineInteractionLeftHandPoseActive.store(1, std::memory_order_relaxed);
+    Game::logMsg(
+        "[VR][MagazineInteraction] old magazine grabbed; froze viewmodel and hid native clip weaponId=%d clip=%d ent=%d bone=%d distance=%.2f padding=%.2f centerLocalOffset=(%.2f %.2f %.2f) model=%s",
+        static_cast<int>(activeWeaponId),
+        activeClip,
+        box.entityIndex,
+        box.boneIndex,
+        distance,
+        grabPadding,
+        m_MagazineInteractionHeldMagazineCenterOffsetLocal.x,
+        m_MagazineInteractionHeldMagazineCenterOffsetLocal.y,
+        m_MagazineInteractionHeldMagazineCenterOffsetLocal.z,
+        box.modelName.c_str());
+    return false;
 }
 
 bool VR::DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass drawPass)
@@ -51,12 +1683,66 @@ bool VR::DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass 
         sceneLightScale = std::clamp(localLuma / 110.0f, 0.08f, 1.0f);
     }
 
-    // The detachable magazine is rendered by repeating the native Source
-    // viewmodel draw with every non-clip bone moved out of view. This reuses
-    // the weapon model's active materials, shader path and lighting exactly.
-    // Do not also draw the old standalone D3D9 GLB visual.
+    // Detached magazines are primarily rendered by repeating the native Source
+    // viewmodel draw with every non-clip bone moved out of view. While a fresh
+    // magazine is held, keep a lightweight standalone wire box visible as a
+    // fallback because the matching weapon viewmodel draw is not guaranteed to
+    // occur every frame.
     const VrHandMatrix4* manualReloadMagazineWorldPtr = nullptr;
     const bool manualReloadMagazineUseViewmodelLayer = false;
+    VrHandMatrix4 standaloneMagazineBoxWorld{};
+    const VrHandMatrix4* standaloneMagazineBoxWorldPtr = nullptr;
+    Vector standaloneMagazineBoxMins(0.0f, 0.0f, 0.0f);
+    Vector standaloneMagazineBoxMaxs(0.0f, 0.0f, 0.0f);
+    const bool standaloneMagazineBoxUseViewmodelLayer = true;
+    VrHandMatrix4 magazineSocketCaptureBoxWorld{};
+    const VrHandMatrix4* magazineSocketCaptureBoxWorldPtr = nullptr;
+    Vector magazineSocketCaptureBoxMins(0.0f, 0.0f, 0.0f);
+    Vector magazineSocketCaptureBoxMaxs(0.0f, 0.0f, 0.0f);
+    const bool magazineSocketCaptureBoxUseViewmodelLayer = true;
+    VrHandMatrix4 currentMagazineBoxWorld{};
+    const VrHandMatrix4* currentMagazineBoxWorldPtr = nullptr;
+    Vector currentMagazineBoxMins(0.0f, 0.0f, 0.0f);
+    Vector currentMagazineBoxMaxs(0.0f, 0.0f, 0.0f);
+    const bool currentMagazineBoxUseViewmodelLayer = true;
+    if (m_MagazineBoxDebugEnabled &&
+        m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine &&
+        m_MagazineInteractionSocketValid &&
+        GetMagazineInteractionDetachedMagazineWorld(standaloneMagazineBoxWorld))
+    {
+        standaloneMagazineBoxWorldPtr = &standaloneMagazineBoxWorld;
+        standaloneMagazineBoxMins = m_MagazineInteractionSocketBox.mins;
+        standaloneMagazineBoxMaxs = m_MagazineInteractionSocketBox.maxs;
+    }
+    if (m_MagazineBoxDebugEnabled &&
+        m_MagazineInteractionSocketValid &&
+        (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
+            m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine))
+    {
+        magazineSocketCaptureBoxWorld = m_MagazineInteractionSocketWorld;
+        magazineSocketCaptureBoxWorldPtr = &magazineSocketCaptureBoxWorld;
+        magazineSocketCaptureBoxMins = m_MagazineInteractionSocketBox.mins;
+        magazineSocketCaptureBoxMaxs = m_MagazineInteractionSocketBox.maxs;
+    }
+    if (m_MagazineBoxDebugEnabled)
+    {
+        MagazineInteractionBoxSnapshot debugBox{};
+        if (GetMagazineInteractionBox(debugBox))
+        {
+            const float ageSeconds = std::chrono::duration<float>(
+                std::chrono::steady_clock::now() - debugBox.publishedAt).count();
+            if (ageSeconds <= std::max(0.02f, m_MagazineInteractionStaleSeconds))
+            {
+                currentMagazineBoxWorld = MagazineInteractionBuildBoxWorld(debugBox);
+                if (MagazineInteractionMatrixLooksRenderable(currentMagazineBoxWorld))
+                {
+                    currentMagazineBoxWorldPtr = &currentMagazineBoxWorld;
+                    currentMagazineBoxMins = debugBox.mins;
+                    currentMagazineBoxMaxs = debugBox.maxs;
+                }
+            }
+        }
+    }
     const Vector currentViewmodelPosition = GetRecommendedViewmodelAbsPos();
     const QAngle currentViewmodelAngles = GetRecommendedViewmodelAbsAngle();
 
@@ -85,6 +1771,19 @@ bool VR::DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass 
         kNoManualReloadMagazineGlbPath,
         manualReloadMagazineWorldPtr,
         manualReloadMagazineUseViewmodelLayer,
+        standaloneMagazineBoxWorldPtr,
+        standaloneMagazineBoxMins,
+        standaloneMagazineBoxMaxs,
+        standaloneMagazineBoxUseViewmodelLayer,
+        magazineSocketCaptureBoxWorldPtr,
+        magazineSocketCaptureBoxMins,
+        magazineSocketCaptureBoxMaxs,
+        magazineSocketCaptureBoxUseViewmodelLayer,
+        currentMagazineBoxWorldPtr,
+        currentMagazineBoxMins,
+        currentMagazineBoxMaxs,
+        currentMagazineBoxUseViewmodelLayer,
+        m_MagazineInteractionLeftHandPoseActive.load(std::memory_order_relaxed) != 0,
         drawPass);
     device->Release();
     return drewAny;
@@ -370,6 +2069,27 @@ namespace
             lower.find("magazine_locked") != std::string::npos;
     }
 
+    bool MagazineInteractionSoundLooksClipOut(const char* sample)
+    {
+        if (!sample || !*sample)
+            return false;
+
+        std::string lower(sample);
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return lower.find("clip_out") != std::string::npos ||
+            lower.find("clip-out") != std::string::npos ||
+            lower.find("clipout") != std::string::npos ||
+            lower.find("mag_out") != std::string::npos ||
+            lower.find("mag-out") != std::string::npos ||
+            lower.find("magout") != std::string::npos ||
+            lower.find("magazine_out") != std::string::npos ||
+            lower.find("magazine-out") != std::string::npos ||
+            lower.find("magazineout") != std::string::npos ||
+            lower.find("clip.remove") != std::string::npos ||
+            lower.find("mag.remove") != std::string::npos ||
+            lower.find("magazine.remove") != std::string::npos;
+    }
+
     enum class ManualReloadDelayedSoundStage
     {
         Other,
@@ -457,8 +2177,12 @@ namespace
         return lower.find("weapon") != std::string::npos ? 1 : 0;
     }
 
-    size_t ManualReloadNormalizeDelayedSoundsForReplay(std::vector<ManualReloadDelayedSound>& sounds)
+    size_t ManualReloadNormalizeDelayedSoundsForReplay(
+        std::vector<ManualReloadDelayedSound>& sounds,
+        float* outRebaseSeconds)
     {
+        if (outRebaseSeconds)
+            *outRebaseSeconds = 0.0f;
         if (sounds.empty())
             return 0;
 
@@ -539,6 +2263,8 @@ namespace
         std::sort(selectedIndices.begin(), selectedIndices.end());
 
         const float rebaseSeconds = sounds[selectedInsertIndex].offsetSeconds;
+        if (outRebaseSeconds)
+            *outRebaseSeconds = rebaseSeconds;
         std::vector<ManualReloadDelayedSound> normalized;
         normalized.reserve(selectedIndices.size());
         for (size_t selected : selectedIndices)
@@ -585,6 +2311,127 @@ namespace
         return escaped;
     }
 
+    std::string MagazineInteractionNormalizeSoundForCompare(const std::string& rawSample)
+    {
+        return MagazineInteractionLowerAscii(ManualReloadPrepareConsoleSoundSample(rawSample));
+    }
+
+    bool MagazineInteractionShouldLetSyntheticSoundPlay(
+        std::string& pendingSample,
+        std::chrono::steady_clock::time_point& pendingStarted,
+        const char* sample,
+        std::chrono::steady_clock::time_point now)
+    {
+        if (!sample || !*sample || pendingSample.empty() ||
+            pendingStarted.time_since_epoch().count() == 0)
+        {
+            return false;
+        }
+
+        const float ageSeconds = std::chrono::duration<float>(
+            now - pendingStarted).count();
+        if (ageSeconds < 0.0f || ageSeconds > 0.50f)
+        {
+            pendingSample.clear();
+            pendingStarted = {};
+            return false;
+        }
+
+        const std::string pending = MagazineInteractionNormalizeSoundForCompare(
+            pendingSample);
+        const std::string current = MagazineInteractionNormalizeSoundForCompare(sample);
+        if (pending.empty() || current.empty() || pending != current)
+            return false;
+
+        pendingSample.clear();
+        pendingStarted = {};
+        return true;
+    }
+
+}
+
+bool VR::CaptureMagazineInteractionSound(int entityIndex, const char* sample, float volume, int flags, int pitch)
+{
+    constexpr int kSoundChangeVolume = (1 << 0);
+    constexpr int kSoundChangePitch = (1 << 1);
+    constexpr int kSoundStop = (1 << 2);
+    constexpr int kSoundStopLooping = (1 << 5);
+    constexpr int kNonStartFlags = kSoundChangeVolume | kSoundChangePitch | kSoundStop | kSoundStopLooping;
+    if ((flags & kNonStartFlags) != 0)
+        return false;
+
+    const bool waitingForInsertTail =
+        m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
+        m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine;
+    const bool removingOldMagazine =
+        m_MagazineInteractionState == MagazineInteractionManualState::HoldingOldMagazine;
+    const bool suppressingNativeReload =
+        removingOldMagazine ||
+        waitingForInsertTail ||
+        m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBackendReload;
+    if (!sample || !*sample || !m_Game || !m_MagazineInteractionReloadTriggered ||
+        !suppressingNativeReload)
+    {
+        return false;
+    }
+
+    const int localPlayerIndex = (m_Game->m_EngineClient != nullptr)
+        ? m_Game->m_EngineClient->GetLocalPlayer()
+        : -1;
+    const bool fromViewmodel = m_MagazineInteractionViewmodelEntityIndex > 0 &&
+        entityIndex == m_MagazineInteractionViewmodelEntityIndex;
+    const bool fromLocalWeaponPath = (entityIndex == -1 || entityIndex == localPlayerIndex) &&
+        ManualReloadSoundLooksWeaponRelated(sample);
+    if (!fromViewmodel && !fromLocalWeaponPath)
+        return false;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (MagazineInteractionShouldLetSyntheticSoundPlay(
+        m_MagazineInteractionSyntheticClipOutSample,
+        m_MagazineInteractionSyntheticClipOutStarted,
+        sample,
+        now))
+    {
+        Game::logMsg(
+            "[VR][MagazineInteraction][Audio] let synthetic clip-out play sample=%s",
+            sample);
+        return false;
+    }
+    if (MagazineInteractionShouldLetSyntheticSoundPlay(
+        m_MagazineInteractionSyntheticClipInSample,
+        m_MagazineInteractionSyntheticClipInStarted,
+        sample,
+        now))
+    {
+        Game::logMsg(
+            "[VR][MagazineInteraction][Audio] let synthetic clip-in play sample=%s",
+            sample);
+        return false;
+    }
+
+    if (!ManualReloadSoundLooksWeaponRelated(sample) &&
+        !ManualReloadSoundStartsInsertTail(sample) &&
+        !MagazineInteractionSoundLooksClipOut(sample))
+    {
+        return false;
+    }
+
+    if (!MagazineInteractionSoundMatchesCurrentWeapon(this, sample))
+    {
+        Game::logMsg(
+            "[VR][MagazineInteraction][Audio] swallowed mismatched native reload sound weaponId=%d model=%s sample=%s state=%d",
+            m_MagazineInteractionWeaponId,
+            m_MagazineInteractionMagazineModelName.c_str(),
+            sample,
+            static_cast<int>(m_MagazineInteractionState));
+        return true;
+    }
+
+    Game::logMsg(
+        "[VR][MagazineInteraction][Audio] swallowed native reload sound sample=%s state=%d",
+        sample,
+        static_cast<int>(m_MagazineInteractionState));
+    return true;
 }
 
 bool VR::IsManualReloadActive() const

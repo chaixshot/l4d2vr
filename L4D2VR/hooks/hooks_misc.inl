@@ -1143,6 +1143,781 @@ namespace
         return bestBone;
     }
 
+    inline Vector HooksTransformPoint(const vr_vm_stabilize::Mat3x4& matrix, const Vector& value)
+    {
+        return Vector(
+            matrix.m[0][0] * value.x + matrix.m[0][1] * value.y + matrix.m[0][2] * value.z + matrix.m[0][3],
+            matrix.m[1][0] * value.x + matrix.m[1][1] * value.y + matrix.m[1][2] * value.z + matrix.m[1][3],
+            matrix.m[2][0] * value.x + matrix.m[2][1] * value.y + matrix.m[2][2] * value.z + matrix.m[2][3]);
+    }
+
+    inline Vector HooksInverseTransformPoint(const vr_vm_stabilize::Mat3x4& matrix, const Vector& value)
+    {
+        const Vector delta(
+            value.x - matrix.m[0][3],
+            value.y - matrix.m[1][3],
+            value.z - matrix.m[2][3]);
+        return Vector(
+            delta.x * matrix.m[0][0] + delta.y * matrix.m[1][0] + delta.z * matrix.m[2][0],
+            delta.x * matrix.m[0][1] + delta.y * matrix.m[1][1] + delta.z * matrix.m[2][1],
+            delta.x * matrix.m[0][2] + delta.y * matrix.m[1][2] + delta.z * matrix.m[2][2]);
+    }
+
+    inline int FindMagazineBoxBone(const std::vector<std::string>& boneNames)
+    {
+        int bestBone = -1;
+        int bestScore = 0;
+        for (int bone = 0; bone < static_cast<int>(boneNames.size()); ++bone)
+        {
+            const int score = ScoreManualReloadMagazineBoneName(boneNames[static_cast<size_t>(bone)]);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestBone = bone;
+            }
+        }
+        return bestBone;
+    }
+
+    inline Vector HooksNormalizeVector(const Vector& value, const Vector& fallback)
+    {
+        const float length = value.Length();
+        if (!(length > 0.000001f))
+            return fallback;
+        return value * (1.0f / length);
+    }
+
+    inline bool HooksBoneIsDescendantOf(
+        const std::vector<int>& boneParents,
+        int bone,
+        int ancestorBone)
+    {
+        const int numBones = static_cast<int>(boneParents.size());
+        if (bone < 0 || bone >= numBones || ancestorBone < 0 || ancestorBone >= numBones)
+            return false;
+
+        int current = bone;
+        for (int guard = 0; guard < numBones && current >= 0 && current < numBones; ++guard)
+        {
+            if (current == ancestorBone)
+                return true;
+            current = boneParents[static_cast<size_t>(current)];
+        }
+        return false;
+    }
+
+    inline int HooksBoneDescendantDepth(
+        const std::vector<int>& boneParents,
+        int bone,
+        int ancestorBone)
+    {
+        const int numBones = static_cast<int>(boneParents.size());
+        if (bone < 0 || bone >= numBones || ancestorBone < 0 || ancestorBone >= numBones)
+            return -1;
+
+        int current = bone;
+        for (int depth = 0; depth < numBones && current >= 0 && current < numBones; ++depth)
+        {
+            if (current == ancestorBone)
+                return depth;
+            current = boneParents[static_cast<size_t>(current)];
+        }
+        return -1;
+    }
+
+    inline bool HooksMagazineBoxCanSampleBoneName(const std::string& lowerName, int descendantDepth)
+    {
+        if (lowerName.empty())
+            return false;
+
+        if (ManualReloadNameContains(lowerName, "finger") ||
+            ManualReloadNameContains(lowerName, "hand") ||
+            ManualReloadNameContains(lowerName, "bip01") ||
+            ManualReloadNameContains(lowerName, "attach") ||
+            ManualReloadNameContains(lowerName, "muzzle") ||
+            ManualReloadNameContains(lowerName, "eject") ||
+            ManualReloadNameContains(lowerName, "release") ||
+            ManualReloadNameContains(lowerName, "realease") ||
+            ManualReloadNameContains(lowerName, "magrel") ||
+            ManualReloadNameContains(lowerName, "button") ||
+            ManualReloadNameContains(lowerName, "trigger") ||
+            ManualReloadNameContains(lowerName, "safety") ||
+            ManualReloadNameContains(lowerName, "bolt") ||
+            ManualReloadNameContains(lowerName, "slide") ||
+            ManualReloadNameContains(lowerName, "charger") ||
+            ManualReloadNameContains(lowerName, "handle") ||
+            ManualReloadNameContains(lowerName, "barrel") ||
+            ManualReloadNameContains(lowerName, "stock") ||
+            ManualReloadNameContains(lowerName, "hammer"))
+        {
+            return false;
+        }
+
+        if (ScoreManualReloadMagazineBoneName(lowerName) > 0)
+            return true;
+
+        const bool hasClipOrMag =
+            ManualReloadNameContains(lowerName, "clip") ||
+            ManualReloadNameContains(lowerName, "mag");
+        const bool hasAmmoPart =
+            ManualReloadNameContains(lowerName, "bullet") ||
+            ManualReloadNameContains(lowerName, "round") ||
+            ManualReloadNameContains(lowerName, "ammo");
+        return descendantDepth <= 2 && hasClipOrMag && hasAmmoPart;
+    }
+
+    inline int HooksDominantAxis(const Vector& value)
+    {
+        const float ax = std::fabs(value.x);
+        const float ay = std::fabs(value.y);
+        const float az = std::fabs(value.z);
+        if (ay >= ax && ay >= az)
+            return 1;
+        if (az >= ax && az >= ay)
+            return 2;
+        return 0;
+    }
+
+    inline bool TryGetOfficialMagazineBoxProfile(
+        const std::string& lowerModel,
+        const Vector& padding,
+        Vector& outMins,
+        Vector& outMaxs,
+        int& outSampleCount,
+        int& outLengthAxis)
+    {
+        outSampleCount = 1;
+        outLengthAxis = 1;
+
+        auto useProfile = [&](const char* modelPath, const Vector& mins, const Vector& maxs, int axis) -> bool
+        {
+            if (lowerModel.find(modelPath) == std::string::npos)
+                return false;
+            outMins = mins - padding;
+            outMaxs = maxs + padding;
+            outLengthAxis = axis;
+            return true;
+        };
+
+        if (useProfile("models/v_models/v_pistol.mdl", Vector(-0.59f, -5.66f, -0.31f), Vector(0.59f, 0.80f, 2.25f), 1)) return true;
+        if (useProfile("models/v_models/v_pistola.mdl", Vector(-0.59f, -5.66f, -0.31f), Vector(0.59f, 0.80f, 2.25f), 1)) return true;
+        if (useProfile("models/v_models/v_dual_pistola.mdl", Vector(-0.66f, -4.66f, -0.42f), Vector(0.72f, 1.35f, 1.99f), 1)) return true;
+        if (useProfile("models/v_models/v_desert_eagle.mdl", Vector(-0.83f, -5.93f, -0.98f), Vector(0.56f, 0.59f, 3.11f), 1)) return true;
+
+        if (useProfile("models/v_models/v_smg.mdl", Vector(-1.17f, -8.29f, -0.86f), Vector(1.17f, 0.09f, 0.86f), 1)) return true;
+        if (useProfile("models/v_models/v_silenced_smg.mdl", Vector(-0.68f, -7.70f, -0.79f), Vector(0.52f, 1.05f, 0.78f), 1)) return true;
+        if (useProfile("models/v_models/v_smg_mp5.mdl", Vector(-0.75f, -8.80f, -1.05f), Vector(0.75f, 1.10f, 1.05f), 1)) return true;
+
+        if (useProfile("models/v_models/v_rifle.mdl", Vector(-0.90f, -8.40f, -1.10f), Vector(0.90f, 1.25f, 1.15f), 1)) return true;
+        if (useProfile("models/v_models/v_rifle_ak47.mdl", Vector(-0.65f, -9.53f, -0.69f), Vector(0.63f, 1.34f, 7.11f), 1)) return true;
+        if (useProfile("models/v_models/v_desert_rifle.mdl", Vector(-1.81f, -0.73f, -4.73f), Vector(1.69f, 0.72f, 1.61f), 2)) return true;
+        if (useProfile("models/v_models/v_rif_sg552.mdl", Vector(-1.05f, -8.70f, -1.30f), Vector(1.05f, 1.25f, 1.30f), 1)) return true;
+
+        if (useProfile("models/v_models/v_huntingrifle.mdl", Vector(-1.17f, -3.11f, -0.86f), Vector(1.17f, 2.23f, 0.86f), 1)) return true;
+        if (useProfile("models/v_models/v_sniper_military.mdl", Vector(-0.79f, -5.30f, -0.09f), Vector(0.86f, 2.80f, 5.01f), 1)) return true;
+        if (useProfile("models/v_models/v_snip_scout.mdl", Vector(-0.96f, -1.84f, -1.21f), Vector(0.47f, 0.18f, 4.64f), 2)) return true;
+        if (useProfile("models/v_models/v_snip_awp.mdl", Vector(-0.66f, -2.56f, -0.97f), Vector(0.67f, 0.92f, 2.37f), 1)) return true;
+
+        if (useProfile("models/v_models/v_pumpshotgun.mdl", Vector(-1.17f, -2.05f, -0.09f), Vector(1.17f, 3.30f, 2.30f), 1)) return true;
+        if (useProfile("models/v_models/v_shotgun_chrome.mdl", Vector(-1.17f, -2.05f, -0.09f), Vector(1.17f, 3.30f, 2.30f), 1)) return true;
+        if (useProfile("models/v_models/v_autoshotgun.mdl", Vector(-1.17f, -8.29f, -0.86f), Vector(1.17f, 0.09f, 0.86f), 1)) return true;
+        if (useProfile("models/v_models/v_shotgun_spas.mdl", Vector(-0.61f, -0.96f, -1.50f), Vector(0.62f, 0.80f, 1.57f), 2)) return true;
+
+        if (useProfile("models/v_models/v_m60.mdl", Vector(-4.20f, -3.20f, -6.40f), Vector(4.20f, 5.40f, 1.60f), 2)) return true;
+        if (useProfile("models/v_models/v_grenade_launcher.mdl", Vector(-1.34f, -0.96f, -0.24f), Vector(1.03f, 1.43f, 5.60f), 2)) return true;
+
+        return false;
+    }
+
+    inline bool HooksVectorComponentsAreFinite(const Vector& value)
+    {
+        return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+    }
+
+    inline void HooksAccumulateBounds(Vector& mins, Vector& maxs, const Vector& value)
+    {
+        mins.x = std::min(mins.x, value.x);
+        mins.y = std::min(mins.y, value.y);
+        mins.z = std::min(mins.z, value.z);
+        maxs.x = std::max(maxs.x, value.x);
+        maxs.y = std::max(maxs.y, value.y);
+        maxs.z = std::max(maxs.z, value.z);
+    }
+
+    inline bool HooksMagazineBoxCanUseHitboxBone(
+        const std::vector<std::string>& boneNames,
+        const std::vector<int>& boneParents,
+        int hitboxBone,
+        int magazineBone,
+        const std::string& lowerHitboxName)
+    {
+        const int depth = HooksBoneDescendantDepth(boneParents, hitboxBone, magazineBone);
+        if (depth < 0 || depth > 6)
+            return false;
+        if (depth == 0)
+            return true;
+
+        const std::string lowerBoneName =
+            hitboxBone < static_cast<int>(boneNames.size())
+            ? vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(hitboxBone)])
+            : std::string();
+        if (HooksMagazineBoxCanSampleBoneName(lowerBoneName, depth))
+            return true;
+        if (!lowerHitboxName.empty() && HooksMagazineBoxCanSampleBoneName(lowerHitboxName, depth))
+            return true;
+
+        return false;
+    }
+
+    inline bool BuildMagazineBoxLocalBoundsFromHitboxes(
+        void* drawState,
+        int requestedHitboxSet,
+        int numBonesOffset,
+        const std::vector<std::string>& boneNames,
+        const std::vector<int>& boneParents,
+        const vr_vm_stabilize::Mat3x4* sourceBones,
+        int numBones,
+        int magazineBone,
+        const vr_vm_stabilize::Mat3x4& magazineWorld,
+        const Vector& padding,
+        Vector& outMins,
+        Vector& outMaxs,
+        int& outSampleCount,
+        int& outLengthAxis)
+    {
+        outSampleCount = 0;
+        outLengthAxis = 0;
+        if (!drawState || !sourceBones || numBones <= 0 || magazineBone < 0 || magazineBone >= numBones)
+            return false;
+
+        const uint8_t* studioHdr = nullptr;
+        if (!vr_vm_stabilize::TryGetStudioHdrFromDrawState(drawState, studioHdr) || !studioHdr)
+            return false;
+
+        int studioLength = 0;
+        vr_vm_stabilize::SafeRead(studioHdr + 0x4C, studioLength);
+
+        int numHitboxSets = 0;
+        int hitboxSetIndex = 0;
+        const int hitboxSetsOffset = (numBonesOffset > 0) ? (numBonesOffset + 16) : 0xAC;
+        const int hitboxSetIndexOffset = hitboxSetsOffset + 4;
+        if (!vr_vm_stabilize::SafeRead(studioHdr + hitboxSetsOffset, numHitboxSets) ||
+            !vr_vm_stabilize::SafeRead(studioHdr + hitboxSetIndexOffset, hitboxSetIndex))
+        {
+            return false;
+        }
+        if (numHitboxSets <= 0 || numHitboxSets > 64 || hitboxSetIndex <= 0 || hitboxSetIndex > 0x200000)
+            return false;
+        if (studioLength > 0 &&
+            (hitboxSetIndex >= studioLength ||
+                hitboxSetIndex + numHitboxSets * 12 > studioLength))
+        {
+            return false;
+        }
+
+        const int firstSet =
+            (requestedHitboxSet >= 0 && requestedHitboxSet < numHitboxSets) ? requestedHitboxSet : 0;
+        const int endSet =
+            (requestedHitboxSet >= 0 && requestedHitboxSet < numHitboxSets) ? (requestedHitboxSet + 1) : numHitboxSets;
+
+        static constexpr int kHitboxSetStride = 12;
+        static constexpr int kHitboxStrideCandidates[] = { 68, 72, 64, 80, 88 };
+        int bestCount = 0;
+        int bestAxis = 0;
+        Vector bestMins(0.0f, 0.0f, 0.0f);
+        Vector bestMaxs(0.0f, 0.0f, 0.0f);
+
+        for (int stride : kHitboxStrideCandidates)
+        {
+            int sampleCount = 0;
+            Vector boundsMins(FLT_MAX, FLT_MAX, FLT_MAX);
+            Vector boundsMaxs(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+
+            for (int set = firstSet; set < endSet; ++set)
+            {
+                const size_t setOffset = static_cast<size_t>(hitboxSetIndex) +
+                    static_cast<size_t>(set) * static_cast<size_t>(kHitboxSetStride);
+                if (studioLength > 0 && setOffset + kHitboxSetStride > static_cast<size_t>(studioLength))
+                    continue;
+
+                const uint8_t* setBase = studioHdr + setOffset;
+                int numHitboxes = 0;
+                int hitboxIndex = 0;
+                if (!vr_vm_stabilize::SafeRead(setBase + 4, numHitboxes) ||
+                    !vr_vm_stabilize::SafeRead(setBase + 8, hitboxIndex))
+                {
+                    continue;
+                }
+                if (numHitboxes <= 0 || numHitboxes > 512 || hitboxIndex <= 0 || hitboxIndex > 0x200000)
+                    continue;
+
+                for (int hitbox = 0; hitbox < numHitboxes; ++hitbox)
+                {
+                    const size_t hitboxOffset = setOffset + static_cast<size_t>(hitboxIndex) +
+                        static_cast<size_t>(hitbox) * static_cast<size_t>(stride);
+                    if (studioLength > 0 && hitboxOffset + 32 > static_cast<size_t>(studioLength))
+                        continue;
+
+                    const uint8_t* hitboxBase = studioHdr + hitboxOffset;
+                    int hitboxBone = -1;
+                    Vector bbMin;
+                    Vector bbMax;
+                    int nameOffset = 0;
+                    if (!vr_vm_stabilize::SafeRead(hitboxBase + 0, hitboxBone) ||
+                        !vr_vm_stabilize::SafeRead(hitboxBase + 8, bbMin) ||
+                        !vr_vm_stabilize::SafeRead(hitboxBase + 20, bbMax))
+                    {
+                        continue;
+                    }
+                    vr_vm_stabilize::SafeRead(hitboxBase + 32, nameOffset);
+                    if (hitboxBone < 0 || hitboxBone >= numBones)
+                        continue;
+                    if (!HooksVectorComponentsAreFinite(bbMin) || !HooksVectorComponentsAreFinite(bbMax))
+                        continue;
+                    if (bbMax.x <= bbMin.x || bbMax.y <= bbMin.y || bbMax.z <= bbMin.z)
+                        continue;
+                    const Vector span = bbMax - bbMin;
+                    if (span.x > 128.0f || span.y > 128.0f || span.z > 128.0f)
+                        continue;
+
+                    std::string lowerHitboxName;
+                    if (nameOffset > 0 && nameOffset < 0x10000)
+                    {
+                        std::string hitboxName;
+                        const size_t nameAddressOffset = hitboxOffset + static_cast<size_t>(nameOffset);
+                        if ((studioLength <= 0 || nameAddressOffset < static_cast<size_t>(studioLength)) &&
+                            vr_vm_stabilize::TryReadCStringSafe(reinterpret_cast<const char*>(studioHdr + nameAddressOffset), hitboxName))
+                        {
+                            lowerHitboxName = vr_vm_stabilize::ToLowerAscii(hitboxName);
+                        }
+                    }
+
+                    if (!HooksMagazineBoxCanUseHitboxBone(boneNames, boneParents, hitboxBone, magazineBone, lowerHitboxName))
+                        continue;
+
+                    vr_vm_stabilize::Mat3x4 hitboxBoneWorld{};
+                    if (!vr_vm_stabilize::SafeRead(sourceBones + hitboxBone, hitboxBoneWorld))
+                        continue;
+
+                    for (int z = 0; z <= 1; ++z)
+                    {
+                        for (int y = 0; y <= 1; ++y)
+                        {
+                            for (int x = 0; x <= 1; ++x)
+                            {
+                                const Vector hitboxLocal(
+                                    x ? bbMax.x : bbMin.x,
+                                    y ? bbMax.y : bbMin.y,
+                                    z ? bbMax.z : bbMin.z);
+                                const Vector world = HooksTransformPoint(hitboxBoneWorld, hitboxLocal);
+                                const Vector magazineLocal = HooksInverseTransformPoint(magazineWorld, world);
+                                HooksAccumulateBounds(boundsMins, boundsMaxs, magazineLocal);
+                            }
+                        }
+                    }
+                    ++sampleCount;
+                }
+            }
+
+            if (sampleCount <= 0 || boundsMins.x == FLT_MAX)
+                continue;
+
+            const Vector range = boundsMaxs - boundsMins;
+            if (range.x <= 0.001f || range.y <= 0.001f || range.z <= 0.001f)
+                continue;
+
+            int axis = 0;
+            if (range.y > range[axis])
+                axis = 1;
+            if (range.z > range[axis])
+                axis = 2;
+
+            if (sampleCount > bestCount || (sampleCount == bestCount && range[axis] > (bestMaxs - bestMins)[bestAxis]))
+            {
+                bestCount = sampleCount;
+                bestAxis = axis;
+                bestMins = boundsMins;
+                bestMaxs = boundsMaxs;
+            }
+        }
+
+        if (bestCount <= 0)
+            return false;
+
+        outMins = bestMins - padding;
+        outMaxs = bestMaxs + padding;
+        outSampleCount = bestCount;
+        outLengthAxis = bestAxis;
+        return true;
+    }
+
+    inline bool BuildMagazineBoxLocalBoundsFromBoneSamples(
+        const std::vector<std::string>& boneNames,
+        const std::vector<int>& boneParents,
+        const vr_vm_stabilize::Mat3x4* sourceBones,
+        int numBones,
+        int magazineBone,
+        const vr_vm_stabilize::Mat3x4& magazineWorld,
+        const Vector& fallbackHalf,
+        const Vector& padding,
+        const Vector& insertionAxisLocal,
+        Vector& outMins,
+        Vector& outMaxs,
+        int& outSampleCount,
+        int& outLengthAxis)
+    {
+        outSampleCount = 0;
+        outLengthAxis = HooksDominantAxis(insertionAxisLocal);
+        if (!sourceBones || numBones <= 0 || magazineBone < 0 || magazineBone >= numBones)
+            return false;
+
+        Vector sampleMins(FLT_MAX, FLT_MAX, FLT_MAX);
+        Vector sampleMaxs(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+        for (int bone = 0; bone < numBones; ++bone)
+        {
+            const int depth = HooksBoneDescendantDepth(boneParents, bone, magazineBone);
+            if (depth < 0 || depth > 6)
+                continue;
+
+            if (depth > 0)
+            {
+                const std::string lowerBoneName =
+                    bone < static_cast<int>(boneNames.size())
+                    ? vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(bone)])
+                    : std::string();
+                if (!HooksMagazineBoxCanSampleBoneName(lowerBoneName, depth))
+                    continue;
+            }
+
+            vr_vm_stabilize::Mat3x4 boneWorld{};
+            if (!vr_vm_stabilize::SafeRead(sourceBones + bone, boneWorld))
+                continue;
+
+            const Vector local = HooksInverseTransformPoint(magazineWorld, vr_vm_stabilize::GetOrigin(boneWorld));
+            sampleMins.x = std::min(sampleMins.x, local.x);
+            sampleMins.y = std::min(sampleMins.y, local.y);
+            sampleMins.z = std::min(sampleMins.z, local.z);
+            sampleMaxs.x = std::max(sampleMaxs.x, local.x);
+            sampleMaxs.y = std::max(sampleMaxs.y, local.y);
+            sampleMaxs.z = std::max(sampleMaxs.z, local.z);
+            ++outSampleCount;
+        }
+
+        if (outSampleCount < 2)
+            return false;
+
+        const float ranges[3] = {
+            sampleMaxs.x - sampleMins.x,
+            sampleMaxs.y - sampleMins.y,
+            sampleMaxs.z - sampleMins.z
+        };
+        if (ranges[0] > 64.0f || ranges[1] > 64.0f || ranges[2] > 64.0f)
+            return false;
+
+        int dominantAxis = 0;
+        if (ranges[1] > ranges[dominantAxis])
+            dominantAxis = 1;
+        if (ranges[2] > ranges[dominantAxis])
+            dominantAxis = 2;
+
+        const float minUsefulSpan = std::max(0.005f * 43.2f, 0.002f * std::max(1.0f, fallbackHalf.Length()));
+        const int preferredAxis = HooksDominantAxis(insertionAxisLocal);
+        outLengthAxis = (ranges[preferredAxis] >= minUsefulSpan) ? preferredAxis : dominantAxis;
+        if (ranges[outLengthAxis] < minUsefulSpan)
+            return false;
+
+        outMins = Vector(0.0f, 0.0f, 0.0f);
+        outMaxs = Vector(0.0f, 0.0f, 0.0f);
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            const float center = (sampleMins[axis] + sampleMaxs[axis]) * 0.5f;
+            const float sampledHalf = ranges[axis] * 0.5f;
+            float half = fallbackHalf[axis] + padding[axis];
+            if (axis == outLengthAxis)
+                half = std::max(sampledHalf + std::max(padding[axis], fallbackHalf[axis] * 0.5f), fallbackHalf[axis] * 0.65f);
+            else if (ranges[axis] >= minUsefulSpan)
+                half = std::max(sampledHalf + padding[axis], fallbackHalf[axis] + padding[axis]);
+
+            outMins[axis] = center - half;
+            outMaxs[axis] = center + half;
+        }
+
+        return true;
+    }
+
+    inline void DrawMagazineBoxSolidQuad(
+        IVDebugOverlay* overlay,
+        const Vector& a,
+        const Vector& b,
+        const Vector& c,
+        const Vector& d,
+        int r,
+        int g,
+        int bColor,
+        int alpha,
+        bool noDepthTest,
+        float duration)
+    {
+        overlay->AddTriangleOverlay(a, b, c, r, g, bColor, alpha, noDepthTest, duration);
+        overlay->AddTriangleOverlay(a, c, d, r, g, bColor, alpha, noDepthTest, duration);
+        overlay->AddTriangleOverlay(a, c, b, r, g, bColor, alpha, noDepthTest, duration);
+        overlay->AddTriangleOverlay(a, d, c, r, g, bColor, alpha, noDepthTest, duration);
+    }
+
+    inline void DrawCurrentWeaponMagazineBox(
+        VR* vr,
+        void* drawState,
+        const std::string& modelName,
+        int entityIndex,
+        int hitboxSet,
+        const void* pCustomBoneToWorld)
+    {
+        if (!vr || !drawState || !pCustomBoneToWorld || modelName.empty())
+        {
+            return;
+        }
+
+        const bool wantsMagazineBox = vr->m_MagazineInteractionEnabled || vr->m_MagazineBoxDebugEnabled;
+        if (!wantsMagazineBox)
+            return;
+        constexpr bool drawDebugBox = false;
+
+        const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
+        if (!HooksModelNameIsViewmodel(lowerModel) || HooksModelNameIsArmsOrHands(lowerModel))
+            return;
+
+        std::vector<std::string> boneNames;
+        std::vector<int> boneParents;
+        int numBones = 0;
+        int boneIndex = 0;
+        int stride = 0;
+        int numBonesOffset = 0;
+        if (!vr_vm_stabilize::TryCollectBoneNamesFromDrawState(
+            drawState,
+            boneNames,
+            boneParents,
+            numBones,
+            boneIndex,
+            stride,
+            numBonesOffset))
+        {
+            return;
+        }
+        if (numBones <= 0 || numBones > 512 || static_cast<int>(boneNames.size()) < numBones ||
+            static_cast<int>(boneParents.size()) < numBones)
+        {
+            return;
+        }
+
+        const int magazineBone = FindMagazineBoxBone(boneNames);
+        if (magazineBone < 0 || magazineBone >= numBones)
+            return;
+
+        const auto* sourceBones = reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pCustomBoneToWorld);
+        vr_vm_stabilize::Mat3x4 magazineWorld{};
+        if (!vr_vm_stabilize::SafeRead(sourceBones + magazineBone, magazineWorld))
+            return;
+
+        const uint32_t frameSeq = vr->m_RenderFrameSeq.load(std::memory_order_relaxed);
+        if (frameSeq != 0)
+        {
+            static std::mutex s_drawMutex;
+            static std::unordered_map<std::string, uint32_t> s_lastDrawSeq;
+            const std::string key = std::to_string(entityIndex) + "|" + lowerModel;
+            std::lock_guard<std::mutex> lock(s_drawMutex);
+            uint32_t& lastSeq = s_lastDrawSeq[key];
+            if (lastSeq == frameSeq)
+                return;
+            lastSeq = frameSeq;
+        }
+
+        const Vector fallbackHalf(
+            std::max(0.001f, vr->m_MagazineBoxDebugFallbackHalfExtentsMeters.x) * vr->m_VRScale,
+            std::max(0.001f, vr->m_MagazineBoxDebugFallbackHalfExtentsMeters.y) * vr->m_VRScale,
+            std::max(0.001f, vr->m_MagazineBoxDebugFallbackHalfExtentsMeters.z) * vr->m_VRScale);
+        const Vector padding(
+            std::max(0.0f, vr->m_MagazineBoxDebugPaddingMeters.x) * vr->m_VRScale,
+            std::max(0.0f, vr->m_MagazineBoxDebugPaddingMeters.y) * vr->m_VRScale,
+            std::max(0.0f, vr->m_MagazineBoxDebugPaddingMeters.z) * vr->m_VRScale);
+
+        const Vector insertionAxisLocal = HooksNormalizeVector(
+            vr->m_ManualReloadMagazineInsertionAxisLocal,
+            Vector(0.0f, -1.0f, 0.0f));
+        const float magazineLengthHalf = std::max(fallbackHalf.x, std::max(fallbackHalf.y, fallbackHalf.z));
+        int sampleCount = 0;
+        int lengthAxis = HooksDominantAxis(insertionAxisLocal);
+        Vector mins;
+        Vector maxs;
+        const char* boundsSource = "fallback";
+        auto useFallbackBounds = [&]()
+        {
+            sampleCount = 1;
+            lengthAxis = HooksDominantAxis(insertionAxisLocal);
+            const Vector centerLocal = insertionAxisLocal * magazineLengthHalf;
+            mins = centerLocal - fallbackHalf - padding;
+            maxs = centerLocal + fallbackHalf + padding;
+            boundsSource = "fallback";
+        };
+        if (TryGetOfficialMagazineBoxProfile(
+            lowerModel,
+            padding,
+            mins,
+            maxs,
+            sampleCount,
+            lengthAxis))
+        {
+            boundsSource = "official";
+        }
+        else if (BuildMagazineBoxLocalBoundsFromHitboxes(
+            drawState,
+            hitboxSet,
+            numBonesOffset,
+            boneNames,
+            boneParents,
+            sourceBones,
+            numBones,
+            magazineBone,
+            magazineWorld,
+            padding,
+            mins,
+            maxs,
+            sampleCount,
+            lengthAxis))
+        {
+            boundsSource = "hitbox";
+        }
+        else if (BuildMagazineBoxLocalBoundsFromBoneSamples(
+            boneNames,
+            boneParents,
+            sourceBones,
+            numBones,
+            magazineBone,
+            magazineWorld,
+            fallbackHalf,
+            padding,
+            insertionAxisLocal,
+            mins,
+            maxs,
+            sampleCount,
+            lengthAxis))
+        {
+            boundsSource = "bones";
+        }
+        else
+        {
+            useFallbackBounds();
+        }
+
+        if (std::strcmp(boundsSource, "official") != 0)
+        {
+            const Vector span = maxs - mins;
+            const int clampedLengthAxis = std::clamp(lengthAxis, 0, 2);
+            const float maxAllowed[3] =
+            {
+                std::max(fallbackHalf.x * 2.4f, ((clampedLengthAxis == 0) ? 0.18f : 0.035f) * vr->m_VRScale),
+                std::max(fallbackHalf.y * 2.4f, ((clampedLengthAxis == 1) ? 0.18f : 0.035f) * vr->m_VRScale),
+                std::max(fallbackHalf.z * 2.4f, ((clampedLengthAxis == 2) ? 0.18f : 0.035f) * vr->m_VRScale)
+            };
+            if (span.x > maxAllowed[0] || span.y > maxAllowed[1] || span.z > maxAllowed[2])
+            {
+                const char* rejectedSource = boundsSource;
+                useFallbackBounds();
+                boundsSource = "fallback-clamped";
+                static std::mutex s_clampLogMutex;
+                static std::unordered_map<std::string, bool> s_clampLoggedModels;
+                std::lock_guard<std::mutex> lock(s_clampLogMutex);
+                if (s_clampLoggedModels.emplace(lowerModel, true).second)
+                {
+                    Game::logMsg(
+                        "[VR][MagazineBox] rejected oversized %s bounds model=%s span=(%.2f %.2f %.2f) allowed=(%.2f %.2f %.2f)",
+                        rejectedSource,
+                        lowerModel.c_str(),
+                        span.x,
+                        span.y,
+                        span.z,
+                        maxAllowed[0],
+                        maxAllowed[1],
+                        maxAllowed[2]);
+                }
+            }
+        }
+
+        vr->PublishMagazineInteractionBox(
+            Vector(magazineWorld.m[0][3], magazineWorld.m[1][3], magazineWorld.m[2][3]),
+            Vector(magazineWorld.m[0][0], magazineWorld.m[1][0], magazineWorld.m[2][0]),
+            Vector(magazineWorld.m[0][1], magazineWorld.m[1][1], magazineWorld.m[2][1]),
+            Vector(magazineWorld.m[0][2], magazineWorld.m[1][2], magazineWorld.m[2][2]),
+            mins,
+            maxs,
+            frameSeq,
+            entityIndex,
+            magazineBone,
+            modelName.c_str());
+
+        Vector corners[8];
+        for (int z = 0; z <= 1; ++z)
+        {
+            for (int y = 0; y <= 1; ++y)
+            {
+                for (int x = 0; x <= 1; ++x)
+                {
+                    const int index = x | (y << 1) | (z << 2);
+                    const Vector local(
+                        x ? maxs.x : mins.x,
+                        y ? maxs.y : mins.y,
+                        z ? maxs.z : mins.z);
+                    corners[index] = HooksTransformPoint(magazineWorld, local);
+                }
+            }
+        }
+
+        if (drawDebugBox)
+        {
+            const float duration = std::max(0.02f, vr->m_LastFrameDuration * 2.0f);
+            constexpr int kR = 255;
+            constexpr int kG = 72;
+            constexpr int kB = 24;
+            constexpr int kA = 220;
+            constexpr bool kNoDepthTest = true;
+            IVDebugOverlay* overlay = vr->m_Game->m_DebugOverlay;
+            DrawMagazineBoxSolidQuad(overlay, corners[0], corners[1], corners[3], corners[2], kR, kG, kB, kA, kNoDepthTest, duration);
+            DrawMagazineBoxSolidQuad(overlay, corners[4], corners[6], corners[7], corners[5], kR, kG, kB, kA, kNoDepthTest, duration);
+            DrawMagazineBoxSolidQuad(overlay, corners[0], corners[4], corners[5], corners[1], kR, kG, kB, kA, kNoDepthTest, duration);
+            DrawMagazineBoxSolidQuad(overlay, corners[2], corners[3], corners[7], corners[6], kR, kG, kB, kA, kNoDepthTest, duration);
+            DrawMagazineBoxSolidQuad(overlay, corners[0], corners[2], corners[6], corners[4], kR, kG, kB, kA, kNoDepthTest, duration);
+            DrawMagazineBoxSolidQuad(overlay, corners[1], corners[5], corners[7], corners[3], kR, kG, kB, kA, kNoDepthTest, duration);
+        }
+
+        static std::mutex s_logMutex;
+        static std::unordered_map<std::string, int> s_loggedBoneByModel;
+        {
+            std::lock_guard<std::mutex> lock(s_logMutex);
+            auto it = s_loggedBoneByModel.find(lowerModel);
+            if (it == s_loggedBoneByModel.end() || it->second != magazineBone)
+            {
+                s_loggedBoneByModel[lowerModel] = magazineBone;
+                const char* boneName =
+                    (magazineBone < static_cast<int>(boneNames.size()) && !boneNames[static_cast<size_t>(magazineBone)].empty())
+                    ? boneNames[static_cast<size_t>(magazineBone)].c_str()
+                    : "<unnamed>";
+                Game::logMsg(
+                    "[VR][MagazineBox] drawing solid magazine box model=%s bone=%d name=%s source=%s samples=%d axis=%d mins=(%.2f %.2f %.2f) maxs=(%.2f %.2f %.2f)",
+                    modelName.c_str(),
+                    magazineBone,
+                    boneName,
+                    boundsSource,
+                    sampleCount,
+                    lengthAxis,
+                    mins.x,
+                    mins.y,
+                    mins.z,
+                    maxs.x,
+                    maxs.y,
+                    maxs.z);
+            }
+        }
+    }
+
     inline int FindManualReloadConfiguredMagazineBone(
         const VR* vr,
         const std::string& modelName,
@@ -1229,6 +2004,141 @@ namespace
         return vr && vr->m_ManualReloadState == ManualReloadState::HoldingFreshMagazine;
     }
 
+    struct MagazineInteractionDetachedMagazinePoseCache
+    {
+        VR* owner = nullptr;
+        std::string modelName;
+        int clipBone = -1;
+        int numBones = 0;
+        std::vector<vr_vm_stabilize::Mat3x4> sourceBones;
+
+        void Reset()
+        {
+            owner = nullptr;
+            modelName.clear();
+            clipBone = -1;
+            numBones = 0;
+            sourceBones.clear();
+        }
+    };
+
+    inline MagazineInteractionDetachedMagazinePoseCache& GetMagazineInteractionDetachedMagazinePoseCache()
+    {
+        static MagazineInteractionDetachedMagazinePoseCache cache;
+        return cache;
+    }
+
+    inline void LogMagazineInteractionDetachedDrawSkip(const char* reason, const std::string& modelName = std::string())
+    {
+        static std::mutex s_skipLogMutex;
+        static std::unordered_map<std::string, std::chrono::steady_clock::time_point> s_lastSkipLog;
+        const auto now = std::chrono::steady_clock::now();
+        const std::string key = std::string(reason ? reason : "unknown") + "|" + modelName;
+        std::lock_guard<std::mutex> lock(s_skipLogMutex);
+        auto& last = s_lastSkipLog[key];
+        if (last.time_since_epoch().count() != 0 &&
+            std::chrono::duration<float>(now - last).count() < 1.0f)
+        {
+            return;
+        }
+        last = now;
+        Game::logMsg(
+            "[VR][MagazineInteraction] detached magazine draw skipped reason=%s model=%s",
+            reason ? reason : "unknown",
+            modelName.empty() ? "<none>" : modelName.c_str());
+    }
+
+    inline bool BuildDetachedSourceMagazineBones(
+        const char* logPrefix,
+        const std::string& modelName,
+        const std::vector<int>& boneParents,
+        const vr_vm_stabilize::Mat3x4* sourceBones,
+        int numBones,
+        int clipBone,
+        const VrHandMatrix4& targetMagazineWorld,
+        const vr_vm_stabilize::Mat3x4* cachedMagazineBones,
+        uint32_t renderFrameSeq,
+        vr_vm_stabilize::Mat3x4*& outBones)
+    {
+        outBones = nullptr;
+        if (!sourceBones)
+            return false;
+        if (numBones <= 0 || numBones > 512 || clipBone < 0 || clipBone >= numBones ||
+            static_cast<int>(boneParents.size()) < numBones)
+            return false;
+
+        const vr_vm_stabilize::Mat3x4* magazineSourceBones = cachedMagazineBones ? cachedMagazineBones : sourceBones;
+        vr_vm_stabilize::Mat3x4 originalClipWorld{};
+        if (!vr_vm_stabilize::SafeRead(magazineSourceBones + clipBone, originalClipWorld))
+            return false;
+
+        vr_vm_stabilize::Mat3x4 inverseOriginalClip{};
+        vr_vm_stabilize::Mat3x4 targetClipWorld = HooksVrHandMatrixToMat3x4(
+            HooksStripVrHandMatrixScale(targetMagazineWorld));
+        vr_vm_stabilize::Mat3x4 targetDelta{};
+        vr_vm_stabilize::InvertTR(originalClipWorld, inverseOriginalClip);
+        vr_vm_stabilize::Mul(targetClipWorld, inverseOriginalClip, targetDelta);
+
+        uint32_t seqEven = renderFrameSeq & ~1u;
+        if (seqEven == 0)
+            seqEven = (static_cast<uint32_t>(GetTickCount()) << 1u) | 2u;
+        vr_vm_stabilize::Mat3x4* isolatedBones = vr_vm_stabilize::AllocStableBones(numBones, seqEven);
+        if (!isolatedBones)
+            return false;
+
+        auto isClipOrDescendant = [&](int bone)
+            {
+                int current = bone;
+                for (int guard = 0; guard < numBones && current >= 0 && current < numBones; ++guard)
+                {
+                    if (current == clipBone)
+                        return true;
+                    current = boneParents[static_cast<size_t>(current)];
+                }
+                return false;
+            };
+
+        for (int bone = 0; bone < numBones; ++bone)
+        {
+            vr_vm_stabilize::Mat3x4 source{};
+            if (!vr_vm_stabilize::SafeRead(sourceBones + bone, source))
+                return false;
+
+            if (isClipOrDescendant(bone))
+            {
+                if (!vr_vm_stabilize::SafeRead(magazineSourceBones + bone, source))
+                    return false;
+                vr_vm_stabilize::Mul(targetDelta, source, isolatedBones[bone]);
+            }
+            else
+            {
+                isolatedBones[bone] = source;
+                isolatedBones[bone].m[0][3] += 100000.0f;
+                isolatedBones[bone].m[1][3] += 100000.0f;
+                isolatedBones[bone].m[2][3] += 100000.0f;
+            }
+        }
+
+        static std::mutex s_detachedSourceMagazineLogMutex;
+        static std::unordered_set<std::string> s_detachedSourceMagazineLoggedModels;
+        {
+            std::lock_guard<std::mutex> lock(s_detachedSourceMagazineLogMutex);
+            const std::string key = std::string(logPrefix ? logPrefix : "Magazine") + "|" + modelName + "|" + std::to_string(clipBone);
+            if (s_detachedSourceMagazineLoggedModels.emplace(key).second)
+            {
+                Game::logMsg(
+                    "[VR][%s] drawing detached magazine through Source viewmodel shader model=%s clipBone=%d cached=%d",
+                    logPrefix ? logPrefix : "Magazine",
+                    modelName.c_str(),
+                    clipBone,
+                    cachedMagazineBones ? 1 : 0);
+            }
+        }
+
+        outBones = isolatedBones;
+        return true;
+    }
+
     inline bool BuildManualReloadNativeMagazineBones(
         VR* vr,
         void* drawState,
@@ -1273,72 +2183,158 @@ namespace
         VrHandMatrix4 targetMagazineWorld{};
         if (!vr->GetManualReloadMagazineWorld(targetMagazineWorld))
             return false;
-        targetMagazineWorld = HooksStripVrHandMatrixScale(targetMagazineWorld);
 
         const auto* sourceBones = reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pCustomBoneToWorld);
-        vr_vm_stabilize::Mat3x4 originalClipWorld{};
-        if (!vr_vm_stabilize::SafeRead(sourceBones + clipBone, originalClipWorld))
+        return BuildDetachedSourceMagazineBones(
+            "ManualReload",
+            modelName,
+            boneParents,
+            sourceBones,
+            numBones,
+            clipBone,
+            targetMagazineWorld,
+            nullptr,
+            vr->m_RenderFrameSeq.load(std::memory_order_relaxed),
+            outBones);
+    }
+
+    inline bool BuildMagazineInteractionDetachedMagazineBones(
+        VR* vr,
+        void* drawState,
+        const std::string& modelName,
+        const void* pCustomBoneToWorld,
+        vr_vm_stabilize::Mat3x4*& outBones)
+    {
+        outBones = nullptr;
+        if (!vr || !vr->ShouldDrawMagazineInteractionDetachedMagazine() || !drawState || !pCustomBoneToWorld)
+        {
+            if (vr && vr->IsMagazineInteractionManualActive())
+                LogMagazineInteractionDetachedDrawSkip("inactive-or-missing-draw-input", modelName);
             return false;
-
-        vr_vm_stabilize::Mat3x4 inverseOriginalClip{};
-        vr_vm_stabilize::Mat3x4 targetClipWorld = HooksVrHandMatrixToMat3x4(targetMagazineWorld);
-        vr_vm_stabilize::Mat3x4 targetDelta{};
-        vr_vm_stabilize::InvertTR(originalClipWorld, inverseOriginalClip);
-        vr_vm_stabilize::Mul(targetClipWorld, inverseOriginalClip, targetDelta);
-
-        uint32_t seqEven = vr->m_RenderFrameSeq.load(std::memory_order_relaxed) & ~1u;
-        if (seqEven == 0)
-            seqEven = (static_cast<uint32_t>(GetTickCount()) << 1u) | 2u;
-        vr_vm_stabilize::Mat3x4* isolatedBones = vr_vm_stabilize::AllocStableBones(numBones, seqEven);
-        if (!isolatedBones)
+        }
+        if (!vr->m_Game || vr->m_Game->GetMatQueueMode() != 0)
+        {
+            LogMagazineInteractionDetachedDrawSkip("mat-queue-not-single-thread", modelName);
             return false;
+        }
 
-        auto isClipOrDescendant = [&](int bone)
+        const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
+        if (!HooksModelNameIsViewmodel(lowerModel))
+        {
+            LogMagazineInteractionDetachedDrawSkip("not-viewmodel", modelName);
+            return false;
+        }
+        if (vr->m_MagazineInteractionMagazineModelName.empty() ||
+            vr_vm_stabilize::ToLowerAscii(vr->m_MagazineInteractionMagazineModelName) != lowerModel)
+        {
+            LogMagazineInteractionDetachedDrawSkip("model-mismatch", modelName);
+            return false;
+        }
+
+        std::vector<std::string> boneNames;
+        std::vector<int> boneParents;
+        int numBones = 0;
+        int boneIndex = 0;
+        int stride = 0;
+        int numBonesOffset = 0;
+        if (!vr_vm_stabilize::TryCollectBoneNamesFromDrawState(
+            drawState,
+            boneNames,
+            boneParents,
+            numBones,
+            boneIndex,
+            stride,
+            numBonesOffset))
+        {
+            LogMagazineInteractionDetachedDrawSkip("collect-bones-failed", modelName);
+            return false;
+        }
+        if (numBones <= 0 || numBones > 512 || static_cast<int>(boneParents.size()) < numBones)
+        {
+            LogMagazineInteractionDetachedDrawSkip("invalid-bone-count", modelName);
+            return false;
+        }
+
+        const int clipBone = vr->m_MagazineInteractionMagazineBoneIndex;
+        if (clipBone < 0 || clipBone >= numBones)
+        {
+            LogMagazineInteractionDetachedDrawSkip("invalid-clip-bone", modelName);
+            return false;
+        }
+
+        MagazineInteractionDetachedMagazinePoseCache& poseCache = GetMagazineInteractionDetachedMagazinePoseCache();
+        const bool cacheMatches =
+            poseCache.owner == vr &&
+            poseCache.modelName == lowerModel &&
+            poseCache.clipBone == clipBone &&
+            poseCache.numBones == numBones &&
+            static_cast<int>(poseCache.sourceBones.size()) == numBones;
+        const bool refreshPoseCache =
+            vr->m_MagazineInteractionState == MagazineInteractionManualState::HoldingOldMagazine &&
+            !vr->m_MagazineInteractionReloadTriggered;
+
+        const auto* sourceBones = reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pCustomBoneToWorld);
+        if (refreshPoseCache || !cacheMatches)
+        {
+            std::vector<vr_vm_stabilize::Mat3x4> capturedBones(static_cast<size_t>(numBones));
+            bool captured = true;
+            for (int bone = 0; bone < numBones; ++bone)
             {
-                int current = bone;
-                for (int guard = 0; guard < numBones && current >= 0 && current < numBones; ++guard)
+                if (!vr_vm_stabilize::SafeRead(sourceBones + bone, capturedBones[static_cast<size_t>(bone)]))
                 {
-                    if (current == clipBone)
-                        return true;
-                    current = boneParents[static_cast<size_t>(current)];
+                    captured = false;
+                    break;
                 }
-                return false;
-            };
-
-        for (int bone = 0; bone < numBones; ++bone)
-        {
-            vr_vm_stabilize::Mat3x4 source{};
-            if (!vr_vm_stabilize::SafeRead(sourceBones + bone, source))
-                return false;
-
-            if (isClipOrDescendant(bone))
-            {
-                vr_vm_stabilize::Mul(targetDelta, source, isolatedBones[bone]);
             }
-            else
+            if (captured)
             {
-                isolatedBones[bone] = source;
-                isolatedBones[bone].m[0][3] += 100000.0f;
-                isolatedBones[bone].m[1][3] += 100000.0f;
-                isolatedBones[bone].m[2][3] += 100000.0f;
+                poseCache.owner = vr;
+                poseCache.modelName = lowerModel;
+                poseCache.clipBone = clipBone;
+                poseCache.numBones = numBones;
+                poseCache.sourceBones.swap(capturedBones);
+            }
+            else if (!cacheMatches)
+            {
+                poseCache.Reset();
             }
         }
 
-        static std::mutex s_sourceMagazineLogMutex;
-        static std::unordered_map<std::string, bool> s_sourceMagazineLoggedModels;
+        const bool useCachedMagazinePose =
+            poseCache.owner == vr &&
+            poseCache.modelName == lowerModel &&
+            poseCache.clipBone == clipBone &&
+            poseCache.numBones == numBones &&
+            static_cast<int>(poseCache.sourceBones.size()) == numBones;
+        const vr_vm_stabilize::Mat3x4* magazineSourceBones = useCachedMagazinePose
+            ? poseCache.sourceBones.data()
+            : sourceBones;
+
+        VrHandMatrix4 targetMagazineWorld{};
+        if (!vr->GetMagazineInteractionDetachedMagazineWorld(targetMagazineWorld))
         {
-            std::lock_guard<std::mutex> lock(s_sourceMagazineLogMutex);
-            if (s_sourceMagazineLoggedModels.emplace(modelName, true).second)
-            {
-                Game::logMsg(
-                    "[VR][ManualReload] drawing detached magazine through Source viewmodel shader model=%s clipBone=%d",
-                    modelName.c_str(),
-                    clipBone);
-            }
+            LogMagazineInteractionDetachedDrawSkip("missing-target-world", modelName);
+            return false;
         }
 
-        outBones = isolatedBones;
-        return true;
+        const char* logPrefix =
+            (vr->m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine)
+            ? "MagazineInteractionFresh"
+            : "MagazineInteraction";
+        const bool built = BuildDetachedSourceMagazineBones(
+            logPrefix,
+            modelName,
+            boneParents,
+            sourceBones,
+            numBones,
+            clipBone,
+            targetMagazineWorld,
+            useCachedMagazinePose ? magazineSourceBones : nullptr,
+            vr->m_RenderFrameSeq.load(std::memory_order_relaxed),
+            outBones);
+        if (!built)
+            LogMagazineInteractionDetachedDrawSkip("build-source-magazine-failed", modelName);
+        return built;
     }
 
     inline void MaybeCaptureVrHandsVmPose(
@@ -2227,7 +3223,9 @@ namespace
     {
         ManualReloadFrozenViewmodelPoseCache& frozenCache = GetManualReloadFrozenViewmodelPoseCache();
 
-        if (!vr || !vr->IsManualReloadActive())
+        const bool manualReloadActive = vr && vr->IsManualReloadActive();
+        const bool magazineInteractionActive = vr && vr->IsMagazineInteractionManualActive();
+        if (!vr || (!manualReloadActive && !magazineInteractionActive))
         {
             if (!vr || frozenCache.owner == vr)
                 frozenCache.Reset();
@@ -2242,6 +3240,19 @@ namespace
         const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
         if (!HooksModelNameIsViewmodel(lowerModel))
             return;
+        std::string magazineInteractionLockedModel;
+        const bool magazineInteractionOnly = magazineInteractionActive && !manualReloadActive;
+        const bool isArmsOrHandsModel = HooksModelNameIsArmsOrHands(lowerModel);
+        if (magazineInteractionOnly)
+        {
+            magazineInteractionLockedModel =
+                vr_vm_stabilize::ToLowerAscii(vr->m_MagazineInteractionMagazineModelName);
+            if ((magazineInteractionLockedModel.empty() || magazineInteractionLockedModel != lowerModel) &&
+                !isArmsOrHandsModel)
+            {
+                return;
+            }
+        }
 
         std::vector<std::string> boneNames;
         std::vector<int> boneParents;
@@ -2268,8 +3279,24 @@ namespace
             return;
 
         const auto* sourceBones = reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pCustomBoneToWorld);
-        int clipBone = GetManualReloadLockedMagazineBone(vr, modelName, numBones);
-        if (clipBone < 0)
+        int clipBone = -1;
+        if (magazineInteractionActive)
+        {
+            const std::string lockedModel = magazineInteractionLockedModel.empty()
+                ? vr_vm_stabilize::ToLowerAscii(vr->m_MagazineInteractionMagazineModelName)
+                : magazineInteractionLockedModel;
+            if (!lockedModel.empty() && lockedModel == lowerModel)
+            {
+                const int lockedBone = vr->m_MagazineInteractionMagazineBoneIndex;
+                if (lockedBone >= 0 && lockedBone < numBones)
+                    clipBone = lockedBone;
+            }
+        }
+        if (clipBone < 0 && manualReloadActive)
+        {
+            clipBone = GetManualReloadLockedMagazineBone(vr, modelName, numBones);
+        }
+        if (clipBone < 0 && manualReloadActive)
         {
             clipBone = ResolveManualReloadMagazineBone(
                 vr,
@@ -2281,7 +3308,7 @@ namespace
                 numBones);
         }
 
-        if (clipBone >= 0 && viewmodelEntity)
+        if (manualReloadActive && clipBone >= 0 && viewmodelEntity)
         {
             const int motionBone = GetManualReloadLockedMagazineMotionBone(vr, modelName, numBones);
             vr_vm_stabilize::Mat3x4 clip{};
@@ -2300,14 +3327,20 @@ namespace
                 HooksMat3x4ToVrHandMatrix(motionProbe));
         }
 
-        const bool visuallyPauseViewmodel = IsManualReloadViewmodelVisualPauseState(vr);
-        const bool visuallyReplayViewmodel = IsManualReloadViewmodelVisualReplayState(vr);
-        const bool hideNativeClip = vr->ShouldHideManualReloadNativeClip() && clipBone >= 0;
+        const bool visuallyPauseViewmodel = manualReloadActive
+            ? IsManualReloadViewmodelVisualPauseState(vr)
+            : vr->ShouldFreezeMagazineInteractionViewmodel();
+        const bool visuallyReplayViewmodel = manualReloadActive
+            ? IsManualReloadViewmodelVisualReplayState(vr)
+            : false;
+        const bool hideNativeClip = (manualReloadActive
+            ? vr->ShouldHideManualReloadNativeClip()
+            : vr->ShouldHideMagazineInteractionNativeClip()) && clipBone >= 0;
         if (!visuallyPauseViewmodel && !visuallyReplayViewmodel && !hideNativeClip)
         {
             if (frozenCache.owner == vr)
             {
-                if (vr->m_ManualReloadState == ManualReloadState::WatchingNativeClipRemoval)
+                if (manualReloadActive && vr->m_ManualReloadState == ManualReloadState::WatchingNativeClipRemoval)
                     frozenCache.Reset();
                 else
                     frozenCache.models.erase(lowerModel);
@@ -2370,24 +3403,39 @@ namespace
             {
                 if (visuallyPauseViewmodel)
                 {
-                    CaptureManualReloadTailPose(vr, frozenPose, modelAnchor, sourceBones, numBones);
+                    if (manualReloadActive)
+                        CaptureManualReloadTailPose(vr, frozenPose, modelAnchor, sourceBones, numBones);
                     ApplyManualReloadLocalPose(modelAnchor, frozenPose.frozenLocalBones, copiedBones, numBones);
                 }
                 else
                 {
+                    const auto now = std::chrono::steady_clock::now();
                     const float elapsedSeconds = std::chrono::duration<float>(
-                        std::chrono::steady_clock::now() - vr->m_ManualReloadResumeStarted).count();
+                        now - vr->m_ManualReloadResumeStarted).count();
+                    const float replayStartOffsetSeconds = vr->m_ManualReloadVisualReplayStartOffsetSeconds;
                     const auto* replayLocalBones = SelectManualReloadReplayLocalBones(
                         frozenPose,
                         elapsedSeconds,
-                        vr->m_ManualReloadVisualReplayStartOffsetSeconds);
+                        replayStartOffsetSeconds);
                     if (replayLocalBones)
                         ApplyManualReloadLocalPose(modelAnchor, *replayLocalBones, copiedBones, numBones);
                 }
             }
         }
 
-        SnapManualReloadNativeMagazineToSocket(vr, boneParents, clipBone, copiedBones, numBones);
+        if (manualReloadActive)
+            SnapManualReloadNativeMagazineToSocket(vr, boneParents, clipBone, copiedBones, numBones);
+
+        if (magazineInteractionActive && hideNativeClip)
+        {
+            DrawCurrentWeaponMagazineBox(
+                vr,
+                drawState,
+                modelName,
+                info.entity_index,
+                info.hitboxset,
+                copiedBones);
+        }
 
         if (hideNativeClip)
         {
@@ -2577,7 +3625,9 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 
 	void* pBonesToWorldFinal = pCustomBoneToWorld;
 	vr_vm_stabilize::Mat3x4* manualReloadNativeMagazineBones = nullptr;
+	vr_vm_stabilize::Mat3x4* magazineInteractionDetachedMagazineBones = nullptr;
 	bool drawManualReloadNativeMagazine = false;
+	bool drawMagazineInteractionDetachedMagazine = false;
 
 	// Per-draw origin/angles override (used for multicore viewmodel stabilization).
 	// We never write into shared entity state here; we only override the ModelRenderInfo_t
@@ -3060,6 +4110,12 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 			modelName,
 			pBonesToWorldFinal,
 			manualReloadNativeMagazineBones);
+		drawMagazineInteractionDetachedMagazine = BuildMagazineInteractionDetachedMagazineBones(
+			m_VR,
+			state,
+			modelName,
+			pBonesToWorldFinal,
+			magazineInteractionDetachedMagazineBones);
 
 		ApplyManualReloadViewmodelOverride(
 			m_VR,
@@ -3068,6 +4124,17 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 			info,
 			const_cast<C_BaseEntity*>(entity),
 			pBonesToWorldFinal);
+
+		if (!m_VR || !m_VR->ShouldHideMagazineInteractionNativeClip())
+		{
+			DrawCurrentWeaponMagazineBox(
+				m_VR,
+				state,
+				modelName,
+				info.entity_index,
+				info.hitboxset,
+				pBonesToWorldFinal);
+		}
 	}
 
 	// Capture the exact arm matrices submitted to Source. In queued rendering
@@ -3102,6 +4169,8 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 	// same active material, shader, skin, lighting and post-processing as the gun.
 	if (drawManualReloadNativeMagazine && manualReloadNativeMagazineBones)
 		hkDrawModelExecute.fOriginal(ecx, state, *pDrawInfo, manualReloadNativeMagazineBones);
+	if (drawMagazineInteractionDetachedMagazine && magazineInteractionDetachedMagazineBones)
+		hkDrawModelExecute.fOriginal(ecx, state, *pDrawInfo, magazineInteractionDetachedMagazineBones);
 }
 
 // Returns true if the engine RT being pushed looks like the HUD/VGUI render target.
@@ -3595,6 +4664,8 @@ void Hooks::dEmitSoundAttenuation(
     float soundTime,
     int speakerEntity)
 {
+    if (m_VR && m_VR->CaptureMagazineInteractionSound(entIndex, sample, volume, flags, pitch))
+        return;
     if (m_VR && m_VR->CaptureManualReloadSound(entIndex, sample, volume, flags, pitch))
         return;
 
@@ -3634,6 +4705,8 @@ void Hooks::dEmitSoundLevel(
     float soundTime,
     int speakerEntity)
 {
+    if (m_VR && m_VR->CaptureMagazineInteractionSound(entIndex, sample, volume, flags, pitch))
+        return;
     if (m_VR && m_VR->CaptureManualReloadSound(entIndex, sample, volume, flags, pitch))
         return;
 

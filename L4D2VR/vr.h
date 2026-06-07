@@ -122,12 +122,37 @@ enum class ManualReloadState
 	ResumingNativeReloadWithMagazine
 };
 
+enum class MagazineInteractionManualState
+{
+	Idle,
+	HoldingOldMagazine,
+	WaitingForFreshMagazine,
+	HoldingFreshMagazine,
+	WaitingForBackendReload
+};
+
 struct ManualReloadDelayedSound
 {
 	std::string sample;
 	float offsetSeconds = 0.0f;
 	float volume = 1.0f;
 	int pitch = 100;
+};
+
+struct MagazineInteractionBoxSnapshot
+{
+	Vector origin;
+	Vector axisX = { 1.0f, 0.0f, 0.0f };
+	Vector axisY = { 0.0f, 1.0f, 0.0f };
+	Vector axisZ = { 0.0f, 0.0f, 1.0f };
+	Vector mins;
+	Vector maxs;
+	uint32_t frameSeq = 0;
+	uint32_t publishSeq = 0;
+	int entityIndex = -1;
+	int boneIndex = -1;
+	std::string modelName;
+	std::chrono::steady_clock::time_point publishedAt{};
 };
 
 struct D3DAimLineOverlayEyeState
@@ -504,10 +529,10 @@ public:
 	// Lets you apply extra correction for render-thread decoupling without affecting single-thread.
 	Vector m_QueuedBulletVisualHitOffset = { 0.0f, 0.0f, 0.02f };
 	// Prefer the visible viewmodel's muzzlesmoke bone/empty for local client bullet/tracer FX.
-	bool m_BulletVisualsUseMuzzleSmoke = true;
+	bool m_BulletVisualsUseMuzzleSmoke = false;
 	// Client-side bullet/tracer FX can be emitted from the viewmodel pose when
 	// the visible gun is projected in Source's viewmodel layer. Visual-only.
-	bool m_BulletVisualsUseViewmodelPose = true;
+	bool m_BulletVisualsUseViewmodelPose = false;
 
 	Vector m_ViewmodelPosAdjust = { 0,0,0 };
 	QAngle m_ViewmodelAngAdjust = { 0,0,0 };
@@ -1064,7 +1089,7 @@ public:
 	bool m_HideArms = false;
 	// Independent GLB + ozz-animation VR hand renderer. The initial D3D9 draw path is
 	// deliberately limited to mat_queue_mode 0 until a queued DXVK submission point is added.
-	bool m_VrHandsEnabled = true;
+	bool m_VrHandsEnabled = false;
 	bool m_VrHandsMotionRangeWithoutController = false;
 	bool m_VrHandsRightUseViewmodelPose = false;
 	bool m_VrHandsDebugLog = false;
@@ -1073,6 +1098,59 @@ public:
 	const CViewSetup* m_VrHandsActiveEyeView = nullptr;
 	int m_VrHandsActiveEyeIndex = -1;
 	bool m_VrHandsWorldMaskDrawn = false;
+
+	// Debug overlay: identify the current weapon viewmodel's magazine bone and draw a solid box over it.
+	bool m_MagazineBoxDebugEnabled = false;
+	Vector m_MagazineBoxDebugFallbackHalfExtentsMeters = { 0.025f, 0.095f, 0.018f };
+	Vector m_MagazineBoxDebugPaddingMeters = { 0.002f, 0.002f, 0.002f };
+	// Independent magazine interaction prototype. It consumes the current weapon magazine OBB and
+	// lets the off hand claim the left grip before that input reaches reload/inventory logic.
+	bool m_MagazineInteractionEnabled = false;
+	bool m_MagazineInteractionSuppressEmptyClipAutoReload = false;
+	float m_MagazineInteractionGrabPaddingMeters = 0.12f;
+	float m_MagazineInteractionPullTriggerMeters = 0.08f;
+	float m_MagazineInteractionPullTriggerByMagazineMeters = 0.025f;
+	float m_MagazineInteractionFreshMagazineGrabRangeMeters = 0.18f;
+	Vector m_MagazineInteractionFreshMagazineBoxHalfExtentsMeters = { 0.055f, 0.045f, 0.12f };
+	float m_MagazineInteractionSocketCaptureRadiusMeters = 0.06f;
+	float m_MagazineInteractionSocketCaptureAngleDeg = 35.0f;
+	float m_MagazineInteractionSocketRequiredDepthMeters = 0.04f;
+	float m_MagazineInteractionSocketRequiredOverlapFraction = 0.45f;
+	float m_MagazineInteractionStaleSeconds = 0.20f;
+	mutable std::mutex m_MagazineInteractionBoxMutex;
+	mutable std::mutex m_MagazineInteractionPoseMutex;
+	MagazineInteractionBoxSnapshot m_MagazineInteractionBox{};
+	bool m_MagazineInteractionBoxValid = false;
+	uint32_t m_MagazineInteractionPublishSeq = 0;
+	bool m_MagazineInteractionLeftHandHolding = false;
+	bool m_MagazineInteractionReloadTriggered = false;
+	bool m_MagazineInteractionReloadCommandPending = false;
+	bool m_MagazineInteractionReloadCommandIssued = false;
+	std::chrono::steady_clock::time_point m_MagazineInteractionReloadCommandHoldUntil{};
+	bool m_MagazineInteractionSuppressLeftInputUntilRelease = false;
+	bool m_MagazineInteractionOldMagazinePulled = false;
+	MagazineInteractionManualState m_MagazineInteractionState = MagazineInteractionManualState::Idle;
+	C_WeaponCSBase* m_MagazineInteractionWeapon = nullptr;
+	int m_MagazineInteractionWeaponId = 0;
+	int m_MagazineInteractionStartClip = -1;
+	int m_MagazineInteractionMagazineBoneIndex = -1;
+	int m_MagazineInteractionViewmodelEntityIndex = -1;
+	std::string m_MagazineInteractionMagazineModelName;
+	MagazineInteractionBoxSnapshot m_MagazineInteractionSocketBox{};
+	bool m_MagazineInteractionSocketValid = false;
+	VrHandMatrix4 m_MagazineInteractionSocketWorld{};
+	VrHandMatrix4 m_MagazineInteractionControllerToMagazine{};
+	VrHandMatrix4 m_MagazineInteractionDetachedMagazineWorld{};
+	Vector m_MagazineInteractionGrabStartLeftControllerPosAbs{};
+	Vector m_MagazineInteractionHeldMagazineCenterOffsetLocal{};
+	std::chrono::steady_clock::time_point m_MagazineInteractionStarted{};
+	std::chrono::steady_clock::time_point m_MagazineInteractionFreshGrabbedAt{};
+	std::chrono::steady_clock::time_point m_MagazineInteractionPostInsertStarted{};
+	std::string m_MagazineInteractionSyntheticClipOutSample;
+	std::chrono::steady_clock::time_point m_MagazineInteractionSyntheticClipOutStarted{};
+	std::string m_MagazineInteractionSyntheticClipInSample;
+	std::chrono::steady_clock::time_point m_MagazineInteractionSyntheticClipInStarted{};
+	std::atomic<uint32_t> m_MagazineInteractionLeftHandPoseActive{ 0 };
 
 	// Manual magazine reload prototype for detachable-magazine firearms.
 	// The current viewmodel is scanned for a likely clip/magazine root bone. The old native magazine exits
@@ -2724,6 +2802,31 @@ public:
 	void ReleaseVRRenderTargetsForDeviceReset();
 	void ReleaseVrHandsD3DResources();
 	bool DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass drawPass);
+	void PublishMagazineInteractionBox(
+		const Vector& origin,
+		const Vector& axisX,
+		const Vector& axisY,
+		const Vector& axisZ,
+		const Vector& mins,
+		const Vector& maxs,
+		uint32_t frameSeq,
+		int entityIndex,
+		int boneIndex,
+		const char* modelName);
+	bool GetMagazineInteractionBox(MagazineInteractionBoxSnapshot& outSnapshot) const;
+	bool UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown, bool leftGripJustPressed);
+	void MarkMagazineInteractionReloadCommandIssued();
+	bool IsMagazineInteractionReloadCommandActive() const;
+	bool ShouldSuppressMagazineInteractionEmptyClipAutoReload(C_BasePlayer* localPlayer) const;
+	bool IsMagazineInteractionLeftHandActive() const;
+	bool IsMagazineInteractionManualActive() const;
+	bool IsMagazineInteractionBlockingFire() const;
+	bool ShouldFreezeMagazineInteractionViewmodel() const;
+	bool ShouldHideMagazineInteractionNativeClip() const;
+	bool ShouldDrawMagazineInteractionDetachedMagazine() const;
+	bool GetMagazineInteractionDetachedMagazineWorld(VrHandMatrix4& outWorld) const;
+	bool CaptureMagazineInteractionSound(int entityIndex, const char* sample, float volume, int flags, int pitch);
+	void CancelMagazineInteractionManual();
 	bool IsManualReloadActive() const;
 	bool IsManualReloadBlockingFire() const;
 	bool ShouldHideManualReloadNativeClip() const;

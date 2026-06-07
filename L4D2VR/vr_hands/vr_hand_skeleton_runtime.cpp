@@ -127,7 +127,8 @@ namespace
     bool BuildSummaryCurlPalette(
         const VrHandMeshAsset& asset,
         const vr::VRSkeletalSummaryData_t& summary,
-        std::vector<VrHandMatrixRows3x4>& outPalette)
+        std::vector<VrHandMatrixRows3x4>& outPalette,
+        const VrHandFingerCurlOverride* fingerCurlOverride)
     {
         const bool rightHand = FindNameIndex(asset.jointNames, "wrist_r") >= 0;
         const bool leftHand = FindNameIndex(asset.jointNames, "wrist_l") >= 0;
@@ -158,7 +159,15 @@ namespace
 
         for (int finger = 0; finger < vr::VRFinger_Count; ++finger)
         {
-            const float curl = std::clamp(summary.flFingerCurl[finger], 0.0f, 1.0f);
+            float curl = std::clamp(summary.flFingerCurl[finger], 0.0f, 1.0f);
+            if (fingerCurlOverride && fingerCurlOverride->enabled &&
+                finger < static_cast<int>(fingerCurlOverride->minCurl.size()) &&
+                finger < static_cast<int>(fingerCurlOverride->maxCurl.size()))
+            {
+                const float minCurl = std::clamp(fingerCurlOverride->minCurl[static_cast<size_t>(finger)], 0.0f, 1.0f);
+                const float maxCurl = std::clamp(fingerCurlOverride->maxCurl[static_cast<size_t>(finger)], minCurl, 1.0f);
+                curl = std::clamp(curl, minCurl, maxCurl);
+            }
             for (int segment = 0; segment < 3; ++segment)
             {
                 const std::string jointName = std::string("finger_") +
@@ -405,7 +414,11 @@ bool VrHandSkeletonRuntime::Update(vr::IVRInput* input, vr::EVRSkeletalMotionRan
     return true;
 }
 
-bool VrHandSkeletonRuntime::BuildSkinningPalette(const VrHandMeshAsset& asset, std::vector<VrHandMatrixRows3x4>& outPalette, std::string& outError) const
+bool VrHandSkeletonRuntime::BuildSkinningPalette(
+    const VrHandMeshAsset& asset,
+    std::vector<VrHandMatrixRows3x4>& outPalette,
+    std::string& outError,
+    const VrHandFingerCurlOverride* fingerCurlOverride) const
 {
     outError.clear();
     outPalette.clear();
@@ -422,7 +435,7 @@ bool VrHandSkeletonRuntime::BuildSkinningPalette(const VrHandMeshAsset& asset, s
         return false;
     }
 
-    if (m_Impl->hasSummary && BuildSummaryCurlPalette(asset, m_Impl->summary, outPalette))
+    if (m_Impl->hasSummary && BuildSummaryCurlPalette(asset, m_Impl->summary, outPalette, fingerCurlOverride))
         return true;
 
     outPalette.resize(asset.jointNames.size());

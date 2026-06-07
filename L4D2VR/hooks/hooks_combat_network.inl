@@ -1587,8 +1587,17 @@ int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 	// Final outgoing-command guard for manual reload. CreateMove already clears IN_ATTACK,
 	// but keep the wire path authoritative as well so standard and encoded server commands
 	// both remain decoupled from the local physical magazine interaction.
-	if (to && m_VR && m_VR->IsManualReloadBlockingFire())
-		to->buttons &= ~(1 << 0); // IN_ATTACK
+	if (to && m_VR)
+	{
+		if (m_VR->IsManualReloadBlockingFire() || m_VR->IsMagazineInteractionBlockingFire())
+			to->buttons &= ~(1 << 0); // IN_ATTACK
+		if (m_VR->ShouldSuppressMagazineInteractionEmptyClipAutoReload(nullptr))
+		{
+			constexpr int kIN_ATTACK = (1 << 0);
+			constexpr int kIN_RELOAD = (1 << 13);
+			to->buttons &= ~(kIN_ATTACK | kIN_RELOAD);
+		}
+	}
 
 	// VR 未启用：原样走引擎
 	if (!m_VR->m_IsVREnabled)

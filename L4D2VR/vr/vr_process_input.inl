@@ -69,6 +69,8 @@ void VR::ProcessInput()
             StopVoiceRecordCommandNow();
         }
         m_PrimaryAttackDown = false;
+        (void)UpdateMagazineInteraction(nullptr, false, false);
+        CancelMagazineInteractionManual();
         CancelManualReload();
         CancelTeleportTargeting();
         return;
@@ -399,6 +401,27 @@ void VR::ProcessInput()
             return primaryValid && secondaryValid;
         };
 
+    bool suppressReload = false;
+    bool suppressCrouch = false;
+
+    auto originMatchesRole = [&](vr::VRInputValueHandle_t origin, vr::ETrackedControllerRole role) -> bool
+        {
+            if (!m_Input || !m_System)
+                return false;
+            if (origin == vr::k_ulInvalidInputValueHandle)
+                return false;
+
+            vr::InputOriginInfo_t info{};
+            if (m_Input->GetOriginTrackedDeviceInfo(origin, &info, sizeof(info)) != vr::VRInputError_None)
+                return false;
+
+            const vr::TrackedDeviceIndex_t roleIndex = m_System->GetTrackedDeviceIndexForControllerRole(role);
+            if (roleIndex == vr::k_unTrackedDeviceIndexInvalid)
+                return false;
+
+            return info.trackedDeviceIndex == roleIndex;
+        };
+
     vr::InputDigitalActionData_t primaryAttackActionData{};
     bool primaryAttackDown = false;
     bool primaryAttackJustPressed = false;
@@ -429,6 +452,48 @@ void VR::ProcessInput()
     bool reloadButtonDown = false;
     bool reloadJustPressed = false;
     bool reloadDataValid = getActionState(&m_ActionReload, reloadActionData, reloadButtonDown, reloadJustPressed);
+    const bool reloadFromLeftHand =
+        reloadDataValid &&
+        (originMatchesRole(reloadActionData.activeOrigin, vr::TrackedControllerRole_LeftHand) ||
+            reloadActionData.activeOrigin == vr::k_ulInvalidInputValueHandle);
+    const bool crouchFromLeftHand =
+        crouchDataValid &&
+        (originMatchesRole(crouchActionData.activeOrigin, vr::TrackedControllerRole_LeftHand) ||
+            crouchActionData.activeOrigin == vr::k_ulInvalidInputValueHandle);
+    const bool magazineGripDown =
+        (reloadFromLeftHand && reloadButtonDown) ||
+        (crouchFromLeftHand && crouchButtonDown);
+    const bool magazineGripJustPressed =
+        (reloadFromLeftHand && reloadJustPressed) ||
+        (crouchFromLeftHand && crouchJustPressed);
+    const bool magazineInteractionReloadPulse = UpdateMagazineInteraction(
+        localPlayer,
+        magazineGripDown,
+        magazineGripJustPressed);
+    if (IsMagazineInteractionLeftHandActive())
+    {
+        if (reloadFromLeftHand)
+        {
+            reloadButtonDown = false;
+            reloadJustPressed = false;
+            suppressReload = true;
+        }
+        if (crouchFromLeftHand)
+        {
+            crouchButtonDown = false;
+            crouchJustPressed = false;
+            suppressCrouch = true;
+        }
+    }
+    const bool suppressMagazineEmptyClipAutoReload =
+        !magazineInteractionReloadPulse &&
+        ShouldSuppressMagazineInteractionEmptyClipAutoReload(localPlayer);
+    if (suppressMagazineEmptyClipAutoReload)
+    {
+        reloadButtonDown = false;
+        reloadJustPressed = false;
+        suppressReload = true;
+    }
     // Manual reload reuses the existing left-hand Reload / grip binding.
     // During the paused phase, a fresh press at the left waist grabs a movable Source-rendered native magazine.
     // MouseMode can optionally drive the same state machine with temporary keyboard test controls.
@@ -560,27 +625,6 @@ void VR::ProcessInput()
 
             if (targetSlotCmd)
                 m_Game->ClientCmd_Unrestricted(targetSlotCmd);
-        };
-
-    bool suppressReload = false;
-    bool suppressCrouch = false;
-
-    auto originMatchesRole = [&](vr::VRInputValueHandle_t origin, vr::ETrackedControllerRole role) -> bool
-        {
-            if (!m_Input || !m_System)
-                return false;
-            if (origin == vr::k_ulInvalidInputValueHandle)
-                return false;
-
-            vr::InputOriginInfo_t info{};
-            if (m_Input->GetOriginTrackedDeviceInfo(origin, &info, sizeof(info)) != vr::VRInputError_None)
-                return false;
-
-            const vr::TrackedDeviceIndex_t roleIndex = m_System->GetTrackedDeviceIndexForControllerRole(role);
-            if (roleIndex == vr::k_unTrackedDeviceIndexInvalid)
-                return false;
-
-            return info.trackedDeviceIndex == roleIndex;
         };
 
     // When quick-switch is enabled, disable legacy inventory switching entirely.
@@ -1109,7 +1153,7 @@ void VR::ProcessInput()
         primaryAttackDown = false;
         primaryAttackJustPressed = false;
     }
-    if (IsManualReloadBlockingFire())
+    if (IsManualReloadBlockingFire() || IsMagazineInteractionBlockingFire() || suppressMagazineEmptyClipAutoReload)
     {
         primaryAttackDown = false;
         primaryAttackJustPressed = false;
@@ -1278,15 +1322,24 @@ void VR::ProcessInput()
         EndSpeechToTextCapture(true);
     }
 
-    reloadButtonDown = (reloadButtonDown || gestureReloadActive) && !suppressReload;
+    reloadButtonDown = (((reloadButtonDown || gestureReloadActive) && !suppressReload) || magazineInteractionReloadPulse);
     secondaryAttackActive = secondaryAttackActive || gestureSecondaryAttackActive;
 
-    const bool wantReload = (!crouchButtonDown && reloadButtonDown && !adjustViewmodelActive && !scopeAdjustActive && !IsManualReloadActive());
+    const bool wantReload =
+        magazineInteractionReloadPulse ||
+        (!crouchButtonDown && reloadButtonDown && !adjustViewmodelActive && !scopeAdjustActive && !IsManualReloadActive());
     if (wantReload && !m_ReloadCmdOwned)
     {
-        BeginManualReload(localPlayer);
+        if (!magazineInteractionReloadPulse)
+            BeginManualReload(localPlayer);
         m_Game->ClientCmd_Unrestricted("+reload");
         m_ReloadCmdOwned = true;
+        if (magazineInteractionReloadPulse)
+            MarkMagazineInteractionReloadCommandIssued();
+    }
+    else if (wantReload && magazineInteractionReloadPulse && m_ReloadCmdOwned)
+    {
+        MarkMagazineInteractionReloadCommandIssued();
     }
     else if (!wantReload && m_ReloadCmdOwned)
     {

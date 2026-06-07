@@ -9,6 +9,7 @@
 #include "offsets.h"
 #include "vr_hands/vr_hand_math.h"
 #include "vr_hands/vr_hand_vm_pose.h"
+#include "sdk/ivdebugoverlay.h"
 #include <iostream>
 #include <cstdint>
 #include <string>
@@ -20,6 +21,7 @@
 #include <mutex>
 #include <unordered_map>
 #include <cmath>
+#include <cfloat>
 #include <intrin.h>
 #include <cstddef>
 #ifndef WIN32_LEAN_AND_MEAN

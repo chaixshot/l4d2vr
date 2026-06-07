@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <cstdio>
 #include <string>
 #include <utility>
 #include <vector>
@@ -347,6 +348,7 @@ VrHandSystem::VrHandSystem()
     m_Hands[1].actionPath = "/actions/base/in/skeleton_righthand";
     m_Hands[1].assetFileName = "vr_glove_right_model.glb";
     m_ManualReloadMagazinePalette = { VrHandMath::ToRows3x4(VrHandMath::Identity()) };
+    m_StandaloneMagazineBoxPalette = { VrHandMath::ToRows3x4(VrHandMath::Identity()) };
 }
 
 VrHandSystem::~VrHandSystem() = default;
@@ -536,6 +538,199 @@ bool VrHandSystem::DrawManualReloadMagazine(
 
         Game::logMsg(
             "[VR][ManualReload] drew magazine world=(%.2f %.2f %.2f) camera=(%.2f %.2f %.2f) pass=%s fov=%.2f near=%.2f",
+            VrHandMath::Get(*world, 0, 3),
+            VrHandMath::Get(*world, 1, 3),
+            VrHandMath::Get(*world, 2, 3),
+            VrHandMath::Get(cameraWorld, 0, 3),
+            VrHandMath::Get(cameraWorld, 1, 3),
+            VrHandMath::Get(cameraWorld, 2, 3),
+            passName,
+            projectionFov,
+            projectionNear);
+    }
+    return true;
+}
+
+bool VrHandSystem::EnsureStandaloneMagazineBoxLoaded(const Vector& mins, const Vector& maxs, bool debugLog)
+{
+    Vector boxMins(
+        std::min(mins.x, maxs.x),
+        std::min(mins.y, maxs.y),
+        std::min(mins.z, maxs.z));
+    Vector boxMaxs(
+        std::max(mins.x, maxs.x),
+        std::max(mins.y, maxs.y),
+        std::max(mins.z, maxs.z));
+
+    const float minExtent = 0.50f;
+    if ((boxMaxs.x - boxMins.x) < minExtent)
+    {
+        const float center = (boxMaxs.x + boxMins.x) * 0.5f;
+        boxMins.x = center - minExtent * 0.5f;
+        boxMaxs.x = center + minExtent * 0.5f;
+    }
+    if ((boxMaxs.y - boxMins.y) < minExtent)
+    {
+        const float center = (boxMaxs.y + boxMins.y) * 0.5f;
+        boxMins.y = center - minExtent * 0.5f;
+        boxMaxs.y = center + minExtent * 0.5f;
+    }
+    if ((boxMaxs.z - boxMins.z) < minExtent)
+    {
+        const float center = (boxMaxs.z + boxMins.z) * 0.5f;
+        boxMins.z = center - minExtent * 0.5f;
+        boxMaxs.z = center + minExtent * 0.5f;
+    }
+
+    char key[192] = {};
+    std::snprintf(
+        key,
+        sizeof(key),
+        "generated:magazine_box:%.3f,%.3f,%.3f:%.3f,%.3f,%.3f",
+        boxMins.x,
+        boxMins.y,
+        boxMins.z,
+        boxMaxs.x,
+        boxMaxs.y,
+        boxMaxs.z);
+    if (m_StandaloneMagazineBoxAsset.IsValid() && m_StandaloneMagazineBoxKey == key)
+        return true;
+
+    VrHandMeshAsset asset{};
+    asset.jointNames = { "root" };
+    asset.jointParents = { -1 };
+    asset.bindMatrices = { VrHandMath::Identity() };
+    asset.inverseBindMatrices = { VrHandMath::Identity() };
+    asset.fallbackColorArgb = 0xFFFF4818u;
+    asset.sourcePath = key;
+
+    auto addFace = [&](const Vector& a, const Vector& b, const Vector& c, const Vector& d, const Vector& normal)
+    {
+        const std::uint16_t base = static_cast<std::uint16_t>(asset.vertices.size());
+        const Vector positions[4] = { a, b, c, d };
+        const float uvs[4][2] =
+        {
+            { 0.0f, 0.0f },
+            { 1.0f, 0.0f },
+            { 1.0f, 1.0f },
+            { 0.0f, 1.0f }
+        };
+        for (int i = 0; i < 4; ++i)
+        {
+            VrHandVertex vertex{};
+            vertex.position[0] = positions[i].x;
+            vertex.position[1] = positions[i].y;
+            vertex.position[2] = positions[i].z;
+            vertex.normal[0] = normal.x;
+            vertex.normal[1] = normal.y;
+            vertex.normal[2] = normal.z;
+            vertex.uv[0] = uvs[i][0];
+            vertex.uv[1] = uvs[i][1];
+            vertex.weights[0] = 1.0f;
+            vertex.joints[0] = 0;
+            asset.vertices.push_back(vertex);
+        }
+        asset.indices.push_back(base + 0);
+        asset.indices.push_back(base + 1);
+        asset.indices.push_back(base + 2);
+        asset.indices.push_back(base + 0);
+        asset.indices.push_back(base + 2);
+        asset.indices.push_back(base + 3);
+    };
+
+    const float x0 = boxMins.x;
+    const float y0 = boxMins.y;
+    const float z0 = boxMins.z;
+    const float x1 = boxMaxs.x;
+    const float y1 = boxMaxs.y;
+    const float z1 = boxMaxs.z;
+    addFace(Vector(x0, y0, z0), Vector(x0, y1, z0), Vector(x0, y1, z1), Vector(x0, y0, z1), Vector(-1.0f, 0.0f, 0.0f));
+    addFace(Vector(x1, y0, z0), Vector(x1, y0, z1), Vector(x1, y1, z1), Vector(x1, y1, z0), Vector(1.0f, 0.0f, 0.0f));
+    addFace(Vector(x0, y0, z0), Vector(x0, y0, z1), Vector(x1, y0, z1), Vector(x1, y0, z0), Vector(0.0f, -1.0f, 0.0f));
+    addFace(Vector(x0, y1, z0), Vector(x1, y1, z0), Vector(x1, y1, z1), Vector(x0, y1, z1), Vector(0.0f, 1.0f, 0.0f));
+    addFace(Vector(x0, y0, z0), Vector(x1, y0, z0), Vector(x1, y1, z0), Vector(x0, y1, z0), Vector(0.0f, 0.0f, -1.0f));
+    addFace(Vector(x0, y0, z1), Vector(x0, y1, z1), Vector(x1, y1, z1), Vector(x1, y0, z1), Vector(0.0f, 0.0f, 1.0f));
+
+    m_StandaloneMagazineBoxAsset = std::move(asset);
+    m_StandaloneMagazineBoxKey = key;
+    m_StandaloneMagazineBoxDrawLogged = false;
+    if (debugLog)
+    {
+        Game::logMsg(
+            "[VR][MagazineInteraction] generated standalone magazine box mins=(%.2f %.2f %.2f) maxs=(%.2f %.2f %.2f)",
+            boxMins.x,
+            boxMins.y,
+            boxMins.z,
+            boxMaxs.x,
+            boxMaxs.y,
+            boxMaxs.z);
+    }
+    return true;
+}
+
+bool VrHandSystem::DrawStandaloneMagazineBox(
+    IDirect3DDevice9* device,
+    const CViewSetup& view,
+    float sceneLightScale,
+    const VrHandMatrix4* world,
+    const Vector& mins,
+    const Vector& maxs,
+    bool useViewmodelLayer,
+    VrHandDrawPass drawPass)
+{
+    if (!world)
+        return false;
+    if (useViewmodelLayer && drawPass == VrHandDrawPass::WorldVisibilityMask)
+        return false;
+    if (!EnsureStandaloneMagazineBoxLoaded(mins, maxs, true))
+        return false;
+
+    const float projectionAspect =
+        useViewmodelLayer ? ResolveVrHandsViewmodelAspect(view) : ResolveVrHandsSceneAspect(view);
+    const float projectionFov =
+        (useViewmodelLayer && view.fovViewmodel > 0.001f) ? view.fovViewmodel : view.fov;
+    const float projectionNear = useViewmodelLayer ? 0.10f : view.zNear;
+    const float projectionFar =
+        (useViewmodelLayer && view.zFarViewmodel > projectionNear) ? view.zFarViewmodel : view.zFar;
+
+    const VrHandMatrix4 projection = VrHandMath::BuildPerspective(
+        projectionFov,
+        projectionAspect,
+        projectionNear,
+        projectionFar);
+    const VrHandMatrix4 camera = VrHandMath::BuildSourceView(view.origin, view.angles);
+    const VrHandMatrix4 cameraWorld = VrHandMath::Multiply(camera, *world);
+    const VrHandMatrix4 wvp = VrHandMath::Multiply(projection, cameraWorld);
+    const VrHandDrawPass rendererPass =
+        useViewmodelLayer ? VrHandDrawPass::ViewmodelStandalone : drawPass;
+
+    std::string error;
+    if (!m_Renderer.Draw(
+            device,
+            2,
+            m_StandaloneMagazineBoxAsset,
+            m_StandaloneMagazineBoxPalette,
+            *world,
+            wvp,
+            rendererPass,
+            sceneLightScale,
+            error))
+    {
+        ReportErrorOnce(error);
+        return false;
+    }
+
+    if (!m_StandaloneMagazineBoxDrawLogged && rendererPass != VrHandDrawPass::WorldVisibilityMask)
+    {
+        m_StandaloneMagazineBoxDrawLogged = true;
+        const char* passName = "world-depth";
+        if (rendererPass == VrHandDrawPass::ViewmodelComposite)
+            passName = "viewmodel-composite";
+        else if (rendererPass == VrHandDrawPass::ViewmodelStandalone)
+            passName = "viewmodel-standalone";
+
+        Game::logMsg(
+            "[VR][MagazineInteraction] drew standalone fresh magazine box world=(%.2f %.2f %.2f) camera=(%.2f %.2f %.2f) pass=%s fov=%.2f near=%.2f",
             VrHandMath::Get(*world, 0, 3),
             VrHandMath::Get(*world, 1, 3),
             VrHandMath::Get(*world, 2, 3),
@@ -908,6 +1103,7 @@ void VrHandSystem::UpdatePoses(
     vr::IVRInput* input,
     bool motionRangeWithoutController,
     bool rightUseViewmodelPose,
+    bool leftHandMagazineGripPose,
     bool debugLog)
 {
     if (m_RightViewmodelPoseWasEnabled != rightUseViewmodelPose)
@@ -925,6 +1121,14 @@ void VrHandSystem::UpdatePoses(
         ? vr::VRSkeletalMotionRange_WithoutController
         : vr::VRSkeletalMotionRange_WithController;
 
+    VrHandFingerCurlOverride magazineGripOverride{};
+    if (leftHandMagazineGripPose)
+    {
+        magazineGripOverride.enabled = true;
+        magazineGripOverride.minCurl = { 0.20f, 0.28f, 0.32f, 0.34f, 0.34f };
+        magazineGripOverride.maxCurl = { 0.48f, 0.58f, 0.62f, 0.64f, 0.64f };
+    }
+
     for (size_t handIndex = 0; handIndex < m_Hands.size(); ++handIndex)
     {
         HandState& hand = m_Hands[handIndex];
@@ -941,7 +1145,9 @@ void VrHandSystem::UpdatePoses(
                 ReportErrorOnce(error + ": " + hand.actionPath);
             continue;
         }
-        if (!hand.skeleton.BuildSkinningPalette(hand.asset, hand.palette, error))
+        const VrHandFingerCurlOverride* fingerCurlOverride =
+            (handIndex == 0u && leftHandMagazineGripPose) ? &magazineGripOverride : nullptr;
+        if (!hand.skeleton.BuildSkinningPalette(hand.asset, hand.palette, error, fingerCurlOverride))
         {
             if (!error.empty())
                 ReportErrorOnce(error + ": " + hand.asset.sourcePath);
@@ -1017,6 +1223,19 @@ bool VrHandSystem::DrawForEye(
     const std::string& manualReloadMagazineGlbPath,
     const VrHandMatrix4* manualReloadMagazineWorld,
     bool manualReloadMagazineUseViewmodelLayer,
+    const VrHandMatrix4* standaloneMagazineBoxWorld,
+    const Vector& standaloneMagazineBoxMins,
+    const Vector& standaloneMagazineBoxMaxs,
+    bool standaloneMagazineBoxUseViewmodelLayer,
+    const VrHandMatrix4* magazineSocketCaptureBoxWorld,
+    const Vector& magazineSocketCaptureBoxMins,
+    const Vector& magazineSocketCaptureBoxMaxs,
+    bool magazineSocketCaptureBoxUseViewmodelLayer,
+    const VrHandMatrix4* currentMagazineBoxWorld,
+    const Vector& currentMagazineBoxMins,
+    const Vector& currentMagazineBoxMaxs,
+    bool currentMagazineBoxUseViewmodelLayer,
+    bool leftHandMagazineGripPose,
     VrHandDrawPass drawPass)
 {
     if (!device || !input)
@@ -1054,15 +1273,59 @@ bool VrHandSystem::DrawForEye(
         {
             drewAny = true;
         }
+        if (DrawStandaloneMagazineBox(
+                device,
+                view,
+                sceneLightScale,
+                standaloneMagazineBoxWorld,
+                standaloneMagazineBoxMins,
+                standaloneMagazineBoxMaxs,
+                standaloneMagazineBoxUseViewmodelLayer,
+                drawPass))
+        {
+            drewAny = true;
+        }
+        if (DrawStandaloneMagazineBox(
+                device,
+                view,
+                sceneLightScale,
+                magazineSocketCaptureBoxWorld,
+                magazineSocketCaptureBoxMins,
+                magazineSocketCaptureBoxMaxs,
+                magazineSocketCaptureBoxUseViewmodelLayer,
+                drawPass))
+        {
+            drewAny = true;
+        }
+        if (DrawStandaloneMagazineBox(
+                device,
+                view,
+                sceneLightScale,
+                currentMagazineBoxWorld,
+                currentMagazineBoxMins,
+                currentMagazineBoxMaxs,
+                currentMagazineBoxUseViewmodelLayer,
+                drawPass))
+        {
+            drewAny = true;
+        }
         return drewAny;
     }
 
-    if (rightUseViewmodelPose || eyeIndex == 0 || (!m_Hands[0].paletteValid && !m_Hands[1].paletteValid))
-        UpdatePoses(input, motionRangeWithoutController, rightUseViewmodelPose, debugLog);
+    if (m_LeftHandMagazineGripPoseWasEnabled != leftHandMagazineGripPose)
+    {
+        m_LeftHandMagazineGripPoseWasEnabled = leftHandMagazineGripPose;
+        m_Hands[0].paletteValid = false;
+    }
+
+    if (rightUseViewmodelPose || eyeIndex == 0 || !m_Hands[0].paletteValid || !m_Hands[1].paletteValid)
+        UpdatePoses(input, motionRangeWithoutController, rightUseViewmodelPose, leftHandMagazineGripPose, debugLog);
 
     const VrHandMatrix4 sceneProjection = BuildVrHandsProjection(view, false);
+    const bool leftHandUsesMagazineViewmodelLayer =
+        leftHandMagazineGripPose && standaloneMagazineBoxUseViewmodelLayer;
     const VrHandMatrix4 viewmodelProjection =
-        rightUseViewmodelPose ? BuildVrHandsProjection(view, true) : sceneProjection;
+        (rightUseViewmodelPose || leftHandUsesMagazineViewmodelLayer) ? BuildVrHandsProjection(view, true) : sceneProjection;
     const VrHandMatrix4 camera = VrHandMath::BuildSourceView(view.origin, view.angles);
     const float sourceUnitsPerMeter = vrScale;
     const float clampedModelScale = std::clamp(modelScale, 0.25f, 4.0f);
@@ -1105,11 +1368,23 @@ bool VrHandSystem::DrawForEye(
                 rotationOffsets[handIndex]);
         }
 
-        const bool useViewmodelLayer = handIndex == 1 && rightUseViewmodelPose;
+        const bool useViewmodelLayer =
+            (handIndex == 1 && rightUseViewmodelPose) ||
+            (handIndex == 0 && leftHandUsesMagazineViewmodelLayer);
+        if (handIndex == 0 && leftHandUsesMagazineViewmodelLayer &&
+            drawPass == VrHandDrawPass::WorldVisibilityMask)
+        {
+            continue;
+        }
+
         const VrHandMatrix4& projection = useViewmodelLayer ? viewmodelProjection : sceneProjection;
         const VrHandMatrix4 wvp = VrHandMath::Multiply(projection, VrHandMath::Multiply(camera, world));
+        const VrHandDrawPass handDrawPass =
+            (handIndex == 0 && leftHandUsesMagazineViewmodelLayer)
+            ? VrHandDrawPass::ViewmodelStandalone
+            : drawPass;
         std::string error;
-        if (!m_Renderer.Draw(device, handIndex, hand.asset, hand.palette, world, wvp, drawPass, sceneLightScale, error))
+        if (!m_Renderer.Draw(device, handIndex, hand.asset, hand.palette, world, wvp, handDrawPass, sceneLightScale, error))
             ReportErrorOnce(error);
         else
             drewAny = true;
@@ -1122,6 +1397,42 @@ bool VrHandSystem::DrawForEye(
             manualReloadMagazineGlbPath,
             manualReloadMagazineWorld,
             manualReloadMagazineUseViewmodelLayer,
+            drawPass))
+    {
+        drewAny = true;
+    }
+    if (DrawStandaloneMagazineBox(
+            device,
+            view,
+            sceneLightScale,
+            standaloneMagazineBoxWorld,
+            standaloneMagazineBoxMins,
+            standaloneMagazineBoxMaxs,
+            standaloneMagazineBoxUseViewmodelLayer,
+            drawPass))
+    {
+        drewAny = true;
+    }
+    if (DrawStandaloneMagazineBox(
+            device,
+            view,
+            sceneLightScale,
+            magazineSocketCaptureBoxWorld,
+            magazineSocketCaptureBoxMins,
+            magazineSocketCaptureBoxMaxs,
+            magazineSocketCaptureBoxUseViewmodelLayer,
+            drawPass))
+    {
+        drewAny = true;
+    }
+    if (DrawStandaloneMagazineBox(
+            device,
+            view,
+            sceneLightScale,
+            currentMagazineBoxWorld,
+            currentMagazineBoxMins,
+            currentMagazineBoxMaxs,
+            currentMagazineBoxUseViewmodelLayer,
             drawPass))
     {
         drewAny = true;
