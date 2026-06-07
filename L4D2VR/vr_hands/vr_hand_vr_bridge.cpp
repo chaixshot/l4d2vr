@@ -483,6 +483,19 @@ namespace
             MagazineInteractionMatrixAxis(matrix, 2) * localPoint.z;
     }
 
+    MagazineInteractionBoxSnapshot MagazineInteractionBuildWorldBoxSnapshot(
+        const MagazineInteractionBoxSnapshot& localBox,
+        const VrHandMatrix4& world)
+    {
+        MagazineInteractionBoxSnapshot out = localBox;
+        out.origin = MagazineInteractionMatrixOrigin(world);
+        out.axisX = MagazineInteractionMatrixAxis(world, 0);
+        out.axisY = MagazineInteractionMatrixAxis(world, 1);
+        out.axisZ = MagazineInteractionMatrixAxis(world, 2);
+        out.publishedAt = std::chrono::steady_clock::now();
+        return out;
+    }
+
     void MagazineInteractionProjectBoxOntoAxis(
         const VrHandMatrix4& world,
         const MagazineInteractionBoxSnapshot& box,
@@ -848,6 +861,8 @@ namespace
         vr->m_MagazineInteractionSyntheticClipOutSample = sample;
         vr->m_MagazineInteractionSyntheticClipOutStarted = std::chrono::steady_clock::now();
         vr->m_Game->ClientCmd_Unrestricted(command.c_str());
+        vr->m_MagazineInteractionSyntheticClipOutSample.clear();
+        vr->m_MagazineInteractionSyntheticClipOutStarted = {};
         Game::logMsg(
             "[VR][MagazineInteraction][Audio] played synthetic clip-out sample=%s",
             sample.c_str());
@@ -872,9 +887,33 @@ namespace
         vr->m_MagazineInteractionSyntheticClipInSample = sample;
         vr->m_MagazineInteractionSyntheticClipInStarted = std::chrono::steady_clock::now();
         vr->m_Game->ClientCmd_Unrestricted(command.c_str());
+        vr->m_MagazineInteractionSyntheticClipInSample.clear();
+        vr->m_MagazineInteractionSyntheticClipInStarted = {};
         Game::logMsg(
             "[VR][MagazineInteraction][Audio] played synthetic clip-in sample=%s",
             sample.c_str());
+    }
+
+    const char* MagazineInteractionBlockedFireEmptySound(int weaponId)
+    {
+        const auto id = static_cast<C_WeaponCSBase::WeaponID>(weaponId);
+        return (id == C_WeaponCSBase::WeaponID::PISTOL ||
+            id == C_WeaponCSBase::WeaponID::MAGNUM)
+            ? "ClipEmpty_Pistol"
+            : "ClipEmpty_Rifle";
+    }
+
+    bool MagazineInteractionSoundLooksClipEmpty(const char* sample)
+    {
+        if (!sample || !*sample)
+            return false;
+
+        std::string lower(sample);
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return lower.find("clipempty") != std::string::npos ||
+            lower.find("clip_empty") != std::string::npos ||
+            lower.find("clip.empty") != std::string::npos ||
+            lower.find("clip-empty") != std::string::npos;
     }
 
     bool MagazineInteractionReadActiveWeapon(
@@ -997,6 +1036,8 @@ bool VR::ShouldSuppressMagazineInteractionEmptyClipAutoReload(C_BasePlayer* loca
     {
         return false;
     }
+    if (IsMagazineInteractionReloadCommandActive())
+        return false;
 
     C_BasePlayer* player = localPlayer;
     if (!player && m_Game && m_Game->m_EngineClient)
@@ -1035,6 +1076,68 @@ bool VR::IsMagazineInteractionBlockingFire() const
 {
     return IsMagazineInteractionManualActive() &&
         m_MagazineInteractionState != MagazineInteractionManualState::WaitingForBackendReload;
+}
+
+void VR::PlayMagazineInteractionBlockedFireEmptySound()
+{
+    if (!m_Game)
+        return;
+
+    const bool magazineInteractionBlocksFire = IsMagazineInteractionBlockingFire();
+    int weaponId = magazineInteractionBlocksFire ? m_MagazineInteractionWeaponId : 0;
+
+    if (weaponId == 0 || !magazineInteractionBlocksFire)
+    {
+        C_BasePlayer* player = nullptr;
+        if (m_Game->m_EngineClient)
+        {
+            const int localPlayerIndex = m_Game->m_EngineClient->GetLocalPlayer();
+            if (localPlayerIndex > 0)
+                player = reinterpret_cast<C_BasePlayer*>(m_Game->GetClientEntity(localPlayerIndex));
+        }
+
+        C_WeaponCSBase* activeWeapon = nullptr;
+        C_WeaponCSBase::WeaponID activeWeaponId = C_WeaponCSBase::WeaponID::NONE;
+        int activeClip = -1;
+        if (!MagazineInteractionReadActiveWeapon(player, activeWeapon, activeWeaponId, activeClip) ||
+            activeClip != 0)
+        {
+            if (!magazineInteractionBlocksFire)
+                return;
+        }
+        else
+        {
+            weaponId = static_cast<int>(activeWeaponId);
+        }
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (m_MagazineInteractionEmptyFireSoundLastPlayed.time_since_epoch().count() != 0 &&
+        std::chrono::duration<float>(now - m_MagazineInteractionEmptyFireSoundLastPlayed).count() < 0.12f)
+    {
+        return;
+    }
+
+    const char* soundName = MagazineInteractionBlockedFireEmptySound(weaponId);
+    const char* soundPath = (std::strcmp(soundName, "ClipEmpty_Pistol") == 0)
+        ? "weapons/clipempty_pistol.wav"
+        : "weapons/clipempty_rifle.wav";
+    const std::string soundSpec = std::string("game:") + soundPath;
+    const bool feedbackPlayed = TryPlayKillSoundSpec(soundSpec, 1.0f, nullptr, false);
+    if (!feedbackPlayed)
+    {
+        const std::string command = std::string("play ") + soundPath;
+        m_Game->ClientCmd_Unrestricted(command.c_str());
+    }
+    m_MagazineInteractionEmptyFireSoundLastPlayed = now;
+    Game::logMsg(
+        "[VR][MagazineInteraction][Audio] played blocked-fire empty sound name=%s spec=%s feedback=%d weaponId=%d state=%d blocking=%d",
+        soundName,
+        soundSpec.c_str(),
+        feedbackPlayed ? 1 : 0,
+        weaponId,
+        static_cast<int>(m_MagazineInteractionState),
+        magazineInteractionBlocksFire ? 1 : 0);
 }
 
 bool VR::ShouldFreezeMagazineInteractionViewmodel() const
@@ -1100,6 +1203,7 @@ void VR::CancelMagazineInteractionManual()
     m_MagazineInteractionSyntheticClipOutStarted = {};
     m_MagazineInteractionSyntheticClipInSample.clear();
     m_MagazineInteractionSyntheticClipInStarted = {};
+    m_MagazineInteractionEmptyFireSoundLastPlayed = {};
     m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
     if (wasActive)
         Game::logMsg("[VR][MagazineInteraction] reset manual magazine interaction state");
@@ -1326,6 +1430,91 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         return false;
     }
 
+    auto beginMagazineInteractionSession = [&](const MagazineInteractionBoxSnapshot& box)
+    {
+        m_MagazineInteractionReloadTriggered = false;
+        m_MagazineInteractionReloadCommandPending = false;
+        m_MagazineInteractionReloadCommandIssued = false;
+        m_MagazineInteractionReloadCommandHoldUntil = {};
+        m_MagazineInteractionSuppressLeftInputUntilRelease = false;
+        m_MagazineInteractionOldMagazinePulled = false;
+        m_MagazineInteractionWeapon = activeWeapon;
+        m_MagazineInteractionWeaponId = static_cast<int>(activeWeaponId);
+        m_MagazineInteractionStartClip = activeClip;
+        m_MagazineInteractionMagazineBoneIndex = box.boneIndex;
+        m_MagazineInteractionViewmodelEntityIndex = box.entityIndex;
+        m_MagazineInteractionMagazineModelName = box.modelName;
+        m_MagazineInteractionSocketBox = box;
+        m_MagazineInteractionSocketValid = true;
+        m_MagazineInteractionSocketWorld = MagazineInteractionBuildBoxWorld(box);
+        setDetachedMagazineWorld(m_MagazineInteractionSocketWorld);
+        m_MagazineInteractionGrabStartLeftControllerPosAbs = m_LeftControllerPosAbs;
+        m_MagazineInteractionStarted = now;
+        m_MagazineInteractionFreshGrabbedAt = {};
+        m_MagazineInteractionPostInsertStarted = {};
+        m_MagazineInteractionSyntheticClipOutSample.clear();
+        m_MagazineInteractionSyntheticClipOutStarted = {};
+        m_MagazineInteractionSyntheticClipInSample.clear();
+        m_MagazineInteractionSyntheticClipInStarted = {};
+        m_MagazineInteractionEmptyFireSoundLastPlayed = {};
+        m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
+    };
+
+    auto getMagazineBoxForAutoEject = [&](MagazineInteractionBoxSnapshot& box, float& ageSeconds, bool& usedCachedBox) -> bool
+    {
+        ageSeconds = -1.0f;
+        usedCachedBox = false;
+        const float freshMaxAgeSeconds = std::max(0.02f, m_MagazineInteractionStaleSeconds);
+        static std::chrono::steady_clock::time_point s_lastAutoEjectBoxLog{};
+        auto logLimited = [&](const char* reason, int entityIndex, int boneIndex)
+        {
+            if (s_lastAutoEjectBoxLog.time_since_epoch().count() != 0 &&
+                std::chrono::duration<float>(now - s_lastAutoEjectBoxLog).count() < 1.0f)
+            {
+                return;
+            }
+            s_lastAutoEjectBoxLog = now;
+            Game::logMsg(
+                "[VR][MagazineInteraction] empty clip auto-eject cannot start: %s age=%.3fs freshMax=%.3fs ent=%d bone=%d",
+                reason ? reason : "unknown",
+                ageSeconds,
+                freshMaxAgeSeconds,
+                entityIndex,
+                boneIndex);
+        };
+
+        if (!GetMagazineInteractionBox(box))
+        {
+            logLimited("no published magazine box", -1, -1);
+            return false;
+        }
+
+        ageSeconds = std::chrono::duration<float>(now - box.publishedAt).count();
+        if (ageSeconds <= freshMaxAgeSeconds)
+            return true;
+
+        if (MagazineInteractionMatrixLooksRenderable(MagazineInteractionBuildBoxWorld(box)))
+        {
+            usedCachedBox = true;
+            if (s_lastAutoEjectBoxLog.time_since_epoch().count() == 0 ||
+                std::chrono::duration<float>(now - s_lastAutoEjectBoxLog).count() >= 1.0f)
+            {
+                s_lastAutoEjectBoxLog = now;
+                Game::logMsg(
+                    "[VR][MagazineInteraction] empty clip auto-eject using last known magazine box age=%.3fs freshMax=%.3fs ent=%d bone=%d model=%s",
+                    ageSeconds,
+                    freshMaxAgeSeconds,
+                    box.entityIndex,
+                    box.boneIndex,
+                    box.modelName.c_str());
+            }
+            return true;
+        }
+
+        logLimited("last known magazine box invalid", box.entityIndex, box.boneIndex);
+        return false;
+    };
+
     if (IsMagazineInteractionManualActive() && activeWeapon != m_MagazineInteractionWeapon)
     {
         Game::logMsg("[VR][MagazineInteraction] active weapon changed; canceling manual magazine interaction");
@@ -1374,11 +1563,20 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         QAngle pickupAngles{};
         const bool hasPickupBox = MagazineInteractionBuildFreshMagazinePickupBox(this, pickupBox, pickupAngles);
         VrHandMatrix4 pickupMagazineWorld{};
+        MagazineInteractionBoxSnapshot freshGrabBox{};
         if (hasPickupBox)
         {
-            if (m_MagazineBoxDebugEnabled)
-                MagazineInteractionDrawFreshMagazinePickupBox(this, pickupBox, pickupAngles);
             pickupMagazineWorld = MagazineInteractionBuildSocketOrientedMagazineWorldAtCenter(this, pickupBox.origin);
+            freshGrabBox = MagazineInteractionBuildWorldBoxSnapshot(m_MagazineInteractionSocketBox, pickupMagazineWorld);
+            if (m_MagazineBoxDebugEnabled)
+            {
+                QAngle freshGrabAngles = pickupAngles;
+                QAngle::VectorAngles(
+                    MagazineInteractionMatrixAxis(pickupMagazineWorld, 0),
+                    MagazineInteractionMatrixAxis(pickupMagazineWorld, 2),
+                    freshGrabAngles);
+                MagazineInteractionDrawFreshMagazinePickupBox(this, freshGrabBox, freshGrabAngles);
+            }
             setDetachedMagazineWorld(pickupMagazineWorld);
         }
 
@@ -1388,7 +1586,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 return reloadCommandPending();
 
             const float grabDistance = MagazineInteractionNearestLeftHandProbeDistanceSourceUnits(
-                pickupBox,
+                freshGrabBox,
                 m_LeftControllerPosAbs,
                 m_LeftControllerAngAbs,
                 m_VRScale);
@@ -1396,7 +1594,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             if (grabDistance > grabRange)
             {
                 Game::logMsg(
-                    "[VR][MagazineInteraction] fresh magazine grab ignored; left hand outside pickup box distance=%.2f range=%.2f",
+                    "[VR][MagazineInteraction] fresh magazine grab ignored; left hand outside fresh magazine box distance=%.2f range=%.2f",
                     grabDistance,
                     grabRange);
                 return reloadCommandPending();
@@ -1425,7 +1623,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                     controllerWorld,
                     freshCenterWorld - MagazineInteractionMatrixOrigin(controllerWorld));
             Game::logMsg(
-                "[VR][MagazineInteraction] fresh magazine grabbed from pickup box distance=%.2f range=%.2f relationCaptured=%d clipOrigin=(%.2f %.2f %.2f) visibleCenter=(%.2f %.2f %.2f) centerLocalOffset=(%.2f %.2f %.2f) centerLocal=(%.2f %.2f %.2f) model=%s; move it into MagazineSocket",
+                "[VR][MagazineInteraction] fresh magazine grabbed from fresh magazine box distance=%.2f range=%.2f relationCaptured=%d clipOrigin=(%.2f %.2f %.2f) visibleCenter=(%.2f %.2f %.2f) centerLocalOffset=(%.2f %.2f %.2f) centerLocal=(%.2f %.2f %.2f) model=%s; move it into MagazineSocket",
                 grabDistance,
                 grabRange,
                 relationCaptured ? 1 : 0,
@@ -1539,6 +1737,34 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         return reloadCommandPending();
     }
 
+    if (m_MagazineInteractionSuppressEmptyClipAutoReload &&
+        activeClip == 0 &&
+        MagazineInteractionWeaponUsesDetachableMagazine(activeWeaponId))
+    {
+        MagazineInteractionBoxSnapshot box{};
+        float boxAgeSeconds = -1.0f;
+        bool usedCachedBox = false;
+        if (getMagazineBoxForAutoEject(box, boxAgeSeconds, usedCachedBox))
+        {
+            beginMagazineInteractionSession(box);
+            m_MagazineInteractionState = MagazineInteractionManualState::WaitingForFreshMagazine;
+            m_MagazineInteractionLeftHandHolding = false;
+            m_MagazineInteractionOldMagazinePulled = true;
+            MagazineInteractionPlayClipOutSound(this);
+            startImmediateReloadCommand("empty-clip-auto-eject");
+            Game::logMsg(
+                "[VR][MagazineInteraction] empty clip auto-ejected magazine; waiting for fresh magazine weaponId=%d clip=%d ent=%d bone=%d age=%.3fs cached=%d model=%s",
+                static_cast<int>(activeWeaponId),
+                activeClip,
+                box.entityIndex,
+                box.boneIndex,
+                boxAgeSeconds,
+                usedCachedBox ? 1 : 0,
+                box.modelName.c_str());
+            return reloadCommandPending();
+        }
+    }
+
     if (!leftGripDown)
         return false;
 
@@ -1591,27 +1817,9 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         return false;
     }
 
+    beginMagazineInteractionSession(box);
     m_MagazineInteractionState = MagazineInteractionManualState::HoldingOldMagazine;
     m_MagazineInteractionLeftHandHolding = true;
-    m_MagazineInteractionReloadTriggered = false;
-    m_MagazineInteractionReloadCommandPending = false;
-    m_MagazineInteractionReloadCommandIssued = false;
-    m_MagazineInteractionReloadCommandHoldUntil = {};
-    m_MagazineInteractionSuppressLeftInputUntilRelease = false;
-    m_MagazineInteractionOldMagazinePulled = false;
-    m_MagazineInteractionWeapon = activeWeapon;
-    m_MagazineInteractionWeaponId = static_cast<int>(activeWeaponId);
-    m_MagazineInteractionStartClip = activeClip;
-    m_MagazineInteractionMagazineBoneIndex = box.boneIndex;
-    m_MagazineInteractionViewmodelEntityIndex = box.entityIndex;
-    m_MagazineInteractionMagazineModelName = box.modelName;
-    m_MagazineInteractionSocketBox = box;
-    m_MagazineInteractionSocketValid = true;
-    m_MagazineInteractionSocketWorld = MagazineInteractionBuildBoxWorld(box);
-    setDetachedMagazineWorld(m_MagazineInteractionSocketWorld);
-    m_MagazineInteractionGrabStartLeftControllerPosAbs = m_LeftControllerPosAbs;
-    m_MagazineInteractionStarted = now;
-    m_MagazineInteractionPostInsertStarted = {};
     {
         const VrHandMatrix4 controllerWorld = MagazineInteractionBuildControllerWorldFromAxes(
             m_LeftControllerPosAbs,
@@ -1636,10 +1844,6 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 controllerWorld,
                 socketCenterWorld - MagazineInteractionMatrixOrigin(controllerWorld));
     }
-    m_MagazineInteractionSyntheticClipOutSample.clear();
-    m_MagazineInteractionSyntheticClipOutStarted = {};
-    m_MagazineInteractionSyntheticClipInSample.clear();
-    m_MagazineInteractionSyntheticClipInStarted = {};
     m_MagazineInteractionLeftHandPoseActive.store(1, std::memory_order_relaxed);
     Game::logMsg(
         "[VR][MagazineInteraction] old magazine grabbed; froze viewmodel and hid native clip weaponId=%d clip=%d ent=%d bone=%d distance=%.2f padding=%.2f centerLocalOffset=(%.2f %.2f %.2f) model=%s",
@@ -2358,6 +2562,8 @@ bool VR::CaptureMagazineInteractionSound(int entityIndex, const char* sample, fl
     constexpr int kSoundStopLooping = (1 << 5);
     constexpr int kNonStartFlags = kSoundChangeVolume | kSoundChangePitch | kSoundStop | kSoundStopLooping;
     if ((flags & kNonStartFlags) != 0)
+        return false;
+    if (MagazineInteractionSoundLooksClipEmpty(sample))
         return false;
 
     const bool waitingForInsertTail =

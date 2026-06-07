@@ -1150,6 +1150,7 @@ public:
 	std::chrono::steady_clock::time_point m_MagazineInteractionSyntheticClipOutStarted{};
 	std::string m_MagazineInteractionSyntheticClipInSample;
 	std::chrono::steady_clock::time_point m_MagazineInteractionSyntheticClipInStarted{};
+	std::chrono::steady_clock::time_point m_MagazineInteractionEmptyFireSoundLastPlayed{};
 	std::atomic<uint32_t> m_MagazineInteractionLeftHandPoseActive{ 0 };
 
 	// Manual magazine reload prototype for detachable-magazine firearms.
@@ -2825,6 +2826,7 @@ public:
 	bool ShouldHideMagazineInteractionNativeClip() const;
 	bool ShouldDrawMagazineInteractionDetachedMagazine() const;
 	bool GetMagazineInteractionDetachedMagazineWorld(VrHandMatrix4& outWorld) const;
+	void PlayMagazineInteractionBlockedFireEmptySound();
 	bool CaptureMagazineInteractionSound(int entityIndex, const char* sample, float volume, int flags, int pitch);
 	void CancelMagazineInteractionManual();
 	bool IsManualReloadActive() const;

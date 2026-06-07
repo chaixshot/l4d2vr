@@ -1153,7 +1153,14 @@ void VR::ProcessInput()
         primaryAttackDown = false;
         primaryAttackJustPressed = false;
     }
-    if (IsManualReloadBlockingFire() || IsMagazineInteractionBlockingFire() || suppressMagazineEmptyClipAutoReload)
+    const bool manualReloadBlocksFire = IsManualReloadBlockingFire();
+    const bool magazineInteractionBlocksFire = IsMagazineInteractionBlockingFire();
+    if ((magazineInteractionBlocksFire || suppressMagazineEmptyClipAutoReload) &&
+        primaryAttackDown)
+    {
+        PlayMagazineInteractionBlockedFireEmptySound();
+    }
+    if (manualReloadBlocksFire || magazineInteractionBlocksFire || suppressMagazineEmptyClipAutoReload)
     {
         primaryAttackDown = false;
         primaryAttackJustPressed = false;

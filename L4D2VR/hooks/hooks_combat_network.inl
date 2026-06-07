@@ -1589,13 +1589,23 @@ int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 	// both remain decoupled from the local physical magazine interaction.
 	if (to && m_VR)
 	{
-		if (m_VR->IsManualReloadBlockingFire() || m_VR->IsMagazineInteractionBlockingFire())
-			to->buttons &= ~(1 << 0); // IN_ATTACK
-		if (m_VR->ShouldSuppressMagazineInteractionEmptyClipAutoReload(nullptr))
+		constexpr int kMagazineInteractionInAttack = (1 << 0);
+		const bool manualReloadBlocksFire = m_VR->IsManualReloadBlockingFire();
+		const bool magazineInteractionBlocksFire = m_VR->IsMagazineInteractionBlockingFire();
+		if (manualReloadBlocksFire || magazineInteractionBlocksFire)
 		{
-			constexpr int kIN_ATTACK = (1 << 0);
+			if (magazineInteractionBlocksFire && ((to->buttons & kMagazineInteractionInAttack) != 0))
+				m_VR->PlayMagazineInteractionBlockedFireEmptySound();
+			to->buttons &= ~kMagazineInteractionInAttack; // IN_ATTACK
+		}
+		const bool suppressMagazineEmptyClipAutoReload =
+			m_VR->ShouldSuppressMagazineInteractionEmptyClipAutoReload(nullptr);
+		if (suppressMagazineEmptyClipAutoReload)
+		{
 			constexpr int kIN_RELOAD = (1 << 13);
-			to->buttons &= ~(kIN_ATTACK | kIN_RELOAD);
+			if ((to->buttons & kMagazineInteractionInAttack) != 0)
+				m_VR->PlayMagazineInteractionBlockedFireEmptySound();
+			to->buttons &= ~(kMagazineInteractionInAttack | kIN_RELOAD);
 		}
 	}
 
