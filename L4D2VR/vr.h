@@ -1124,7 +1124,7 @@ public:
 	float m_MagazineInteractionBoltReturnDistanceMeters = 0.018f;
 	Vector m_MagazineInteractionBoltBoxHalfExtentsMeters = { 0.045f, 0.035f, 0.035f };
 	Vector m_MagazineInteractionBoltBoxLocalOffsetMeters = { 0.0f, 0.0f, 0.0f };
-	Vector m_MagazineInteractionBoltPullAxisLocal = { 0.0f, 1.0f, 0.0f };
+	Vector m_MagazineInteractionBoltPullAxisLocal = { 0.0f, 0.0f, 1.0f };
 	float m_MagazineInteractionStaleSeconds = 0.20f;
 	mutable std::mutex m_MagazineInteractionBoxMutex;
 	mutable std::mutex m_MagazineInteractionBoltBoxMutex;
@@ -1145,6 +1145,7 @@ public:
 	MagazineInteractionManualState m_MagazineInteractionState = MagazineInteractionManualState::Idle;
 	C_WeaponCSBase* m_MagazineInteractionWeapon = nullptr;
 	int m_MagazineInteractionWeaponId = 0;
+	std::atomic<int> m_MagazineInteractionCurrentWeaponId{ 0 };
 	int m_MagazineInteractionStartClip = -1;
 	int m_MagazineInteractionMagazineBoneIndex = -1;
 	int m_MagazineInteractionViewmodelEntityIndex = -1;
@@ -1158,6 +1159,9 @@ public:
 	VrHandMatrix4 m_MagazineInteractionBoltWorld{};
 	VrHandMatrix4 m_MagazineInteractionControllerToMagazine{};
 	VrHandMatrix4 m_MagazineInteractionDetachedMagazineWorld{};
+	bool m_MagazineInteractionFreshPickupBasisValid = false;
+	Vector m_MagazineInteractionFreshPickupForward{};
+	Vector m_MagazineInteractionFreshPickupRight{};
 	Vector m_MagazineInteractionBoltPullAxisWorld{};
 	Vector m_MagazineInteractionGrabStartLeftControllerPosAbs{};
 	Vector m_MagazineInteractionHeldMagazineCenterOffsetLocal{};
@@ -1195,9 +1199,14 @@ public:
 	// magazine with keyboard keys so the full state machine can be tested before physical hand input is available.
 	bool m_ManualReloadMouseTestMode = false;
 	// Optional exact per-weapon visual magazine bone overrides. Empty keeps automatic detection.
-	// Config format: ak47:Magazine_Main,m16a1:v_weapon.M4A1_Clip,scar:j_mag1
+	// Config format: ak47:Magazine_Main,m16a1:v_weapon.M4A1_Clip,scar:j_mag1.
+	// MagazineInteraction also uses this map for its magazine/socket bone before automatic detection.
 	std::string m_ManualReloadMagazineBoneOverridesSpec;
 	std::unordered_map<int, std::vector<std::string>> m_ManualReloadMagazineBoneOverrides;
+	// Optional exact per-weapon bolt/charging-handle bone overrides for MagazineInteraction.
+	// Same format and aliases as ManualReloadMagazineBoneOverrides.
+	std::string m_MagazineInteractionBoltBoneOverridesSpec;
+	std::unordered_map<int, std::vector<std::string>> m_MagazineInteractionBoltBoneOverrides;
 	// The active manual-reload weapon id is snapshotted at BeginManualReload so the render hook
 	// can resolve the configured override without dereferencing gameplay entity state.
 	int m_ManualReloadWeaponId = 0;

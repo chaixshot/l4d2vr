@@ -1143,6 +1143,12 @@ void VR::ParseConfigFile()
     m_MagazineInteractionBoltPullDistanceMeters = std::clamp(getFloat("MagazineInteractionBoltPullDistanceMeters", m_MagazineInteractionBoltPullDistanceMeters), 0.0f, 0.25f);
     m_MagazineInteractionBoltReturnDistanceMeters = std::clamp(getFloat("MagazineInteractionBoltReturnDistanceMeters", m_MagazineInteractionBoltReturnDistanceMeters), 0.0f, 0.10f);
     m_MagazineInteractionBoltBoxHalfExtentsMeters = getVector3("MagazineInteractionBoltBoxHalfExtentsMeters", m_MagazineInteractionBoltBoxHalfExtentsMeters);
+    m_MagazineInteractionBoltBoxHalfExtentsMeters.x = getFloat("MagazineInteractionBoltBoxHalfExtentsMetersX", m_MagazineInteractionBoltBoxHalfExtentsMeters.x);
+    m_MagazineInteractionBoltBoxHalfExtentsMeters.y = getFloat("MagazineInteractionBoltBoxHalfExtentsMetersY", m_MagazineInteractionBoltBoxHalfExtentsMeters.y);
+    m_MagazineInteractionBoltBoxHalfExtentsMeters.z = getFloat("MagazineInteractionBoltBoxHalfExtentsMetersZ", m_MagazineInteractionBoltBoxHalfExtentsMeters.z);
+    m_MagazineInteractionBoltBoxHalfExtentsMeters.x = std::clamp(m_MagazineInteractionBoltBoxHalfExtentsMeters.x, 0.005f, 0.25f);
+    m_MagazineInteractionBoltBoxHalfExtentsMeters.y = std::clamp(m_MagazineInteractionBoltBoxHalfExtentsMeters.y, 0.005f, 0.25f);
+    m_MagazineInteractionBoltBoxHalfExtentsMeters.z = std::clamp(m_MagazineInteractionBoltBoxHalfExtentsMeters.z, 0.005f, 0.25f);
     m_MagazineInteractionBoltBoxLocalOffsetMeters = getVector3("MagazineInteractionBoltBoxLocalOffsetMeters", m_MagazineInteractionBoltBoxLocalOffsetMeters);
     m_MagazineInteractionBoltBoxLocalOffsetMeters.x = getFloat("MagazineInteractionBoltBoxLocalOffsetMetersX", m_MagazineInteractionBoltBoxLocalOffsetMeters.x);
     m_MagazineInteractionBoltBoxLocalOffsetMeters.y = getFloat("MagazineInteractionBoltBoxLocalOffsetMetersY", m_MagazineInteractionBoltBoxLocalOffsetMeters.y);
@@ -1156,8 +1162,10 @@ void VR::ParseConfigFile()
     m_ManualReloadMouseTestMode = getBool("ManualReloadMouseTestMode", m_ManualReloadMouseTestMode);
     m_ManualReloadMagazineBoneOverridesSpec = getString("ManualReloadMagazineBoneOverrides", m_ManualReloadMagazineBoneOverridesSpec);
     m_ManualReloadMagazineBoneOverrides.clear();
+    m_MagazineInteractionBoltBoneOverridesSpec = getString("MagazineInteractionBoltBoneOverrides", m_MagazineInteractionBoltBoneOverridesSpec);
+    m_MagazineInteractionBoltBoneOverrides.clear();
     {
-        auto normalizeManualReloadWeaponKey = [&](std::string value)
+        auto normalizeBoneOverrideWeaponKey = [&](std::string value)
             {
                 trim(value);
                 std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -1166,7 +1174,7 @@ void VR::ParseConfigFile()
                 return value;
             };
 
-        const std::unordered_map<std::string, int> manualReloadWeaponAliases =
+        const std::unordered_map<std::string, int> weaponBoneOverrideAliases =
         {
             { "pistol", C_WeaponCSBase::WeaponID::PISTOL },
             { "pistols", C_WeaponCSBase::WeaponID::PISTOL },
@@ -1195,9 +1203,9 @@ void VR::ParseConfigFile()
             { "scout", C_WeaponCSBase::WeaponID::SCOUT }
         };
 
-        auto parseManualReloadWeaponId = [&](const std::string& rawKey, int& outWeaponId)
+        auto parseBoneOverrideWeaponId = [&](const std::string& rawKey, int& outWeaponId)
             {
-                const std::string key = normalizeManualReloadWeaponKey(rawKey);
+                const std::string key = normalizeBoneOverrideWeaponKey(rawKey);
                 if (key.empty())
                     return false;
 
@@ -1209,43 +1217,58 @@ void VR::ParseConfigFile()
                     return true;
                 }
 
-                const auto it = manualReloadWeaponAliases.find(key);
-                if (it == manualReloadWeaponAliases.end())
+                const auto it = weaponBoneOverrideAliases.find(key);
+                if (it == weaponBoneOverrideAliases.end())
                     return false;
 
                 outWeaponId = it->second;
                 return true;
             };
 
-        std::stringstream ss(m_ManualReloadMagazineBoneOverridesSpec);
-        std::string entry;
-        while (std::getline(ss, entry, ','))
-        {
-            trim(entry);
-            if (entry.empty())
-                continue;
-
-            const size_t separator = entry.find(':');
-            if (separator == std::string::npos)
+        auto parseBoneOverrideSpec = [&](
+            const char* configName,
+            const std::string& spec,
+            std::unordered_map<int, std::vector<std::string>>& outOverrides)
             {
-                Game::logMsg("[VR][ManualReload] ignored invalid magazine bone override entry=%s", entry.c_str());
-                continue;
-            }
+                std::stringstream ss(spec);
+                std::string entry;
+                while (std::getline(ss, entry, ','))
+                {
+                    trim(entry);
+                    if (entry.empty())
+                        continue;
 
-            std::string weaponKey = entry.substr(0, separator);
-            std::string boneName = entry.substr(separator + 1);
-            trim(weaponKey);
-            trim(boneName);
+                    const size_t separator = entry.find(':');
+                    if (separator == std::string::npos)
+                    {
+                        Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
+                        continue;
+                    }
 
-            int weaponId = 0;
-            if (boneName.empty() || !parseManualReloadWeaponId(weaponKey, weaponId))
-            {
-                Game::logMsg("[VR][ManualReload] ignored invalid magazine bone override entry=%s", entry.c_str());
-                continue;
-            }
+                    std::string weaponKey = entry.substr(0, separator);
+                    std::string boneName = entry.substr(separator + 1);
+                    trim(weaponKey);
+                    trim(boneName);
 
-            m_ManualReloadMagazineBoneOverrides[weaponId].push_back(boneName);
-        }
+                    int weaponId = 0;
+                    if (boneName.empty() || !parseBoneOverrideWeaponId(weaponKey, weaponId))
+                    {
+                        Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
+                        continue;
+                    }
+
+                    outOverrides[weaponId].push_back(boneName);
+                }
+            };
+
+        parseBoneOverrideSpec(
+            "ManualReloadMagazineBoneOverrides",
+            m_ManualReloadMagazineBoneOverridesSpec,
+            m_ManualReloadMagazineBoneOverrides);
+        parseBoneOverrideSpec(
+            "MagazineInteractionBoltBoneOverrides",
+            m_MagazineInteractionBoltBoneOverridesSpec,
+            m_MagazineInteractionBoltBoneOverrides);
     }
     m_ManualReloadNativeClipLeaveDistanceMeters = std::clamp(getFloat("ManualReloadNativeClipLeaveDistanceMeters", m_ManualReloadNativeClipLeaveDistanceMeters), 0.001f, 0.50f);
     m_ManualReloadMagazineGrabRangeMeters = std::clamp(getFloat("ManualReloadMagazineGrabRangeMeters", m_ManualReloadMagazineGrabRangeMeters), 0.01f, 0.50f);

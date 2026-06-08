@@ -83,6 +83,53 @@ namespace
         return VrHandMath::BuildPerspective(fov, aspect, zNear, zFar);
     }
 
+    bool ReprojectScenePointToViewmodelLayer(
+        const CViewSetup& view,
+        const Vector& scenePoint,
+        Vector& outViewmodelPoint)
+    {
+        const float sceneFov = (view.fov > 0.001f) ? view.fov : 90.0f;
+        const float viewmodelFov =
+            (view.fovViewmodel > 0.001f) ? view.fovViewmodel : sceneFov;
+        const float sceneAspect = ResolveVrHandsSceneAspect(view);
+        const float viewmodelAspect = ResolveVrHandsViewmodelAspect(view);
+
+        constexpr float kPi = 3.14159265358979323846f;
+        const float sceneXScale =
+            1.0f / std::tan(std::clamp(sceneFov, 1.0f, 179.0f) * kPi / 360.0f);
+        const float viewmodelXScale =
+            1.0f / std::tan(std::clamp(viewmodelFov, 1.0f, 179.0f) * kPi / 360.0f);
+        const float sceneYScale = sceneXScale * sceneAspect;
+        const float viewmodelYScale = viewmodelXScale * viewmodelAspect;
+        if (!(viewmodelXScale > 0.0001f) || !(viewmodelYScale > 0.0001f))
+            return false;
+
+        Vector forward{};
+        Vector right{};
+        Vector up{};
+        QAngle qangles(view.angles.x, view.angles.y, view.angles.z);
+        QAngle::AngleVectors(qangles, &forward, &right, &up);
+        forward = VrHandMath::Normalize(forward);
+        right = VrHandMath::Normalize(right);
+        up = VrHandMath::Normalize(up);
+        if (forward.Length() <= 0.0001f || right.Length() <= 0.0001f || up.Length() <= 0.0001f)
+            return false;
+
+        const Vector delta = scenePoint - view.origin;
+        const float viewX = VrHandMath::Dot(delta, right);
+        const float viewY = VrHandMath::Dot(delta, up);
+        const float viewZ = VrHandMath::Dot(delta, forward);
+        if (!std::isfinite(viewX) || !std::isfinite(viewY) || !std::isfinite(viewZ))
+            return false;
+
+        outViewmodelPoint =
+            view.origin +
+            right * (viewX * (sceneXScale / viewmodelXScale)) +
+            up * (viewY * (sceneYScale / viewmodelYScale)) +
+            forward * viewZ;
+        return true;
+    }
+
     int FindVrHandsNameIndex(const std::vector<std::string>& names, const char* name)
     {
         if (!name || !*name)
@@ -653,7 +700,6 @@ bool VrHandSystem::EnsureStandaloneMagazineBoxLoaded(const Vector& mins, const V
 
     m_StandaloneMagazineBoxAsset = std::move(asset);
     m_StandaloneMagazineBoxKey = key;
-    m_StandaloneMagazineBoxDrawLogged = false;
     if (debugLog)
     {
         Game::logMsg(
@@ -720,9 +766,9 @@ bool VrHandSystem::DrawStandaloneMagazineBox(
         return false;
     }
 
-    if (!m_StandaloneMagazineBoxDrawLogged && rendererPass != VrHandDrawPass::WorldVisibilityMask)
+    if (rendererPass != VrHandDrawPass::WorldVisibilityMask &&
+        m_StandaloneMagazineBoxDrawLoggedKeys.insert(m_StandaloneMagazineBoxKey).second)
     {
-        m_StandaloneMagazineBoxDrawLogged = true;
         const char* passName = "world-depth";
         if (rendererPass == VrHandDrawPass::ViewmodelComposite)
             passName = "viewmodel-composite";
@@ -1235,6 +1281,10 @@ bool VrHandSystem::DrawForEye(
     const Vector& currentMagazineBoxMins,
     const Vector& currentMagazineBoxMaxs,
     bool currentMagazineBoxUseViewmodelLayer,
+    const VrHandMatrix4* currentBoltBoxWorld,
+    const Vector& currentBoltBoxMins,
+    const Vector& currentBoltBoxMaxs,
+    bool currentBoltBoxUseViewmodelLayer,
     bool leftHandMagazineGripPose,
     VrHandDrawPass drawPass)
 {
@@ -1309,6 +1359,18 @@ bool VrHandSystem::DrawForEye(
         {
             drewAny = true;
         }
+        if (DrawStandaloneMagazineBox(
+                device,
+                view,
+                sceneLightScale,
+                currentBoltBoxWorld,
+                currentBoltBoxMins,
+                currentBoltBoxMaxs,
+                currentBoltBoxUseViewmodelLayer,
+                drawPass))
+        {
+            drewAny = true;
+        }
         return drewAny;
     }
 
@@ -1331,7 +1393,13 @@ bool VrHandSystem::DrawForEye(
     const float clampedModelScale = std::clamp(modelScale, 0.25f, 4.0f);
 
     bool drewAny = false;
-    const Vector positions[2] = { leftControllerPosition, rightControllerPosition };
+    Vector positions[2] = { leftControllerPosition, rightControllerPosition };
+    if (leftHandUsesMagazineViewmodelLayer)
+    {
+        Vector reprojectedLeft{};
+        if (ReprojectScenePointToViewmodelLayer(view, positions[0], reprojectedLeft))
+            positions[0] = reprojectedLeft;
+    }
     const QAngle angles[2] = { leftControllerAngles, rightControllerAngles };
     const Vector positionOffsets[2] = { leftHandPoseOffsetMeters, rightHandPoseOffsetMeters };
     const Vector rotationOffsets[2] = { leftHandPoseRotationOffsetDeg, rightHandPoseRotationOffsetDeg };
@@ -1433,6 +1501,18 @@ bool VrHandSystem::DrawForEye(
             currentMagazineBoxMins,
             currentMagazineBoxMaxs,
             currentMagazineBoxUseViewmodelLayer,
+            drawPass))
+    {
+        drewAny = true;
+    }
+    if (DrawStandaloneMagazineBox(
+            device,
+            view,
+            sceneLightScale,
+            currentBoltBoxWorld,
+            currentBoltBoxMins,
+            currentBoltBoxMaxs,
+            currentBoltBoxUseViewmodelLayer,
             drawPass))
     {
         drewAny = true;

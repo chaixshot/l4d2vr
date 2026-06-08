@@ -61,6 +61,10 @@ public:
         const Vector& currentMagazineBoxMins,
         const Vector& currentMagazineBoxMaxs,
         bool currentMagazineBoxUseViewmodelLayer,
+        const VrHandMatrix4* currentBoltBoxWorld,
+        const Vector& currentBoltBoxMins,
+        const Vector& currentBoltBoxMaxs,
+        bool currentBoltBoxUseViewmodelLayer,
         bool leftHandMagazineGripPose,
         VrHandDrawPass drawPass);
 
@@ -156,7 +160,7 @@ private:
     VrHandMeshAsset m_StandaloneMagazineBoxAsset;
     std::vector<VrHandMatrixRows3x4> m_StandaloneMagazineBoxPalette;
     std::string m_StandaloneMagazineBoxKey;
-    bool m_StandaloneMagazineBoxDrawLogged = false;
+    std::unordered_set<std::string> m_StandaloneMagazineBoxDrawLoggedKeys;
     std::string m_RightViewmodelPoseModel;
     std::string m_RightViewmodelAnchorModel;
     VrHandMatrix4 m_RightViewmodelPalmWorld{};

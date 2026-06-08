@@ -2212,6 +2212,90 @@ namespace
         DrawMagazineBoxSolidQuad(overlay, corners[1], corners[5], corners[7], corners[3], r, g, bColor, alpha, noDepthTest, duration);
     }
 
+    inline int FindConfiguredViewmodelBoneOverride(
+        const char* logTag,
+        const char* role,
+        const char* configName,
+        int weaponId,
+        const std::unordered_map<int, std::vector<std::string>>& overrides,
+        const std::string& overrideSpec,
+        const std::string& modelName,
+        const std::vector<std::string>& boneNames,
+        std::string& outConfiguredName)
+    {
+        outConfiguredName.clear();
+        if (weaponId <= 0)
+            return -1;
+
+        const auto overrideIt = overrides.find(weaponId);
+        if (overrideIt == overrides.end() || overrideIt->second.empty())
+            return -1;
+
+        for (const std::string& requestedName : overrideIt->second)
+        {
+            const std::string requestedLower = vr_vm_stabilize::ToLowerAscii(requestedName);
+            if (requestedLower.empty())
+                continue;
+
+            for (int bone = 0; bone < static_cast<int>(boneNames.size()); ++bone)
+            {
+                if (vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(bone)]) != requestedLower)
+                    continue;
+
+                outConfiguredName = requestedName;
+
+                static std::mutex s_overrideLogMutex;
+                static std::unordered_set<std::string> s_loggedMatches;
+                const std::string logKey =
+                    std::string(logTag ? logTag : "VR") + "|match|" +
+                    (role ? role : "bone") + "|" +
+                    std::to_string(weaponId) + "|" + modelName + "|" + requestedLower;
+                bool shouldLog = false;
+                {
+                    std::lock_guard<std::mutex> lock(s_overrideLogMutex);
+                    shouldLog = s_loggedMatches.insert(logKey).second;
+                }
+                if (shouldLog)
+                {
+                    Game::logMsg(
+                        "[VR][%s] configured %s bone override matched source=%s weaponId=%d model=%s bone=%d name=%s",
+                        logTag ? logTag : "Unknown",
+                        role ? role : "viewmodel",
+                        configName ? configName : "unknown",
+                        weaponId,
+                        modelName.c_str(),
+                        bone,
+                        boneNames[static_cast<size_t>(bone)].c_str());
+                }
+                return bone;
+            }
+        }
+
+        static std::mutex s_overrideMissLogMutex;
+        static std::unordered_set<std::string> s_loggedMisses;
+        const std::string missKey =
+            std::string(logTag ? logTag : "VR") + "|miss|" +
+            (role ? role : "bone") + "|" +
+            std::to_string(weaponId) + "|" + modelName + "|" + overrideSpec;
+        bool shouldLogMiss = false;
+        {
+            std::lock_guard<std::mutex> lock(s_overrideMissLogMutex);
+            shouldLogMiss = s_loggedMisses.insert(missKey).second;
+        }
+        if (shouldLogMiss)
+        {
+            Game::logMsg(
+                "[VR][%s] configured %s bone override not found; falling back to automatic detection source=%s weaponId=%d model=%s spec=%s",
+                logTag ? logTag : "Unknown",
+                role ? role : "viewmodel",
+                configName ? configName : "unknown",
+                weaponId,
+                modelName.c_str(),
+                overrideSpec.c_str());
+        }
+        return -1;
+    }
+
     inline void DrawCurrentWeaponMagazineBox(
         VR* vr,
         void* drawState,
@@ -2258,7 +2342,25 @@ namespace
             return;
         }
 
-        const int magazineBone = FindMagazineBoxBone(boneNames);
+        const int currentMagazineInteractionWeaponId =
+            vr->m_MagazineInteractionCurrentWeaponId.load(std::memory_order_relaxed);
+        const int magazineInteractionWeaponId =
+            currentMagazineInteractionWeaponId > 0
+            ? currentMagazineInteractionWeaponId
+            : vr->m_MagazineInteractionWeaponId;
+        std::string configuredMagazineBoneName;
+        int magazineBone = FindConfiguredViewmodelBoneOverride(
+            "MagazineInteraction",
+            "magazine",
+            "ManualReloadMagazineBoneOverrides",
+            magazineInteractionWeaponId,
+            vr->m_ManualReloadMagazineBoneOverrides,
+            vr->m_ManualReloadMagazineBoneOverridesSpec,
+            modelName,
+            boneNames,
+            configuredMagazineBoneName);
+        if (magazineBone < 0)
+            magazineBone = FindMagazineBoxBone(boneNames);
         if (magazineBone < 0 || magazineBone >= numBones)
             return;
 
@@ -2500,7 +2602,19 @@ namespace
             magazineBone,
             modelName.c_str());
 
-        const int boltBone = FindMagazineInteractionBoltBone(lowerModel, boneNames);
+        std::string configuredBoltBoneName;
+        int boltBone = FindConfiguredViewmodelBoneOverride(
+            "MagazineInteraction",
+            "bolt",
+            "MagazineInteractionBoltBoneOverrides",
+            magazineInteractionWeaponId,
+            vr->m_MagazineInteractionBoltBoneOverrides,
+            vr->m_MagazineInteractionBoltBoneOverridesSpec,
+            modelName,
+            boneNames,
+            configuredBoltBoneName);
+        if (boltBone < 0)
+            boltBone = FindMagazineInteractionBoltBone(lowerModel, boneNames);
         if (boltBone >= 0 && boltBone < numBones)
         {
             vr_vm_stabilize::Mat3x4 boltWorld{};
@@ -2535,6 +2649,50 @@ namespace
                     entityIndex,
                     boltBone,
                     modelName.c_str());
+
+                {
+                    static std::mutex s_boltBoxLogMutex;
+                    static std::unordered_set<std::string> s_loggedBoltBoxes;
+                    const char* boltBoneName =
+                        (static_cast<size_t>(boltBone) < boneNames.size())
+                        ? boneNames[static_cast<size_t>(boltBone)].c_str()
+                        : "";
+                    char key[256] = {};
+                    std::snprintf(
+                        key,
+                        sizeof(key),
+                        "%s|%d|%.3f,%.3f,%.3f|%.3f,%.3f,%.3f",
+                        lowerModel.c_str(),
+                        boltBone,
+                        vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.x,
+                        vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.y,
+                        vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.z,
+                        vr->m_MagazineInteractionBoltBoxLocalOffsetMeters.x,
+                        vr->m_MagazineInteractionBoltBoxLocalOffsetMeters.y,
+                        vr->m_MagazineInteractionBoltBoxLocalOffsetMeters.z);
+                    bool shouldLog = false;
+                    {
+                        std::lock_guard<std::mutex> lock(s_boltBoxLogMutex);
+                        shouldLog = s_loggedBoltBoxes.insert(key).second;
+                    }
+                    if (shouldLog)
+                    {
+                        Game::logMsg(
+                            "[VR][MagazineBolt] drawing bolt box model=%s bone=%d name=%s mins=(%.2f %.2f %.2f) maxs=(%.2f %.2f %.2f) pullAxis=(%.3f %.3f %.3f)",
+                            modelName.c_str(),
+                            boltBone,
+                            boltBoneName,
+                            boltLocalOffset.x - boltHalf.x,
+                            boltLocalOffset.y - boltHalf.y,
+                            boltLocalOffset.z - boltHalf.z,
+                            boltLocalOffset.x + boltHalf.x,
+                            boltLocalOffset.y + boltHalf.y,
+                            boltLocalOffset.z + boltHalf.z,
+                            pullAxisWorld.x,
+                            pullAxisWorld.y,
+                            pullAxisWorld.z);
+                    }
+                }
             }
         }
 
@@ -3077,6 +3235,8 @@ namespace
         int numBones = 0;
         int rootBone = -1;
         bool valid = false;
+        bool hardLockModelAnchorValid = false;
+        vr_vm_stabilize::Mat3x4 hardLockModelAnchor{};
         std::vector<vr_vm_stabilize::Mat3x4> frozenLocalBones;
         std::vector<ManualReloadTailPoseSample> tailSamples;
         std::chrono::steady_clock::time_point tailCaptureStarted{};
@@ -4072,6 +4232,9 @@ namespace
         const bool visuallyReplayViewmodel = manualReloadActive
             ? IsManualReloadViewmodelVisualReplayState(vr)
             : false;
+        const bool magazineInteractionHardLockViewmodel =
+            magazineInteractionActive &&
+            vr->m_MagazineInteractionState == MagazineInteractionManualState::HoldingBolt;
         const bool hideNativeClip = (manualReloadActive
             ? vr->ShouldHideManualReloadNativeClip()
             : vr->ShouldHideMagazineInteractionNativeClip()) && clipBone >= 0;
@@ -4140,11 +4303,29 @@ namespace
 
             if (frozenPose.valid)
             {
+                if (magazineInteractionHardLockViewmodel &&
+                    !frozenPose.hardLockModelAnchorValid)
+                {
+                    frozenPose.hardLockModelAnchor = modelAnchor;
+                    frozenPose.hardLockModelAnchorValid = true;
+                    Game::logMsg(
+                        "[VR][MagazineInteraction] hard-locked viewmodel anchor while bolt is held model=%s",
+                        modelName.c_str());
+                }
+                else if (!magazineInteractionHardLockViewmodel)
+                {
+                    frozenPose.hardLockModelAnchorValid = false;
+                }
+
                 if (visuallyPauseViewmodel)
                 {
                     if (manualReloadActive)
                         CaptureManualReloadTailPose(vr, frozenPose, modelAnchor, sourceBones, numBones);
-                    ApplyManualReloadLocalPose(modelAnchor, frozenPose.frozenLocalBones, copiedBones, numBones);
+                    const vr_vm_stabilize::Mat3x4& anchor =
+                        (magazineInteractionHardLockViewmodel && frozenPose.hardLockModelAnchorValid)
+                        ? frozenPose.hardLockModelAnchor
+                        : modelAnchor;
+                    ApplyManualReloadLocalPose(anchor, frozenPose.frozenLocalBones, copiedBones, numBones);
                 }
                 else
                 {
