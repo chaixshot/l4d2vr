@@ -112,6 +112,12 @@ MagazineInteractionSocketCaptureRadiusMeters=0.06
 MagazineInteractionSocketCaptureAngleDeg=35
 MagazineInteractionSocketRequiredDepthMeters=0.04
 MagazineInteractionSocketRequiredOverlapFraction=0.45
+MagazineInteractionBoltGrabPaddingMeters=0.10
+MagazineInteractionBoltPullDistanceMeters=0.055
+MagazineInteractionBoltReturnDistanceMeters=0.018
+MagazineInteractionBoltBoxHalfExtentsMeters=0.045,0.035,0.035
+MagazineInteractionBoltBoxLocalOffsetMeters=0.000,0.000,0.000
+MagazineInteractionBoltPullAxisLocal=0,1,0
 MagazineInteractionStaleSeconds=0.20
 ViewmodelDisableMoveBob=false
 

@@ -128,7 +128,9 @@ enum class MagazineInteractionManualState
 	HoldingOldMagazine,
 	WaitingForFreshMagazine,
 	HoldingFreshMagazine,
-	WaitingForBackendReload
+	WaitingForBackendReload,
+	WaitingForBoltGrab,
+	HoldingBolt
 };
 
 struct ManualReloadDelayedSound
@@ -145,6 +147,7 @@ struct MagazineInteractionBoxSnapshot
 	Vector axisX = { 1.0f, 0.0f, 0.0f };
 	Vector axisY = { 0.0f, 1.0f, 0.0f };
 	Vector axisZ = { 0.0f, 0.0f, 1.0f };
+	Vector pullAxisWorld = { 0.0f, 0.0f, 0.0f };
 	Vector mins;
 	Vector maxs;
 	uint32_t frameSeq = 0;
@@ -1116,12 +1119,22 @@ public:
 	float m_MagazineInteractionSocketCaptureAngleDeg = 35.0f;
 	float m_MagazineInteractionSocketRequiredDepthMeters = 0.04f;
 	float m_MagazineInteractionSocketRequiredOverlapFraction = 0.45f;
+	float m_MagazineInteractionBoltGrabPaddingMeters = 0.10f;
+	float m_MagazineInteractionBoltPullDistanceMeters = 0.055f;
+	float m_MagazineInteractionBoltReturnDistanceMeters = 0.018f;
+	Vector m_MagazineInteractionBoltBoxHalfExtentsMeters = { 0.045f, 0.035f, 0.035f };
+	Vector m_MagazineInteractionBoltBoxLocalOffsetMeters = { 0.0f, 0.0f, 0.0f };
+	Vector m_MagazineInteractionBoltPullAxisLocal = { 0.0f, 1.0f, 0.0f };
 	float m_MagazineInteractionStaleSeconds = 0.20f;
 	mutable std::mutex m_MagazineInteractionBoxMutex;
+	mutable std::mutex m_MagazineInteractionBoltBoxMutex;
 	mutable std::mutex m_MagazineInteractionPoseMutex;
 	MagazineInteractionBoxSnapshot m_MagazineInteractionBox{};
+	MagazineInteractionBoxSnapshot m_MagazineInteractionBoltBox{};
 	bool m_MagazineInteractionBoxValid = false;
+	bool m_MagazineInteractionBoltBoxValid = false;
 	uint32_t m_MagazineInteractionPublishSeq = 0;
+	uint32_t m_MagazineInteractionBoltPublishSeq = 0;
 	bool m_MagazineInteractionLeftHandHolding = false;
 	bool m_MagazineInteractionReloadTriggered = false;
 	bool m_MagazineInteractionReloadCommandPending = false;
@@ -1137,19 +1150,40 @@ public:
 	int m_MagazineInteractionViewmodelEntityIndex = -1;
 	std::string m_MagazineInteractionMagazineModelName;
 	MagazineInteractionBoxSnapshot m_MagazineInteractionSocketBox{};
+	MagazineInteractionBoxSnapshot m_MagazineInteractionBoltRestBox{};
 	bool m_MagazineInteractionSocketValid = false;
+	bool m_MagazineInteractionBoltRestValid = false;
 	VrHandMatrix4 m_MagazineInteractionSocketWorld{};
+	VrHandMatrix4 m_MagazineInteractionBoltRestWorld{};
+	VrHandMatrix4 m_MagazineInteractionBoltWorld{};
 	VrHandMatrix4 m_MagazineInteractionControllerToMagazine{};
 	VrHandMatrix4 m_MagazineInteractionDetachedMagazineWorld{};
+	Vector m_MagazineInteractionBoltPullAxisWorld{};
 	Vector m_MagazineInteractionGrabStartLeftControllerPosAbs{};
 	Vector m_MagazineInteractionHeldMagazineCenterOffsetLocal{};
+	Vector m_MagazineInteractionBoltGrabStartLeftControllerPosAbs{};
+	float m_MagazineInteractionBoltGrabStartPullDistance = 0.0f;
+	float m_MagazineInteractionBoltPullDistance = 0.0f;
+	float m_MagazineInteractionBoltMaxPullDistance = 0.0f;
+	bool m_MagazineInteractionBoltReachedRear = false;
+	bool m_MagazineInteractionBoltPullAxisSignLocked = false;
 	std::chrono::steady_clock::time_point m_MagazineInteractionStarted{};
 	std::chrono::steady_clock::time_point m_MagazineInteractionFreshGrabbedAt{};
 	std::chrono::steady_clock::time_point m_MagazineInteractionPostInsertStarted{};
+	std::chrono::steady_clock::time_point m_MagazineInteractionBoltStageStarted{};
+	std::chrono::steady_clock::time_point m_MagazineInteractionBoltGrabbedAt{};
 	std::string m_MagazineInteractionSyntheticClipOutSample;
 	std::chrono::steady_clock::time_point m_MagazineInteractionSyntheticClipOutStarted{};
 	std::string m_MagazineInteractionSyntheticClipInSample;
 	std::chrono::steady_clock::time_point m_MagazineInteractionSyntheticClipInStarted{};
+	std::string m_MagazineInteractionSyntheticBoltBackSample;
+	std::chrono::steady_clock::time_point m_MagazineInteractionSyntheticBoltBackStarted{};
+	std::string m_MagazineInteractionSyntheticBoltForwardSample;
+	std::chrono::steady_clock::time_point m_MagazineInteractionSyntheticBoltForwardStarted{};
+	std::string m_MagazineInteractionCapturedBoltBackSample;
+	std::string m_MagazineInteractionCapturedBoltForwardSample;
+	int m_MagazineInteractionCapturedBoltBackSoundScore = -1;
+	int m_MagazineInteractionCapturedBoltForwardSoundScore = -1;
 	std::chrono::steady_clock::time_point m_MagazineInteractionEmptyFireSoundLastPlayed{};
 	std::atomic<uint32_t> m_MagazineInteractionLeftHandPoseActive{ 0 };
 
@@ -2814,7 +2848,20 @@ public:
 		int entityIndex,
 		int boneIndex,
 		const char* modelName);
+	void PublishMagazineInteractionBoltBox(
+		const Vector& origin,
+		const Vector& axisX,
+		const Vector& axisY,
+		const Vector& axisZ,
+		const Vector& mins,
+		const Vector& maxs,
+		const Vector& pullAxisWorld,
+		uint32_t frameSeq,
+		int entityIndex,
+		int boneIndex,
+		const char* modelName);
 	bool GetMagazineInteractionBox(MagazineInteractionBoxSnapshot& outSnapshot) const;
+	bool GetMagazineInteractionBoltBox(MagazineInteractionBoxSnapshot& outSnapshot) const;
 	bool UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown, bool leftGripJustPressed);
 	void MarkMagazineInteractionReloadCommandIssued();
 	bool IsMagazineInteractionReloadCommandActive() const;
@@ -2826,6 +2873,8 @@ public:
 	bool ShouldHideMagazineInteractionNativeClip() const;
 	bool ShouldDrawMagazineInteractionDetachedMagazine() const;
 	bool GetMagazineInteractionDetachedMagazineWorld(VrHandMatrix4& outWorld) const;
+	bool ShouldMoveMagazineInteractionBolt() const;
+	bool GetMagazineInteractionBoltWorld(VrHandMatrix4& outWorld) const;
 	void PlayMagazineInteractionBlockedFireEmptySound();
 	bool CaptureMagazineInteractionSound(int entityIndex, const char* sample, float volume, int flags, int pitch);
 	void CancelMagazineInteractionManual();

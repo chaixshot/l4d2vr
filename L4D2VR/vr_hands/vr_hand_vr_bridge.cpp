@@ -28,6 +28,7 @@ namespace
     size_t ManualReloadNormalizeDelayedSoundsForReplay(
         std::vector<ManualReloadDelayedSound>& sounds,
         float* outRebaseSeconds = nullptr);
+    std::string ManualReloadPrepareConsoleSoundSample(const std::string& rawSample);
 
     Vector MagazineInteractionNormalizeAxis(const Vector& axis, const Vector& fallback)
     {
@@ -393,6 +394,39 @@ namespace
             MagazineInteractionMatrixAxis(matrix, 2) * localVector.z;
     }
 
+    VrHandMatrix4 MagazineInteractionMatrixWithOrigin(const VrHandMatrix4& matrix, const Vector& origin)
+    {
+        VrHandMatrix4 out = matrix;
+        VrHandMath::Set(out, 0, 3, origin.x);
+        VrHandMath::Set(out, 1, 3, origin.y);
+        VrHandMath::Set(out, 2, 3, origin.z);
+        return out;
+    }
+
+    Vector MagazineInteractionBuildBoltPullAxisWorld(
+        const VR* vr,
+        const MagazineInteractionBoxSnapshot& boltBox,
+        const VrHandMatrix4& boltRestWorld)
+    {
+        if (!vr)
+            return Vector(-1.0f, 0.0f, 0.0f);
+
+        Vector publishedAxis = VrHandMath::Normalize(boltBox.pullAxisWorld);
+        if (publishedAxis.Length() > 0.0001f)
+            return publishedAxis;
+
+        Vector localAxis = VrHandMath::Normalize(vr->m_MagazineInteractionBoltPullAxisLocal);
+        if (localAxis.Length() > 0.0001f && MagazineInteractionMatrixBasisLooksValid(boltRestWorld))
+        {
+            Vector worldAxis = MagazineInteractionMatrixLocalVectorToWorld(boltRestWorld, localAxis);
+            worldAxis = VrHandMath::Normalize(worldAxis);
+            if (worldAxis.Length() > 0.0001f)
+                return worldAxis;
+        }
+
+        return Vector(-1.0f, 0.0f, 0.0f);
+    }
+
     VrHandMatrix4 MagazineInteractionBuildControllerRelation(
         const VrHandMatrix4& controllerWorld,
         const VrHandMatrix4& magazineWorld)
@@ -605,6 +639,11 @@ namespace
         }
     }
 
+    bool MagazineInteractionWeaponRequiresManualBolt(C_WeaponCSBase::WeaponID weaponId)
+    {
+        return MagazineInteractionWeaponUsesDetachableMagazine(weaponId);
+    }
+
     int MagazineInteractionDefaultMaxClip(C_WeaponCSBase::WeaponID weaponId, int currentClip)
     {
         switch (weaponId)
@@ -752,6 +791,84 @@ namespace
         return std::string();
     }
 
+    std::string MagazineInteractionBoltFallbackSoundSample(const VR* vr, bool forward)
+    {
+        if (!vr)
+            return std::string();
+
+        std::string lowerModel = vr->m_MagazineInteractionMagazineModelName;
+        std::transform(lowerModel.begin(), lowerModel.end(), lowerModel.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        const char* suffix = forward ? "forward" : "back";
+        auto slide = [&](const char* directory, const char* stem, bool numbered = true) -> std::string
+        {
+            std::string sample = std::string("weapons/") + directory + "/gunother/" + stem + "_slide" + suffix;
+            if (numbered)
+                sample += "_1";
+            sample += ".wav";
+            return sample;
+        };
+        auto bolt = [&](const char* directory, const char* stem) -> std::string
+        {
+            return std::string("weapons/") + directory + "/gunother/" + stem + "_bolt" + suffix + ".wav";
+        };
+
+        if (lowerModel.find("dual_pistol") != std::string::npos ||
+            lowerModel.find("dual_pistola") != std::string::npos)
+        {
+            return slide("dual_pistol", "dualpistol");
+        }
+        if (lowerModel.find("desert_eagle") != std::string::npos ||
+            lowerModel.find("magnum") != std::string::npos)
+        {
+            return slide("magnum", "pistol");
+        }
+        if (lowerModel.find("pistol") != std::string::npos)
+            return slide("pistol", "pistol");
+        if (lowerModel.find("rifle_ak47") != std::string::npos ||
+            lowerModel.find("ak47") != std::string::npos)
+        {
+            return slide("rifle_ak47", "rifle");
+        }
+        if (lowerModel.find("desert_rifle") != std::string::npos)
+            return slide("rifle_desert", "rifle");
+        if (lowerModel.find("sg552") != std::string::npos)
+            return slide("sg552", "sg552", false);
+        if (lowerModel.find("silenced_smg") != std::string::npos ||
+            lowerModel.find("smg_silenced") != std::string::npos)
+        {
+            return slide("smg_silenced", "smg");
+        }
+        if (lowerModel.find("mp5") != std::string::npos)
+            return slide("mp5navy", "mp5", false);
+        if (lowerModel.find("smg") != std::string::npos ||
+            lowerModel.find("uzi") != std::string::npos)
+        {
+            return slide("smg", "smg");
+        }
+        if (lowerModel.find("huntingrifle") != std::string::npos ||
+            lowerModel.find("hunting_rifle") != std::string::npos)
+        {
+            return bolt("hunting_rifle", "hunting_rifle");
+        }
+        if (lowerModel.find("sniper_military") != std::string::npos)
+            return slide("sniper_military", "sniper_military");
+        if (lowerModel.find("awp") != std::string::npos)
+            return bolt("awp", "awp");
+        if (lowerModel.find("scout") != std::string::npos)
+            return bolt("scout", "scout");
+        if (lowerModel.find("m60") != std::string::npos ||
+            lowerModel.find("machinegun_m60") != std::string::npos)
+        {
+            return slide("machinegun_m60", "rifle");
+        }
+        if (lowerModel.find("rifle") != std::string::npos ||
+            lowerModel.find("sg552") != std::string::npos)
+        {
+            return slide("rifle", "rifle");
+        }
+        return std::string();
+    }
+
     std::string MagazineInteractionLowerAscii(std::string value)
     {
         std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -894,6 +1011,61 @@ namespace
             sample.c_str());
     }
 
+    void MagazineInteractionPlayBoltSound(VR* vr, bool forward)
+    {
+        if (!vr || !vr->m_Game)
+            return;
+
+        const std::string sample = forward
+            ? (!vr->m_MagazineInteractionCapturedBoltForwardSample.empty()
+                ? vr->m_MagazineInteractionCapturedBoltForwardSample
+                : MagazineInteractionBoltFallbackSoundSample(vr, true))
+            : (!vr->m_MagazineInteractionCapturedBoltBackSample.empty()
+                ? vr->m_MagazineInteractionCapturedBoltBackSample
+                : MagazineInteractionBoltFallbackSoundSample(vr, false));
+        const std::string prepared = ManualReloadPrepareConsoleSoundSample(sample);
+        if (prepared.empty())
+        {
+            Game::logMsg(
+                "[VR][MagazineInteraction][Audio] no synthetic bolt-%s sample for model=%s weaponId=%d",
+                forward ? "forward" : "back",
+                vr->m_MagazineInteractionMagazineModelName.c_str(),
+                vr->m_MagazineInteractionWeaponId);
+            return;
+        }
+
+        const std::string command = "playvol \"" + prepared + "\" 1.000";
+        if (forward)
+        {
+            vr->m_MagazineInteractionSyntheticBoltForwardSample = prepared;
+            vr->m_MagazineInteractionSyntheticBoltForwardStarted = std::chrono::steady_clock::now();
+        }
+        else
+        {
+            vr->m_MagazineInteractionSyntheticBoltBackSample = prepared;
+            vr->m_MagazineInteractionSyntheticBoltBackStarted = std::chrono::steady_clock::now();
+        }
+        vr->m_Game->ClientCmd_Unrestricted(command.c_str());
+        if (forward)
+        {
+            vr->m_MagazineInteractionSyntheticBoltForwardSample.clear();
+            vr->m_MagazineInteractionSyntheticBoltForwardStarted = {};
+        }
+        else
+        {
+            vr->m_MagazineInteractionSyntheticBoltBackSample.clear();
+            vr->m_MagazineInteractionSyntheticBoltBackStarted = {};
+        }
+        Game::logMsg(
+            "[VR][MagazineInteraction][Audio] played synthetic bolt-%s sample=%s source=%s",
+            forward ? "forward" : "back",
+            prepared.c_str(),
+            ((forward && !vr->m_MagazineInteractionCapturedBoltForwardSample.empty()) ||
+                (!forward && !vr->m_MagazineInteractionCapturedBoltBackSample.empty()))
+            ? "captured"
+            : "fallback");
+    }
+
     const char* MagazineInteractionBlockedFireEmptySound(int weaponId)
     {
         const auto id = static_cast<C_WeaponCSBase::WeaponID>(weaponId);
@@ -985,6 +1157,42 @@ void VR::PublishMagazineInteractionBox(
     m_MagazineInteractionBoxValid = true;
 }
 
+void VR::PublishMagazineInteractionBoltBox(
+    const Vector& origin,
+    const Vector& axisX,
+    const Vector& axisY,
+    const Vector& axisZ,
+    const Vector& mins,
+    const Vector& maxs,
+    const Vector& pullAxisWorld,
+    uint32_t frameSeq,
+    int entityIndex,
+    int boneIndex,
+    const char* modelName)
+{
+    if (!m_MagazineInteractionEnabled && !m_MagazineBoxDebugEnabled)
+        return;
+
+    MagazineInteractionBoxSnapshot snapshot{};
+    snapshot.origin = origin;
+    snapshot.axisX = MagazineInteractionNormalizeAxis(axisX, Vector(1.0f, 0.0f, 0.0f));
+    snapshot.axisY = MagazineInteractionNormalizeAxis(axisY, Vector(0.0f, 1.0f, 0.0f));
+    snapshot.axisZ = MagazineInteractionNormalizeAxis(axisZ, Vector(0.0f, 0.0f, 1.0f));
+    snapshot.pullAxisWorld = MagazineInteractionNormalizeAxis(pullAxisWorld, Vector(0.0f, 0.0f, 0.0f));
+    snapshot.mins = mins;
+    snapshot.maxs = maxs;
+    snapshot.frameSeq = frameSeq;
+    snapshot.entityIndex = entityIndex;
+    snapshot.boneIndex = boneIndex;
+    snapshot.modelName = modelName ? modelName : "";
+    snapshot.publishedAt = std::chrono::steady_clock::now();
+
+    std::lock_guard<std::mutex> lock(m_MagazineInteractionBoltBoxMutex);
+    snapshot.publishSeq = ++m_MagazineInteractionBoltPublishSeq;
+    m_MagazineInteractionBoltBox = snapshot;
+    m_MagazineInteractionBoltBoxValid = true;
+}
+
 bool VR::GetMagazineInteractionBox(MagazineInteractionBoxSnapshot& outSnapshot) const
 {
     std::lock_guard<std::mutex> lock(m_MagazineInteractionBoxMutex);
@@ -994,11 +1202,22 @@ bool VR::GetMagazineInteractionBox(MagazineInteractionBoxSnapshot& outSnapshot) 
     return true;
 }
 
+bool VR::GetMagazineInteractionBoltBox(MagazineInteractionBoxSnapshot& outSnapshot) const
+{
+    std::lock_guard<std::mutex> lock(m_MagazineInteractionBoltBoxMutex);
+    if (!m_MagazineInteractionBoltBoxValid)
+        return false;
+    outSnapshot = m_MagazineInteractionBoltBox;
+    return true;
+}
+
 bool VR::IsMagazineInteractionLeftHandActive() const
 {
     return m_MagazineInteractionState == MagazineInteractionManualState::HoldingOldMagazine ||
         m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine ||
         m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBackendReload ||
+        m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBoltGrab ||
+        m_MagazineInteractionState == MagazineInteractionManualState::HoldingBolt ||
         m_MagazineInteractionSuppressLeftInputUntilRelease ||
         m_MagazineInteractionLeftHandHolding;
 }
@@ -1074,8 +1293,7 @@ bool VR::ShouldSuppressMagazineInteractionEmptyClipAutoReload(C_BasePlayer* loca
 
 bool VR::IsMagazineInteractionBlockingFire() const
 {
-    return IsMagazineInteractionManualActive() &&
-        m_MagazineInteractionState != MagazineInteractionManualState::WaitingForBackendReload;
+    return IsMagazineInteractionManualActive();
 }
 
 void VR::PlayMagazineInteractionBlockedFireEmptySound()
@@ -1145,7 +1363,9 @@ bool VR::ShouldFreezeMagazineInteractionViewmodel() const
     return m_MagazineInteractionState == MagazineInteractionManualState::HoldingOldMagazine ||
         m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
         m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine ||
-        m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBackendReload;
+        m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBackendReload ||
+        m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBoltGrab ||
+        m_MagazineInteractionState == MagazineInteractionManualState::HoldingBolt;
 }
 
 bool VR::ShouldHideMagazineInteractionNativeClip() const
@@ -1171,6 +1391,21 @@ bool VR::GetMagazineInteractionDetachedMagazineWorld(VrHandMatrix4& outWorld) co
     return MagazineInteractionMatrixLooksRenderable(outWorld);
 }
 
+bool VR::ShouldMoveMagazineInteractionBolt() const
+{
+    return m_MagazineInteractionState == MagazineInteractionManualState::HoldingBolt &&
+        m_MagazineInteractionBoltRestValid &&
+        MagazineInteractionMatrixLooksRenderable(m_MagazineInteractionBoltWorld);
+}
+
+bool VR::GetMagazineInteractionBoltWorld(VrHandMatrix4& outWorld) const
+{
+    if (!ShouldMoveMagazineInteractionBolt())
+        return false;
+    outWorld = m_MagazineInteractionBoltWorld;
+    return MagazineInteractionMatrixLooksRenderable(outWorld);
+}
+
 void VR::CancelMagazineInteractionManual()
 {
     const bool wasActive = IsMagazineInteractionManualActive() || m_MagazineInteractionLeftHandHolding;
@@ -1188,21 +1423,42 @@ void VR::CancelMagazineInteractionManual()
     m_MagazineInteractionViewmodelEntityIndex = -1;
     m_MagazineInteractionMagazineModelName.clear();
     m_MagazineInteractionSocketValid = false;
+    m_MagazineInteractionBoltRestValid = false;
     m_MagazineInteractionSocketWorld = {};
+    m_MagazineInteractionBoltRestWorld = {};
+    m_MagazineInteractionBoltWorld = {};
     m_MagazineInteractionControllerToMagazine = {};
     {
         std::lock_guard<std::mutex> lock(m_MagazineInteractionPoseMutex);
         m_MagazineInteractionDetachedMagazineWorld = {};
     }
+    m_MagazineInteractionBoltRestBox = {};
+    m_MagazineInteractionBoltPullAxisWorld = {};
     m_MagazineInteractionGrabStartLeftControllerPosAbs = {};
     m_MagazineInteractionHeldMagazineCenterOffsetLocal = {};
+    m_MagazineInteractionBoltGrabStartLeftControllerPosAbs = {};
+    m_MagazineInteractionBoltGrabStartPullDistance = 0.0f;
+    m_MagazineInteractionBoltPullDistance = 0.0f;
+    m_MagazineInteractionBoltMaxPullDistance = 0.0f;
+    m_MagazineInteractionBoltReachedRear = false;
+    m_MagazineInteractionBoltPullAxisSignLocked = false;
     m_MagazineInteractionStarted = {};
     m_MagazineInteractionFreshGrabbedAt = {};
     m_MagazineInteractionPostInsertStarted = {};
+    m_MagazineInteractionBoltStageStarted = {};
+    m_MagazineInteractionBoltGrabbedAt = {};
     m_MagazineInteractionSyntheticClipOutSample.clear();
     m_MagazineInteractionSyntheticClipOutStarted = {};
     m_MagazineInteractionSyntheticClipInSample.clear();
     m_MagazineInteractionSyntheticClipInStarted = {};
+    m_MagazineInteractionSyntheticBoltBackSample.clear();
+    m_MagazineInteractionSyntheticBoltBackStarted = {};
+    m_MagazineInteractionSyntheticBoltForwardSample.clear();
+    m_MagazineInteractionSyntheticBoltForwardStarted = {};
+    m_MagazineInteractionCapturedBoltBackSample.clear();
+    m_MagazineInteractionCapturedBoltForwardSample.clear();
+    m_MagazineInteractionCapturedBoltBackSoundScore = -1;
+    m_MagazineInteractionCapturedBoltForwardSoundScore = -1;
     m_MagazineInteractionEmptyFireSoundLastPlayed = {};
     m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
     if (wasActive)
@@ -1334,6 +1590,154 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
 
         m_MagazineInteractionSocketBox = box;
         m_MagazineInteractionSocketWorld = boxWorld;
+    };
+
+    auto setBoltPullDistance = [&](float pullDistance)
+    {
+        const float maxPull = std::max(
+            0.0f,
+            std::max(m_MagazineInteractionBoltMaxPullDistance,
+                m_MagazineInteractionBoltPullDistanceMeters * m_VRScale));
+        m_MagazineInteractionBoltPullDistance = std::clamp(pullDistance, 0.0f, maxPull);
+        if (!m_MagazineInteractionBoltRestValid ||
+            !MagazineInteractionMatrixLooksRenderable(m_MagazineInteractionBoltRestWorld))
+        {
+            m_MagazineInteractionBoltWorld = {};
+            return;
+        }
+
+        Vector axis = VrHandMath::Normalize(m_MagazineInteractionBoltPullAxisWorld);
+        if (axis.Length() <= 0.0001f)
+            axis = MagazineInteractionBuildBoltPullAxisWorld(this, m_MagazineInteractionBoltRestBox, m_MagazineInteractionBoltRestWorld);
+        m_MagazineInteractionBoltPullAxisWorld = axis;
+
+        const Vector restOrigin = MagazineInteractionMatrixOrigin(m_MagazineInteractionBoltRestWorld);
+        m_MagazineInteractionBoltWorld = MagazineInteractionMatrixWithOrigin(
+            m_MagazineInteractionBoltRestWorld,
+            restOrigin + axis * m_MagazineInteractionBoltPullDistance);
+    };
+
+    auto getFreshBoltBoxForActiveViewmodel = [&](MagazineInteractionBoxSnapshot& box) -> bool
+    {
+        if (!GetMagazineInteractionBoltBox(box))
+            return false;
+
+        const float ageSeconds = std::chrono::duration<float>(now - box.publishedAt).count();
+        if (ageSeconds > std::max(0.02f, m_MagazineInteractionStaleSeconds))
+            return false;
+        if (m_MagazineInteractionViewmodelEntityIndex >= 0 &&
+            box.entityIndex != m_MagazineInteractionViewmodelEntityIndex)
+        {
+            return false;
+        }
+        if (!m_MagazineInteractionMagazineModelName.empty() &&
+            !box.modelName.empty() &&
+            box.modelName != m_MagazineInteractionMagazineModelName)
+        {
+            return false;
+        }
+        return MagazineInteractionMatrixLooksRenderable(MagazineInteractionBuildBoxWorld(box));
+    };
+
+    auto refreshBoltFromPublishedViewmodelBox = [&]()
+    {
+        if (!m_MagazineInteractionBoltRestValid)
+            return;
+
+        MagazineInteractionBoxSnapshot box{};
+        if (!getFreshBoltBoxForActiveViewmodel(box))
+            return;
+
+        const VrHandMatrix4 boxWorld = MagazineInteractionBuildBoxWorld(box);
+        if (!MagazineInteractionMatrixLooksRenderable(boxWorld))
+            return;
+
+        m_MagazineInteractionBoltRestBox = box;
+        m_MagazineInteractionBoltRestWorld = boxWorld;
+        m_MagazineInteractionBoltPullAxisWorld =
+            MagazineInteractionBuildBoltPullAxisWorld(this, m_MagazineInteractionBoltRestBox, m_MagazineInteractionBoltRestWorld);
+        setBoltPullDistance(m_MagazineInteractionBoltPullDistance);
+    };
+
+    auto beginBoltStage = [&](C_WeaponCSBase::WeaponID weaponId, const char* reason) -> bool
+    {
+        if (!MagazineInteractionWeaponRequiresManualBolt(weaponId))
+            return false;
+
+        MagazineInteractionBoxSnapshot boltBox{};
+        if (!getFreshBoltBoxForActiveViewmodel(boltBox))
+        {
+            Game::logMsg(
+                "[VR][MagazineInteraction] cannot start bolt stage: no fresh bolt/slide box weaponId=%d model=%s reason=%s",
+                static_cast<int>(weaponId),
+                m_MagazineInteractionMagazineModelName.c_str(),
+                reason ? reason : "unknown");
+            return false;
+        }
+
+        const float requiredPull = std::max(0.0f, m_MagazineInteractionBoltPullDistanceMeters) * m_VRScale;
+        if (requiredPull <= 0.001f)
+        {
+            Game::logMsg(
+                "[VR][MagazineInteraction] skipped bolt stage because pull distance is disabled weaponId=%d reason=%s",
+                static_cast<int>(weaponId),
+                reason ? reason : "unknown");
+            return false;
+        }
+
+        m_MagazineInteractionState = MagazineInteractionManualState::WaitingForBoltGrab;
+        m_MagazineInteractionLeftHandHolding = false;
+        m_MagazineInteractionBoltRestBox = boltBox;
+        m_MagazineInteractionBoltRestValid = true;
+        m_MagazineInteractionBoltRestWorld = MagazineInteractionBuildBoxWorld(boltBox);
+        m_MagazineInteractionBoltPullAxisWorld =
+            MagazineInteractionBuildBoltPullAxisWorld(this, m_MagazineInteractionBoltRestBox, m_MagazineInteractionBoltRestWorld);
+        m_MagazineInteractionBoltGrabStartLeftControllerPosAbs = {};
+        m_MagazineInteractionBoltGrabStartPullDistance = 0.0f;
+        m_MagazineInteractionBoltPullDistance = 0.0f;
+        m_MagazineInteractionBoltMaxPullDistance = requiredPull;
+        m_MagazineInteractionBoltReachedRear = false;
+        m_MagazineInteractionBoltPullAxisSignLocked = false;
+        m_MagazineInteractionBoltStageStarted = now;
+        m_MagazineInteractionBoltGrabbedAt = {};
+        setBoltPullDistance(0.0f);
+        m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
+        const Vector boltBoxOffsetMeters =
+            (m_VRScale > 0.001f)
+            ? ((boltBox.mins + boltBox.maxs) * (0.5f / m_VRScale))
+            : Vector(0.0f, 0.0f, 0.0f);
+        Game::logMsg(
+            "[VR][MagazineInteraction] backend reload complete; bolt stage armed weaponId=%d ent=%d bone=%d pull=%.2f return=%.2f axis=(%.2f %.2f %.2f) boxOffsetMeters=(%.3f %.3f %.3f) model=%s reason=%s",
+            static_cast<int>(weaponId),
+            boltBox.entityIndex,
+            boltBox.boneIndex,
+            requiredPull,
+            std::max(0.0f, m_MagazineInteractionBoltReturnDistanceMeters) * m_VRScale,
+            m_MagazineInteractionBoltPullAxisWorld.x,
+            m_MagazineInteractionBoltPullAxisWorld.y,
+            m_MagazineInteractionBoltPullAxisWorld.z,
+            boltBoxOffsetMeters.x,
+            boltBoxOffsetMeters.y,
+            boltBoxOffsetMeters.z,
+            boltBox.modelName.c_str(),
+            reason ? reason : "unknown");
+        return true;
+    };
+
+    auto completeBoltStage = [&](const char* reason, bool suppressLeftInputUntilRelease)
+    {
+        setBoltPullDistance(0.0f);
+        MagazineInteractionPlayBoltSound(this, true);
+        TriggerPhysicalHandHapticPulse(true, 0.030f, 95.0f, 0.45f, 2);
+        Game::logMsg(
+            "[VR][MagazineInteraction] bolt returned to battery; physical reload complete reason=%s",
+            reason ? reason : "unknown");
+        CancelMagazineInteractionManual();
+        if (suppressLeftInputUntilRelease)
+        {
+            m_MagazineInteractionSuppressLeftInputUntilRelease = true;
+            Game::logMsg("[VR][MagazineInteraction] bolt completed while left grip is still held; suppressing normal reload until release");
+        }
     };
 
     auto detachedMagazineFitsSocket = [&]() -> bool
@@ -1537,22 +1941,172 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             (maxClip > 0 && activeClip >= maxClip && activeClip != m_MagazineInteractionStartClip);
         if ((elapsed >= 0.20f && clipUpdated) || elapsed >= 3.0f)
         {
-            const bool suppressLeftInputUntilRelease = leftGripDown;
             Game::logMsg(
-                "[VR][MagazineInteraction] native reload animation skipped; backend reload wait complete elapsed=%.3fs clip=%d startClip=%d max=%d updated=%d",
+                "[VR][MagazineInteraction] native reload animation skipped; backend reload wait complete elapsed=%.3fs clip=%d startClip=%d max=%d updated=%d; entering bolt stage",
                 elapsed,
                 activeClip,
                 m_MagazineInteractionStartClip,
                 maxClip,
                 clipUpdated ? 1 : 0);
-            CancelMagazineInteractionManual();
-            if (suppressLeftInputUntilRelease)
+
+            if (!beginBoltStage(activeWeaponId, clipUpdated ? "clip-updated" : "backend-timeout"))
             {
-                m_MagazineInteractionSuppressLeftInputUntilRelease = true;
-                Game::logMsg("[VR][MagazineInteraction] backend reload complete while left grip is still held; suppressing normal reload until release");
+                const bool suppressLeftInputUntilRelease = leftGripDown;
+                CancelMagazineInteractionManual();
+                if (suppressLeftInputUntilRelease)
+                {
+                    m_MagazineInteractionSuppressLeftInputUntilRelease = true;
+                    Game::logMsg("[VR][MagazineInteraction] backend reload complete while left grip is still held; suppressing normal reload until release");
+                }
             }
         }
         return reloadCommandPending();
+    }
+
+    if (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBoltGrab)
+    {
+        refreshBoltFromPublishedViewmodelBox();
+        m_MagazineInteractionLeftHandHolding = false;
+        m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
+        setBoltPullDistance(0.0f);
+
+        if (!m_MagazineInteractionBoltRestValid)
+        {
+            const float elapsed = std::chrono::duration<float>(now - m_MagazineInteractionBoltStageStarted).count();
+            if (elapsed >= 2.0f)
+            {
+                Game::logMsg("[VR][MagazineInteraction] bolt stage lost rest pose; completing reload without physical bolt after %.3fs", elapsed);
+                const bool suppressLeftInputUntilRelease = leftGripDown;
+                CancelMagazineInteractionManual();
+                if (suppressLeftInputUntilRelease)
+                    m_MagazineInteractionSuppressLeftInputUntilRelease = true;
+            }
+            return false;
+        }
+
+        if (leftGripDown)
+        {
+            const float grabDistance = MagazineInteractionNearestLeftHandProbeDistanceSourceUnits(
+                m_MagazineInteractionBoltRestBox,
+                m_LeftControllerPosAbs,
+                m_LeftControllerAngAbs,
+                m_VRScale);
+            const float grabRange = std::max(0.0f, m_MagazineInteractionBoltGrabPaddingMeters) * m_VRScale;
+            if (grabDistance <= grabRange)
+            {
+                m_MagazineInteractionState = MagazineInteractionManualState::HoldingBolt;
+                m_MagazineInteractionLeftHandHolding = true;
+                m_MagazineInteractionBoltGrabStartLeftControllerPosAbs = m_LeftControllerPosAbs;
+                m_MagazineInteractionBoltGrabStartPullDistance = m_MagazineInteractionBoltPullDistance;
+                m_MagazineInteractionBoltGrabbedAt = now;
+                m_MagazineInteractionBoltPullAxisSignLocked = false;
+                m_MagazineInteractionLeftHandPoseActive.store(1, std::memory_order_relaxed);
+                Game::logMsg(
+                    "[VR][MagazineInteraction] bolt grabbed distance=%.2f range=%.2f pull=%.2f axis=(%.2f %.2f %.2f) model=%s",
+                    grabDistance,
+                    grabRange,
+                    m_MagazineInteractionBoltMaxPullDistance,
+                    m_MagazineInteractionBoltPullAxisWorld.x,
+                    m_MagazineInteractionBoltPullAxisWorld.y,
+                    m_MagazineInteractionBoltPullAxisWorld.z,
+                    m_MagazineInteractionBoltRestBox.modelName.c_str());
+            }
+            else if (leftGripJustPressed)
+            {
+                Game::logMsg(
+                    "[VR][MagazineInteraction] bolt grab ignored; left hand outside bolt box distance=%.2f range=%.2f ent=%d bone=%d model=%s",
+                    grabDistance,
+                    grabRange,
+                    m_MagazineInteractionBoltRestBox.entityIndex,
+                    m_MagazineInteractionBoltRestBox.boneIndex,
+                    m_MagazineInteractionBoltRestBox.modelName.c_str());
+            }
+        }
+        return false;
+    }
+
+    if (m_MagazineInteractionState == MagazineInteractionManualState::HoldingBolt)
+    {
+        if (!m_MagazineInteractionBoltRestValid ||
+            !MagazineInteractionMatrixLooksRenderable(m_MagazineInteractionBoltRestWorld))
+        {
+            Game::logMsg("[VR][MagazineInteraction] bolt hold lost rest pose; canceling bolt hold");
+            m_MagazineInteractionState = MagazineInteractionManualState::WaitingForBoltGrab;
+            m_MagazineInteractionLeftHandHolding = false;
+            m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
+            return false;
+        }
+
+        const float requiredPull = std::max(0.001f, m_MagazineInteractionBoltMaxPullDistance);
+        const float returnDistance = std::clamp(
+            m_MagazineInteractionBoltReturnDistanceMeters * m_VRScale,
+            0.0f,
+            requiredPull);
+
+        if (!leftGripDown)
+        {
+            if (m_MagazineInteractionBoltReachedRear)
+            {
+                completeBoltStage("released-after-rear", false);
+            }
+            else
+            {
+                setBoltPullDistance(0.0f);
+                m_MagazineInteractionState = MagazineInteractionManualState::WaitingForBoltGrab;
+                m_MagazineInteractionLeftHandHolding = false;
+                m_MagazineInteractionBoltGrabbedAt = {};
+                m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
+                Game::logMsg("[VR][MagazineInteraction] bolt released before rear threshold; bolt returned to rest");
+            }
+            return false;
+        }
+
+        Vector axis = VrHandMath::Normalize(m_MagazineInteractionBoltPullAxisWorld);
+        const Vector handDelta = m_LeftControllerPosAbs - m_MagazineInteractionBoltGrabStartLeftControllerPosAbs;
+        float handPullDistance = VrHandMath::Dot(handDelta, axis);
+        if (!m_MagazineInteractionBoltPullAxisSignLocked)
+        {
+            const float signLockDistance = std::max(0.10f, 0.006f * m_VRScale);
+            if (std::fabs(handPullDistance) >= signLockDistance)
+            {
+                if (handPullDistance < 0.0f)
+                {
+                    axis = axis * -1.0f;
+                    m_MagazineInteractionBoltPullAxisWorld = axis;
+                    handPullDistance = -handPullDistance;
+                }
+                m_MagazineInteractionBoltPullAxisSignLocked = true;
+                Game::logMsg(
+                    "[VR][MagazineInteraction] bolt pull axis sign locked axis=(%.2f %.2f %.2f) firstProjected=%.2f",
+                    axis.x,
+                    axis.y,
+                    axis.z,
+                    handPullDistance);
+            }
+        }
+        const float desiredPull = m_MagazineInteractionBoltGrabStartPullDistance + handPullDistance;
+        setBoltPullDistance(desiredPull);
+        m_MagazineInteractionLeftHandPoseActive.store(1, std::memory_order_relaxed);
+
+        if (!m_MagazineInteractionBoltReachedRear &&
+            m_MagazineInteractionBoltPullDistance >= requiredPull)
+        {
+            m_MagazineInteractionBoltReachedRear = true;
+            MagazineInteractionPlayBoltSound(this, false);
+            TriggerPhysicalHandHapticPulse(true, 0.024f, 110.0f, 0.38f, 2);
+            Game::logMsg(
+                "[VR][MagazineInteraction] bolt rear threshold reached pull=%.2f required=%.2f handProjected=%.2f",
+                m_MagazineInteractionBoltPullDistance,
+                requiredPull,
+                handPullDistance);
+        }
+
+        if (m_MagazineInteractionBoltReachedRear &&
+            m_MagazineInteractionBoltPullDistance <= returnDistance)
+        {
+            completeBoltStage("returned-to-battery", leftGripDown);
+        }
+        return false;
     }
 
     if (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine)
@@ -1930,21 +2484,39 @@ bool VR::DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass 
     }
     if (m_MagazineBoxDebugEnabled)
     {
-        MagazineInteractionBoxSnapshot debugBox{};
-        if (GetMagazineInteractionBox(debugBox))
-        {
-            const float ageSeconds = std::chrono::duration<float>(
-                std::chrono::steady_clock::now() - debugBox.publishedAt).count();
-            if (ageSeconds <= std::max(0.02f, m_MagazineInteractionStaleSeconds))
+        auto tryUseCurrentDebugBox = [&](const MagazineInteractionBoxSnapshot& debugBox)
             {
+                const float ageSeconds = std::chrono::duration<float>(
+                    std::chrono::steady_clock::now() - debugBox.publishedAt).count();
+                if (ageSeconds > std::max(0.02f, m_MagazineInteractionStaleSeconds))
+                    return false;
+
                 currentMagazineBoxWorld = MagazineInteractionBuildBoxWorld(debugBox);
-                if (MagazineInteractionMatrixLooksRenderable(currentMagazineBoxWorld))
-                {
-                    currentMagazineBoxWorldPtr = &currentMagazineBoxWorld;
-                    currentMagazineBoxMins = debugBox.mins;
-                    currentMagazineBoxMaxs = debugBox.maxs;
-                }
-            }
+                if (!MagazineInteractionMatrixLooksRenderable(currentMagazineBoxWorld))
+                    return false;
+
+                currentMagazineBoxWorldPtr = &currentMagazineBoxWorld;
+                currentMagazineBoxMins = debugBox.mins;
+                currentMagazineBoxMaxs = debugBox.maxs;
+                return true;
+            };
+
+        const bool preferBoltBox =
+            m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBoltGrab ||
+            m_MagazineInteractionState == MagazineInteractionManualState::HoldingBolt;
+
+        bool usedCurrentDebugBox = false;
+        if (preferBoltBox)
+        {
+            MagazineInteractionBoxSnapshot boltDebugBox{};
+            usedCurrentDebugBox = GetMagazineInteractionBoltBox(boltDebugBox) &&
+                tryUseCurrentDebugBox(boltDebugBox);
+        }
+        if (!usedCurrentDebugBox)
+        {
+            MagazineInteractionBoxSnapshot debugBox{};
+            if (GetMagazineInteractionBox(debugBox))
+                tryUseCurrentDebugBox(debugBox);
         }
     }
     const Vector currentViewmodelPosition = GetRecommendedViewmodelAbsPos();
@@ -2571,10 +3143,14 @@ bool VR::CaptureMagazineInteractionSound(int entityIndex, const char* sample, fl
         m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine;
     const bool removingOldMagazine =
         m_MagazineInteractionState == MagazineInteractionManualState::HoldingOldMagazine;
+    const bool waitingForBoltAction =
+        m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBoltGrab ||
+        m_MagazineInteractionState == MagazineInteractionManualState::HoldingBolt;
     const bool suppressingNativeReload =
         removingOldMagazine ||
         waitingForInsertTail ||
-        m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBackendReload;
+        m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBackendReload ||
+        waitingForBoltAction;
     if (!sample || !*sample || !m_Game || !m_MagazineInteractionReloadTriggered ||
         !suppressingNativeReload)
     {
@@ -2614,6 +3190,28 @@ bool VR::CaptureMagazineInteractionSound(int entityIndex, const char* sample, fl
             sample);
         return false;
     }
+    if (MagazineInteractionShouldLetSyntheticSoundPlay(
+        m_MagazineInteractionSyntheticBoltBackSample,
+        m_MagazineInteractionSyntheticBoltBackStarted,
+        sample,
+        now))
+    {
+        Game::logMsg(
+            "[VR][MagazineInteraction][Audio] let synthetic bolt-back play sample=%s",
+            sample);
+        return false;
+    }
+    if (MagazineInteractionShouldLetSyntheticSoundPlay(
+        m_MagazineInteractionSyntheticBoltForwardSample,
+        m_MagazineInteractionSyntheticBoltForwardStarted,
+        sample,
+        now))
+    {
+        Game::logMsg(
+            "[VR][MagazineInteraction][Audio] let synthetic bolt-forward play sample=%s",
+            sample);
+        return false;
+    }
 
     if (!ManualReloadSoundLooksWeaponRelated(sample) &&
         !ManualReloadSoundStartsInsertTail(sample) &&
@@ -2631,6 +3229,34 @@ bool VR::CaptureMagazineInteractionSound(int entityIndex, const char* sample, fl
             sample,
             static_cast<int>(m_MagazineInteractionState));
         return true;
+    }
+
+    const ManualReloadDelayedSoundStage delayedStage = ManualReloadClassifyDelayedSound(sample);
+    if (delayedStage == ManualReloadDelayedSoundStage::SlideBack)
+    {
+        const int score = ManualReloadSoundSpecificityScore(sample);
+        if (score >= m_MagazineInteractionCapturedBoltBackSoundScore)
+        {
+            m_MagazineInteractionCapturedBoltBackSample = sample;
+            m_MagazineInteractionCapturedBoltBackSoundScore = score;
+            Game::logMsg(
+                "[VR][MagazineInteraction][Audio] captured native bolt-back sample score=%d sample=%s",
+                score,
+                sample);
+        }
+    }
+    else if (delayedStage == ManualReloadDelayedSoundStage::SlideForward)
+    {
+        const int score = ManualReloadSoundSpecificityScore(sample);
+        if (score >= m_MagazineInteractionCapturedBoltForwardSoundScore)
+        {
+            m_MagazineInteractionCapturedBoltForwardSample = sample;
+            m_MagazineInteractionCapturedBoltForwardSoundScore = score;
+            Game::logMsg(
+                "[VR][MagazineInteraction][Audio] captured native bolt-forward sample score=%d sample=%s",
+                score,
+                sample);
+        }
     }
 
     Game::logMsg(
