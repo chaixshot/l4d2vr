@@ -7,6 +7,7 @@
 #include "vector.h"
 
 #include <array>
+#include <cstdint>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -97,7 +98,12 @@ private:
         const VrHandMatrix4* world,
         bool useViewmodelLayer,
         VrHandDrawPass drawPass);
-    bool EnsureStandaloneMagazineBoxLoaded(const Vector& mins, const Vector& maxs, bool debugLog);
+    bool EnsureStandaloneMagazineBoxLoaded(
+        const Vector& mins,
+        const Vector& maxs,
+        std::uint32_t fallbackColorArgb,
+        const char* debugName,
+        bool debugLog);
     bool DrawStandaloneMagazineBox(
         IDirect3DDevice9* device,
         const CViewSetup& view,
@@ -105,6 +111,8 @@ private:
         const VrHandMatrix4* world,
         const Vector& mins,
         const Vector& maxs,
+        std::uint32_t fallbackColorArgb,
+        const char* debugName,
         bool useViewmodelLayer,
         VrHandDrawPass drawPass);
     void UpdatePoses(

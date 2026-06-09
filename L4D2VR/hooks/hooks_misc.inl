@@ -1188,6 +1188,133 @@ namespace
         return bestBone;
     }
 
+    inline bool MagazineInteractionWeaponIdIsShotgun(int weaponId)
+    {
+        return weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::PUMPSHOTGUN) ||
+            weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::SHOTGUN_CHROME) ||
+            weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::AUTOSHOTGUN) ||
+            weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::SPAS);
+    }
+
+    inline bool MagazineInteractionWeaponIdIsHandgun(int weaponId)
+    {
+        return weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::PISTOL) ||
+            weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::MAGNUM);
+    }
+
+    inline int ScoreMagazineInteractionShotgunShellBoneName(const std::string& rawName)
+    {
+        const std::string name = vr_vm_stabilize::ToLowerAscii(rawName);
+        if (name.empty())
+            return 0;
+
+        if (ManualReloadNameContains(name, "finger") ||
+            ManualReloadNameContains(name, "hand") ||
+            ManualReloadNameContains(name, "bip01") ||
+            ManualReloadNameContains(name, "attach") ||
+            ManualReloadNameContains(name, "muzzle") ||
+            ManualReloadNameContains(name, "eject") ||
+            ManualReloadNameContains(name, "release") ||
+            ManualReloadNameContains(name, "realease") ||
+            ManualReloadNameContains(name, "magrel") ||
+            ManualReloadNameContains(name, "button") ||
+            ManualReloadNameContains(name, "trigger") ||
+            ManualReloadNameContains(name, "safety") ||
+            ManualReloadNameContains(name, "bolt") ||
+            ManualReloadNameContains(name, "slide") ||
+            ManualReloadNameContains(name, "charger") ||
+            ManualReloadNameContains(name, "handle") ||
+            ManualReloadNameContains(name, "barrel") ||
+            ManualReloadNameContains(name, "stock") ||
+            ManualReloadNameContains(name, "hammer"))
+        {
+            return 0;
+        }
+
+        const bool hasWeapon = ManualReloadNameContains(name, "weapon");
+        const bool hasClip = ManualReloadNameContains(name, "clip");
+        const bool hasBullet = ManualReloadNameContains(name, "bullet");
+        const bool hasRound = ManualReloadNameContains(name, "round");
+        const bool hasShell = ManualReloadNameContains(name, "shell");
+        const bool hasAmmo = ManualReloadNameContains(name, "ammo");
+        if (!hasClip && !hasBullet && !hasRound && !hasShell && !hasAmmo)
+            return 0;
+
+        int score = 300;
+        if (name == "valvebiped.weapon_clip_bullets" ||
+            name == "weapon_clip_bullets")
+        {
+            score += 3200;
+        }
+        else if (name == "valvebiped.weapon_clip" ||
+            name == "weapon_clip")
+        {
+            score += 3000;
+        }
+        else if (ManualReloadNameContains(name, "weapon_clip"))
+        {
+            score += 2600;
+        }
+        else if (hasClip)
+        {
+            score += 1800;
+        }
+
+        if (hasWeapon)
+            score += 550;
+        if (hasBullet || hasRound || hasShell)
+            score += 350;
+        if (hasAmmo)
+            score += 120;
+        return score;
+    }
+
+    inline int FindMagazineInteractionShotgunShellBone(
+        const std::string& modelName,
+        const std::vector<std::string>& boneNames)
+    {
+        int bestBone = -1;
+        int bestScore = 0;
+        for (int bone = 0; bone < static_cast<int>(boneNames.size()); ++bone)
+        {
+            const int score = ScoreMagazineInteractionShotgunShellBoneName(boneNames[static_cast<size_t>(bone)]);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestBone = bone;
+            }
+        }
+
+        if (bestBone >= 0)
+        {
+            static std::mutex s_logMutex;
+            static std::unordered_map<std::string, int> s_loggedBoneByModel;
+            std::lock_guard<std::mutex> lock(s_logMutex);
+            auto it = s_loggedBoneByModel.find(modelName);
+            if (it == s_loggedBoneByModel.end() || it->second != bestBone)
+            {
+                s_loggedBoneByModel[modelName] = bestBone;
+                Game::logMsg(
+                    "[VR][MagazineBox] shotgun shell bone candidate model=%s bone=%d name=%s score=%d",
+                    modelName.c_str(),
+                    bestBone,
+                    boneNames[static_cast<size_t>(bestBone)].c_str(),
+                    bestScore);
+            }
+        }
+
+        return bestBone;
+    }
+
+    inline bool MagazineInteractionShotgunShellBoneUsesStockProfileAxes(const std::string& lowerName)
+    {
+        return lowerName == "valvebiped.weapon_clip_bullets" ||
+            lowerName == "weapon_clip_bullets" ||
+            lowerName == "valvebiped.weapon_clip" ||
+            lowerName == "weapon_clip" ||
+            ManualReloadNameContains(lowerName, "weapon_clip");
+    }
+
     inline int FindMagazineBoxLegacyClipBone(const std::vector<std::string>& boneNames)
     {
         for (int bone = 0; bone < static_cast<int>(boneNames.size()); ++bone)
@@ -1314,11 +1441,37 @@ namespace
         return -1;
     }
 
-    inline int ScoreMagazineInteractionBoltBoneName(const std::string& rawName)
+    inline int ScoreMagazineInteractionBoltBoneName(const std::string& rawName, int weaponId)
     {
         const std::string name = vr_vm_stabilize::ToLowerAscii(rawName);
         if (name.empty())
             return 0;
+
+        if (MagazineInteractionWeaponIdIsShotgun(weaponId) &&
+            (name == "weapon_charger_slide" ||
+                name == "valvebiped.weapon_charger_slide"))
+        {
+            return 5600;
+        }
+
+        if (MagazineInteractionWeaponIdIsHandgun(weaponId) &&
+            (name == "weapon_charger_slide" ||
+                name == "valvebiped.weapon_charger_slide" ||
+                name == "weapon_slide" ||
+                name == "valvebiped.weapon_slide" ||
+                name == "v_weapon.slide" ||
+                name == "v_weapon_slide" ||
+                name == "slide"))
+        {
+            return 5600;
+        }
+
+        if (MagazineInteractionWeaponIdIsHandgun(weaponId) &&
+            ManualReloadNameContains(name, "slide") &&
+            (ManualReloadNameContains(name, "weapon") || name == "slide"))
+        {
+            return 5200;
+        }
 
         if (ManualReloadNameContains(name, "finger") ||
             ManualReloadNameContains(name, "hand") ||
@@ -1396,6 +1549,7 @@ namespace
     }
 
     inline int FindMagazineInteractionBoltBone(
+        int weaponId,
         const std::string& modelName,
         const std::vector<std::string>& boneNames)
     {
@@ -1403,7 +1557,9 @@ namespace
         int bestScore = 0;
         for (int bone = 0; bone < static_cast<int>(boneNames.size()); ++bone)
         {
-            const int score = ScoreMagazineInteractionBoltBoneName(boneNames[static_cast<size_t>(bone)]);
+            const int score = ScoreMagazineInteractionBoltBoneName(
+                boneNames[static_cast<size_t>(bone)],
+                weaponId);
             if (score > bestScore)
             {
                 bestScore = score;
@@ -1421,8 +1577,9 @@ namespace
             {
                 s_loggedBoneByModel[modelName] = bestBone;
                 Game::logMsg(
-                    "[VR][MagazineBolt] name candidate model=%s bone=%d name=%s score=%d",
+                    "[VR][MagazineBolt] name candidate model=%s weaponId=%d bone=%d name=%s score=%d",
                     modelName.c_str(),
+                    weaponId,
                     bestBone,
                     boneNames[static_cast<size_t>(bestBone)].c_str(),
                     bestScore);
@@ -2521,6 +2678,8 @@ namespace
             modelName,
             boneNames,
             configuredMagazineBoneName);
+        if (magazineBone < 0 && MagazineInteractionWeaponIdIsShotgun(magazineInteractionWeaponId))
+            magazineBone = FindMagazineInteractionShotgunShellBone(lowerModel, boneNames);
         if (magazineBone < 0)
             magazineBone = FindMagazineBoxBone(boneNames);
         if (magazineBone < 0)
@@ -2539,7 +2698,9 @@ namespace
             : std::string();
         const std::string lowerMagazineBoneName = vr_vm_stabilize::ToLowerAscii(magazineBoneName);
         const bool magazineBoneUsesStockProfileAxes =
-            ManualReloadNameIsLegacyValveBipedClip(lowerMagazineBoneName);
+            ManualReloadNameIsLegacyValveBipedClip(lowerMagazineBoneName) ||
+            (MagazineInteractionWeaponIdIsShotgun(magazineInteractionWeaponId) &&
+                MagazineInteractionShotgunShellBoneUsesStockProfileAxes(lowerMagazineBoneName));
 
         const uint32_t frameSeq = vr->m_RenderFrameSeq.load(std::memory_order_relaxed);
         if (frameSeq != 0)
@@ -2671,7 +2832,7 @@ namespace
         const char* basisSource = "magazine-bone";
         const bool officialCustomMagazineBone =
             std::strcmp(boundsSource, "official") == 0 &&
-            !ManualReloadNameIsLegacyValveBipedClip(lowerMagazineBoneName);
+            !magazineBoneUsesStockProfileAxes;
         if (officialCustomMagazineBone)
         {
             const int directOffsetAnchorBone = FindMagazineBoxDirectOffsetAnchorBone(
@@ -2778,7 +2939,10 @@ namespace
             boneNames,
             configuredBoltBoneName);
         if (boltBone < 0)
-            boltBone = FindMagazineInteractionBoltBone(lowerModel, boneNames);
+            boltBone = FindMagazineInteractionBoltBone(
+                magazineInteractionWeaponId,
+                lowerModel,
+                boneNames);
         if (boltBone >= 0 && boltBone < numBones)
         {
             vr_vm_stabilize::Mat3x4 boltWorld{};

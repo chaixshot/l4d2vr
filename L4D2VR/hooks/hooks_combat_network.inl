@@ -1590,6 +1590,7 @@ int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 	if (to && m_VR)
 	{
 		constexpr int kMagazineInteractionInAttack = (1 << 0);
+		constexpr int kMagazineInteractionInReload = (1 << 13);
 		const bool manualReloadBlocksFire = m_VR->IsManualReloadBlockingFire();
 		const bool magazineInteractionBlocksFire = m_VR->IsMagazineInteractionBlockingFire();
 		if (manualReloadBlocksFire || magazineInteractionBlocksFire)
@@ -1598,14 +1599,18 @@ int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 				m_VR->PlayMagazineInteractionBlockedFireEmptySound();
 			to->buttons &= ~kMagazineInteractionInAttack; // IN_ATTACK
 		}
+		if (m_VR->IsMagazineInteractionLeftHandActive() &&
+			!m_VR->IsMagazineInteractionReloadCommandActive())
+		{
+			to->buttons &= ~kMagazineInteractionInReload; // IN_RELOAD
+		}
 		const bool suppressMagazineEmptyClipAutoReload =
 			m_VR->ShouldSuppressMagazineInteractionEmptyClipAutoReload(nullptr);
 		if (suppressMagazineEmptyClipAutoReload)
 		{
-			constexpr int kIN_RELOAD = (1 << 13);
 			if ((to->buttons & kMagazineInteractionInAttack) != 0)
 				m_VR->PlayMagazineInteractionBlockedFireEmptySound();
-			to->buttons &= ~(kMagazineInteractionInAttack | kIN_RELOAD);
+			to->buttons &= ~(kMagazineInteractionInAttack | kMagazineInteractionInReload);
 		}
 	}
 

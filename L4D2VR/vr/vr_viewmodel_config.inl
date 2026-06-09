@@ -633,6 +633,17 @@ void VR::ParseConfigFile()
     std::unordered_map<std::string, std::string> userConfig;
     size_t parsedEntryCount = 0;
 
+    auto configValueAllowsSemicolon = [&](std::string key)->bool
+        {
+            trim(key);
+            std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return std::tolower(c); });
+            return key == "magazineinteractionboltpullaxislocaloverrides" ||
+                key == "magazineinteractionsocketcaptureboxhalfextentsmetersoverrides" ||
+                key == "magazineinteractionsocketcaptureboxlocaloffsetmetersoverrides" ||
+                key == "magazineinteractionsocketcaptureboxlocalrotationoffsetdegoverrides" ||
+                key == "magazineinteractionsocketcaptureangledegoverrides";
+        };
+
     auto parseConfigPath = [&](const char* path)->bool
         {
             std::ifstream configStream(path);
@@ -646,10 +657,17 @@ void VR::ParseConfigFile()
                 size_t cut = std::string::npos;
                 size_t p1 = line.find("//");
                 size_t p2 = line.find('#');
+                size_t eqBeforeComment = line.find('=');
                 size_t p3 = line.find(';');
                 if (p1 != std::string::npos) cut = p1;
                 if (p2 != std::string::npos) cut = (cut == std::string::npos) ? p2 : std::min(cut, p2);
-                if (p3 != std::string::npos) cut = (cut == std::string::npos) ? p3 : std::min(cut, p3);
+                if (p3 != std::string::npos &&
+                    (eqBeforeComment == std::string::npos ||
+                        p3 < eqBeforeComment ||
+                        !configValueAllowsSemicolon(line.substr(0, eqBeforeComment))))
+                {
+                    cut = (cut == std::string::npos) ? p3 : std::min(cut, p3);
+                }
                 if (cut != std::string::npos) line.erase(cut);
 
                 trim(line);
@@ -1135,10 +1153,26 @@ void VR::ParseConfigFile()
     m_MagazineInteractionPullTriggerByMagazineMeters = std::clamp(getFloat("MagazineInteractionPullTriggerByMagazineMeters", m_MagazineInteractionPullTriggerByMagazineMeters), 0.0f, 0.50f);
     m_MagazineInteractionFreshMagazineGrabRangeMeters = std::clamp(getFloat("MagazineInteractionFreshMagazineGrabRangeMeters", m_MagazineInteractionFreshMagazineGrabRangeMeters), 0.0f, 0.50f);
     m_MagazineInteractionFreshMagazineBoxHalfExtentsMeters = getVector3("MagazineInteractionFreshMagazineBoxHalfExtentsMeters", m_MagazineInteractionFreshMagazineBoxHalfExtentsMeters);
+    m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters = getVector3("MagazineInteractionFreshMagazineSocketLocalOffsetMeters", m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters);
+    m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters.x = std::clamp(m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters.x, -0.50f, 0.50f);
+    m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters.y = std::clamp(m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters.y, -0.50f, 0.50f);
+    m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters.z = std::clamp(m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters.z, -0.50f, 0.50f);
     m_MagazineInteractionSocketCaptureRadiusMeters = std::clamp(getFloat("MagazineInteractionSocketCaptureRadiusMeters", m_MagazineInteractionSocketCaptureRadiusMeters), 0.0f, 0.25f);
     m_MagazineInteractionSocketCaptureAngleDeg = std::clamp(getFloat("MagazineInteractionSocketCaptureAngleDeg", m_MagazineInteractionSocketCaptureAngleDeg), 0.0f, 89.0f);
     m_MagazineInteractionSocketRequiredDepthMeters = std::clamp(getFloat("MagazineInteractionSocketRequiredDepthMeters", m_MagazineInteractionSocketRequiredDepthMeters), 0.0f, 0.25f);
     m_MagazineInteractionSocketRequiredOverlapFraction = std::clamp(getFloat("MagazineInteractionSocketRequiredOverlapFraction", m_MagazineInteractionSocketRequiredOverlapFraction), 0.0f, 1.0f);
+    m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters = getVector3("MagazineInteractionSocketCaptureBoxHalfExtentsMeters", m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters);
+    m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters.x = std::clamp(m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters.x, 0.0f, 0.50f);
+    m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters.y = std::clamp(m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters.y, 0.0f, 0.50f);
+    m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters.z = std::clamp(m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters.z, 0.0f, 0.50f);
+    m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters = getVector3("MagazineInteractionSocketCaptureBoxLocalOffsetMeters", m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters);
+    m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters.x = std::clamp(m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters.x, -0.50f, 0.50f);
+    m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters.y = std::clamp(m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters.y, -0.50f, 0.50f);
+    m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters.z = std::clamp(m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters.z, -0.50f, 0.50f);
+    m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg = getVector3("MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg", m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg);
+    m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg.x = std::clamp(m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg.x, -180.0f, 180.0f);
+    m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg.y = std::clamp(m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg.y, -180.0f, 180.0f);
+    m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg.z = std::clamp(m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg.z, -180.0f, 180.0f);
     m_MagazineInteractionBoltGrabPaddingMeters = std::clamp(getFloat("MagazineInteractionBoltGrabPaddingMeters", m_MagazineInteractionBoltGrabPaddingMeters), 0.0f, 0.25f);
     m_MagazineInteractionBoltPullDistanceMeters = std::clamp(getFloat("MagazineInteractionBoltPullDistanceMeters", m_MagazineInteractionBoltPullDistanceMeters), 0.0f, 0.25f);
     m_MagazineInteractionBoltReturnDistanceMeters = std::clamp(getFloat("MagazineInteractionBoltReturnDistanceMeters", m_MagazineInteractionBoltReturnDistanceMeters), 0.0f, 0.10f);
@@ -1166,6 +1200,14 @@ void VR::ParseConfigFile()
     m_MagazineInteractionBoltBoneOverrides.clear();
     m_MagazineInteractionBoltPullAxisLocalOverridesSpec = getString("MagazineInteractionBoltPullAxisLocalOverrides", m_MagazineInteractionBoltPullAxisLocalOverridesSpec);
     m_MagazineInteractionBoltPullAxisLocalOverrides.clear();
+    m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverridesSpec = getString("MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides", m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverridesSpec);
+    m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides.clear();
+    m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverridesSpec = getString("MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides", m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverridesSpec);
+    m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides.clear();
+    m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverridesSpec = getString("MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides", m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverridesSpec);
+    m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides.clear();
+    m_MagazineInteractionSocketCaptureAngleDegOverridesSpec = getString("MagazineInteractionSocketCaptureAngleDegOverrides", m_MagazineInteractionSocketCaptureAngleDegOverridesSpec);
+    m_MagazineInteractionSocketCaptureAngleDegOverrides.clear();
     {
         auto normalizeBoneOverrideWeaponKey = [&](std::string value)
             {
@@ -1207,7 +1249,20 @@ void VR::ParseConfigFile()
             { "awp", C_WeaponCSBase::WeaponID::AWP },
             { "scout", C_WeaponCSBase::WeaponID::SCOUT },
             { "m60", C_WeaponCSBase::WeaponID::M60 },
-            { "machinegun_m60", C_WeaponCSBase::WeaponID::M60 }
+            { "machinegun_m60", C_WeaponCSBase::WeaponID::M60 },
+            { "pump", C_WeaponCSBase::WeaponID::PUMPSHOTGUN },
+            { "pumpshotgun", C_WeaponCSBase::WeaponID::PUMPSHOTGUN },
+            { "pump_shotgun", C_WeaponCSBase::WeaponID::PUMPSHOTGUN },
+            { "shotgun", C_WeaponCSBase::WeaponID::PUMPSHOTGUN },
+            { "chrome", C_WeaponCSBase::WeaponID::SHOTGUN_CHROME },
+            { "shotgun_chrome", C_WeaponCSBase::WeaponID::SHOTGUN_CHROME },
+            { "chrome_shotgun", C_WeaponCSBase::WeaponID::SHOTGUN_CHROME },
+            { "auto", C_WeaponCSBase::WeaponID::AUTOSHOTGUN },
+            { "autoshotgun", C_WeaponCSBase::WeaponID::AUTOSHOTGUN },
+            { "auto_shotgun", C_WeaponCSBase::WeaponID::AUTOSHOTGUN },
+            { "shotgun_spas", C_WeaponCSBase::WeaponID::SPAS },
+            { "spas", C_WeaponCSBase::WeaponID::SPAS },
+            { "spas12", C_WeaponCSBase::WeaponID::SPAS }
         };
 
         auto parseBoneOverrideWeaponId = [&](const std::string& rawKey, int& outWeaponId)
@@ -1348,6 +1403,132 @@ void VR::ParseConfigFile()
                 }
             };
 
+        auto parseVector3OverrideValue = [&](std::string value, Vector& outValue)
+            {
+                trim(value);
+                std::replace(value.begin(), value.end(), '|', ',');
+                std::replace(value.begin(), value.end(), '/', ',');
+                std::stringstream ss(value);
+                std::string componentText;
+                float components[3] = {};
+                for (int i = 0; i < 3; ++i)
+                {
+                    if (!std::getline(ss, componentText, ','))
+                        return false;
+                    trim(componentText);
+                    if (componentText.empty())
+                        return false;
+                    char* end = nullptr;
+                    const float component = std::strtof(componentText.c_str(), &end);
+                    if (!end || *end != '\0' || !std::isfinite(component))
+                        return false;
+                    components[i] = component;
+                }
+
+                std::string extra;
+                while (std::getline(ss, extra, ','))
+                {
+                    trim(extra);
+                    if (!extra.empty())
+                        return false;
+                }
+
+                outValue = Vector(components[0], components[1], components[2]);
+                return true;
+            };
+
+        auto parseVector3OverrideSpec = [&](
+            const char* configName,
+            const std::string& spec,
+            float minValue,
+            float maxValue,
+            std::unordered_map<int, Vector>& outOverrides)
+            {
+                std::stringstream ss(spec);
+                std::string entry;
+                while (std::getline(ss, entry, ';'))
+                {
+                    trim(entry);
+                    if (entry.empty())
+                        continue;
+
+                    size_t separator = entry.find(':');
+                    if (separator == std::string::npos)
+                        separator = entry.find('=');
+                    if (separator == std::string::npos)
+                    {
+                        Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
+                        continue;
+                    }
+
+                    std::string weaponKey = entry.substr(0, separator);
+                    std::string valueText = entry.substr(separator + 1);
+                    trim(weaponKey);
+                    trim(valueText);
+
+                    int weaponId = 0;
+                    Vector value{};
+                    if (valueText.empty() ||
+                        !parseBoneOverrideWeaponId(weaponKey, weaponId) ||
+                        !parseVector3OverrideValue(valueText, value))
+                    {
+                        Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
+                        continue;
+                    }
+
+                    value.x = std::clamp(value.x, minValue, maxValue);
+                    value.y = std::clamp(value.y, minValue, maxValue);
+                    value.z = std::clamp(value.z, minValue, maxValue);
+                    outOverrides[weaponId] = value;
+                }
+            };
+
+        auto parseFloatOverrideSpec = [&](
+            const char* configName,
+            const std::string& spec,
+            float minValue,
+            float maxValue,
+            std::unordered_map<int, float>& outOverrides)
+            {
+                std::stringstream ss(spec);
+                std::string entry;
+                while (std::getline(ss, entry, ';'))
+                {
+                    trim(entry);
+                    if (entry.empty())
+                        continue;
+
+                    size_t separator = entry.find(':');
+                    if (separator == std::string::npos)
+                        separator = entry.find('=');
+                    if (separator == std::string::npos)
+                    {
+                        Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
+                        continue;
+                    }
+
+                    std::string weaponKey = entry.substr(0, separator);
+                    std::string valueText = entry.substr(separator + 1);
+                    trim(weaponKey);
+                    trim(valueText);
+
+                    int weaponId = 0;
+                    char* end = nullptr;
+                    const float value = std::strtof(valueText.c_str(), &end);
+                    if (valueText.empty() ||
+                        !end ||
+                        *end != '\0' ||
+                        !std::isfinite(value) ||
+                        !parseBoneOverrideWeaponId(weaponKey, weaponId))
+                    {
+                        Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
+                        continue;
+                    }
+
+                    outOverrides[weaponId] = std::clamp(value, minValue, maxValue);
+                }
+            };
+
         parseBoneOverrideSpec(
             "ManualReloadMagazineBoneOverrides",
             m_ManualReloadMagazineBoneOverridesSpec,
@@ -1360,6 +1541,30 @@ void VR::ParseConfigFile()
             "MagazineInteractionBoltPullAxisLocalOverrides",
             m_MagazineInteractionBoltPullAxisLocalOverridesSpec,
             m_MagazineInteractionBoltPullAxisLocalOverrides);
+        parseVector3OverrideSpec(
+            "MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides",
+            m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverridesSpec,
+            0.0f,
+            0.50f,
+            m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides);
+        parseVector3OverrideSpec(
+            "MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides",
+            m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverridesSpec,
+            -0.50f,
+            0.50f,
+            m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides);
+        parseVector3OverrideSpec(
+            "MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides",
+            m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverridesSpec,
+            -180.0f,
+            180.0f,
+            m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides);
+        parseFloatOverrideSpec(
+            "MagazineInteractionSocketCaptureAngleDegOverrides",
+            m_MagazineInteractionSocketCaptureAngleDegOverridesSpec,
+            0.0f,
+            89.0f,
+            m_MagazineInteractionSocketCaptureAngleDegOverrides);
     }
     m_ManualReloadNativeClipLeaveDistanceMeters = std::clamp(getFloat("ManualReloadNativeClipLeaveDistanceMeters", m_ManualReloadNativeClipLeaveDistanceMeters), 0.001f, 0.50f);
     m_ManualReloadMagazineGrabRangeMeters = std::clamp(getFloat("ManualReloadMagazineGrabRangeMeters", m_ManualReloadMagazineGrabRangeMeters), 0.01f, 0.50f);

@@ -785,6 +785,7 @@ void VR::ProcessInput()
         const Vector worldUp(0.f, 0.f, 1.f);
 
         Vector invForward = m_HmdForward;
+        invForward = VectorRotate(invForward, worldUp, m_RotationOffset);
         invForward.z = 0.f;
         float invFwdLen = sqrtf(invForward.x * invForward.x + invForward.y * invForward.y + invForward.z * invForward.z);
         if (invFwdLen < 0.001f)

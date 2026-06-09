@@ -1115,10 +1115,25 @@ public:
 	float m_MagazineInteractionPullTriggerByMagazineMeters = 0.025f;
 	float m_MagazineInteractionFreshMagazineGrabRangeMeters = 0.18f;
 	Vector m_MagazineInteractionFreshMagazineBoxHalfExtentsMeters = { 0.055f, 0.045f, 0.12f };
+	Vector m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters = { -0.12f, 0.0f, 0.0f };
 	float m_MagazineInteractionSocketCaptureRadiusMeters = 0.06f;
 	float m_MagazineInteractionSocketCaptureAngleDeg = 35.0f;
 	float m_MagazineInteractionSocketRequiredDepthMeters = 0.04f;
 	float m_MagazineInteractionSocketRequiredOverlapFraction = 0.45f;
+	Vector m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters = { 0.0f, 0.0f, 0.0f };
+	Vector m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters = { 0.0f, 0.0f, 0.0f };
+	Vector m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
+	// Optional exact per-weapon socket capture tuning. Config format follows the weapon aliases used by BoneOverrides.
+	// Vector overrides use semicolon-separated entries because values contain commas:
+	// m16:0.06,0.04,0.12;ak47:0.05,0.04,0.10.
+	std::string m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverridesSpec;
+	std::unordered_map<int, Vector> m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides;
+	std::string m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverridesSpec;
+	std::unordered_map<int, Vector> m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides;
+	std::string m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverridesSpec;
+	std::unordered_map<int, Vector> m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides;
+	std::string m_MagazineInteractionSocketCaptureAngleDegOverridesSpec;
+	std::unordered_map<int, float> m_MagazineInteractionSocketCaptureAngleDegOverrides;
 	float m_MagazineInteractionBoltGrabPaddingMeters = 0.10f;
 	float m_MagazineInteractionBoltPullDistanceMeters = 0.055f;
 	float m_MagazineInteractionBoltReturnDistanceMeters = 0.018f;
@@ -1146,6 +1161,11 @@ public:
 	std::chrono::steady_clock::time_point m_MagazineInteractionReloadCommandHoldUntil{};
 	bool m_MagazineInteractionSuppressLeftInputUntilRelease = false;
 	bool m_MagazineInteractionOldMagazinePulled = false;
+	bool m_MagazineInteractionShotgunShellMode = false;
+	bool m_MagazineInteractionShotgunSlotInterruptRequired = false;
+	bool m_MagazineInteractionShotgunSlotInterruptReturnPending = false;
+	int m_MagazineInteractionShotgunShellsLoadedThisSession = 0;
+	int m_MagazineInteractionShotgunLastInterruptedClip = -1;
 	MagazineInteractionManualState m_MagazineInteractionState = MagazineInteractionManualState::Idle;
 	C_WeaponCSBase* m_MagazineInteractionWeapon = nullptr;
 	int m_MagazineInteractionWeaponId = 0;
@@ -1155,10 +1175,12 @@ public:
 	int m_MagazineInteractionViewmodelEntityIndex = -1;
 	std::string m_MagazineInteractionMagazineModelName;
 	MagazineInteractionBoxSnapshot m_MagazineInteractionSocketBox{};
+	MagazineInteractionBoxSnapshot m_MagazineInteractionSocketCaptureBox{};
 	MagazineInteractionBoxSnapshot m_MagazineInteractionBoltRestBox{};
 	bool m_MagazineInteractionSocketValid = false;
 	bool m_MagazineInteractionBoltRestValid = false;
 	VrHandMatrix4 m_MagazineInteractionSocketWorld{};
+	VrHandMatrix4 m_MagazineInteractionSocketCaptureWorld{};
 	VrHandMatrix4 m_MagazineInteractionBoltRestWorld{};
 	VrHandMatrix4 m_MagazineInteractionBoltWorld{};
 	VrHandMatrix4 m_MagazineInteractionControllerToMagazine{};
@@ -1180,6 +1202,8 @@ public:
 	std::chrono::steady_clock::time_point m_MagazineInteractionPostInsertStarted{};
 	std::chrono::steady_clock::time_point m_MagazineInteractionBoltStageStarted{};
 	std::chrono::steady_clock::time_point m_MagazineInteractionBoltGrabbedAt{};
+	std::chrono::steady_clock::time_point m_MagazineInteractionShotgunSlotInterruptReturnAt{};
+	std::chrono::steady_clock::time_point m_MagazineInteractionShotgunSlotInterruptGraceUntil{};
 	std::string m_MagazineInteractionSyntheticClipOutSample;
 	std::chrono::steady_clock::time_point m_MagazineInteractionSyntheticClipOutStarted{};
 	std::string m_MagazineInteractionSyntheticClipInSample;

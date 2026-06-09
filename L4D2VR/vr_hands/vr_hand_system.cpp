@@ -48,6 +48,10 @@ namespace
     };
 
     constexpr std::uint32_t kVrHandsVmPoseMaxAgeMs = 500u;
+    constexpr std::uint32_t kMagazineDebugFreshBoxColorArgb = 0xFFFFC247u;
+    constexpr std::uint32_t kMagazineDebugSocketCaptureBoxColorArgb = 0xFF2EF5FFu;
+    constexpr std::uint32_t kMagazineDebugCurrentMagazineBoxColorArgb = 0xFFFF4818u;
+    constexpr std::uint32_t kMagazineDebugBoltBoxColorArgb = 0xFF4A8CFFu;
     constexpr float kVrHandsVmCurlDeadZoneRadians = 0.08f;
 
     float ResolveVrHandsSceneAspect(const CViewSetup& view)
@@ -598,8 +602,14 @@ bool VrHandSystem::DrawManualReloadMagazine(
     return true;
 }
 
-bool VrHandSystem::EnsureStandaloneMagazineBoxLoaded(const Vector& mins, const Vector& maxs, bool debugLog)
+bool VrHandSystem::EnsureStandaloneMagazineBoxLoaded(
+    const Vector& mins,
+    const Vector& maxs,
+    std::uint32_t fallbackColorArgb,
+    const char* debugName,
+    bool debugLog)
 {
+    const char* boxName = (debugName && debugName[0] != '\0') ? debugName : "magazine_box";
     Vector boxMins(
         std::min(mins.x, maxs.x),
         std::min(mins.y, maxs.y),
@@ -633,7 +643,8 @@ bool VrHandSystem::EnsureStandaloneMagazineBoxLoaded(const Vector& mins, const V
     std::snprintf(
         key,
         sizeof(key),
-        "generated:magazine_box:%.3f,%.3f,%.3f:%.3f,%.3f,%.3f",
+        "generated:magazine_box:%08X:%.3f,%.3f,%.3f:%.3f,%.3f,%.3f",
+        fallbackColorArgb,
         boxMins.x,
         boxMins.y,
         boxMins.z,
@@ -648,7 +659,7 @@ bool VrHandSystem::EnsureStandaloneMagazineBoxLoaded(const Vector& mins, const V
     asset.jointParents = { -1 };
     asset.bindMatrices = { VrHandMath::Identity() };
     asset.inverseBindMatrices = { VrHandMath::Identity() };
-    asset.fallbackColorArgb = 0xFFFF4818u;
+    asset.fallbackColorArgb = fallbackColorArgb;
     asset.sourcePath = key;
 
     auto addFace = [&](const Vector& a, const Vector& b, const Vector& c, const Vector& d, const Vector& normal)
@@ -703,7 +714,9 @@ bool VrHandSystem::EnsureStandaloneMagazineBoxLoaded(const Vector& mins, const V
     if (debugLog)
     {
         Game::logMsg(
-            "[VR][MagazineInteraction] generated standalone magazine box mins=(%.2f %.2f %.2f) maxs=(%.2f %.2f %.2f)",
+            "[VR][MagazineInteraction] generated %s debug box color=%08X mins=(%.2f %.2f %.2f) maxs=(%.2f %.2f %.2f)",
+            boxName,
+            fallbackColorArgb,
             boxMins.x,
             boxMins.y,
             boxMins.z,
@@ -721,14 +734,17 @@ bool VrHandSystem::DrawStandaloneMagazineBox(
     const VrHandMatrix4* world,
     const Vector& mins,
     const Vector& maxs,
+    std::uint32_t fallbackColorArgb,
+    const char* debugName,
     bool useViewmodelLayer,
     VrHandDrawPass drawPass)
 {
+    const char* boxName = (debugName && debugName[0] != '\0') ? debugName : "magazine_box";
     if (!world)
         return false;
     if (useViewmodelLayer && drawPass == VrHandDrawPass::WorldVisibilityMask)
         return false;
-    if (!EnsureStandaloneMagazineBoxLoaded(mins, maxs, true))
+    if (!EnsureStandaloneMagazineBoxLoaded(mins, maxs, fallbackColorArgb, boxName, false))
         return false;
 
     const float projectionAspect =
@@ -767,7 +783,7 @@ bool VrHandSystem::DrawStandaloneMagazineBox(
     }
 
     if (rendererPass != VrHandDrawPass::WorldVisibilityMask &&
-        m_StandaloneMagazineBoxDrawLoggedKeys.insert(m_StandaloneMagazineBoxKey).second)
+        m_StandaloneMagazineBoxDrawLoggedKeys.insert(std::string(boxName) + ":" + m_StandaloneMagazineBoxKey).second)
     {
         const char* passName = "world-depth";
         if (rendererPass == VrHandDrawPass::ViewmodelComposite)
@@ -776,7 +792,8 @@ bool VrHandSystem::DrawStandaloneMagazineBox(
             passName = "viewmodel-standalone";
 
         Game::logMsg(
-            "[VR][MagazineInteraction] drew standalone fresh magazine box world=(%.2f %.2f %.2f) camera=(%.2f %.2f %.2f) pass=%s fov=%.2f near=%.2f",
+            "[VR][MagazineInteraction] drew %s debug box world=(%.2f %.2f %.2f) camera=(%.2f %.2f %.2f) pass=%s fov=%.2f near=%.2f",
+            boxName,
             VrHandMath::Get(*world, 0, 3),
             VrHandMath::Get(*world, 1, 3),
             VrHandMath::Get(*world, 2, 3),
@@ -1330,6 +1347,8 @@ bool VrHandSystem::DrawForEye(
                 standaloneMagazineBoxWorld,
                 standaloneMagazineBoxMins,
                 standaloneMagazineBoxMaxs,
+                kMagazineDebugFreshBoxColorArgb,
+                "fresh_magazine",
                 standaloneMagazineBoxUseViewmodelLayer,
                 drawPass))
         {
@@ -1342,6 +1361,8 @@ bool VrHandSystem::DrawForEye(
                 magazineSocketCaptureBoxWorld,
                 magazineSocketCaptureBoxMins,
                 magazineSocketCaptureBoxMaxs,
+                kMagazineDebugSocketCaptureBoxColorArgb,
+                "socket_capture",
                 magazineSocketCaptureBoxUseViewmodelLayer,
                 drawPass))
         {
@@ -1354,6 +1375,8 @@ bool VrHandSystem::DrawForEye(
                 currentMagazineBoxWorld,
                 currentMagazineBoxMins,
                 currentMagazineBoxMaxs,
+                kMagazineDebugCurrentMagazineBoxColorArgb,
+                "current_magazine",
                 currentMagazineBoxUseViewmodelLayer,
                 drawPass))
         {
@@ -1366,6 +1389,8 @@ bool VrHandSystem::DrawForEye(
                 currentBoltBoxWorld,
                 currentBoltBoxMins,
                 currentBoltBoxMaxs,
+                kMagazineDebugBoltBoxColorArgb,
+                "current_bolt",
                 currentBoltBoxUseViewmodelLayer,
                 drawPass))
         {
@@ -1476,6 +1501,8 @@ bool VrHandSystem::DrawForEye(
             standaloneMagazineBoxWorld,
             standaloneMagazineBoxMins,
             standaloneMagazineBoxMaxs,
+            kMagazineDebugFreshBoxColorArgb,
+            "fresh_magazine",
             standaloneMagazineBoxUseViewmodelLayer,
             drawPass))
     {
@@ -1488,6 +1515,8 @@ bool VrHandSystem::DrawForEye(
             magazineSocketCaptureBoxWorld,
             magazineSocketCaptureBoxMins,
             magazineSocketCaptureBoxMaxs,
+            kMagazineDebugSocketCaptureBoxColorArgb,
+            "socket_capture",
             magazineSocketCaptureBoxUseViewmodelLayer,
             drawPass))
     {
@@ -1500,6 +1529,8 @@ bool VrHandSystem::DrawForEye(
             currentMagazineBoxWorld,
             currentMagazineBoxMins,
             currentMagazineBoxMaxs,
+            kMagazineDebugCurrentMagazineBoxColorArgb,
+            "current_magazine",
             currentMagazineBoxUseViewmodelLayer,
             drawPass))
     {
@@ -1512,6 +1543,8 @@ bool VrHandSystem::DrawForEye(
             currentBoltBoxWorld,
             currentBoltBoxMins,
             currentBoltBoxMaxs,
+            kMagazineDebugBoltBoxColorArgb,
+            "current_bolt",
             currentBoltBoxUseViewmodelLayer,
             drawPass))
     {

@@ -1311,6 +1311,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 	// Even if the server has already refilled the weapon, no shot may leave this client until
 	// the player inserts the magazine and the delayed local reload tail has finished.
 	constexpr int kMagazineInteractionInAttack = (1 << 0);
+	constexpr int kMagazineInteractionInReload = (1 << 13);
 	const bool manualReloadBlocksFire = m_VR->IsManualReloadBlockingFire();
 	const bool magazineInteractionBlocksFire = m_VR->IsMagazineInteractionBlockingFire();
 	if (manualReloadBlocksFire || magazineInteractionBlocksFire)
@@ -1319,14 +1320,18 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			m_VR->PlayMagazineInteractionBlockedFireEmptySound();
 		cmd->buttons &= ~kMagazineInteractionInAttack; // IN_ATTACK
 	}
+	if (m_VR->IsMagazineInteractionLeftHandActive() &&
+		!m_VR->IsMagazineInteractionReloadCommandActive())
+	{
+		cmd->buttons &= ~kMagazineInteractionInReload; // IN_RELOAD
+	}
 	const bool suppressMagazineEmptyClipAutoReload =
 		m_VR->ShouldSuppressMagazineInteractionEmptyClipAutoReload(nullptr);
 	if (suppressMagazineEmptyClipAutoReload)
 	{
-		constexpr int kIN_RELOAD = (1 << 13);
 		if ((cmd->buttons & kMagazineInteractionInAttack) != 0)
 			m_VR->PlayMagazineInteractionBlockedFireEmptySound();
-		cmd->buttons &= ~(kMagazineInteractionInAttack | kIN_RELOAD);
+		cmd->buttons &= ~(kMagazineInteractionInAttack | kMagazineInteractionInReload);
 	}
 
 	{
