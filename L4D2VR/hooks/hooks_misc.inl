@@ -1044,6 +1044,10 @@ namespace
         if (name.empty())
             return 0;
 
+        const bool hasClip = ManualReloadNameContains(name, "clip");
+        const bool hasMagazine = ManualReloadNameContains(name, "magazine");
+        const bool hasLooseMag = ManualReloadNameHasLooseMagToken(name);
+
         // Ignore controls, helpers and visual children. We need the root bone that
         // moves the whole detachable magazine.
         if (ManualReloadNameContains(name, "release") ||
@@ -1053,16 +1057,13 @@ namespace
             ManualReloadNameContains(name, "bullet") ||
             ManualReloadNameContains(name, "round") ||
             ManualReloadNameContains(name, "shell") ||
-            ManualReloadNameContains(name, "ammo") ||
+            (ManualReloadNameContains(name, "ammo") && !hasClip && !hasMagazine && !hasLooseMag) ||
             ManualReloadNameContains(name, "helper") ||
             ManualReloadNameContains(name, "attach"))
         {
             return 0;
         }
 
-        const bool hasClip = ManualReloadNameContains(name, "clip");
-        const bool hasMagazine = ManualReloadNameContains(name, "magazine");
-        const bool hasLooseMag = ManualReloadNameHasLooseMagToken(name);
         if (!hasClip && !hasMagazine && !hasLooseMag)
             return 0;
 
@@ -1439,6 +1440,39 @@ namespace
         return value * (1.0f / length);
     }
 
+    inline int ResolveMagazineInteractionWeaponIdForConfig(const VR* vr)
+    {
+        if (!vr)
+            return 0;
+
+        if (vr->m_MagazineInteractionWeaponId > 0)
+            return vr->m_MagazineInteractionWeaponId;
+
+        return vr->m_MagazineInteractionCurrentWeaponId.load(std::memory_order_relaxed);
+    }
+
+    inline Vector ResolveMagazineInteractionBoltPullAxisLocal(
+        const VR* vr,
+        bool& outUsedOverride)
+    {
+        outUsedOverride = false;
+        if (!vr)
+            return Vector(0.0f, 1.0f, 0.0f);
+
+        const int weaponId = ResolveMagazineInteractionWeaponIdForConfig(vr);
+        if (weaponId > 0)
+        {
+            const auto axisIt = vr->m_MagazineInteractionBoltPullAxisLocalOverrides.find(weaponId);
+            if (axisIt != vr->m_MagazineInteractionBoltPullAxisLocalOverrides.end())
+            {
+                outUsedOverride = true;
+                return axisIt->second;
+            }
+        }
+
+        return vr->m_MagazineInteractionBoltPullAxisLocal;
+    }
+
     inline Vector BuildMagazineInteractionBoltPullAxisWorld(
         VR* vr,
         const std::string& modelName,
@@ -1450,10 +1484,10 @@ namespace
         const void* pModelToWorld)
     {
         const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
-        Vector configuredLocalAxis = vr
-            ? vr->m_MagazineInteractionBoltPullAxisLocal
-            : Vector(0.0f, 1.0f, 0.0f);
+        bool usedAxisOverride = false;
+        Vector configuredLocalAxis = ResolveMagazineInteractionBoltPullAxisLocal(vr, usedAxisOverride);
         const bool legacyM16Axis =
+            !usedAxisOverride &&
             lowerModel.find("models/v_models/v_rifle.mdl") != std::string::npos &&
             std::fabs(configuredLocalAxis.x + 1.0f) < 0.001f &&
             std::fabs(configuredLocalAxis.y) < 0.001f &&
@@ -1482,7 +1516,7 @@ namespace
                 }
             }
             Game::logMsg(
-                "[VR][MagazineBolt] pull axis model=%s source=%s local=(%.2f %.2f %.2f) axis=(%.3f %.3f %.3f)%s",
+                "[VR][MagazineBolt] pull axis model=%s source=%s local=(%.2f %.2f %.2f) axis=(%.3f %.3f %.3f)%s%s",
                 modelName.c_str(),
                 source ? source : "unknown",
                 localAxis.x,
@@ -1491,7 +1525,8 @@ namespace
                 axis.x,
                 axis.y,
                 axis.z,
-                legacyM16Axis ? " legacyM16Axis=1" : "");
+                legacyM16Axis ? " legacyM16Axis=1" : "",
+                usedAxisOverride ? " override=1" : "");
         };
 
         auto axisFromMatrix = [&](const vr_vm_stabilize::Mat3x4& matrix) -> Vector
@@ -1809,8 +1844,13 @@ namespace
 
         if (useProfile("models/v_models/v_pistol.mdl", Vector(-0.59f, -5.66f, -0.31f), Vector(0.59f, 0.80f, 2.25f), 1)) return true;
         if (useProfile("models/v_models/v_pistola.mdl", Vector(-0.59f, -5.66f, -0.31f), Vector(0.59f, 0.80f, 2.25f), 1)) return true;
+        if (useProfile("models/v_models/v_pistolb.mdl", Vector(-0.59f, -5.66f, -0.31f), Vector(0.59f, 0.80f, 2.25f), 1)) return true;
         if (useProfile("models/v_models/v_dual_pistola.mdl", Vector(-0.66f, -4.66f, -0.42f), Vector(0.72f, 1.35f, 1.99f), 1)) return true;
+        if (useProfile("models/v_models/v_dual_pistol.mdl", Vector(-0.66f, -4.66f, -0.42f), Vector(0.72f, 1.35f, 1.99f), 1)) return true;
+        if (useProfile("models/v_models/v_dual_pistols.mdl", Vector(-0.66f, -4.66f, -0.42f), Vector(0.72f, 1.35f, 1.99f), 1)) return true;
         if (useProfile("models/v_models/v_desert_eagle.mdl", Vector(-0.83f, -5.93f, -0.98f), Vector(0.56f, 0.59f, 3.11f), 1)) return true;
+        if (useProfile("models/v_models/v_pistol_magnum.mdl", Vector(-0.83f, -5.93f, -0.98f), Vector(0.56f, 0.59f, 3.11f), 1)) return true;
+        if (useProfile("models/v_models/v_pistol", Vector(-0.59f, -5.66f, -0.31f), Vector(0.59f, 0.80f, 2.25f), 1)) return true;
 
         if (useProfile("models/v_models/v_smg.mdl", Vector(-1.17f, -8.29f, -0.86f), Vector(1.17f, 0.09f, 0.86f), 1)) return true;
         if (useProfile("models/v_models/v_silenced_smg.mdl", Vector(-0.68f, -7.70f, -0.79f), Vector(0.52f, 1.05f, 0.78f), 1)) return true;
@@ -1835,6 +1875,128 @@ namespace
         if (useProfile("models/v_models/v_grenade_launcher.mdl", Vector(-1.34f, -0.96f, -0.24f), Vector(1.03f, 1.43f, 5.60f), 2)) return true;
 
         return false;
+    }
+
+    inline bool MagazineBoxOfficialProfileExists(const std::string& lowerModel)
+    {
+        Vector mins;
+        Vector maxs;
+        int sampleCount = 0;
+        int lengthAxis = 0;
+        return TryGetOfficialMagazineBoxProfile(
+            lowerModel,
+            Vector(0.0f, 0.0f, 0.0f),
+            mins,
+            maxs,
+            sampleCount,
+            lengthAxis);
+    }
+
+    inline int FindMagazineBoxOfficialProfileFallbackBone(
+        const std::string& lowerModel,
+        const std::vector<std::string>& boneNames)
+    {
+        if (!MagazineBoxOfficialProfileExists(lowerModel))
+            return -1;
+
+        auto canUseFallbackName = [&](const std::string& lowerName)
+            {
+                if (lowerName.empty())
+                    return false;
+
+                if (ManualReloadNameContains(lowerName, "finger") ||
+                    ManualReloadNameContains(lowerName, "hand") ||
+                    ManualReloadNameContains(lowerName, "bip01") ||
+                    ManualReloadNameContains(lowerName, "attach") ||
+                    ManualReloadNameContains(lowerName, "muzzle") ||
+                    ManualReloadNameContains(lowerName, "eject") ||
+                    ManualReloadNameContains(lowerName, "release") ||
+                    ManualReloadNameContains(lowerName, "realease") ||
+                    ManualReloadNameContains(lowerName, "magrel") ||
+                    ManualReloadNameContains(lowerName, "button") ||
+                    ManualReloadNameContains(lowerName, "trigger") ||
+                    ManualReloadNameContains(lowerName, "safety") ||
+                    ManualReloadNameContains(lowerName, "bolt") ||
+                    ManualReloadNameContains(lowerName, "slide") ||
+                    ManualReloadNameContains(lowerName, "charger") ||
+                    ManualReloadNameContains(lowerName, "handle") ||
+                    ManualReloadNameContains(lowerName, "barrel") ||
+                    ManualReloadNameContains(lowerName, "stock") ||
+                    ManualReloadNameContains(lowerName, "hammer") ||
+                    ManualReloadNameContains(lowerName, "bullet") ||
+                    ManualReloadNameContains(lowerName, "round") ||
+                    ManualReloadNameContains(lowerName, "shell"))
+                {
+                    return false;
+                }
+
+                return ManualReloadNameContains(lowerName, "clip") ||
+                    ManualReloadNameContains(lowerName, "magazine") ||
+                    ManualReloadNameHasLooseMagToken(lowerName);
+            };
+
+        int bestBone = -1;
+        int bestScore = 0;
+        for (int bone = 0; bone < static_cast<int>(boneNames.size()); ++bone)
+        {
+            const std::string lowerName = vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(bone)]);
+            if (!canUseFallbackName(lowerName))
+                continue;
+
+            int score = 250;
+            if (lowerName == "valvebiped.weapon_clip" ||
+                lowerName == "valvebiped.weapon_magazine" ||
+                lowerName == "weapon_clip" ||
+                lowerName == "weapon_magazine")
+            {
+                score += 1800;
+            }
+            else if (lowerName == "valvebiped.clip" ||
+                lowerName == "valvebiped.magazine" ||
+                lowerName == "clip" ||
+                lowerName == "mag" ||
+                lowerName == "magazine")
+            {
+                score += 1400;
+            }
+
+            if (ManualReloadNameContains(lowerName, "weapon"))
+                score += 500;
+            if (ManualReloadNameContains(lowerName, "magazine"))
+                score += 450;
+            if (ManualReloadNameHasLooseMagToken(lowerName))
+                score += 350;
+            if (ManualReloadNameContains(lowerName, "clip"))
+                score += 300;
+            if (ManualReloadNameContains(lowerName, "ammo"))
+                score -= 100;
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestBone = bone;
+            }
+        }
+
+        if (bestBone >= 0)
+        {
+            static std::mutex s_fallbackLogMutex;
+            static std::unordered_map<std::string, int> s_loggedFallbackByModel;
+            std::lock_guard<std::mutex> lock(s_fallbackLogMutex);
+            auto it = s_loggedFallbackByModel.find(lowerModel);
+            if (it == s_loggedFallbackByModel.end() || it->second != bestBone)
+            {
+                s_loggedFallbackByModel[lowerModel] = bestBone;
+                Game::logMsg(
+                    "[VR][MagazineBox] official-profile fallback magazine bone model=%s bone=%d name=%s score=%d",
+                    lowerModel.c_str(),
+                    bestBone,
+                    boneNames[static_cast<size_t>(bestBone)].c_str(),
+                    bestScore);
+            }
+        }
+
+        return bestBone;
     }
 
     inline bool HooksVectorComponentsAreFinite(const Vector& value)
@@ -2361,6 +2523,8 @@ namespace
             configuredMagazineBoneName);
         if (magazineBone < 0)
             magazineBone = FindMagazineBoxBone(boneNames);
+        if (magazineBone < 0)
+            magazineBone = FindMagazineBoxOfficialProfileFallbackBone(lowerModel, boneNames);
         if (magazineBone < 0 || magazineBone >= numBones)
             return;
 

@@ -1125,6 +1125,10 @@ public:
 	Vector m_MagazineInteractionBoltBoxHalfExtentsMeters = { 0.045f, 0.035f, 0.035f };
 	Vector m_MagazineInteractionBoltBoxLocalOffsetMeters = { 0.0f, 0.0f, 0.0f };
 	Vector m_MagazineInteractionBoltPullAxisLocal = { 0.0f, 0.0f, 1.0f };
+	// Optional exact per-weapon bolt pull axes. Config format:
+	// m16:0,0,1;scar:0,1,0;magnum:-1,0,0. Empty falls back to MagazineInteractionBoltPullAxisLocal.
+	std::string m_MagazineInteractionBoltPullAxisLocalOverridesSpec;
+	std::unordered_map<int, Vector> m_MagazineInteractionBoltPullAxisLocalOverrides;
 	float m_MagazineInteractionStaleSeconds = 0.20f;
 	mutable std::mutex m_MagazineInteractionBoxMutex;
 	mutable std::mutex m_MagazineInteractionBoltBoxMutex;

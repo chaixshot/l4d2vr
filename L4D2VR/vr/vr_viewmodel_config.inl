@@ -1164,6 +1164,8 @@ void VR::ParseConfigFile()
     m_ManualReloadMagazineBoneOverrides.clear();
     m_MagazineInteractionBoltBoneOverridesSpec = getString("MagazineInteractionBoltBoneOverrides", m_MagazineInteractionBoltBoneOverridesSpec);
     m_MagazineInteractionBoltBoneOverrides.clear();
+    m_MagazineInteractionBoltPullAxisLocalOverridesSpec = getString("MagazineInteractionBoltPullAxisLocalOverrides", m_MagazineInteractionBoltPullAxisLocalOverridesSpec);
+    m_MagazineInteractionBoltPullAxisLocalOverrides.clear();
     {
         auto normalizeBoneOverrideWeaponKey = [&](std::string value)
             {
@@ -1178,6 +1180,8 @@ void VR::ParseConfigFile()
         {
             { "pistol", C_WeaponCSBase::WeaponID::PISTOL },
             { "pistols", C_WeaponCSBase::WeaponID::PISTOL },
+            { "dual_pistol", C_WeaponCSBase::WeaponID::PISTOL },
+            { "dual_pistols", C_WeaponCSBase::WeaponID::PISTOL },
             { "uzi", C_WeaponCSBase::WeaponID::UZI },
             { "smg", C_WeaponCSBase::WeaponID::UZI },
             { "m16", C_WeaponCSBase::WeaponID::M16A1 },
@@ -1197,10 +1201,13 @@ void VR::ParseConfigFile()
             { "magnum", C_WeaponCSBase::WeaponID::MAGNUM },
             { "deagle", C_WeaponCSBase::WeaponID::MAGNUM },
             { "desert_eagle", C_WeaponCSBase::WeaponID::MAGNUM },
+            { "pistol_magnum", C_WeaponCSBase::WeaponID::MAGNUM },
             { "mp5", C_WeaponCSBase::WeaponID::MP5 },
             { "sg552", C_WeaponCSBase::WeaponID::SG552 },
             { "awp", C_WeaponCSBase::WeaponID::AWP },
-            { "scout", C_WeaponCSBase::WeaponID::SCOUT }
+            { "scout", C_WeaponCSBase::WeaponID::SCOUT },
+            { "m60", C_WeaponCSBase::WeaponID::M60 },
+            { "machinegun_m60", C_WeaponCSBase::WeaponID::M60 }
         };
 
         auto parseBoneOverrideWeaponId = [&](const std::string& rawKey, int& outWeaponId)
@@ -1261,6 +1268,86 @@ void VR::ParseConfigFile()
                 }
             };
 
+        auto parseBoltPullAxisOverrideVector = [&](std::string value, Vector& outAxis)
+            {
+                trim(value);
+                std::replace(value.begin(), value.end(), '|', ',');
+                std::replace(value.begin(), value.end(), '/', ',');
+                std::stringstream ss(value);
+                std::string componentText;
+                float components[3] = {};
+                for (int i = 0; i < 3; ++i)
+                {
+                    if (!std::getline(ss, componentText, ','))
+                        return false;
+                    trim(componentText);
+                    if (componentText.empty())
+                        return false;
+                    char* end = nullptr;
+                    const float component = std::strtof(componentText.c_str(), &end);
+                    if (!end || *end != '\0' || !std::isfinite(component))
+                        return false;
+                    components[i] = component;
+                }
+
+                std::string extra;
+                while (std::getline(ss, extra, ','))
+                {
+                    trim(extra);
+                    if (!extra.empty())
+                        return false;
+                }
+
+                const Vector axis(components[0], components[1], components[2]);
+                const float length = axis.Length();
+                if (!(length > 0.0001f))
+                    return false;
+
+                outAxis = axis * (1.0f / length);
+                return true;
+            };
+
+        auto parseBoltPullAxisOverrideSpec = [&](
+            const char* configName,
+            const std::string& spec,
+            std::unordered_map<int, Vector>& outOverrides)
+            {
+                std::stringstream ss(spec);
+                std::string entry;
+                while (std::getline(ss, entry, ';'))
+                {
+                    trim(entry);
+                    if (entry.empty())
+                        continue;
+
+                    size_t separator = entry.find(':');
+                    if (separator == std::string::npos)
+                        separator = entry.find('=');
+                    if (separator == std::string::npos)
+                    {
+                        Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
+                        continue;
+                    }
+
+                    std::string weaponKey = entry.substr(0, separator);
+                    std::string axisText = entry.substr(separator + 1);
+                    trim(weaponKey);
+                    trim(axisText);
+
+                    int weaponId = 0;
+                    Vector axis{};
+                    if (axisText.empty() ||
+                        !parseBoneOverrideWeaponId(weaponKey, weaponId) ||
+                        !parseBoltPullAxisOverrideVector(axisText, axis))
+                    {
+                        Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
+                        continue;
+                    }
+
+                    outOverrides[weaponId] = axis;
+                }
+            };
+
         parseBoneOverrideSpec(
             "ManualReloadMagazineBoneOverrides",
             m_ManualReloadMagazineBoneOverridesSpec,
@@ -1269,6 +1356,10 @@ void VR::ParseConfigFile()
             "MagazineInteractionBoltBoneOverrides",
             m_MagazineInteractionBoltBoneOverridesSpec,
             m_MagazineInteractionBoltBoneOverrides);
+        parseBoltPullAxisOverrideSpec(
+            "MagazineInteractionBoltPullAxisLocalOverrides",
+            m_MagazineInteractionBoltPullAxisLocalOverridesSpec,
+            m_MagazineInteractionBoltPullAxisLocalOverrides);
     }
     m_ManualReloadNativeClipLeaveDistanceMeters = std::clamp(getFloat("ManualReloadNativeClipLeaveDistanceMeters", m_ManualReloadNativeClipLeaveDistanceMeters), 0.001f, 0.50f);
     m_ManualReloadMagazineGrabRangeMeters = std::clamp(getFloat("ManualReloadMagazineGrabRangeMeters", m_ManualReloadMagazineGrabRangeMeters), 0.01f, 0.50f);

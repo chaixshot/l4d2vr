@@ -545,6 +545,33 @@ namespace
         return out;
     }
 
+    int MagazineInteractionResolveWeaponIdForConfig(const VR* vr)
+    {
+        if (!vr)
+            return 0;
+
+        if (vr->m_MagazineInteractionWeaponId > 0)
+            return vr->m_MagazineInteractionWeaponId;
+
+        return vr->m_MagazineInteractionCurrentWeaponId.load(std::memory_order_relaxed);
+    }
+
+    Vector MagazineInteractionResolveBoltPullAxisLocal(const VR* vr)
+    {
+        if (!vr)
+            return Vector(0.0f, 1.0f, 0.0f);
+
+        const int weaponId = MagazineInteractionResolveWeaponIdForConfig(vr);
+        if (weaponId > 0)
+        {
+            const auto axisIt = vr->m_MagazineInteractionBoltPullAxisLocalOverrides.find(weaponId);
+            if (axisIt != vr->m_MagazineInteractionBoltPullAxisLocalOverrides.end())
+                return axisIt->second;
+        }
+
+        return vr->m_MagazineInteractionBoltPullAxisLocal;
+    }
+
     Vector MagazineInteractionBuildBoltPullAxisWorld(
         const VR* vr,
         const MagazineInteractionBoxSnapshot& boltBox,
@@ -557,7 +584,7 @@ namespace
         if (publishedAxis.Length() > 0.0001f)
             return publishedAxis;
 
-        Vector localAxis = VrHandMath::Normalize(vr->m_MagazineInteractionBoltPullAxisLocal);
+        Vector localAxis = VrHandMath::Normalize(MagazineInteractionResolveBoltPullAxisLocal(vr));
         if (localAxis.Length() > 0.0001f && MagazineInteractionMatrixBasisLooksValid(boltRestWorld))
         {
             Vector worldAxis = MagazineInteractionMatrixLocalVectorToWorld(boltRestWorld, localAxis);

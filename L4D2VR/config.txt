@@ -125,6 +125,7 @@ MagazineInteractionBoltBoxLocalOffsetMetersX=0.000
 MagazineInteractionBoltBoxLocalOffsetMetersY=0.000
 MagazineInteractionBoltBoxLocalOffsetMetersZ=0.000
 MagazineInteractionBoltPullAxisLocal=0,0,1
+MagazineInteractionBoltPullAxisLocalOverrides=
 MagazineInteractionBoltBoneOverrides=
 MagazineInteractionStaleSeconds=0.20
 ViewmodelDisableMoveBob=false
