@@ -57,6 +57,14 @@ static inline bool StringContains(const char* text, const char* needle)
 	return text && needle && *needle && std::strstr(text, needle) != nullptr;
 }
 
+static inline bool MagazineInteractionWeaponIdIsShotgun(int weaponId)
+{
+	return weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::PUMPSHOTGUN) ||
+		weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::SHOTGUN_CHROME) ||
+		weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::AUTOSHOTGUN) ||
+		weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::SPAS);
+}
+
 static bool IsVRThrowableWeapon(C_WeaponCSBase* weapon, const char* weaponName, const char* weaponNetClass)
 {
 	if (weapon)

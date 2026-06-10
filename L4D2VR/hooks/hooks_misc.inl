@@ -1188,14 +1188,6 @@ namespace
         return bestBone;
     }
 
-    inline bool MagazineInteractionWeaponIdIsShotgun(int weaponId)
-    {
-        return weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::PUMPSHOTGUN) ||
-            weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::SHOTGUN_CHROME) ||
-            weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::AUTOSHOTGUN) ||
-            weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::SPAS);
-    }
-
     inline bool MagazineInteractionWeaponIdIsHandgun(int weaponId)
     {
         return weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::PISTOL) ||
@@ -5066,6 +5058,9 @@ void Hooks::dItemPostFrameServer(void* ecx, void* edx)
 #else
 	weaponId = weapon->GetWeaponID();
 #endif
+
+	if (!MagazineInteractionWeaponIdIsShotgun(weaponId))
+		return;
 
 	m_VR->TryApplyMagazineInteractionShotgunServerReloadAbort(ecx, weaponId);
 }
