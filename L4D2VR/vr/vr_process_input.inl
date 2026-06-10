@@ -535,6 +535,11 @@ void VR::ProcessInput()
     bool specialInfectedDodgeToggleJustPressed = false;
     [[maybe_unused]] bool specialInfectedDodgeToggleDataValid = getActionState(&m_ActionSpecialInfectedDodgeToggle, specialInfectedDodgeToggleActionData, specialInfectedDodgeToggleDown, specialInfectedDodgeToggleJustPressed);
 
+    vr::InputDigitalActionData_t ledgeGuardToggleActionData{};
+    [[maybe_unused]] bool ledgeGuardToggleDown = false;
+    bool ledgeGuardToggleJustPressed = false;
+    [[maybe_unused]] bool ledgeGuardToggleDataValid = getActionState(&m_ActionLedgeGuardToggle, ledgeGuardToggleActionData, ledgeGuardToggleDown, ledgeGuardToggleJustPressed);
+
     vr::InputDigitalActionData_t effectiveRangeAutoFireToggleActionData{};
     [[maybe_unused]] bool effectiveRangeAutoFireToggleDown = false;
     bool effectiveRangeAutoFireToggleJustPressed = false;
@@ -1138,6 +1143,11 @@ void VR::ProcessInput()
         std::lock_guard<std::mutex> lock(m_SpecialInfectedDodgeMutex);
         m_SpecialInfectedDodgeThreats.clear();
         m_LastSpecialInfectedDodgeScanTime = {};
+    }
+
+    if (ledgeGuardToggleJustPressed)
+    {
+        m_LedgeGuardEnabled = !m_LedgeGuardEnabled;
     }
 
     if (effectiveRangeAutoFireToggleJustPressed)

@@ -52,6 +52,33 @@ static inline bool IsFiniteViewAngle(const QAngle& a)
 	return std::isfinite(a.x) && std::isfinite(a.y) && std::isfinite(a.z);
 }
 
+static inline bool StringContains(const char* text, const char* needle)
+{
+	return text && needle && *needle && std::strstr(text, needle) != nullptr;
+}
+
+static bool IsVRThrowableWeapon(C_WeaponCSBase* weapon, const char* weaponName, const char* weaponNetClass)
+{
+	if (weapon)
+	{
+		const C_WeaponCSBase::WeaponID weaponId = weapon->GetWeaponID();
+		if (weaponId == C_WeaponCSBase::WeaponID::MOLOTOV ||
+			weaponId == C_WeaponCSBase::WeaponID::PIPE_BOMB ||
+			weaponId == C_WeaponCSBase::WeaponID::VOMITJAR)
+		{
+			return true;
+		}
+	}
+
+	return StringContains(weaponName, "molotov") ||
+		(StringContains(weaponName, "pipe") && StringContains(weaponName, "bomb")) ||
+		StringContains(weaponName, "vomit") ||
+		StringContains(weaponNetClass, "Molotov") ||
+		StringContains(weaponNetClass, "PipeBomb") ||
+		StringContains(weaponNetClass, "VomitJar") ||
+		StringContains(weaponNetClass, "BaseCSGrenade");
+}
+
 static bool IsLocalClientActiveWeapon(void* weapon)
 {
 	if (!weapon || !Hooks::m_Game || !Hooks::m_Game->m_EngineClient)

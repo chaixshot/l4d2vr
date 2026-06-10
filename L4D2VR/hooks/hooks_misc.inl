@@ -5173,14 +5173,6 @@ Vector* Hooks::dServerPlayerEyePosition(void* ecx, void* edx, Vector* eyePos)
 	}
 
 	Vector* result = hkServerPlayerEyePosition.fOriginal(ecx, eyePos);
-
-	if (result && m_Game->m_PerformingMelee)
-	{
-		int i = m_Game->m_CurrentUsercmdID;
-		if (m_Game->IsValidPlayerIndex(i))
-			*result = m_Game->m_PlayersVRInfo[i].controllerPos;
-	}
-
 	return result;
 }
 

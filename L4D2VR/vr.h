@@ -977,6 +977,7 @@ public:
 	vr::VRActionHandle_t m_ActionInventoryQuickSwitch;
 	vr::VRActionHandle_t m_ActionSpecialInfectedAutoAimToggle;
 	vr::VRActionHandle_t m_ActionSpecialInfectedDodgeToggle;
+	vr::VRActionHandle_t m_ActionLedgeGuardToggle;
 	vr::VRActionHandle_t m_ActionEffectiveAttackRangeAutoFireToggle;
 	vr::VRActionHandle_t m_ActionSpeechToText;
 	vr::VRActionHandle_t m_ActionActivateVR;

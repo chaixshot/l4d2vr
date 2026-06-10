@@ -26,6 +26,9 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 	static bool s_tpMeleePrevAttackDown = false;
 	static std::chrono::steady_clock::time_point s_tpMeleeLockUntil{};
 	static QAngle s_tpMeleeLockedAngles = { 0,0,0 };
+	static uintptr_t s_vrAwareThrowableAimWeapon = 0;
+	static bool s_vrAwareThrowableAimPrevAttackDown = false;
+	static int s_vrAwareThrowableAimTicks = 0;
 	// Auto-repeat spray-push for pump/chrome shotguns and AWP/scout:
 	// detect a real shot/shell spend and queue a short IN_ATTACK2.
 	static uintptr_t s_autoRepeatSprayPushWeapon = 0;
@@ -650,14 +653,62 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		else {
 			// VR-aware servers: ensure cmd->viewangles matches HMD.
 			// Otherwise forward/sidemove get interpreted in the wrong basis (push forward -> strafe).
-			Vector hmdAng = m_VR->GetViewAngle();
-			QAngle view(hmdAng.x, hmdAng.y, hmdAng.z);
+			bool useControllerCmdView = false;
+			{
+				const int lpIdx = (m_Game && m_Game->m_EngineClient) ? m_Game->m_EngineClient->GetLocalPlayer() : -1;
+				C_BasePlayer* lp = (lpIdx > 0) ? (C_BasePlayer*)m_Game->GetClientEntity(lpIdx) : nullptr;
+				C_WeaponCSBase* activeWeapon = lp ? reinterpret_cast<C_WeaponCSBase*>(lp->GetActiveWeapon()) : nullptr;
+				const uintptr_t weaponTag = reinterpret_cast<uintptr_t>(activeWeapon);
+				if (weaponTag != s_vrAwareThrowableAimWeapon)
+				{
+					s_vrAwareThrowableAimWeapon = weaponTag;
+					s_vrAwareThrowableAimPrevAttackDown = false;
+					s_vrAwareThrowableAimTicks = 0;
+				}
+
+				const char* activeWeaponName = activeWeapon ? activeWeapon->GetName() : nullptr;
+				const char* activeWeaponNetClass = activeWeapon ? m_Game->GetNetworkClassName((uintptr_t*)activeWeapon) : nullptr;
+				const bool usingMountedWeapon = lp ? (
+					ReadNetvar<bool>(lp, VR::kUsingMountedGunOffset) ||
+					ReadNetvar<bool>(lp, VR::kUsingMountedWeaponOffset)
+					) : false;
+				const bool activeWeaponIsThrowable = IsVRThrowableWeapon(activeWeapon, activeWeaponName, activeWeaponNetClass);
+				constexpr int kIN_ATTACK = (1 << 0);
+				const bool attackDown = (cmd->buttons & kIN_ATTACK) != 0;
+
+				if (activeWeaponIsThrowable)
+				{
+					if (attackDown || (s_vrAwareThrowableAimPrevAttackDown && !attackDown))
+						s_vrAwareThrowableAimTicks = 3;
+					useControllerCmdView = attackDown || (s_vrAwareThrowableAimTicks > 0);
+					if (s_vrAwareThrowableAimTicks > 0)
+						--s_vrAwareThrowableAimTicks;
+				}
+				else
+				{
+					s_vrAwareThrowableAimTicks = 0;
+				}
+
+				s_vrAwareThrowableAimPrevAttackDown = activeWeaponIsThrowable && attackDown;
+				useControllerCmdView = useControllerCmdView || usingMountedWeapon;
+			}
+
+			QAngle view;
+			if (useControllerCmdView)
+			{
+				view = m_VR->GetRightControllerAbsAngle();
+			}
+			else
+			{
+				Vector hmdAng = m_VR->GetViewAngle();
+				view = QAngle(hmdAng.x, hmdAng.y, hmdAng.z);
+			}
 			if (m_VR->m_MouseModeEnabled)
 			{
 				float yaw = m_VR->m_RotationOffset;
 				while (yaw > 180.f)  yaw -= 360.f;
 				while (yaw < -180.f) yaw += 360.f;
-				float pitch = m_VR->m_MouseAimInitialized ? m_VR->m_MouseAimPitchOffset : hmdAng.x;
+				float pitch = m_VR->m_MouseAimInitialized ? m_VR->m_MouseAimPitchOffset : view.x;
 				view = QAngle(pitch, yaw, 0.f);
 			}
 			if (view.x > 89.f)  view.x = 89.f;

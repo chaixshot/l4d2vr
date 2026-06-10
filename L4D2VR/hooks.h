@@ -20,6 +20,7 @@ class matrix3x4_t;
 class edict_t;
 class ModelRenderInfo_t;
 class C_BasePlayer;
+class Server_BaseEntity;
 
 template <typename T>
 struct Hook
@@ -92,6 +93,8 @@ typedef int(__thiscall* tPrimaryAttack)(void* thisptr);
 typedef void(__thiscall* tItemPostFrame)(void* thisptr);
 typedef int(__thiscall* tGetPrimaryAttackActivity)(void* thisptr, void* meleeInfo);
 typedef Vector* (__thiscall* tEyePosition)(void* thisptr, Vector* eyePos);
+typedef const QAngle* (__thiscall* tEyeAngles)(void* thisptr);
+typedef Server_BaseEntity* (__thiscall* tFindUseEntity)(void* thisptr, float radius, float dotLimit, float defaultDotLimit, void* traceResult, void* extra);
 typedef void(__thiscall* tDrawModelExecute)(void* thisptr, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld);
 typedef void(__thiscall* tPushRenderTargetAndViewport)(void* thisptr, ITexture* pTexture, ITexture* pDepthTexture, int nViewX, int nViewY, int nViewW, int nViewH);
 typedef void(__thiscall* tPopRenderTargetAndViewport)(void* thisptr);
@@ -141,6 +144,9 @@ public:
 	static inline Hook<tItemPostFrame> hkItemPostFrameServer;
 	static inline Hook<tGetPrimaryAttackActivity> hkGetPrimaryAttackActivity;
 	static inline Hook<tEyePosition> hkEyePosition;
+	static inline Hook<tEyePosition> hkServerPlayerEyePosition;
+	static inline Hook<tEyeAngles> hkServerPlayerEyeAngles;
+	static inline Hook<tFindUseEntity> hkFindUseEntity;
 	static inline Hook<tDrawModelExecute> hkDrawModelExecute;
 	static inline Hook<tPushRenderTargetAndViewport> hkPushRenderTargetAndViewport;
 	static inline Hook<tPopRenderTargetAndViewport> hkPopRenderTargetAndViewport;
@@ -196,6 +202,9 @@ public:
 	static void __fastcall dItemPostFrameServer(void* ecx, void* edx);
 	static int __fastcall dGetPrimaryAttackActivity(void* ecx, void* edx, void* meleeInfo);
 	static Vector* __fastcall dEyePosition(void* ecx, void* edx, Vector* eyePos);
+	static Vector* __fastcall dServerPlayerEyePosition(void* ecx, void* edx, Vector* eyePos);
+	static const QAngle* __fastcall dServerPlayerEyeAngles(void* ecx, void* edx);
+	static Server_BaseEntity* __fastcall dFindUseEntity(void* ecx, void* edx, float radius, float dotLimit, float defaultDotLimit, void* traceResult, void* extra);
 	static void __fastcall dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld);
 	static void __fastcall dPushRenderTargetAndViewport(void* ecx, void* edx, ITexture* pTexture, ITexture* pDepthTexture, int nViewX, int nViewY, int nViewW, int nViewH);
 	static void __fastcall dPopRenderTargetAndViewport(void* ecx, void* edx);
