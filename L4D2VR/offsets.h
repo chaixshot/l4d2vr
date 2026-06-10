@@ -74,6 +74,21 @@ public:
     Offset DrawLaserBeam =               { "client.dll", 0x0EF660, "53 8B DC 83 EC 08 83 E4 F0 83 C4 04 55 8B 6B 04 89 6C 24 04 8B EC 81 EC C8 04 00 00 A1 ? ? ? ? 33 C5 89 45 FC A1 ? ? ? ? D9 BD BA FB FF FF D9 40 0C 8B 4B 0C 0F B7 85 BA FB FF FF D8 0D ? ? ? ? 0D 00 0C 00 00", 0, true };
     Offset UpdateFlashlight =             { "client.dll", 0x0EE820, "55 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 10 8B 55 18 53 8B 5D 0C 56 8B F1", 0, true };
     Offset UpdateFlashlightColor =        { "client.dll", 0x0EEB10, "55 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 0C 8B 55 14 53 56 89 85 ? ? ? ? 8B 45 18 8B F1", 0, true };
+    Offset ClientPlayerEyeVectors =       { "client.dll", 0x20450,
+        "55 8B EC 56 8B F1 8B 86 ? ? ? ? 83 F8 FF 74 5B",
+        0,
+        true
+    };
+    Offset ClientPlayerEyePosition =      { "client.dll", 0x20EB0,
+        "55 8B EC 56 8B F1 8B 86 ? ? ? ? 83 F8 FF 74 5D",
+        0,
+        true
+    };
+    Offset ClientFindUseEntity =          { "client.dll", 0x283200,
+        "55 8B EC 81 EC 78 0B 00 00 A1 ? ? ? ? 33 C5 89 45 FC 0F 57 C9 F3 0F 10 45 0C 0F 2F C8 F3 0F 10 55 08",
+        0,
+        true
+    };
 
     Offset ServerFireTerrorBullets =     { "server.dll", 0x3C3FC0, "55 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 8B 45 08 8B 4D 10" };
     Offset ReadUserCmd =                 { "server.dll", 0x205100, "55 8B EC 53 8B 5D 10 56 57 8B 7D 0C 53" };
@@ -88,18 +103,23 @@ public:
     Offset GetActiveWeapon =             { "server.dll", 0x464F0, "55 8B EC 8B 45 0C 56 8B 75 08 50 56 E8 ? ? ? ? 84 C0 74 47 8B", -64 };
     Offset GetMeleeWeaponInfo =          { "server.dll", 0x3E67D0, "8B 81 ? ? ? ? 50 B9 ? ? ? ? E8 ? ? ? ? C3" };
     Offset EyePosition =                 { "server.dll", 0x6D610, "55 8B EC 56 8B F1 8B 86 ? ? ? ? C1 E8 0B A8 01 74 05 E8 ? ? ? ? 8B 45 08 F3" };
-    Offset ServerPlayerEyeAngles =       { "server.dll", 0x7A4F0,
+    Offset ServerPlayerEyeAngles =       { "server.dll", 0x7B0F0,
         "55 8B EC 83 EC 64 A1 ? ? ? ? 33 C5 89 45 FC 56 57 8B F9 8B 0D ? ? ? ? E8 ? ? ? ? 84 C0 74 64 80 3D ? ? ? ? 00 75 5B 8B 87 ? ? ? ? 83 F8 FF 74 50",
         0,
         true
     };
-    Offset ServerPlayerEyePosition =     { "server.dll", 0x7A6A0,
+    Offset ServerPlayerEyePosition =     { "server.dll", 0x7B2A0,
         "55 8B EC 56 57 8B F9 8B 0D ? ? ? ? E8 ? ? ? ? 84 C0 74 71 80 3D ? ? ? ? 00 75 68 8B 87 ? ? ? ? 83 F8 FF 74 5D",
         0,
         true
     };
-    Offset FindUseEntity =               { "server.dll", 0x7AE20,
-        "53 8B DC 83 EC 08 83 E4 F0 83 C4 04 55 8B 6B 04 89 6C 24 04 8B EC 81 EC ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC F3 0F 10 43 08 56 F3 0F 11 85 ? ? ? ?",
+    Offset FindUseEntity =               { "server.dll", 0x34E6C0,
+        "55 8B EC B8 80 13 00 00 E8 ? ? ? ? A1 ? ? ? ? 33 C5 89 45 FC 0F 57 C9 F3 0F 10 45 0C 0F 2F C8 F3 0F 10 55 08",
+        0,
+        true
+    };
+    Offset PlayerUse =                   { "server.dll", 0x312AC0,
+        "55 8B EC 81 EC 94 00 00 00 A1 ? ? ? ? 33 C5 89 45 FC 53 56 8B F1 8B 9E B8 1C 00 00 8B 06 8B 90 28 01 00 00",
         0,
         true
     };

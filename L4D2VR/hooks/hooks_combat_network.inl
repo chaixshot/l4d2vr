@@ -1414,6 +1414,81 @@ float __fastcall Hooks::dProcessUsercmds(void* ecx, void* edx, edict_t* player,
 	int index = oEntindex(pPlayer);
 	m_Game->m_CurrentUsercmdID = index;
 
+	const bool preOriginalHasValidPlayer = m_Game->IsValidPlayerIndex(index);
+	if (m_VR && preOriginalHasValidPlayer)
+	{
+		const auto now = std::chrono::steady_clock::now();
+		const bool serverUseAimActive =
+			m_VR->m_ServerUseControllerAimActive ||
+			(m_VR->m_ServerUseControllerAimUntil.time_since_epoch().count() != 0 &&
+				now <= m_VR->m_ServerUseControllerAimUntil);
+		if (serverUseAimActive)
+		{
+			static std::chrono::steady_clock::time_point s_lastServerUseVtableLog{};
+			if (s_lastServerUseVtableLog.time_since_epoch().count() == 0 ||
+				std::chrono::duration<float>(now - s_lastServerUseVtableLog).count() >= 0.50f)
+			{
+				s_lastServerUseVtableLog = now;
+				uintptr_t* vtable = nullptr;
+				uintptr_t eyePositionSlot = 0;
+				uintptr_t eyeAnglesSlot = 0;
+				uintptr_t playerUseSlot = 0;
+				uintptr_t slot6d8 = 0;
+				uintptr_t findUseSlot = 0;
+				uintptr_t isUseableSlot = 0;
+#ifdef _MSC_VER
+				__try
+				{
+					vtable = *reinterpret_cast<uintptr_t**>(pPlayer);
+					if (vtable)
+					{
+						eyePositionSlot = vtable[0x230 / sizeof(uintptr_t)];
+						eyeAnglesSlot = vtable[0x234 / sizeof(uintptr_t)];
+						playerUseSlot = vtable[0x6D4 / sizeof(uintptr_t)];
+						slot6d8 = vtable[0x6D8 / sizeof(uintptr_t)];
+						findUseSlot = vtable[0x6DC / sizeof(uintptr_t)];
+						isUseableSlot = vtable[0x6E0 / sizeof(uintptr_t)];
+					}
+				}
+				__except (EXCEPTION_EXECUTE_HANDLER)
+				{
+					vtable = nullptr;
+					eyePositionSlot = 0;
+					eyeAnglesSlot = 0;
+					playerUseSlot = 0;
+					slot6d8 = 0;
+					findUseSlot = 0;
+					isUseableSlot = 0;
+				}
+#else
+				vtable = *reinterpret_cast<uintptr_t**>(pPlayer);
+				if (vtable)
+				{
+					eyePositionSlot = vtable[0x230 / sizeof(uintptr_t)];
+					eyeAnglesSlot = vtable[0x234 / sizeof(uintptr_t)];
+					playerUseSlot = vtable[0x6D4 / sizeof(uintptr_t)];
+					slot6d8 = vtable[0x6D8 / sizeof(uintptr_t)];
+					findUseSlot = vtable[0x6DC / sizeof(uintptr_t)];
+					isUseableSlot = vtable[0x6E0 / sizeof(uintptr_t)];
+				}
+#endif
+				Game::logMsg(
+					"[VR][UseAim] server player vslots player=%p vtbl=%p eyePos=%p eyeAng=%p playerUse=%p slot6d8=%p findUse=%p isUseable=%p usercmd=%d isVR=%d hasAim=%d",
+					pPlayer,
+					vtable,
+					reinterpret_cast<void*>(eyePositionSlot),
+					reinterpret_cast<void*>(eyeAnglesSlot),
+					reinterpret_cast<void*>(playerUseSlot),
+					reinterpret_cast<void*>(slot6d8),
+					reinterpret_cast<void*>(findUseSlot),
+					reinterpret_cast<void*>(isUseableSlot),
+					index,
+					m_Game->m_PlayersVRInfo[index].isUsingVR ? 1 : 0,
+					m_VR->m_HasNonVRAimSolution ? 1 : 0);
+			}
+		}
+	}
+
 	ApplyServerTeleportMove(pPlayer, pUnknown, index);
 	ApplyServerRoomscale1To1Move(pPlayer, pUnknown, index);
 

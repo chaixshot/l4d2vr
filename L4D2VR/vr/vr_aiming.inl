@@ -838,7 +838,7 @@ C_BaseEntity* VR::GetMountedGunUseEntity(C_BasePlayer* localPlayer) const
     return reinterpret_cast<C_BaseEntity*>(m_Game->m_ClientEntityList->GetClientEntityFromHandle(hUse));
 }
 
-void VR::UpdateNonVRAimSolution(C_BasePlayer* localPlayer, bool forceFresh)
+void VR::UpdateNonVRAimSolution(C_BasePlayer* localPlayer, bool forceFresh, bool allowWithoutForceNonVR)
 {
     // This solution is authoritative for non-VR servers because CreateMove sends
     // m_NonVRAimAngles through cmd->viewangles. Never let render-thread snapshots
@@ -858,7 +858,7 @@ void VR::UpdateNonVRAimSolution(C_BasePlayer* localPlayer, bool forceFresh)
     } mainThreadPoseGuard;
 
     // Keep the previous solution alive if we throttle this frame.
-    if (!m_ForceNonVRServerMovement)
+    if (!m_ForceNonVRServerMovement && !allowWithoutForceNonVR)
     {
         m_HasNonVRAimSolution = false;
         return;

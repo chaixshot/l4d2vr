@@ -5076,10 +5076,25 @@ namespace
 	thread_local void* g_ServerUseControllerAimPlayer = nullptr;
 	thread_local Vector g_ServerUseControllerAimOrigin = { 0.0f, 0.0f, 0.0f };
 	thread_local QAngle g_ServerUseControllerAimAngles = { 0.0f, 0.0f, 0.0f };
+	thread_local bool g_ClientUseControllerAimOverride = false;
+	thread_local void* g_ClientUseControllerAimPlayer = nullptr;
+	thread_local Vector g_ClientUseControllerAimOrigin = { 0.0f, 0.0f, 0.0f };
+	thread_local QAngle g_ClientUseControllerAimAngles = { 0.0f, 0.0f, 0.0f };
 
 	static inline bool IsFiniteVector3(const Vector& v)
 	{
 		return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+	}
+
+	static bool IsServerUseControllerAimWindowActive()
+	{
+		if (!Hooks::m_VR)
+			return false;
+
+		const auto now = std::chrono::steady_clock::now();
+		return Hooks::m_VR->m_ServerUseControllerAimActive ||
+			(Hooks::m_VR->m_ServerUseControllerAimUntil.time_since_epoch().count() != 0 &&
+				now <= Hooks::m_VR->m_ServerUseControllerAimUntil);
 	}
 
 	static bool TryBuildServerUseControllerPose(void* player, Vector& origin, QAngle& angles)
@@ -5106,6 +5121,32 @@ namespace
 		return IsFiniteVector3(origin) && IsFiniteViewAngle(angles);
 	}
 
+	static bool TryBuildClientUseControllerPose(void* player, Vector& origin, QAngle& angles)
+	{
+		if (!Hooks::m_Game || !Hooks::m_VR || !player)
+			return false;
+
+		if (!Hooks::m_VR->m_IsVREnabled)
+			return false;
+
+		if (!Hooks::m_Game->m_EngineClient || !Hooks::m_Game->m_EngineClient->IsInGame())
+			return false;
+
+		const int localPlayerIndex = Hooks::m_Game->m_EngineClient->GetLocalPlayer();
+		if (localPlayerIndex <= 0 || !Hooks::m_Game->IsValidPlayerIndex(localPlayerIndex))
+			return false;
+
+		C_BaseEntity* localPlayer = Hooks::m_Game->GetClientEntity(localPlayerIndex);
+		if (!localPlayer || reinterpret_cast<void*>(localPlayer) != player)
+			return false;
+
+		origin = Hooks::m_VR->GetRightControllerAbsPos();
+		angles = Hooks::m_VR->GetRightControllerAbsAngle();
+		NormalizeAndClampViewAngles(angles);
+
+		return IsFiniteVector3(origin) && IsFiniteViewAngle(angles);
+	}
+
 	class ScopedServerUseControllerAimOverride
 	{
 	public:
@@ -5127,6 +5168,36 @@ namespace
 			g_ServerUseControllerAimPlayer = m_prevPlayer;
 			g_ServerUseControllerAimOrigin = m_prevOrigin;
 			g_ServerUseControllerAimAngles = m_prevAngles;
+		}
+
+	private:
+		bool m_prevActive;
+		void* m_prevPlayer;
+		Vector m_prevOrigin;
+		QAngle m_prevAngles;
+	};
+
+	class ScopedClientUseControllerAimOverride
+	{
+	public:
+		ScopedClientUseControllerAimOverride(void* player, const Vector& origin, const QAngle& angles)
+			: m_prevActive(g_ClientUseControllerAimOverride),
+			m_prevPlayer(g_ClientUseControllerAimPlayer),
+			m_prevOrigin(g_ClientUseControllerAimOrigin),
+			m_prevAngles(g_ClientUseControllerAimAngles)
+		{
+			g_ClientUseControllerAimOverride = true;
+			g_ClientUseControllerAimPlayer = player;
+			g_ClientUseControllerAimOrigin = origin;
+			g_ClientUseControllerAimAngles = angles;
+		}
+
+		~ScopedClientUseControllerAimOverride()
+		{
+			g_ClientUseControllerAimOverride = m_prevActive;
+			g_ClientUseControllerAimPlayer = m_prevPlayer;
+			g_ClientUseControllerAimOrigin = m_prevOrigin;
+			g_ClientUseControllerAimAngles = m_prevAngles;
 		}
 
 	private:
@@ -5163,6 +5234,18 @@ Vector* Hooks::dServerPlayerEyePosition(void* ecx, void* edx, Vector* eyePos)
 {
 	if (eyePos && g_ServerUseControllerAimOverride && ecx == g_ServerUseControllerAimPlayer)
 	{
+		static std::chrono::steady_clock::time_point s_lastServerEyePositionOverrideLog{};
+		const auto now = std::chrono::steady_clock::now();
+		if (s_lastServerEyePositionOverrideLog.time_since_epoch().count() == 0 ||
+			std::chrono::duration<float>(now - s_lastServerEyePositionOverrideLog).count() >= 0.50f)
+		{
+			s_lastServerEyePositionOverrideLog = now;
+			Game::logMsg(
+				"[VR][UseAim] ServerPlayerEyePosition override origin=(%.1f %.1f %.1f)",
+				g_ServerUseControllerAimOrigin.x,
+				g_ServerUseControllerAimOrigin.y,
+				g_ServerUseControllerAimOrigin.z);
+		}
 		*eyePos = g_ServerUseControllerAimOrigin;
 		return eyePos;
 	}
@@ -5171,25 +5254,166 @@ Vector* Hooks::dServerPlayerEyePosition(void* ecx, void* edx, Vector* eyePos)
 	return result;
 }
 
+Vector* Hooks::dClientPlayerEyePosition(void* ecx, void* edx, Vector* eyePos)
+{
+	if (eyePos && g_ClientUseControllerAimOverride && ecx == g_ClientUseControllerAimPlayer)
+	{
+		*eyePos = g_ClientUseControllerAimOrigin;
+		return eyePos;
+	}
+
+	return hkClientPlayerEyePosition.fOriginal(ecx, eyePos);
+}
+
+void Hooks::dClientPlayerEyeVectors(void* ecx, void* edx, Vector* forward, Vector* right, Vector* up)
+{
+	if (g_ClientUseControllerAimOverride && ecx == g_ClientUseControllerAimPlayer)
+	{
+		QAngle::AngleVectors(g_ClientUseControllerAimAngles, forward, right, up);
+		return;
+	}
+
+	hkClientPlayerEyeVectors.fOriginal(ecx, forward, right, up);
+}
+
 const QAngle* Hooks::dServerPlayerEyeAngles(void* ecx, void* edx)
 {
 	if (g_ServerUseControllerAimOverride && ecx == g_ServerUseControllerAimPlayer)
+	{
+		static std::chrono::steady_clock::time_point s_lastServerEyeAnglesOverrideLog{};
+		const auto now = std::chrono::steady_clock::now();
+		if (s_lastServerEyeAnglesOverrideLog.time_since_epoch().count() == 0 ||
+			std::chrono::duration<float>(now - s_lastServerEyeAnglesOverrideLog).count() >= 0.50f)
+		{
+			s_lastServerEyeAnglesOverrideLog = now;
+			Game::logMsg(
+				"[VR][UseAim] ServerPlayerEyeAngles override angles=(%.1f %.1f %.1f)",
+				g_ServerUseControllerAimAngles.x,
+				g_ServerUseControllerAimAngles.y,
+				g_ServerUseControllerAimAngles.z);
+		}
 		return &g_ServerUseControllerAimAngles;
+	}
 
 	return hkServerPlayerEyeAngles.fOriginal(ecx);
 }
 
-Server_BaseEntity* Hooks::dFindUseEntity(void* ecx, void* edx, float radius, float dotLimit, float defaultDotLimit, void* traceResult, void* extra)
+void Hooks::dPlayerUse(void* ecx, void* edx, void* useEntity)
 {
+	const bool useAimActive = IsServerUseControllerAimWindowActive();
+	if (useAimActive)
+	{
+		static std::chrono::steady_clock::time_point s_lastPlayerUseEntryLog{};
+		const auto now = std::chrono::steady_clock::now();
+		if (s_lastPlayerUseEntryLog.time_since_epoch().count() == 0 ||
+			std::chrono::duration<float>(now - s_lastPlayerUseEntryLog).count() >= 0.50f)
+		{
+			s_lastPlayerUseEntryLog = now;
+			const int playerIndex = m_Game ? m_Game->m_CurrentUsercmdID : -1;
+			const bool validPlayerIndex = m_Game && m_Game->IsValidPlayerIndex(playerIndex);
+			const bool isUsingVR = validPlayerIndex && m_Game->m_PlayersVRInfo[playerIndex].isUsingVR;
+			Game::logMsg(
+				"[VR][UseAim] PlayerUse entry usercmd=%d isVR=%d hasAim=%d player=%p current=%p useEntity=%p",
+				playerIndex,
+				isUsingVR ? 1 : 0,
+				(m_VR && m_VR->m_HasNonVRAimSolution) ? 1 : 0,
+				ecx,
+				m_Game ? reinterpret_cast<void*>(m_Game->m_CurrentUsercmdPlayer) : nullptr,
+				useEntity);
+		}
+	}
+
 	Vector controllerOrigin;
 	QAngle controllerAngles;
-	if (TryBuildServerUseControllerPose(ecx, controllerOrigin, controllerAngles))
+	if (useAimActive && TryBuildServerUseControllerPose(ecx, controllerOrigin, controllerAngles))
 	{
+		static std::chrono::steady_clock::time_point s_lastPlayerUseLog{};
+		const auto now = std::chrono::steady_clock::now();
+		if (s_lastPlayerUseLog.time_since_epoch().count() == 0 ||
+			std::chrono::duration<float>(now - s_lastPlayerUseLog).count() >= 0.50f)
+		{
+			s_lastPlayerUseLog = now;
+			Game::logMsg(
+				"[VR][UseAim] PlayerUse override origin=(%.1f %.1f %.1f) angles=(%.1f %.1f %.1f)",
+				controllerOrigin.x, controllerOrigin.y, controllerOrigin.z,
+				controllerAngles.x, controllerAngles.y, controllerAngles.z);
+		}
+		ScopedServerUseControllerAimOverride useAim(ecx, controllerOrigin, controllerAngles);
+		hkPlayerUse.fOriginal(ecx, useEntity);
+		return;
+	}
+
+	hkPlayerUse.fOriginal(ecx, useEntity);
+}
+
+Server_BaseEntity* Hooks::dFindUseEntity(void* ecx, void* edx, float radius, float dotLimit, float defaultDotLimit, void* traceResult, void* extra)
+{
+	const bool useAimActive = IsServerUseControllerAimWindowActive();
+	if (useAimActive)
+	{
+		static std::chrono::steady_clock::time_point s_lastFindUseEntryLog{};
+		const auto now = std::chrono::steady_clock::now();
+		if (s_lastFindUseEntryLog.time_since_epoch().count() == 0 ||
+			std::chrono::duration<float>(now - s_lastFindUseEntryLog).count() >= 0.50f)
+		{
+			s_lastFindUseEntryLog = now;
+			const int playerIndex = m_Game ? m_Game->m_CurrentUsercmdID : -1;
+			const bool validPlayerIndex = m_Game && m_Game->IsValidPlayerIndex(playerIndex);
+			const bool isUsingVR = validPlayerIndex && m_Game->m_PlayersVRInfo[playerIndex].isUsingVR;
+			Game::logMsg(
+				"[VR][UseAim] FindUseEntity entry usercmd=%d isVR=%d hasAim=%d player=%p current=%p",
+				playerIndex,
+				isUsingVR ? 1 : 0,
+				(m_VR && m_VR->m_HasNonVRAimSolution) ? 1 : 0,
+				ecx,
+				m_Game ? reinterpret_cast<void*>(m_Game->m_CurrentUsercmdPlayer) : nullptr);
+		}
+	}
+
+	Vector controllerOrigin;
+	QAngle controllerAngles;
+	if (useAimActive && TryBuildServerUseControllerPose(ecx, controllerOrigin, controllerAngles))
+	{
+		static std::chrono::steady_clock::time_point s_lastFindUseLog{};
+		const auto now = std::chrono::steady_clock::now();
+		if (s_lastFindUseLog.time_since_epoch().count() == 0 ||
+			std::chrono::duration<float>(now - s_lastFindUseLog).count() >= 0.50f)
+		{
+			s_lastFindUseLog = now;
+			Game::logMsg(
+				"[VR][UseAim] FindUseEntity override origin=(%.1f %.1f %.1f) angles=(%.1f %.1f %.1f)",
+				controllerOrigin.x, controllerOrigin.y, controllerOrigin.z,
+				controllerAngles.x, controllerAngles.y, controllerAngles.z);
+		}
 		ScopedServerUseControllerAimOverride useAim(ecx, controllerOrigin, controllerAngles);
 		return hkFindUseEntity.fOriginal(ecx, radius, dotLimit, defaultDotLimit, traceResult, extra);
 	}
 
 	return hkFindUseEntity.fOriginal(ecx, radius, dotLimit, defaultDotLimit, traceResult, extra);
+}
+
+C_BaseEntity* Hooks::dClientFindUseEntity(void* ecx, void* edx, float radius, float dotLimit, float defaultDotLimit, void* traceResult, void* extra)
+{
+	Vector controllerOrigin;
+	QAngle controllerAngles;
+	if (TryBuildClientUseControllerPose(ecx, controllerOrigin, controllerAngles))
+	{
+		static std::chrono::steady_clock::time_point s_lastClientFindUseLog{};
+		const auto now = std::chrono::steady_clock::now();
+		if (s_lastClientFindUseLog.time_since_epoch().count() == 0 ||
+			std::chrono::duration<float>(now - s_lastClientFindUseLog).count() >= 1.00f)
+		{
+			s_lastClientFindUseLog = now;
+			Game::logMsg(
+				"[VR][UseAim] ClientFindUseEntity highlight override origin=(%.1f %.1f %.1f) angles=(%.1f %.1f %.1f)",
+				controllerOrigin.x, controllerOrigin.y, controllerOrigin.z,
+				controllerAngles.x, controllerAngles.y, controllerAngles.z);
+		}
+		ScopedClientUseControllerAimOverride useAim(ecx, controllerOrigin, controllerAngles);
+		return hkClientFindUseEntity.fOriginal(ecx, radius, dotLimit, defaultDotLimit, traceResult, extra);
+	}
+
+	return hkClientFindUseEntity.fOriginal(ecx, radius, dotLimit, defaultDotLimit, traceResult, extra);
 }
 
 void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld)

@@ -39,12 +39,31 @@ Hooks::Hooks(Game* game)
 	hkEyePosition.enableHook();
 	if (hkServerPlayerEyePosition.pTarget &&
 		hkServerPlayerEyeAngles.pTarget &&
-		hkFindUseEntity.pTarget)
+		(hkFindUseEntity.pTarget || hkPlayerUse.pTarget))
 	{
 		hkServerPlayerEyePosition.enableHook();
 		hkServerPlayerEyeAngles.enableHook();
-		hkFindUseEntity.enableHook();
-		Game::logMsg("[VR][Use] installed L4D2 FindUseEntity controller-pose hooks");
+		if (hkFindUseEntity.pTarget)
+			hkFindUseEntity.enableHook();
+		if (hkPlayerUse.pTarget)
+			hkPlayerUse.enableHook();
+		Game::logMsg(
+			"[VR][Use] installed L4D2 FindUseEntity/PlayerUse controller-pose hooks findUse=%p playerUse=%p",
+			hkFindUseEntity.pTarget,
+			hkPlayerUse.pTarget);
+	}
+	if (hkClientFindUseEntity.pTarget &&
+		hkClientPlayerEyePosition.pTarget &&
+		hkClientPlayerEyeVectors.pTarget)
+	{
+		hkClientPlayerEyePosition.enableHook();
+		hkClientPlayerEyeVectors.enableHook();
+		hkClientFindUseEntity.enableHook();
+		Game::logMsg(
+			"[VR][Use] installed L4D2 client FindUseEntity highlight controller-pose hook findUse=%p eyePos=%p eyeVectors=%p",
+			hkClientFindUseEntity.pTarget,
+			hkClientPlayerEyePosition.pTarget,
+			hkClientPlayerEyeVectors.pTarget);
 	}
 	hkDrawModelExecute.enableHook();
 	hkRenderView.enableHook();
@@ -172,14 +191,34 @@ int Hooks::initSourceHooks()
 
 	if (m_Game->m_Offsets->ServerPlayerEyePosition.valid &&
 		m_Game->m_Offsets->ServerPlayerEyeAngles.valid &&
-		m_Game->m_Offsets->FindUseEntity.valid)
+		(m_Game->m_Offsets->FindUseEntity.valid || m_Game->m_Offsets->PlayerUse.valid))
 	{
 		LPVOID serverPlayerEyePositionAddr = (LPVOID)(m_Game->m_Offsets->ServerPlayerEyePosition.address);
 		LPVOID serverPlayerEyeAnglesAddr = (LPVOID)(m_Game->m_Offsets->ServerPlayerEyeAngles.address);
-		LPVOID findUseEntityAddr = (LPVOID)(m_Game->m_Offsets->FindUseEntity.address);
 		hkServerPlayerEyePosition.createHook(serverPlayerEyePositionAddr, &dServerPlayerEyePosition);
 		hkServerPlayerEyeAngles.createHook(serverPlayerEyeAnglesAddr, &dServerPlayerEyeAngles);
-		hkFindUseEntity.createHook(findUseEntityAddr, &dFindUseEntity);
+		if (m_Game->m_Offsets->FindUseEntity.valid)
+		{
+			LPVOID findUseEntityAddr = (LPVOID)(m_Game->m_Offsets->FindUseEntity.address);
+			hkFindUseEntity.createHook(findUseEntityAddr, &dFindUseEntity);
+		}
+		if (m_Game->m_Offsets->PlayerUse.valid)
+		{
+			LPVOID playerUseAddr = (LPVOID)(m_Game->m_Offsets->PlayerUse.address);
+			hkPlayerUse.createHook(playerUseAddr, &dPlayerUse);
+		}
+	}
+
+	if (m_Game->m_Offsets->ClientFindUseEntity.valid &&
+		m_Game->m_Offsets->ClientPlayerEyePosition.valid &&
+		m_Game->m_Offsets->ClientPlayerEyeVectors.valid)
+	{
+		LPVOID clientFindUseEntityAddr = (LPVOID)(m_Game->m_Offsets->ClientFindUseEntity.address);
+		LPVOID clientPlayerEyePositionAddr = (LPVOID)(m_Game->m_Offsets->ClientPlayerEyePosition.address);
+		LPVOID clientPlayerEyeVectorsAddr = (LPVOID)(m_Game->m_Offsets->ClientPlayerEyeVectors.address);
+		hkClientFindUseEntity.createHook(clientFindUseEntityAddr, &dClientFindUseEntity);
+		hkClientPlayerEyePosition.createHook(clientPlayerEyePositionAddr, &dClientPlayerEyePosition);
+		hkClientPlayerEyeVectors.createHook(clientPlayerEyeVectorsAddr, &dClientPlayerEyeVectors);
 	}
 
 	LPVOID DrawModelExecuteAddr = (LPVOID)(m_Game->m_Offsets->DrawModelExecute.address);

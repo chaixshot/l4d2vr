@@ -55,6 +55,8 @@ void VR::ProcessInput()
             m_Game->ClientCmd_Unrestricted("-use");
             m_UseCmdOwned = false;
         }
+        m_ServerUseControllerAimActive = false;
+        m_ServerUseControllerAimUntil = {};
         if (m_ReloadCmdOwned)
         {
             m_Game->ClientCmd_Unrestricted("-reload");
@@ -273,6 +275,14 @@ void VR::ProcessInput()
     // While aiming teleport, Use is reserved as a modifier that ignores playerclip
     // barriers. Do not also send +use into gameplay.
     const bool wantUse = PressedDigitalAction(m_ActionUse) && !m_TeleportTargetingActive;
+    m_ServerUseControllerAimActive = wantUse;
+    if (wantUse)
+    {
+        m_ServerUseControllerAimUntil =
+            std::chrono::steady_clock::now() +
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<float>(0.20f));
+    }
 
     // Scope realtime adjustment uses Use + left stick while scoped-in.
     // Vertical adjusts magnification FOV; horizontal adjusts scope overlay size.

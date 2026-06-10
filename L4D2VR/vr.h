@@ -899,6 +899,8 @@ public:
 	bool m_InGameVguiMouseDown = false;
 	bool m_JumpCmdOwned = false;
 	bool m_UseCmdOwned = false;
+	bool m_ServerUseControllerAimActive = false;
+	std::chrono::steady_clock::time_point m_ServerUseControllerAimUntil{};
 	bool m_ReloadCmdOwned = false;
 	bool m_DuckCmdOwned = false;
 	bool m_LeftGripPressedPrev = false;
@@ -3077,7 +3079,7 @@ public:
 	std::string GetMeleeWeaponName(C_WeaponCSBase* weapon) const;
 	void WaitForConfigUpdate();
 	bool GetWalkAxis(float& x, float& y);
-	void UpdateNonVRAimSolution(C_BasePlayer* localPlayer, bool forceFresh = false);
+	void UpdateNonVRAimSolution(C_BasePlayer* localPlayer, bool forceFresh = false, bool allowWithoutForceNonVR = false);
 	// Friendly-fire aim guard:
 	// - m_AimLineHitsFriendly is computed from a ray trace and may flicker at hitbox edges.
 	// - While the attack button is held, flicker can effectively create press/release edges.

@@ -28,6 +28,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 	static QAngle s_tpMeleeLockedAngles = { 0,0,0 };
 	static uintptr_t s_vrAwareThrowableAimWeapon = 0;
 	static bool s_vrAwareThrowableAimPrevAttackDown = false;
+	static bool s_vrAwareThrowableAimPrevWeaponThrowable = false;
 	static int s_vrAwareThrowableAimTicks = 0;
 	// Auto-repeat spray-push for pump/chrome shotguns and AWP/scout:
 	// detect a real shot/shell spend and queue a short IN_ATTACK2.
@@ -654,6 +655,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			// VR-aware servers: ensure cmd->viewangles matches HMD.
 			// Otherwise forward/sidemove get interpreted in the wrong basis (push forward -> strafe).
 			bool useControllerCmdView = false;
+			bool useNonVRAimCmdView = false;
+			const char* controllerCmdViewReason = nullptr;
 			{
 				const int lpIdx = (m_Game && m_Game->m_EngineClient) ? m_Game->m_EngineClient->GetLocalPlayer() : -1;
 				C_BasePlayer* lp = (lpIdx > 0) ? (C_BasePlayer*)m_Game->GetClientEntity(lpIdx) : nullptr;
@@ -661,9 +664,11 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 				const uintptr_t weaponTag = reinterpret_cast<uintptr_t>(activeWeapon);
 				if (weaponTag != s_vrAwareThrowableAimWeapon)
 				{
+					if (s_vrAwareThrowableAimPrevWeaponThrowable && s_vrAwareThrowableAimPrevAttackDown)
+						s_vrAwareThrowableAimTicks = std::max(s_vrAwareThrowableAimTicks, 8);
 					s_vrAwareThrowableAimWeapon = weaponTag;
 					s_vrAwareThrowableAimPrevAttackDown = false;
-					s_vrAwareThrowableAimTicks = 0;
+					s_vrAwareThrowableAimPrevWeaponThrowable = false;
 				}
 
 				const char* activeWeaponName = activeWeapon ? activeWeapon->GetName() : nullptr;
@@ -671,32 +676,74 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 				const bool usingMountedWeapon = lp ? (
 					ReadNetvar<bool>(lp, VR::kUsingMountedGunOffset) ||
 					ReadNetvar<bool>(lp, VR::kUsingMountedWeaponOffset)
-					) : false;
+				) : false;
 				const bool activeWeaponIsThrowable = IsVRThrowableWeapon(activeWeapon, activeWeaponName, activeWeaponNetClass);
 				constexpr int kIN_ATTACK = (1 << 0);
+				constexpr int kIN_USE = (1 << 5);
 				const bool attackDown = (cmd->buttons & kIN_ATTACK) != 0;
+				const bool useDown = (cmd->buttons & kIN_USE) != 0;
+				const auto now = std::chrono::steady_clock::now();
+				const bool useCmdAimActive = m_VR &&
+					(m_VR->m_ServerUseControllerAimActive ||
+						(m_VR->m_ServerUseControllerAimUntil.time_since_epoch().count() != 0 &&
+							now <= m_VR->m_ServerUseControllerAimUntil));
 
 				if (activeWeaponIsThrowable)
 				{
 					if (attackDown || (s_vrAwareThrowableAimPrevAttackDown && !attackDown))
-						s_vrAwareThrowableAimTicks = 3;
+						s_vrAwareThrowableAimTicks = 8;
 					useControllerCmdView = attackDown || (s_vrAwareThrowableAimTicks > 0);
+					if (useControllerCmdView)
+					{
+						controllerCmdViewReason = attackDown ? "throw" : "throw-grace";
+					}
 					if (s_vrAwareThrowableAimTicks > 0)
 						--s_vrAwareThrowableAimTicks;
 				}
 				else
 				{
-					s_vrAwareThrowableAimTicks = 0;
+					useControllerCmdView = s_vrAwareThrowableAimTicks > 0;
+					if (useControllerCmdView)
+					{
+						controllerCmdViewReason = "throw-switch-grace";
+					}
+					if (s_vrAwareThrowableAimTicks > 0)
+						--s_vrAwareThrowableAimTicks;
 				}
 
 				s_vrAwareThrowableAimPrevAttackDown = activeWeaponIsThrowable && attackDown;
-				useControllerCmdView = useControllerCmdView || usingMountedWeapon;
+				s_vrAwareThrowableAimPrevWeaponThrowable = activeWeaponIsThrowable;
+				if (useCmdAimActive || useDown)
+				{
+					useControllerCmdView = true;
+					controllerCmdViewReason = "use";
+				}
+				if (usingMountedWeapon)
+				{
+					useControllerCmdView = true;
+					if (!controllerCmdViewReason)
+						controllerCmdViewReason = "mounted";
+				}
 			}
 
 			QAngle view;
 			if (useControllerCmdView)
 			{
 				view = m_VR->GetRightControllerAbsAngle();
+
+				static std::chrono::steady_clock::time_point s_lastControllerCmdViewLog{};
+				const auto logNow = std::chrono::steady_clock::now();
+				if (s_lastControllerCmdViewLog.time_since_epoch().count() == 0 ||
+					std::chrono::duration<float>(logNow - s_lastControllerCmdViewLog).count() >= 0.50f)
+				{
+					s_lastControllerCmdViewLog = logNow;
+					Game::logMsg(
+						"[VR][UseAim] CreateMove controller cmd view reason=%s nonvrAim=%d hasAim=%d view=(%.1f %.1f %.1f)",
+						controllerCmdViewReason ? controllerCmdViewReason : "unknown",
+						useNonVRAimCmdView ? 1 : 0,
+						m_VR->m_HasNonVRAimSolution ? 1 : 0,
+						view.x, view.y, view.z);
+				}
 			}
 			else
 			{
