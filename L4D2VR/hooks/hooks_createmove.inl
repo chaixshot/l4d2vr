@@ -1424,6 +1424,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		}
 
 		m_VR->ApplyRoomscale1To1Move(cmd, flInputSampleTime, controlLocomotionActive);
+		m_VR->ApplyMovementLedgeGuard(cmd, m_VR->m_ScopeFovAdjustSuppressWalk || m_VR->m_TeleportTargetingActive);
 	}
 	return result;
 }

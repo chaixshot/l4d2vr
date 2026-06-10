@@ -1077,6 +1077,14 @@ namespace
         }
     }
 
+    bool MagazineInteractionPublishedBoxMatchesWeapon(
+        const MagazineInteractionBoxSnapshot& box,
+        C_WeaponCSBase::WeaponID activeWeaponId)
+    {
+        const int modelWeaponId = MagazineInteractionInferWeaponIdFromModelName(box.modelName);
+        return modelWeaponId <= 0 || modelWeaponId == static_cast<int>(activeWeaponId);
+    }
+
     bool MagazineInteractionWeaponUsesSinglePumpSound(C_WeaponCSBase::WeaponID weaponId)
     {
         return weaponId == C_WeaponCSBase::WeaponID::PUMPSHOTGUN ||
@@ -2537,7 +2545,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 m_MagazineInteractionSocketCaptureWorld,
                 MagazineInteractionBoxCenterLocal(m_MagazineInteractionSocketCaptureBox));
             Game::logMsg(
-                "[VR][MagazineInteraction] cached shotgun socket capture local-to-viewmodel reason=%s center=(%.2f %.2f %.2f)",
+                "[VR][MagazineInteraction] cached shotgun socket capture local-to-shotgun-anchor reason=%s center=(%.2f %.2f %.2f)",
                 reason ? reason : "unknown",
                 captureCenter.x,
                 captureCenter.y,
@@ -3032,7 +3040,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         if (GetMagazineInteractionBox(box))
         {
             const float ageSeconds = std::chrono::duration<float>(now - box.publishedAt).count();
-            if (ageSeconds <= std::max(0.02f, m_MagazineInteractionStaleSeconds))
+            if (ageSeconds <= std::max(0.02f, m_MagazineInteractionStaleSeconds) &&
+                MagazineInteractionPublishedBoxMatchesWeapon(box, activeWeaponId))
             {
                 beginMagazineInteractionSession(box);
                 m_MagazineInteractionState = MagazineInteractionManualState::WaitingForFreshMagazine;
@@ -3045,6 +3054,23 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                     box.entityIndex,
                     box.boneIndex,
                     box.modelName.c_str());
+            }
+            else if (ageSeconds <= std::max(0.02f, m_MagazineInteractionStaleSeconds))
+            {
+                static std::chrono::steady_clock::time_point s_lastRejectedShotgunBoxLog{};
+                if (s_lastRejectedShotgunBoxLog.time_since_epoch().count() == 0 ||
+                    std::chrono::duration<float>(now - s_lastRejectedShotgunBoxLog).count() >= 0.50f)
+                {
+                    s_lastRejectedShotgunBoxLog = now;
+                    Game::logMsg(
+                        "[VR][MagazineInteraction] rejected stale shotgun box for different weapon activeWeaponId=%d modelWeaponId=%d ent=%d bone=%d model=%s age=%.3f",
+                        static_cast<int>(activeWeaponId),
+                        MagazineInteractionInferWeaponIdFromModelName(box.modelName),
+                        box.entityIndex,
+                        box.boneIndex,
+                        box.modelName.c_str(),
+                        ageSeconds);
+                }
             }
         }
     }

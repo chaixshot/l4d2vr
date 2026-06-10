@@ -3746,6 +3746,7 @@ void VR::RefreshSpecialInfectedPreWarning(const Vector& /*infectedOrigin*/, Spec
 void VR::RefreshSpecialInfectedBlindSpotWarning(const Vector& /*infectedOrigin*/) {}
 bool VR::HasLineOfSightToSpecialInfected(const Vector& /*infectedOrigin*/, int /*entityIndex*/) const { return false; }
 bool VR::IsSpecialInfectedInBlindSpot(const Vector& /*infectedOrigin*/) const { return false; }
+bool VR::ApplyMovementLedgeGuard(CUserCmd* /*cmd*/, bool /*suppressScopeWalk*/) { return false; }
 
 void VR::UpdateSpecialInfectedWarningState()
 {

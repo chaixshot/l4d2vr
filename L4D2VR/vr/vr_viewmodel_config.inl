@@ -1292,7 +1292,9 @@ void VR::ParseConfigFile()
             const std::string& spec,
             std::unordered_map<int, std::vector<std::string>>& outOverrides)
             {
-                std::stringstream ss(spec);
+                std::string normalizedSpec = spec;
+                std::replace(normalizedSpec.begin(), normalizedSpec.end(), ';', ',');
+                std::stringstream ss(normalizedSpec);
                 std::string entry;
                 while (std::getline(ss, entry, ','))
                 {
@@ -1490,7 +1492,9 @@ void VR::ParseConfigFile()
             float maxValue,
             std::unordered_map<int, float>& outOverrides)
             {
-                std::stringstream ss(spec);
+                std::string normalizedSpec = spec;
+                std::replace(normalizedSpec.begin(), normalizedSpec.end(), ',', ';');
+                std::stringstream ss(normalizedSpec);
                 std::string entry;
                 while (std::getline(ss, entry, ';'))
                 {
@@ -1683,6 +1687,13 @@ void VR::ParseConfigFile()
     m_AutoAirStrafeTurnResponsiveness = std::clamp(getFloat("AutoAirStrafeTurnResponsiveness", m_AutoAirStrafeTurnResponsiveness), 0.0f, 1.0f);
     m_AutoAirStrafeDebugLog = getBool("AutoAirStrafeDebugLog", m_AutoAirStrafeDebugLog);
     m_AutoAirStrafeDebugLogHz = std::clamp(getFloat("AutoAirStrafeDebugLogHz", m_AutoAirStrafeDebugLogHz), 0.0f, 60.0f);
+    m_LedgeGuardEnabled = getBool("LedgeGuardEnabled", m_LedgeGuardEnabled);
+    m_LedgeGuardProbeDistance = std::clamp(getFloat("LedgeGuardProbeDistance", m_LedgeGuardProbeDistance), 8.0f, 128.0f);
+    m_LedgeGuardProbeHeight = std::clamp(getFloat("LedgeGuardProbeHeight", m_LedgeGuardProbeHeight), 4.0f, 64.0f);
+    m_LedgeGuardDropDistance = std::clamp(getFloat("LedgeGuardDropDistance", m_LedgeGuardDropDistance), 24.0f, 256.0f);
+    m_LedgeGuardMinMoveSpeed = std::clamp(getFloat("LedgeGuardMinMoveSpeed", m_LedgeGuardMinMoveSpeed), 0.0f, 450.0f);
+    m_LedgeGuardDebugLog = getBool("LedgeGuardDebugLog", m_LedgeGuardDebugLog);
+    m_LedgeGuardDebugLogHz = std::clamp(getFloat("LedgeGuardDebugLogHz", m_LedgeGuardDebugLogHz), 0.0f, 60.0f);
     m_MotionGestureSwingThreshold = std::max(0.0f, getFloat("MotionGestureSwingThreshold", m_MotionGestureSwingThreshold));
     m_MotionGesturePushThreshold = std::max(0.0f, getFloat("MotionGesturePushThreshold", m_MotionGesturePushThreshold));
     m_MotionGestureDownSwingThreshold = std::max(0.0f, getFloat("MotionGestureDownSwingThreshold", m_MotionGestureDownSwingThreshold));
@@ -2122,6 +2133,16 @@ void VR::ParseConfigFile()
     m_RequireSecondaryAttackForItemSwitch = getBool("RequireSecondaryAttackForItemSwitch", m_RequireSecondaryAttackForItemSwitch);
     m_SpecialInfectedWarningActionEnabled = getBool("SpecialInfectedAutoEvade", m_SpecialInfectedWarningActionEnabled);
     m_SpecialInfectedAutoEvadeIgnoreBehind = getBool("SpecialInfectedAutoEvadeIgnoreBehind", m_SpecialInfectedAutoEvadeIgnoreBehind);
+    m_SpecialInfectedDodgeActive = getBool("SpecialInfectedDodgeEnabled", m_SpecialInfectedDodgeActive);
+    m_SpecialInfectedDodgeDistance = std::max(0.0f, getFloat("SpecialInfectedDodgeDistance", m_SpecialInfectedDodgeDistance));
+    if (!m_SpecialInfectedDodgeActive || m_SpecialInfectedDodgeDistance <= 0.0f)
+    {
+        if (m_SpecialInfectedDodgeDistance <= 0.0f)
+            m_SpecialInfectedDodgeActive = false;
+        std::lock_guard<std::mutex> lock(m_SpecialInfectedDodgeMutex);
+        m_SpecialInfectedDodgeThreats.clear();
+        m_LastSpecialInfectedDodgeScanTime = {};
+    }
     m_SpecialInfectedArrowEnabled = getBool("SpecialInfectedArrowEnabled", m_SpecialInfectedArrowEnabled);
     m_SpecialInfectedDebug = getBool("SpecialInfectedDebug", m_SpecialInfectedDebug);
     m_SpecialInfectedArrowDebugLog = getBool("SpecialInfectedArrowDebugLog", m_SpecialInfectedArrowDebugLog);

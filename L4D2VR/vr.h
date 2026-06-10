@@ -872,6 +872,14 @@ public:
 	float m_AutoAirStrafeDebugPrevVy = 0.0f;
 	float m_AutoAirStrafeDebugPrevYaw = 0.0f;
 	bool m_AutoAirStrafeDebugPrevGround = false;
+	bool m_LedgeGuardEnabled = true;
+	float m_LedgeGuardProbeDistance = 36.0f;
+	float m_LedgeGuardProbeHeight = 18.0f;
+	float m_LedgeGuardDropDistance = 96.0f;
+	float m_LedgeGuardMinMoveSpeed = 1.0f;
+	bool m_LedgeGuardDebugLog = false;
+	float m_LedgeGuardDebugLogHz = 2.0f;
+	std::chrono::steady_clock::time_point m_LedgeGuardDebugLastLog{};
 	// Any locomotion (keyboard WASD, thumbstick, etc.) detected in the current CreateMove.
 	// Used to avoid conflicts with 1:1 roomscale movement/camera decoupling.
 	bool m_LocomotionActive = false;
@@ -968,6 +976,7 @@ public:
 	vr::VRActionHandle_t m_ActionInventoryGripRight;
 	vr::VRActionHandle_t m_ActionInventoryQuickSwitch;
 	vr::VRActionHandle_t m_ActionSpecialInfectedAutoAimToggle;
+	vr::VRActionHandle_t m_ActionSpecialInfectedDodgeToggle;
 	vr::VRActionHandle_t m_ActionEffectiveAttackRangeAutoFireToggle;
 	vr::VRActionHandle_t m_ActionSpeechToText;
 	vr::VRActionHandle_t m_ActionActivateVR;
@@ -2615,6 +2624,18 @@ public:
 	std::vector<SpecialInfectedIntentSenseHudLine> m_SpecialInfectedIntentSenseHudLines{};
 	uint32_t m_SpecialInfectedIntentSenseScanRevision = 0;
 	int m_SpecialInfectedIntentSenseHudRevision = 0;
+	struct SpecialInfectedDodgeThreat
+	{
+		Vector origin{ 0.0f, 0.0f, 0.0f };
+		SpecialInfectedType type = SpecialInfectedType::None;
+		int entityIndex = -1;
+		float distanceSq = 0.0f;
+	};
+	bool m_SpecialInfectedDodgeActive = false;
+	float m_SpecialInfectedDodgeDistance = 260.0f;
+	mutable std::mutex m_SpecialInfectedDodgeMutex{};
+	std::vector<SpecialInfectedDodgeThreat> m_SpecialInfectedDodgeThreats{};
+	std::chrono::steady_clock::time_point m_LastSpecialInfectedDodgeScanTime{};
 	float m_SpecialInfectedPreWarningEvadeDistance = 260.0f;
 	float m_SpecialInfectedPreWarningEvadeCooldown = 0.85f;
 	bool m_SpecialInfectedAutoEvadeIgnoreBehind = true;
@@ -3229,6 +3250,7 @@ public:
 	void UpdateSpecialInfectedWarningState();
 	void UpdateSpecialInfectedPreWarningState();
 	Vector GetAimRenderCameraDelta() const;
+	bool ApplyMovementLedgeGuard(CUserCmd* cmd, bool suppressScopeWalk);
 	void ApplyRoomscale1To1Move(CUserCmd* cmd, float inputSampleTime, bool controlLocomotionActive);
 	bool ShouldUseRoomscale1To1ServerMove() const;
 	void QueueRoomscale1To1ServerMoveDelta(const Vector& worldDelta, const Vector& visualWorldDelta);

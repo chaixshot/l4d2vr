@@ -1202,6 +1202,64 @@ namespace
             weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::MAGNUM);
     }
 
+    inline int MagazineInteractionInferWeaponIdFromViewmodelModelName(const std::string& lowerModel)
+    {
+        if (lowerModel.empty())
+            return 0;
+
+        auto has = [&](const char* token) -> bool
+        {
+            return token && *token && lowerModel.find(token) != std::string::npos;
+        };
+
+        if (has("shotgun_chrome") || has("chrome_shotgun"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::SHOTGUN_CHROME);
+        if (has("pumpshotgun") || has("pump_shotgun"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::PUMPSHOTGUN);
+        if (has("autoshotgun") || has("auto_shotgun"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::AUTOSHOTGUN);
+        if (has("shotgun_spas") || has("v_shotgun_spas") || has("spas"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::SPAS);
+
+        if (has("desert_eagle") || has("pistol_magnum"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::MAGNUM);
+        if (has("dual_pistol") || has("dual_pistola") ||
+            has("v_pistol.mdl") || has("v_pistola.mdl") || has("v_pistolb.mdl"))
+        {
+            return static_cast<int>(C_WeaponCSBase::WeaponID::PISTOL);
+        }
+
+        if (has("smg_mp5") || has("mp5"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::MP5);
+        if (has("silenced_smg") || has("smg_silenced"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::MAC10);
+        if (has("v_smg.mdl") || has("smg_uzi"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::UZI);
+
+        if (has("rifle_ak47") || has("ak47"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::AK47);
+        if (has("desert_rifle") || has("rifle_desert"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::SCAR);
+        if (has("sg552"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::SG552);
+        if (has("v_rifle.mdl"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::M16A1);
+
+        if (has("sniper_military") || has("military_sniper"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::SNIPER_MILITARY);
+        if (has("huntingrifle") || has("hunting_rifle"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::HUNTING_RIFLE);
+        if (has("snip_awp") || has("awp"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::AWP);
+        if (has("snip_scout") || has("scout"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::SCOUT);
+
+        if (has("m60") || has("machinegun_m60"))
+            return static_cast<int>(C_WeaponCSBase::WeaponID::M60);
+
+        return 0;
+    }
+
     inline int ScoreMagazineInteractionShotgunShellBoneName(const std::string& rawName)
     {
         const std::string name = vr_vm_stabilize::ToLowerAscii(rawName);
@@ -1313,6 +1371,60 @@ namespace
             lowerName == "valvebiped.weapon_clip" ||
             lowerName == "weapon_clip" ||
             ManualReloadNameContains(lowerName, "weapon_clip");
+    }
+
+    inline int FindMagazineInteractionShotgunStableAnchorBone(
+        const std::vector<std::string>& boneNames,
+        const std::vector<int>& boneParents,
+        int shellBone)
+    {
+        const int numBones = static_cast<int>(boneNames.size());
+        if (numBones <= 0)
+            return -1;
+
+        auto isExactBone = [&](int bone, const char* a, const char* b) -> bool
+        {
+            if (bone < 0 || bone >= numBones)
+                return false;
+            const std::string lowerName = vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(bone)]);
+            return lowerName == a || lowerName == b;
+        };
+
+        auto findExact = [&](const char* a, const char* b) -> int
+        {
+            for (int bone = 0; bone < numBones; ++bone)
+            {
+                if (isExactBone(bone, a, b))
+                    return bone;
+            }
+            return -1;
+        };
+
+        // The shotgun shell/clip bones can be animated by the native reload/pump layers.
+        // Use the main weapon bone as the stable anchor for cached capture offsets.
+        int anchor = findExact("valvebiped.weapon_bone", "weapon_bone");
+        if (anchor >= 0)
+            return anchor;
+
+        if (shellBone >= 0 && shellBone < static_cast<int>(boneParents.size()))
+        {
+            int current = shellBone;
+            for (int guard = 0; guard < static_cast<int>(boneParents.size()); ++guard)
+            {
+                const int parent = boneParents[static_cast<size_t>(current)];
+                if (parent < 0 || parent >= static_cast<int>(boneParents.size()) || parent == current)
+                    break;
+                if (isExactBone(parent, "valvebiped.weapon_bone", "weapon_bone"))
+                    return parent;
+                current = parent;
+            }
+        }
+
+        anchor = findExact("valvebiped.weapon_clip", "weapon_clip");
+        if (anchor >= 0)
+            return anchor;
+
+        return -1;
     }
 
     inline int FindMagazineBoxLegacyClipBone(const std::vector<std::string>& boneNames)
@@ -1659,18 +1771,23 @@ namespace
         auto logAxis = [&](const char* source, const Vector& axis)
         {
             static std::mutex s_axisLogMutex;
-            static std::unordered_map<std::string, std::string> s_axisSourceByModel;
-            const std::string key = lowerModel + "|" + (source ? source : "unknown");
+            static std::unordered_set<std::string> s_loggedAxisSources;
+            char key[256];
+            std::snprintf(
+                key,
+                sizeof(key),
+                "%s|%s|%.2f,%.2f,%.2f|%d|%d",
+                lowerModel.c_str(),
+                source ? source : "unknown",
+                localAxis.x,
+                localAxis.y,
+                localAxis.z,
+                legacyM16Axis ? 1 : 0,
+                usedAxisOverride ? 1 : 0);
             {
-                char value[128];
-                std::snprintf(value, sizeof(value), "%.3f %.3f %.3f", axis.x, axis.y, axis.z);
-                {
-                    std::lock_guard<std::mutex> lock(s_axisLogMutex);
-                    auto it = s_axisSourceByModel.find(key);
-                    if (it != s_axisSourceByModel.end() && it->second == value)
-                        return;
-                    s_axisSourceByModel[key] = value;
-                }
+                std::lock_guard<std::mutex> lock(s_axisLogMutex);
+                if (!s_loggedAxisSources.insert(key).second)
+                    return;
             }
             Game::logMsg(
                 "[VR][MagazineBolt] pull axis model=%s source=%s local=(%.2f %.2f %.2f) axis=(%.3f %.3f %.3f)%s%s",
@@ -2663,10 +2780,36 @@ namespace
 
         const int currentMagazineInteractionWeaponId =
             vr->m_MagazineInteractionCurrentWeaponId.load(std::memory_order_relaxed);
-        const int magazineInteractionWeaponId =
-            currentMagazineInteractionWeaponId > 0
-            ? currentMagazineInteractionWeaponId
-            : vr->m_MagazineInteractionWeaponId;
+        const int inferredModelWeaponId = MagazineInteractionInferWeaponIdFromViewmodelModelName(lowerModel);
+        const int magazineInteractionWeaponId = inferredModelWeaponId > 0
+            ? inferredModelWeaponId
+            : currentMagazineInteractionWeaponId > 0
+                ? currentMagazineInteractionWeaponId
+                : vr->m_MagazineInteractionWeaponId;
+        if (inferredModelWeaponId > 0 &&
+            currentMagazineInteractionWeaponId > 0 &&
+            inferredModelWeaponId != currentMagazineInteractionWeaponId)
+        {
+            static std::mutex s_weaponIdOverrideLogMutex;
+            static std::unordered_set<std::string> s_loggedWeaponIdOverrides;
+            const std::string logKey =
+                lowerModel + "|" +
+                std::to_string(currentMagazineInteractionWeaponId) + "|" +
+                std::to_string(inferredModelWeaponId);
+            bool shouldLog = false;
+            {
+                std::lock_guard<std::mutex> lock(s_weaponIdOverrideLogMutex);
+                shouldLog = s_loggedWeaponIdOverrides.insert(logKey).second;
+            }
+            if (shouldLog)
+            {
+                Game::logMsg(
+                    "[VR][MagazineBox] viewmodel model weaponId overrides stale current weaponId model=%s currentWeaponId=%d modelWeaponId=%d",
+                    lowerModel.c_str(),
+                    currentMagazineInteractionWeaponId,
+                    inferredModelWeaponId);
+            }
+        }
         std::string configuredMagazineBoneName;
         int magazineBone = FindConfiguredViewmodelBoneOverride(
             "MagazineInteraction",
@@ -2697,9 +2840,11 @@ namespace
             ? boneNames[static_cast<size_t>(magazineBone)]
             : std::string();
         const std::string lowerMagazineBoneName = vr_vm_stabilize::ToLowerAscii(magazineBoneName);
+        const bool magazineInteractionIsShotgun =
+            MagazineInteractionWeaponIdIsShotgun(magazineInteractionWeaponId);
         const bool magazineBoneUsesStockProfileAxes =
             ManualReloadNameIsLegacyValveBipedClip(lowerMagazineBoneName) ||
-            (MagazineInteractionWeaponIdIsShotgun(magazineInteractionWeaponId) &&
+            (magazineInteractionIsShotgun &&
                 MagazineInteractionShotgunShellBoneUsesStockProfileAxes(lowerMagazineBoneName));
 
         const uint32_t frameSeq = vr->m_RenderFrameSeq.load(std::memory_order_relaxed);
@@ -2916,11 +3061,54 @@ namespace
         }
 
         vr_vm_stabilize::Mat3x4 modelWorld{};
-        const bool modelBasisValid =
+        bool modelBasisValid =
             pModelToWorld != nullptr &&
             vr_vm_stabilize::SafeRead(
                 reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pModelToWorld),
                 modelWorld);
+
+        if (magazineInteractionIsShotgun)
+        {
+            const int stableAnchorBone = FindMagazineInteractionShotgunStableAnchorBone(
+                boneNames,
+                boneParents,
+                magazineBone);
+            if (stableAnchorBone >= 0 && stableAnchorBone < numBones)
+            {
+                vr_vm_stabilize::Mat3x4 stableAnchorWorld{};
+                if (vr_vm_stabilize::SafeRead(sourceBones + stableAnchorBone, stableAnchorWorld))
+                {
+                    modelWorld = stableAnchorWorld;
+                    modelBasisValid = true;
+
+                    static std::mutex s_shotgunAnchorLogMutex;
+                    static std::unordered_set<std::string> s_loggedShotgunAnchors;
+                    const std::string stableAnchorName =
+                        (stableAnchorBone < static_cast<int>(boneNames.size()))
+                        ? boneNames[static_cast<size_t>(stableAnchorBone)]
+                        : std::string();
+                    const std::string logKey =
+                        lowerModel + "|" +
+                        std::to_string(magazineBone) + "|" +
+                        std::to_string(stableAnchorBone);
+                    bool shouldLog = false;
+                    {
+                        std::lock_guard<std::mutex> lock(s_shotgunAnchorLogMutex);
+                        shouldLog = s_loggedShotgunAnchors.insert(logKey).second;
+                    }
+                    if (shouldLog)
+                    {
+                        Game::logMsg(
+                            "[VR][MagazineBox] shotgun stable socket anchor model=%s shellBone=%d shellName=%s anchorBone=%d anchorName=%s",
+                            lowerModel.c_str(),
+                            magazineBone,
+                            magazineBoneName.c_str(),
+                            stableAnchorBone,
+                            stableAnchorName.c_str());
+                    }
+                }
+            }
+        }
 
         vr->PublishMagazineInteractionBox(
             Vector(boxWorld.m[0][3], boxWorld.m[1][3], boxWorld.m[2][3]),
@@ -3204,10 +3392,14 @@ namespace
 
     inline void LogMagazineInteractionDetachedDrawSkip(const char* reason, const std::string& modelName = std::string())
     {
+        const std::string reasonText = reason ? reason : "unknown";
+        if (reasonText == "not-viewmodel" || reasonText == "model-mismatch")
+            return;
+
         static std::mutex s_skipLogMutex;
         static std::unordered_map<std::string, std::chrono::steady_clock::time_point> s_lastSkipLog;
         const auto now = std::chrono::steady_clock::now();
-        const std::string key = std::string(reason ? reason : "unknown") + "|" + modelName;
+        const std::string key = reasonText + "|" + modelName;
         std::lock_guard<std::mutex> lock(s_skipLogMutex);
         auto& last = s_lastSkipLog[key];
         if (last.time_since_epoch().count() != 0 &&
@@ -3218,7 +3410,7 @@ namespace
         last = now;
         Game::logMsg(
             "[VR][MagazineInteraction] detached magazine draw skipped reason=%s model=%s",
-            reason ? reason : "unknown",
+            reasonText.c_str(),
             modelName.empty() ? "<none>" : modelName.c_str());
     }
 
@@ -4883,8 +5075,81 @@ int Hooks::dGetPrimaryAttackActivity(void* ecx, void* edx, void* meleeInfo)
 	return hkGetPrimaryAttackActivity.fOriginal(ecx, meleeInfo);
 }
 
+namespace
+{
+	thread_local bool g_ServerUseControllerAimOverride = false;
+	thread_local void* g_ServerUseControllerAimPlayer = nullptr;
+	thread_local Vector g_ServerUseControllerAimOrigin = { 0.0f, 0.0f, 0.0f };
+	thread_local QAngle g_ServerUseControllerAimAngles = { 0.0f, 0.0f, 0.0f };
+
+	static inline bool IsFiniteVector3(const Vector& v)
+	{
+		return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+	}
+
+	static bool TryBuildServerUseControllerPose(void* player, Vector& origin, QAngle& angles)
+	{
+		if (!Hooks::m_Game || !player)
+			return false;
+
+		const int playerIndex = Hooks::m_Game->m_CurrentUsercmdID;
+		if (!Hooks::m_Game->IsValidPlayerIndex(playerIndex))
+			return false;
+
+		if (Hooks::m_Game->m_CurrentUsercmdPlayer &&
+			reinterpret_cast<void*>(Hooks::m_Game->m_CurrentUsercmdPlayer) != player)
+			return false;
+
+		const Player& vrPlayer = Hooks::m_Game->m_PlayersVRInfo[playerIndex];
+		if (!vrPlayer.isUsingVR)
+			return false;
+
+		origin = vrPlayer.controllerPos;
+		angles = vrPlayer.controllerAngle;
+		NormalizeAndClampViewAngles(angles);
+
+		return IsFiniteVector3(origin) && IsFiniteViewAngle(angles);
+	}
+
+	class ScopedServerUseControllerAimOverride
+	{
+	public:
+		ScopedServerUseControllerAimOverride(void* player, const Vector& origin, const QAngle& angles)
+			: m_prevActive(g_ServerUseControllerAimOverride),
+			m_prevPlayer(g_ServerUseControllerAimPlayer),
+			m_prevOrigin(g_ServerUseControllerAimOrigin),
+			m_prevAngles(g_ServerUseControllerAimAngles)
+		{
+			g_ServerUseControllerAimOverride = true;
+			g_ServerUseControllerAimPlayer = player;
+			g_ServerUseControllerAimOrigin = origin;
+			g_ServerUseControllerAimAngles = angles;
+		}
+
+		~ScopedServerUseControllerAimOverride()
+		{
+			g_ServerUseControllerAimOverride = m_prevActive;
+			g_ServerUseControllerAimPlayer = m_prevPlayer;
+			g_ServerUseControllerAimOrigin = m_prevOrigin;
+			g_ServerUseControllerAimAngles = m_prevAngles;
+		}
+
+	private:
+		bool m_prevActive;
+		void* m_prevPlayer;
+		Vector m_prevOrigin;
+		QAngle m_prevAngles;
+	};
+}
+
 Vector* Hooks::dEyePosition(void* ecx, void* edx, Vector* eyePos)
 {
+	if (eyePos && g_ServerUseControllerAimOverride && ecx == g_ServerUseControllerAimPlayer)
+	{
+		*eyePos = g_ServerUseControllerAimOrigin;
+		return eyePos;
+	}
+
 	Vector* result = hkEyePosition.fOriginal(ecx, eyePos);
 
 	if (m_Game->m_PerformingMelee)
@@ -4897,6 +5162,47 @@ Vector* Hooks::dEyePosition(void* ecx, void* edx, Vector* eyePos)
 	}
 
 	return result;
+}
+
+Vector* Hooks::dServerPlayerEyePosition(void* ecx, void* edx, Vector* eyePos)
+{
+	if (eyePos && g_ServerUseControllerAimOverride && ecx == g_ServerUseControllerAimPlayer)
+	{
+		*eyePos = g_ServerUseControllerAimOrigin;
+		return eyePos;
+	}
+
+	Vector* result = hkServerPlayerEyePosition.fOriginal(ecx, eyePos);
+
+	if (result && m_Game->m_PerformingMelee)
+	{
+		int i = m_Game->m_CurrentUsercmdID;
+		if (m_Game->IsValidPlayerIndex(i))
+			*result = m_Game->m_PlayersVRInfo[i].controllerPos;
+	}
+
+	return result;
+}
+
+const QAngle* Hooks::dServerPlayerEyeAngles(void* ecx, void* edx)
+{
+	if (g_ServerUseControllerAimOverride && ecx == g_ServerUseControllerAimPlayer)
+		return &g_ServerUseControllerAimAngles;
+
+	return hkServerPlayerEyeAngles.fOriginal(ecx);
+}
+
+Server_BaseEntity* Hooks::dFindUseEntity(void* ecx, void* edx, float radius, float dotLimit, float defaultDotLimit, void* traceResult, void* extra)
+{
+	Vector controllerOrigin;
+	QAngle controllerAngles;
+	if (TryBuildServerUseControllerPose(ecx, controllerOrigin, controllerAngles))
+	{
+		ScopedServerUseControllerAimOverride useAim(ecx, controllerOrigin, controllerAngles);
+		return hkFindUseEntity.fOriginal(ecx, radius, dotLimit, defaultDotLimit, traceResult, extra);
+	}
+
+	return hkFindUseEntity.fOriginal(ecx, radius, dotLimit, defaultDotLimit, traceResult, extra);
 }
 
 void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRenderInfo_t& info, void* pCustomBoneToWorld)

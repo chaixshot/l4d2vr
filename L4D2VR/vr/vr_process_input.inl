@@ -530,6 +530,11 @@ void VR::ProcessInput()
     bool autoAimToggleJustPressed = false;
     [[maybe_unused]] bool autoAimToggleDataValid = getActionState(&m_ActionSpecialInfectedAutoAimToggle, autoAimToggleActionData, autoAimToggleDown, autoAimToggleJustPressed);
 
+    vr::InputDigitalActionData_t specialInfectedDodgeToggleActionData{};
+    [[maybe_unused]] bool specialInfectedDodgeToggleDown = false;
+    bool specialInfectedDodgeToggleJustPressed = false;
+    [[maybe_unused]] bool specialInfectedDodgeToggleDataValid = getActionState(&m_ActionSpecialInfectedDodgeToggle, specialInfectedDodgeToggleActionData, specialInfectedDodgeToggleDown, specialInfectedDodgeToggleJustPressed);
+
     vr::InputDigitalActionData_t effectiveRangeAutoFireToggleActionData{};
     [[maybe_unused]] bool effectiveRangeAutoFireToggleDown = false;
     bool effectiveRangeAutoFireToggleJustPressed = false;
@@ -1114,6 +1119,25 @@ void VR::ProcessInput()
         m_SpecialInfectedPreWarningTargetDistanceSq = std::numeric_limits<float>::max();
         m_SpecialInfectedAutoAimDirection = {};
         m_SpecialInfectedAutoAimCooldownEnd = {};
+    }
+
+    if (specialInfectedDodgeToggleJustPressed)
+    {
+        m_SpecialInfectedDodgeActive = !m_SpecialInfectedDodgeActive;
+        if (!m_SpecialInfectedDodgeActive)
+        {
+            std::lock_guard<std::mutex> lock(m_SpecialInfectedDodgeMutex);
+            m_SpecialInfectedDodgeThreats.clear();
+            m_LastSpecialInfectedDodgeScanTime = {};
+        }
+    }
+
+    if (m_SpecialInfectedDodgeActive && m_SpecialInfectedDodgeDistance <= 0.0f)
+    {
+        m_SpecialInfectedDodgeActive = false;
+        std::lock_guard<std::mutex> lock(m_SpecialInfectedDodgeMutex);
+        m_SpecialInfectedDodgeThreats.clear();
+        m_LastSpecialInfectedDodgeScanTime = {};
     }
 
     if (effectiveRangeAutoFireToggleJustPressed)
