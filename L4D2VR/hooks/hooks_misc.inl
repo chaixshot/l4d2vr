@@ -2915,6 +2915,13 @@ namespace
             }
         }
 
+        vr_vm_stabilize::Mat3x4 modelWorld{};
+        const bool modelBasisValid =
+            pModelToWorld != nullptr &&
+            vr_vm_stabilize::SafeRead(
+                reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pModelToWorld),
+                modelWorld);
+
         vr->PublishMagazineInteractionBox(
             Vector(boxWorld.m[0][3], boxWorld.m[1][3], boxWorld.m[2][3]),
             Vector(boxWorld.m[0][0], boxWorld.m[1][0], boxWorld.m[2][0]),
@@ -2925,7 +2932,12 @@ namespace
             frameSeq,
             entityIndex,
             magazineBone,
-            modelName.c_str());
+            modelName.c_str(),
+            modelBasisValid,
+            Vector(modelWorld.m[0][3], modelWorld.m[1][3], modelWorld.m[2][3]),
+            Vector(modelWorld.m[0][0], modelWorld.m[1][0], modelWorld.m[2][0]),
+            Vector(modelWorld.m[0][1], modelWorld.m[1][1], modelWorld.m[2][1]),
+            Vector(modelWorld.m[0][2], modelWorld.m[1][2], modelWorld.m[2][2]));
 
         std::string configuredBoltBoneName;
         int boltBone = FindConfiguredViewmodelBoneOverride(
@@ -4844,6 +4856,26 @@ int Hooks::dPrimaryAttackServer(void* ecx, void* edx)
 void Hooks::dItemPostFrameServer(void* ecx, void* edx)
 {
 	hkItemPostFrameServer.fOriginal(ecx);
+
+	if (!m_VR || !ecx || !IsLocalServerActiveWeapon(ecx))
+		return;
+
+	Server_WeaponCSBase* weapon = reinterpret_cast<Server_WeaponCSBase*>(ecx);
+	int weaponId = 0;
+#ifdef _MSC_VER
+	__try
+	{
+		weaponId = weapon->GetWeaponID();
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return;
+	}
+#else
+	weaponId = weapon->GetWeaponID();
+#endif
+
+	m_VR->TryApplyMagazineInteractionShotgunServerReloadAbort(ecx, weaponId);
 }
 
 int Hooks::dGetPrimaryAttackActivity(void* ecx, void* edx, void* meleeInfo)

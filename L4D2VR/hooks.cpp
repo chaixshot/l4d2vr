@@ -79,13 +79,47 @@ static bool IsLocalClientActiveWeapon(void* weapon)
 #endif
 }
 
-static bool IsLocalServerMeleeUsercmdContext()
+static bool IsLocalServerUsercmdContext()
 {
 	if (!Hooks::m_Game || !Hooks::m_Game->m_EngineClient)
 		return false;
 
 	const int localPlayerIndex = Hooks::m_Game->m_EngineClient->GetLocalPlayer();
 	return localPlayerIndex > 0 && Hooks::m_Game->m_CurrentUsercmdID == localPlayerIndex;
+}
+
+static bool IsLocalServerMeleeUsercmdContext()
+{
+	return IsLocalServerUsercmdContext();
+}
+
+static bool IsLocalServerActiveWeapon(void* weapon)
+{
+	if (!weapon || !IsLocalServerUsercmdContext() ||
+		!Hooks::m_Game->m_CurrentUsercmdPlayer ||
+		!Hooks::m_Game->m_Offsets ||
+		!Hooks::m_Game->m_Offsets->GetActiveWeapon.address)
+	{
+		return false;
+	}
+
+	typedef Server_WeaponCSBase* (__thiscall* tGetActiveWep)(void* thisptr);
+	static tGetActiveWep oGetActiveWep = (tGetActiveWep)(Hooks::m_Game->m_Offsets->GetActiveWeapon.address);
+	if (!oGetActiveWep)
+		return false;
+
+#ifdef _MSC_VER
+	__try
+	{
+		return reinterpret_cast<void*>(oGetActiveWep(Hooks::m_Game->m_CurrentUsercmdPlayer)) == weapon;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return false;
+	}
+#else
+	return reinterpret_cast<void*>(oGetActiveWep(Hooks::m_Game->m_CurrentUsercmdPlayer)) == weapon;
+#endif
 }
 
 static void NotifyLocalMeleeCollisionHaptics(bool serverCollision, void* weapon, int collisionResult, int entitiesHitBefore, int entitiesHitAfter)

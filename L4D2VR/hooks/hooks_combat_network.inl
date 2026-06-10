@@ -1428,6 +1428,20 @@ float __fastcall Hooks::dProcessUsercmds(void* ecx, void* edx, edict_t* player,
 	// ===== 你原有的“近战挥砍检测/追踪”逻辑，保持不变 =====
 	const bool hasValidPlayer = m_Game->IsValidPlayerIndex(index);
 
+	if (m_VR && hasValidPlayer && m_Game->m_EngineClient)
+	{
+		const int localPlayerIndex = m_Game->m_EngineClient->GetLocalPlayer();
+		if (localPlayerIndex > 0 && index == localPlayerIndex)
+		{
+			typedef Server_WeaponCSBase* (__thiscall* tGetActiveWep)(void* thisptr);
+			static tGetActiveWep oGetActiveWepForMagazineInteraction =
+				(tGetActiveWep)(m_Game->m_Offsets->GetActiveWeapon.address);
+			Server_WeaponCSBase* curWep = oGetActiveWepForMagazineInteraction ? oGetActiveWepForMagazineInteraction(pPlayer) : nullptr;
+			if (curWep)
+				m_VR->TryApplyMagazineInteractionShotgunServerReloadAbort(curWep, curWep->GetWeaponID());
+		}
+	}
+
 	if (hasValidPlayer && m_Game->m_PlayersVRInfo[index].isUsingVR && m_Game->m_PlayersVRInfo[index].isMeleeing)
 	{
 		typedef Server_WeaponCSBase* (__thiscall* tGetActiveWep)(void* thisptr);

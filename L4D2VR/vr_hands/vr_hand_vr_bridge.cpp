@@ -887,6 +887,32 @@ namespace
         return out;
     }
 
+    bool MagazineInteractionBuildModelBasisWorld(
+        const MagazineInteractionBoxSnapshot& box,
+        VrHandMatrix4& outWorld)
+    {
+        if (!box.modelBasisValid)
+            return false;
+
+        outWorld = VrHandMath::Identity();
+        const Vector axisX = MagazineInteractionNormalizeAxis(box.modelAxisX, Vector(1.0f, 0.0f, 0.0f));
+        const Vector axisY = MagazineInteractionNormalizeAxis(box.modelAxisY, Vector(0.0f, 1.0f, 0.0f));
+        const Vector axisZ = MagazineInteractionNormalizeAxis(box.modelAxisZ, Vector(0.0f, 0.0f, 1.0f));
+        VrHandMath::Set(outWorld, 0, 0, axisX.x);
+        VrHandMath::Set(outWorld, 1, 0, axisX.y);
+        VrHandMath::Set(outWorld, 2, 0, axisX.z);
+        VrHandMath::Set(outWorld, 0, 1, axisY.x);
+        VrHandMath::Set(outWorld, 1, 1, axisY.y);
+        VrHandMath::Set(outWorld, 2, 1, axisY.z);
+        VrHandMath::Set(outWorld, 0, 2, axisZ.x);
+        VrHandMath::Set(outWorld, 1, 2, axisZ.y);
+        VrHandMath::Set(outWorld, 2, 2, axisZ.z);
+        VrHandMath::Set(outWorld, 0, 3, box.modelOrigin.x);
+        VrHandMath::Set(outWorld, 1, 3, box.modelOrigin.y);
+        VrHandMath::Set(outWorld, 2, 3, box.modelOrigin.z);
+        return MagazineInteractionMatrixLooksRenderable(outWorld);
+    }
+
     void MagazineInteractionProjectBoxOntoAxis(
         const VrHandMatrix4& world,
         const MagazineInteractionBoxSnapshot& box,
@@ -967,6 +993,47 @@ namespace
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
             out = 0;
+            return false;
+        }
+#endif
+    }
+
+    template <typename T>
+    bool MagazineInteractionTryReadValue(const void* entity, int offset, T& out)
+    {
+        if (!entity || offset < 0)
+            return false;
+#if defined(_MSC_VER)
+        __try
+        {
+#endif
+            out = *reinterpret_cast<const T*>(reinterpret_cast<const unsigned char*>(entity) + offset);
+            return true;
+#if defined(_MSC_VER)
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            out = {};
+            return false;
+        }
+#endif
+    }
+
+    template <typename T>
+    bool MagazineInteractionTryWriteValue(void* entity, int offset, const T& value)
+    {
+        if (!entity || offset < 0)
+            return false;
+#if defined(_MSC_VER)
+        __try
+        {
+#endif
+            *reinterpret_cast<T*>(reinterpret_cast<unsigned char*>(entity) + offset) = value;
+            return true;
+#if defined(_MSC_VER)
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
             return false;
         }
 #endif
@@ -1592,7 +1659,12 @@ void VR::PublishMagazineInteractionBox(
     uint32_t frameSeq,
     int entityIndex,
     int boneIndex,
-    const char* modelName)
+    const char* modelName,
+    bool modelBasisValid,
+    const Vector& modelOrigin,
+    const Vector& modelAxisX,
+    const Vector& modelAxisY,
+    const Vector& modelAxisZ)
 {
     if (!m_MagazineInteractionEnabled && !m_MagazineBoxDebugEnabled)
         return;
@@ -1602,6 +1674,14 @@ void VR::PublishMagazineInteractionBox(
     snapshot.axisX = MagazineInteractionNormalizeAxis(axisX, Vector(1.0f, 0.0f, 0.0f));
     snapshot.axisY = MagazineInteractionNormalizeAxis(axisY, Vector(0.0f, 1.0f, 0.0f));
     snapshot.axisZ = MagazineInteractionNormalizeAxis(axisZ, Vector(0.0f, 0.0f, 1.0f));
+    snapshot.modelBasisValid = modelBasisValid;
+    if (modelBasisValid)
+    {
+        snapshot.modelOrigin = modelOrigin;
+        snapshot.modelAxisX = MagazineInteractionNormalizeAxis(modelAxisX, Vector(1.0f, 0.0f, 0.0f));
+        snapshot.modelAxisY = MagazineInteractionNormalizeAxis(modelAxisY, Vector(0.0f, 1.0f, 0.0f));
+        snapshot.modelAxisZ = MagazineInteractionNormalizeAxis(modelAxisZ, Vector(0.0f, 0.0f, 1.0f));
+    }
     snapshot.mins = mins;
     snapshot.maxs = maxs;
     snapshot.frameSeq = frameSeq;
@@ -1848,7 +1928,8 @@ bool VR::ShouldFreezeMagazineInteractionViewmodel() const
         return m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBackendReload ||
             m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBoltGrab ||
             m_MagazineInteractionState == MagazineInteractionManualState::HoldingBolt ||
-            (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine &&
+            ((m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
+                m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine) &&
                 m_MagazineInteractionShotgunShellsLoadedThisSession > 0);
     }
 
@@ -1858,6 +1939,277 @@ bool VR::ShouldFreezeMagazineInteractionViewmodel() const
         m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBackendReload ||
         m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBoltGrab ||
         m_MagazineInteractionState == MagazineInteractionManualState::HoldingBolt;
+}
+
+void VR::QueueMagazineInteractionShotgunServerReloadAbort(const char* reason)
+{
+    if (!m_MagazineInteractionShotgunShellMode)
+        return;
+
+    const auto now = std::chrono::steady_clock::now();
+    m_MagazineInteractionShotgunServerReloadAbortPending = true;
+    m_MagazineInteractionShotgunServerReloadAbortUntil =
+        now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<float>(0.50f));
+
+    Game::logMsg(
+        "[VR][MagazineInteraction] shotgun server reload abort queued reason=%s clip=%d weaponId=%d",
+        reason ? reason : "unknown",
+        m_MagazineInteractionShotgunLastInterruptedClip,
+        m_MagazineInteractionWeaponId);
+}
+
+bool VR::TryApplyMagazineInteractionShotgunServerReloadAbort(void* serverWeapon, int serverWeaponId)
+{
+    if (!serverWeapon || !m_MagazineInteractionShotgunServerReloadAbortPending)
+        return false;
+
+    const auto now = std::chrono::steady_clock::now();
+    if (m_MagazineInteractionShotgunServerReloadAbortUntil.time_since_epoch().count() != 0 &&
+        now > m_MagazineInteractionShotgunServerReloadAbortUntil)
+    {
+        m_MagazineInteractionShotgunServerReloadAbortPending = false;
+        m_MagazineInteractionShotgunServerReloadAbortUntil = {};
+        Game::logMsg(
+            "[VR][MagazineInteraction] shotgun server reload abort expired weaponId=%d clip=%d",
+            serverWeaponId,
+            m_MagazineInteractionShotgunLastInterruptedClip);
+        return false;
+    }
+
+    if (!MagazineInteractionWeaponUsesShotgunShells(static_cast<C_WeaponCSBase::WeaponID>(serverWeaponId)))
+    {
+        static std::chrono::steady_clock::time_point s_lastNonShotgunAbortLog{};
+        if (s_lastNonShotgunAbortLog.time_since_epoch().count() == 0 ||
+            std::chrono::duration<float>(now - s_lastNonShotgunAbortLog).count() >= 0.25f)
+        {
+            s_lastNonShotgunAbortLog = now;
+            Game::logMsg(
+                "[VR][MagazineInteraction] shotgun server reload abort pending but active server weapon is not shotgun weaponId=%d expectedWeaponId=%d clip=%d",
+                serverWeaponId,
+                m_MagazineInteractionWeaponId,
+                m_MagazineInteractionShotgunLastInterruptedClip);
+        }
+        return false;
+    }
+
+    constexpr int kBaseWeaponInReloadOffset = 0x144D;             // DT_BaseCombatWeapon::m_bInReload
+    constexpr int kL4DWeaponPartialReloadStageOffset = 0x17D8;    // DT_WeaponCSBase::m_partialReloadStage
+    constexpr int kL4DWeaponReloadFromEmptyOffset = 0x17DF;       // DT_WeaponCSBase::m_reloadFromEmpty
+    constexpr int kShotgunReloadStateOffset = 0x17F0;             // DT_BaseShotgun::m_reloadState
+    constexpr int kShotgunReloadNumShellsOffset = 0x17F4;         // DT_BaseShotgun::m_reloadNumShells
+    constexpr int kShotgunReloadAnimStateOffset = 0x1808;         // DT_BaseShotgun::m_reloadAnimState
+    constexpr int kShotgunShellsInsertedOffset = 0x180C;          // DT_BaseShotgun::m_shellsInserted
+    int oldReloadState = -1;
+    int oldReloadNumShells = -1;
+    int oldReloadAnimState = -1;
+    int oldShellsInserted = -1;
+    unsigned char oldPartialReloadStage = 0;
+    unsigned char oldReloadFromEmpty = 0;
+    unsigned char oldInReload = 0;
+    MagazineInteractionTryReadValue(serverWeapon, kShotgunReloadStateOffset, oldReloadState);
+    MagazineInteractionTryReadValue(serverWeapon, kShotgunReloadNumShellsOffset, oldReloadNumShells);
+    MagazineInteractionTryReadValue(serverWeapon, kShotgunReloadAnimStateOffset, oldReloadAnimState);
+    MagazineInteractionTryReadValue(serverWeapon, kShotgunShellsInsertedOffset, oldShellsInserted);
+    MagazineInteractionTryReadValue(serverWeapon, kL4DWeaponPartialReloadStageOffset, oldPartialReloadStage);
+    MagazineInteractionTryReadValue(serverWeapon, kL4DWeaponReloadFromEmptyOffset, oldReloadFromEmpty);
+    MagazineInteractionTryReadValue(serverWeapon, kBaseWeaponInReloadOffset, oldInReload);
+
+    const bool wroteReloadState =
+        MagazineInteractionTryWriteValue<int>(serverWeapon, kShotgunReloadStateOffset, 0);
+    const bool wroteReloadNumShells =
+        MagazineInteractionTryWriteValue<int>(serverWeapon, kShotgunReloadNumShellsOffset, 0);
+    const bool wroteReloadAnimState =
+        MagazineInteractionTryWriteValue<int>(serverWeapon, kShotgunReloadAnimStateOffset, 0);
+    const bool wroteShellsInserted =
+        MagazineInteractionTryWriteValue<int>(serverWeapon, kShotgunShellsInsertedOffset, 0);
+    const bool wrotePartialReloadStage =
+        MagazineInteractionTryWriteValue<unsigned char>(serverWeapon, kL4DWeaponPartialReloadStageOffset, 0);
+    const bool wroteReloadFromEmpty =
+        MagazineInteractionTryWriteValue<unsigned char>(serverWeapon, kL4DWeaponReloadFromEmptyOffset, 0);
+    const bool wroteInReload =
+        MagazineInteractionTryWriteValue<unsigned char>(serverWeapon, kBaseWeaponInReloadOffset, 0);
+
+    if (!wroteReloadState && !wroteReloadNumShells && !wroteReloadAnimState &&
+        !wroteShellsInserted && !wrotePartialReloadStage && !wroteReloadFromEmpty && !wroteInReload)
+    {
+        Game::logMsg(
+            "[VR][MagazineInteraction] shotgun server reload abort failed to write offsets weaponId=%d",
+            serverWeaponId);
+        return false;
+    }
+
+    m_MagazineInteractionShotgunServerReloadAbortPending = false;
+    m_MagazineInteractionShotgunServerReloadAbortUntil = {};
+
+    Game::logMsg(
+        "[VR][MagazineInteraction] shotgun server reload abort applied weaponId=%d reloadState=%d->0 reloadNumShells=%d->0 animState=%d->0 shellsInserted=%d->0 partialStage=%u->0 reloadFromEmpty=%u->0 inReload=%u->0 writes=%d/%d/%d/%d/%d/%d/%d clip=%d",
+        serverWeaponId,
+        oldReloadState,
+        oldReloadNumShells,
+        oldReloadAnimState,
+        oldShellsInserted,
+        static_cast<unsigned>(oldPartialReloadStage),
+        static_cast<unsigned>(oldReloadFromEmpty),
+        static_cast<unsigned>(oldInReload),
+        wroteReloadState ? 1 : 0,
+        wroteReloadNumShells ? 1 : 0,
+        wroteReloadAnimState ? 1 : 0,
+        wroteShellsInserted ? 1 : 0,
+        wrotePartialReloadStage ? 1 : 0,
+        wroteReloadFromEmpty ? 1 : 0,
+        wroteInReload ? 1 : 0,
+        m_MagazineInteractionShotgunLastInterruptedClip);
+    return true;
+}
+
+bool VR::ApplyMagazineInteractionShotgunClientReloadAbort(
+    C_WeaponCSBase* clientWeapon,
+    int clientWeaponId,
+    const char* reason)
+{
+    if (!clientWeapon ||
+        !MagazineInteractionWeaponUsesShotgunShells(static_cast<C_WeaponCSBase::WeaponID>(clientWeaponId)))
+        return false;
+
+    constexpr int kClientNextPrimaryAttackOffset = 0x960;       // DT_BaseCombatWeapon::m_flNextPrimaryAttack
+    constexpr int kClientNextSecondaryAttackOffset = 0x964;     // DT_BaseCombatWeapon::m_flNextSecondaryAttack
+    constexpr int kClientTimeWeaponIdleOffset = 0x990;          // DT_BaseCombatWeapon::m_flTimeWeaponIdle
+    constexpr int kClientBaseWeaponInReloadOffset = 0x9BD;      // DT_BaseCombatWeapon::m_bInReload
+    constexpr int kClientPartialReloadStageOffset = 0xCE8;      // DT_WeaponCSBase::m_partialReloadStage
+    constexpr int kClientReloadFromEmptyOffset = 0xCEF;         // DT_WeaponCSBase::m_reloadFromEmpty
+    constexpr int kClientShotgunReloadStateOffset = 0xD40;      // DT_BaseShotgun::m_reloadState
+    constexpr int kClientShotgunReloadNumShellsOffset = 0xD44;  // DT_BaseShotgun::m_reloadNumShells
+    constexpr int kClientShotgunReloadStartTimeOffset = 0xD48;  // DT_BaseShotgun::m_reloadStartTime
+    constexpr int kClientShotgunReloadStartDurationOffset = 0xD4C;
+    constexpr int kClientShotgunReloadInsertDurationOffset = 0xD50;
+    constexpr int kClientShotgunReloadEndDurationOffset = 0xD54;
+    constexpr int kClientShotgunReloadAnimStateOffset = 0xD58;  // DT_BaseShotgun::m_reloadAnimState
+    constexpr int kClientShotgunShellsInsertedOffset = 0xD5C;   // DT_BaseShotgun::m_shellsInserted
+
+    int oldReloadState = -1;
+    int oldReloadNumShells = -1;
+    int oldReloadAnimState = -1;
+    int oldShellsInserted = -1;
+    unsigned char oldPartialReloadStage = 0;
+    unsigned char oldReloadFromEmpty = 0;
+    unsigned char oldInReload = 0;
+    float oldReloadStartTime = 0.0f;
+    float oldReloadStartDuration = 0.0f;
+    float oldReloadInsertDuration = 0.0f;
+    float oldReloadEndDuration = 0.0f;
+    float oldNextPrimaryAttack = 0.0f;
+    float oldNextSecondaryAttack = 0.0f;
+    float oldTimeWeaponIdle = 0.0f;
+
+    MagazineInteractionTryReadValue(clientWeapon, kClientShotgunReloadStateOffset, oldReloadState);
+    MagazineInteractionTryReadValue(clientWeapon, kClientShotgunReloadNumShellsOffset, oldReloadNumShells);
+    MagazineInteractionTryReadValue(clientWeapon, kClientShotgunReloadAnimStateOffset, oldReloadAnimState);
+    MagazineInteractionTryReadValue(clientWeapon, kClientShotgunShellsInsertedOffset, oldShellsInserted);
+    MagazineInteractionTryReadValue(clientWeapon, kClientPartialReloadStageOffset, oldPartialReloadStage);
+    MagazineInteractionTryReadValue(clientWeapon, kClientReloadFromEmptyOffset, oldReloadFromEmpty);
+    MagazineInteractionTryReadValue(clientWeapon, kClientBaseWeaponInReloadOffset, oldInReload);
+    MagazineInteractionTryReadValue(clientWeapon, kClientShotgunReloadStartTimeOffset, oldReloadStartTime);
+    MagazineInteractionTryReadValue(clientWeapon, kClientShotgunReloadStartDurationOffset, oldReloadStartDuration);
+    MagazineInteractionTryReadValue(clientWeapon, kClientShotgunReloadInsertDurationOffset, oldReloadInsertDuration);
+    MagazineInteractionTryReadValue(clientWeapon, kClientShotgunReloadEndDurationOffset, oldReloadEndDuration);
+    MagazineInteractionTryReadValue(clientWeapon, kClientNextPrimaryAttackOffset, oldNextPrimaryAttack);
+    MagazineInteractionTryReadValue(clientWeapon, kClientNextSecondaryAttackOffset, oldNextSecondaryAttack);
+    MagazineInteractionTryReadValue(clientWeapon, kClientTimeWeaponIdleOffset, oldTimeWeaponIdle);
+
+    const bool wroteReloadState =
+        MagazineInteractionTryWriteValue<int>(clientWeapon, kClientShotgunReloadStateOffset, 0);
+    const bool wroteReloadNumShells =
+        MagazineInteractionTryWriteValue<int>(clientWeapon, kClientShotgunReloadNumShellsOffset, 0);
+    const bool wroteReloadAnimState =
+        MagazineInteractionTryWriteValue<int>(clientWeapon, kClientShotgunReloadAnimStateOffset, 0);
+    const bool wroteShellsInserted =
+        MagazineInteractionTryWriteValue<int>(clientWeapon, kClientShotgunShellsInsertedOffset, 0);
+    const bool wrotePartialReloadStage =
+        MagazineInteractionTryWriteValue<unsigned char>(clientWeapon, kClientPartialReloadStageOffset, 0);
+    const bool wroteReloadFromEmpty =
+        MagazineInteractionTryWriteValue<unsigned char>(clientWeapon, kClientReloadFromEmptyOffset, 0);
+    const bool wroteInReload =
+        MagazineInteractionTryWriteValue<unsigned char>(clientWeapon, kClientBaseWeaponInReloadOffset, 0);
+    const bool wroteReloadStartTime =
+        MagazineInteractionTryWriteValue<float>(clientWeapon, kClientShotgunReloadStartTimeOffset, 0.0f);
+    const bool wroteReloadStartDuration =
+        MagazineInteractionTryWriteValue<float>(clientWeapon, kClientShotgunReloadStartDurationOffset, 0.0f);
+    const bool wroteReloadInsertDuration =
+        MagazineInteractionTryWriteValue<float>(clientWeapon, kClientShotgunReloadInsertDurationOffset, 0.0f);
+    const bool wroteReloadEndDuration =
+        MagazineInteractionTryWriteValue<float>(clientWeapon, kClientShotgunReloadEndDurationOffset, 0.0f);
+    const bool wroteNextPrimaryAttack =
+        MagazineInteractionTryWriteValue<float>(clientWeapon, kClientNextPrimaryAttackOffset, 0.0f);
+    const bool wroteNextSecondaryAttack =
+        MagazineInteractionTryWriteValue<float>(clientWeapon, kClientNextSecondaryAttackOffset, 0.0f);
+    const bool wroteTimeWeaponIdle =
+        MagazineInteractionTryWriteValue<float>(clientWeapon, kClientTimeWeaponIdleOffset, 0.0f);
+
+    const bool wroteAny =
+        wroteReloadState || wroteReloadNumShells || wroteReloadAnimState || wroteShellsInserted ||
+        wrotePartialReloadStage || wroteReloadFromEmpty || wroteInReload ||
+        wroteReloadStartTime || wroteReloadStartDuration || wroteReloadInsertDuration ||
+        wroteReloadEndDuration || wroteNextPrimaryAttack || wroteNextSecondaryAttack ||
+        wroteTimeWeaponIdle;
+    if (!wroteAny)
+        return false;
+
+    const bool hadReloadState =
+        oldReloadState != 0 ||
+        oldReloadNumShells != 0 ||
+        oldReloadAnimState != 0 ||
+        oldShellsInserted != 0 ||
+        oldPartialReloadStage != 0 ||
+        oldReloadFromEmpty != 0 ||
+        oldInReload != 0 ||
+        oldReloadStartTime != 0.0f ||
+        oldReloadStartDuration != 0.0f ||
+        oldReloadInsertDuration != 0.0f ||
+        oldReloadEndDuration != 0.0f;
+    if (hadReloadState)
+    {
+        static std::chrono::steady_clock::time_point s_lastClientAbortLog{};
+        const auto now = std::chrono::steady_clock::now();
+        if (s_lastClientAbortLog.time_since_epoch().count() == 0 ||
+            std::chrono::duration<float>(now - s_lastClientAbortLog).count() >= 0.25f)
+        {
+            s_lastClientAbortLog = now;
+            Game::logMsg(
+                "[VR][MagazineInteraction] shotgun client reload abort applied reason=%s weaponId=%d reloadState=%d->0 reloadNumShells=%d->0 animState=%d->0 shellsInserted=%d->0 partialStage=%u->0 reloadFromEmpty=%u->0 inReload=%u->0 reloadTimes=%.3f/%.3f/%.3f/%.3f->0 next=%.3f/%.3f idle=%.3f writes=%d/%d/%d/%d/%d/%d/%d/%d/%d/%d/%d/%d/%d/%d",
+                reason ? reason : "unknown",
+                clientWeaponId,
+                oldReloadState,
+                oldReloadNumShells,
+                oldReloadAnimState,
+                oldShellsInserted,
+                static_cast<unsigned>(oldPartialReloadStage),
+                static_cast<unsigned>(oldReloadFromEmpty),
+                static_cast<unsigned>(oldInReload),
+                oldReloadStartTime,
+                oldReloadStartDuration,
+                oldReloadInsertDuration,
+                oldReloadEndDuration,
+                oldNextPrimaryAttack,
+                oldNextSecondaryAttack,
+                oldTimeWeaponIdle,
+                wroteReloadState ? 1 : 0,
+                wroteReloadNumShells ? 1 : 0,
+                wroteReloadAnimState ? 1 : 0,
+                wroteShellsInserted ? 1 : 0,
+                wrotePartialReloadStage ? 1 : 0,
+                wroteReloadFromEmpty ? 1 : 0,
+                wroteInReload ? 1 : 0,
+                wroteReloadStartTime ? 1 : 0,
+                wroteReloadStartDuration ? 1 : 0,
+                wroteReloadInsertDuration ? 1 : 0,
+                wroteReloadEndDuration ? 1 : 0,
+                wroteNextPrimaryAttack ? 1 : 0,
+                wroteNextSecondaryAttack ? 1 : 0,
+                wroteTimeWeaponIdle ? 1 : 0);
+        }
+    }
+    return true;
 }
 
 bool VR::ShouldHideMagazineInteractionNativeClip() const
@@ -1912,8 +2264,7 @@ void VR::CancelMagazineInteractionManual()
     m_MagazineInteractionReloadCommandHoldUntil = {};
     m_MagazineInteractionOldMagazinePulled = false;
     m_MagazineInteractionShotgunShellMode = false;
-    m_MagazineInteractionShotgunSlotInterruptRequired = false;
-    m_MagazineInteractionShotgunSlotInterruptReturnPending = false;
+    m_MagazineInteractionShotgunServerReloadAbortPending = false;
     m_MagazineInteractionShotgunShellsLoadedThisSession = 0;
     m_MagazineInteractionShotgunLastInterruptedClip = -1;
     m_MagazineInteractionWeapon = nullptr;
@@ -1926,6 +2277,7 @@ void VR::CancelMagazineInteractionManual()
     m_MagazineInteractionBoltRestValid = false;
     m_MagazineInteractionSocketWorld = {};
     m_MagazineInteractionSocketCaptureWorld = {};
+    m_MagazineInteractionShotgunStableCaptureModelLocal = {};
     m_MagazineInteractionBoltRestWorld = {};
     m_MagazineInteractionBoltWorld = {};
     m_MagazineInteractionControllerToMagazine = {};
@@ -1938,6 +2290,7 @@ void VR::CancelMagazineInteractionManual()
     }
     m_MagazineInteractionBoltRestBox = {};
     m_MagazineInteractionSocketCaptureBox = {};
+    m_MagazineInteractionShotgunStableCaptureBox = {};
     m_MagazineInteractionBoltPullAxisWorld = {};
     m_MagazineInteractionGrabStartLeftControllerPosAbs = {};
     m_MagazineInteractionHeldMagazineCenterOffsetLocal = {};
@@ -1947,13 +2300,13 @@ void VR::CancelMagazineInteractionManual()
     m_MagazineInteractionBoltMaxPullDistance = 0.0f;
     m_MagazineInteractionBoltReachedRear = false;
     m_MagazineInteractionBoltPullAxisSignLocked = false;
+    m_MagazineInteractionShotgunStableCaptureValid = false;
     m_MagazineInteractionStarted = {};
     m_MagazineInteractionFreshGrabbedAt = {};
     m_MagazineInteractionPostInsertStarted = {};
     m_MagazineInteractionBoltStageStarted = {};
     m_MagazineInteractionBoltGrabbedAt = {};
-    m_MagazineInteractionShotgunSlotInterruptReturnAt = {};
-    m_MagazineInteractionShotgunSlotInterruptGraceUntil = {};
+    m_MagazineInteractionShotgunServerReloadAbortUntil = {};
     m_MagazineInteractionSyntheticClipOutSample.clear();
     m_MagazineInteractionSyntheticClipOutStarted = {};
     m_MagazineInteractionSyntheticClipInSample.clear();
@@ -2015,7 +2368,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             m_MagazineInteractionShotgunShellMode ? 1 : 0);
     };
 
-    auto sendShotgunSlotInterruptFallback = [&](const char* reason)
+    auto queueShotgunServerReloadAbort = [&](const char* reason)
     {
         if (!m_Game)
             return;
@@ -2026,45 +2379,12 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_MagazineInteractionReloadCommandPending = false;
         m_MagazineInteractionReloadCommandIssued = false;
         m_MagazineInteractionReloadCommandHoldUntil = {};
-        m_MagazineInteractionShotgunSlotInterruptRequired = true;
-        m_MagazineInteractionShotgunSlotInterruptReturnPending = true;
-        m_MagazineInteractionShotgunSlotInterruptReturnAt =
-            now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                std::chrono::duration<float>(0.075f));
-        m_MagazineInteractionShotgunSlotInterruptGraceUntil =
-            now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                std::chrono::duration<float>(0.45f));
+        QueueMagazineInteractionShotgunServerReloadAbort(reason);
         m_Game->ClientCmd_Unrestricted("-attack");
-        m_Game->ClientCmd_Unrestricted("slot2");
         Game::logMsg(
-            "[VR][MagazineInteraction] shotgun reload interrupt fallback sent -reload;-attack;slot2 reason=%s clip=%d",
+            "[VR][MagazineInteraction] shotgun reload interrupt queued server reload-state abort after -reload;-attack reason=%s clip=%d",
             reason ? reason : "unknown",
             m_MagazineInteractionShotgunLastInterruptedClip);
-    };
-
-    auto advanceShotgunSlotInterruptFallback = [&]() -> bool
-    {
-        if (!m_MagazineInteractionShotgunSlotInterruptReturnPending &&
-            (m_MagazineInteractionShotgunSlotInterruptGraceUntil.time_since_epoch().count() == 0 ||
-                now >= m_MagazineInteractionShotgunSlotInterruptGraceUntil))
-        {
-            return false;
-        }
-
-        if (m_MagazineInteractionShotgunSlotInterruptReturnPending &&
-            now >= m_MagazineInteractionShotgunSlotInterruptReturnAt)
-        {
-            if (m_Game)
-                m_Game->ClientCmd_Unrestricted("slot1");
-            m_MagazineInteractionShotgunSlotInterruptReturnPending = false;
-            m_MagazineInteractionShotgunSlotInterruptGraceUntil =
-                now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                    std::chrono::duration<float>(0.35f));
-            Game::logMsg(
-                "[VR][MagazineInteraction] shotgun reload interrupt fallback returned to slot1 clip=%d",
-                m_MagazineInteractionShotgunLastInterruptedClip);
-        }
-        return true;
     };
 
     auto setDetachedMagazineWorld = [&](const VrHandMatrix4& world)
@@ -2150,8 +2470,91 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         setDetachedMagazineWorld(buildFreshHeldMagazineWorldFromLeftHand());
     };
 
+    auto applyShotgunStableSocketCapture = [&]() -> bool
+    {
+        if (!m_MagazineInteractionShotgunStableCaptureValid)
+            return false;
+
+        VrHandMatrix4 modelWorld{};
+        if (!MagazineInteractionBuildModelBasisWorld(m_MagazineInteractionSocketBox, modelWorld))
+            return false;
+
+        const VrHandMatrix4 captureWorld = MagazineInteractionBuildWorldFromControllerRelation(
+            modelWorld,
+            m_MagazineInteractionShotgunStableCaptureModelLocal);
+        if (!MagazineInteractionMatrixLooksRenderable(captureWorld))
+            return false;
+
+        MagazineInteractionBoxSnapshot captureBox = m_MagazineInteractionShotgunStableCaptureBox;
+        captureBox.origin = MagazineInteractionMatrixOrigin(captureWorld);
+        captureBox.axisX = MagazineInteractionMatrixAxis(captureWorld, 0);
+        captureBox.axisY = MagazineInteractionMatrixAxis(captureWorld, 1);
+        captureBox.axisZ = MagazineInteractionMatrixAxis(captureWorld, 2);
+        captureBox.entityIndex = m_MagazineInteractionSocketBox.entityIndex;
+        captureBox.boneIndex = m_MagazineInteractionSocketBox.boneIndex;
+        captureBox.modelName = m_MagazineInteractionSocketBox.modelName;
+        captureBox.frameSeq = m_MagazineInteractionSocketBox.frameSeq;
+        captureBox.publishSeq = m_MagazineInteractionSocketBox.publishSeq;
+        captureBox.publishedAt = now;
+        captureBox.modelBasisValid = m_MagazineInteractionSocketBox.modelBasisValid;
+        captureBox.modelOrigin = m_MagazineInteractionSocketBox.modelOrigin;
+        captureBox.modelAxisX = m_MagazineInteractionSocketBox.modelAxisX;
+        captureBox.modelAxisY = m_MagazineInteractionSocketBox.modelAxisY;
+        captureBox.modelAxisZ = m_MagazineInteractionSocketBox.modelAxisZ;
+        m_MagazineInteractionSocketCaptureBox = captureBox;
+        m_MagazineInteractionSocketCaptureWorld = captureWorld;
+        return true;
+    };
+
+    auto captureShotgunStableSocketCapture = [&](const char* reason) -> bool
+    {
+        if (!m_MagazineInteractionShotgunShellMode ||
+            !MagazineInteractionMatrixLooksRenderable(m_MagazineInteractionSocketCaptureWorld))
+        {
+            return false;
+        }
+
+        VrHandMatrix4 modelWorld{};
+        if (!MagazineInteractionBuildModelBasisWorld(m_MagazineInteractionSocketBox, modelWorld))
+            return false;
+
+        const VrHandMatrix4 stableLocal = MagazineInteractionBuildControllerRelation(
+            modelWorld,
+            m_MagazineInteractionSocketCaptureWorld);
+        if (!MagazineInteractionMatrixBasisLooksValid(stableLocal))
+            return false;
+
+        m_MagazineInteractionShotgunStableCaptureModelLocal = stableLocal;
+        m_MagazineInteractionShotgunStableCaptureBox = m_MagazineInteractionSocketCaptureBox;
+        m_MagazineInteractionShotgunStableCaptureValid = true;
+
+        static std::chrono::steady_clock::time_point s_lastStableCaptureLog{};
+        if (s_lastStableCaptureLog.time_since_epoch().count() == 0 ||
+            std::chrono::duration<float>(now - s_lastStableCaptureLog).count() >= 0.50f)
+        {
+            s_lastStableCaptureLog = now;
+            const Vector captureCenter = MagazineInteractionMatrixPointWorld(
+                m_MagazineInteractionSocketCaptureWorld,
+                MagazineInteractionBoxCenterLocal(m_MagazineInteractionSocketCaptureBox));
+            Game::logMsg(
+                "[VR][MagazineInteraction] cached shotgun socket capture local-to-viewmodel reason=%s center=(%.2f %.2f %.2f)",
+                reason ? reason : "unknown",
+                captureCenter.x,
+                captureCenter.y,
+                captureCenter.z);
+        }
+        return true;
+    };
+
     auto rebuildSocketCaptureFromSocket = [&]()
     {
+        if (m_MagazineInteractionShotgunShellMode &&
+            m_MagazineInteractionShotgunShellsLoadedThisSession > 0 &&
+            applyShotgunStableSocketCapture())
+        {
+            return;
+        }
+
         MagazineInteractionBoxSnapshot captureBox{};
         VrHandMatrix4 captureWorld{};
         if (MagazineInteractionBuildSocketCaptureBox(
@@ -2474,10 +2877,12 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_MagazineInteractionSuppressLeftInputUntilRelease = false;
         m_MagazineInteractionOldMagazinePulled = false;
         m_MagazineInteractionShotgunShellMode = MagazineInteractionWeaponUsesShotgunShells(activeWeaponId);
-        m_MagazineInteractionShotgunSlotInterruptRequired = false;
-        m_MagazineInteractionShotgunSlotInterruptReturnPending = false;
+        m_MagazineInteractionShotgunServerReloadAbortPending = false;
         m_MagazineInteractionShotgunShellsLoadedThisSession = 0;
         m_MagazineInteractionShotgunLastInterruptedClip = -1;
+        m_MagazineInteractionShotgunStableCaptureValid = false;
+        m_MagazineInteractionShotgunStableCaptureBox = {};
+        m_MagazineInteractionShotgunStableCaptureModelLocal = {};
         m_MagazineInteractionWeapon = activeWeapon;
         m_MagazineInteractionWeaponId = static_cast<int>(activeWeaponId);
         m_MagazineInteractionStartClip = activeClip;
@@ -2496,8 +2901,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_MagazineInteractionStarted = now;
         m_MagazineInteractionFreshGrabbedAt = {};
         m_MagazineInteractionPostInsertStarted = {};
-        m_MagazineInteractionShotgunSlotInterruptReturnAt = {};
-        m_MagazineInteractionShotgunSlotInterruptGraceUntil = {};
+        m_MagazineInteractionShotgunServerReloadAbortUntil = {};
         m_MagazineInteractionSyntheticClipOutSample.clear();
         m_MagazineInteractionSyntheticClipOutStarted = {};
         m_MagazineInteractionSyntheticClipInSample.clear();
@@ -2614,26 +3018,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         return false;
     };
 
-    const bool shotgunSlotInterruptInProgress = advanceShotgunSlotInterruptFallback();
-
     if (IsMagazineInteractionManualActive() && activeWeapon != m_MagazineInteractionWeapon)
     {
-        if (m_MagazineInteractionShotgunShellMode && shotgunSlotInterruptInProgress)
-        {
-            static std::chrono::steady_clock::time_point s_lastSlotInterruptWeaponHoldLog{};
-            if (s_lastSlotInterruptWeaponHoldLog.time_since_epoch().count() == 0 ||
-                std::chrono::duration<float>(now - s_lastSlotInterruptWeaponHoldLog).count() >= 0.10f)
-            {
-                s_lastSlotInterruptWeaponHoldLog = now;
-                Game::logMsg(
-                    "[VR][MagazineInteraction] shotgun slot interrupt temporarily changed active weapon; preserving manual reload state activeWeaponId=%d originalWeaponId=%d returnPending=%d",
-                    static_cast<int>(activeWeaponId),
-                    m_MagazineInteractionWeaponId,
-                    m_MagazineInteractionShotgunSlotInterruptReturnPending ? 1 : 0);
-            }
-            return false;
-        }
-
         Game::logMsg("[VR][MagazineInteraction] active weapon changed; canceling manual magazine interaction");
         CancelMagazineInteractionManual();
         return false;
@@ -2669,6 +3055,17 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         refreshSocketFromPublishedViewmodelBox();
     }
 
+    if (m_MagazineInteractionShotgunShellMode &&
+        m_MagazineInteractionShotgunShellsLoadedThisSession > 0 &&
+        (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
+            m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine))
+    {
+        ApplyMagazineInteractionShotgunClientReloadAbort(
+            activeWeapon,
+            static_cast<int>(activeWeaponId),
+            "shotgun-between-shells");
+    }
+
     if (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBackendReload)
     {
         const float elapsed = std::chrono::duration<float>(now - m_MagazineInteractionPostInsertStarted).count();
@@ -2689,8 +3086,12 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 {
                     ++m_MagazineInteractionShotgunShellsLoadedThisSession;
                     m_MagazineInteractionShotgunLastInterruptedClip = activeClip;
+                    ApplyMagazineInteractionShotgunClientReloadAbort(
+                        activeWeapon,
+                        static_cast<int>(activeWeaponId),
+                        "shotgun-shell-loaded");
                     if (!(maxClip > 0 && activeClip >= maxClip))
-                        sendShotgunSlotInterruptFallback("shotgun-shell-loaded");
+                        queueShotgunServerReloadAbort("shotgun-shell-loaded");
                 }
 
                 if (maxClip > 0 && activeClip >= maxClip)
@@ -2721,14 +3122,14 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 if (leftGripDown)
                     m_MagazineInteractionSuppressLeftInputUntilRelease = true;
                 Game::logMsg(
-                    "[VR][MagazineInteraction] shotgun shell backend load complete; reload released for single-shell interrupt clip=%d startClip=%d max=%d shellsLoaded=%d updated=%d elapsed=%.3fs fallbackKnown=%d",
+                    "[VR][MagazineInteraction] shotgun shell backend load complete; reload abort queued for single-shell stop clip=%d startClip=%d max=%d shellsLoaded=%d updated=%d elapsed=%.3fs abortPending=%d",
                     activeClip,
                     m_MagazineInteractionStartClip,
                     maxClip,
                     m_MagazineInteractionShotgunShellsLoadedThisSession,
                     clipUpdated ? 1 : 0,
                     elapsed,
-                    m_MagazineInteractionShotgunSlotInterruptRequired ? 1 : 0);
+                    m_MagazineInteractionShotgunServerReloadAbortPending ? 1 : 0);
                 return false;
             }
 
@@ -2761,11 +3162,14 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         activeClip > m_MagazineInteractionShotgunLastInterruptedClip)
     {
         const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, activeClip);
-        m_MagazineInteractionShotgunSlotInterruptRequired = true;
         m_MagazineInteractionShotgunLastInterruptedClip = activeClip;
-        sendShotgunSlotInterruptFallback("regular-release-did-not-stop-shell-reload");
+        ApplyMagazineInteractionShotgunClientReloadAbort(
+            activeWeapon,
+            static_cast<int>(activeWeaponId),
+            "shotgun-stray-client-reload");
+        queueShotgunServerReloadAbort("regular-release-did-not-stop-shell-reload");
         Game::logMsg(
-            "[VR][MagazineInteraction] shotgun regular reload interrupt failed; clip advanced without physical shell clip=%d max=%d; slot fallback enabled for later shells",
+            "[VR][MagazineInteraction] shotgun reload state abort did not stop before next shell; clip advanced without physical shell clip=%d max=%d; queued another server abort",
             activeClip,
             maxClip);
         if (maxClip > 0 && activeClip >= maxClip)
@@ -3092,7 +3496,10 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         if (detachedMagazineFitsSocket())
         {
             if (m_MagazineInteractionShotgunShellMode)
+            {
+                captureShotgunStableSocketCapture("shotgun-shell-inserted");
                 m_MagazineInteractionStartClip = activeClip;
+            }
             MagazineInteractionPlayClipInSound(this);
             if (m_MagazineInteractionShotgunShellMode)
                 startImmediateReloadCommand("shotgun-shell-inserted");

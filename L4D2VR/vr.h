@@ -148,12 +148,17 @@ struct MagazineInteractionBoxSnapshot
 	Vector axisY = { 0.0f, 1.0f, 0.0f };
 	Vector axisZ = { 0.0f, 0.0f, 1.0f };
 	Vector pullAxisWorld = { 0.0f, 0.0f, 0.0f };
+	Vector modelOrigin = { 0.0f, 0.0f, 0.0f };
+	Vector modelAxisX = { 1.0f, 0.0f, 0.0f };
+	Vector modelAxisY = { 0.0f, 1.0f, 0.0f };
+	Vector modelAxisZ = { 0.0f, 0.0f, 1.0f };
 	Vector mins;
 	Vector maxs;
 	uint32_t frameSeq = 0;
 	uint32_t publishSeq = 0;
 	int entityIndex = -1;
 	int boneIndex = -1;
+	bool modelBasisValid = false;
 	std::string modelName;
 	std::chrono::steady_clock::time_point publishedAt{};
 };
@@ -1150,6 +1155,7 @@ public:
 	mutable std::mutex m_MagazineInteractionPoseMutex;
 	MagazineInteractionBoxSnapshot m_MagazineInteractionBox{};
 	MagazineInteractionBoxSnapshot m_MagazineInteractionBoltBox{};
+	MagazineInteractionBoxSnapshot m_MagazineInteractionShotgunStableCaptureBox{};
 	bool m_MagazineInteractionBoxValid = false;
 	bool m_MagazineInteractionBoltBoxValid = false;
 	uint32_t m_MagazineInteractionPublishSeq = 0;
@@ -1162,8 +1168,7 @@ public:
 	bool m_MagazineInteractionSuppressLeftInputUntilRelease = false;
 	bool m_MagazineInteractionOldMagazinePulled = false;
 	bool m_MagazineInteractionShotgunShellMode = false;
-	bool m_MagazineInteractionShotgunSlotInterruptRequired = false;
-	bool m_MagazineInteractionShotgunSlotInterruptReturnPending = false;
+	bool m_MagazineInteractionShotgunServerReloadAbortPending = false;
 	int m_MagazineInteractionShotgunShellsLoadedThisSession = 0;
 	int m_MagazineInteractionShotgunLastInterruptedClip = -1;
 	MagazineInteractionManualState m_MagazineInteractionState = MagazineInteractionManualState::Idle;
@@ -1181,6 +1186,7 @@ public:
 	bool m_MagazineInteractionBoltRestValid = false;
 	VrHandMatrix4 m_MagazineInteractionSocketWorld{};
 	VrHandMatrix4 m_MagazineInteractionSocketCaptureWorld{};
+	VrHandMatrix4 m_MagazineInteractionShotgunStableCaptureModelLocal{};
 	VrHandMatrix4 m_MagazineInteractionBoltRestWorld{};
 	VrHandMatrix4 m_MagazineInteractionBoltWorld{};
 	VrHandMatrix4 m_MagazineInteractionControllerToMagazine{};
@@ -1197,13 +1203,13 @@ public:
 	float m_MagazineInteractionBoltMaxPullDistance = 0.0f;
 	bool m_MagazineInteractionBoltReachedRear = false;
 	bool m_MagazineInteractionBoltPullAxisSignLocked = false;
+	bool m_MagazineInteractionShotgunStableCaptureValid = false;
 	std::chrono::steady_clock::time_point m_MagazineInteractionStarted{};
 	std::chrono::steady_clock::time_point m_MagazineInteractionFreshGrabbedAt{};
 	std::chrono::steady_clock::time_point m_MagazineInteractionPostInsertStarted{};
 	std::chrono::steady_clock::time_point m_MagazineInteractionBoltStageStarted{};
 	std::chrono::steady_clock::time_point m_MagazineInteractionBoltGrabbedAt{};
-	std::chrono::steady_clock::time_point m_MagazineInteractionShotgunSlotInterruptReturnAt{};
-	std::chrono::steady_clock::time_point m_MagazineInteractionShotgunSlotInterruptGraceUntil{};
+	std::chrono::steady_clock::time_point m_MagazineInteractionShotgunServerReloadAbortUntil{};
 	std::string m_MagazineInteractionSyntheticClipOutSample;
 	std::chrono::steady_clock::time_point m_MagazineInteractionSyntheticClipOutStarted{};
 	std::string m_MagazineInteractionSyntheticClipInSample;
@@ -2884,7 +2890,12 @@ public:
 		uint32_t frameSeq,
 		int entityIndex,
 		int boneIndex,
-		const char* modelName);
+		const char* modelName,
+		bool modelBasisValid,
+		const Vector& modelOrigin,
+		const Vector& modelAxisX,
+		const Vector& modelAxisY,
+		const Vector& modelAxisZ);
 	void PublishMagazineInteractionBoltBox(
 		const Vector& origin,
 		const Vector& axisX,
@@ -2906,6 +2917,12 @@ public:
 	bool IsMagazineInteractionLeftHandActive() const;
 	bool IsMagazineInteractionManualActive() const;
 	bool IsMagazineInteractionBlockingFire() const;
+	void QueueMagazineInteractionShotgunServerReloadAbort(const char* reason);
+	bool TryApplyMagazineInteractionShotgunServerReloadAbort(void* serverWeapon, int serverWeaponId);
+	bool ApplyMagazineInteractionShotgunClientReloadAbort(
+		C_WeaponCSBase* clientWeapon,
+		int clientWeaponId,
+		const char* reason);
 	bool ShouldFreezeMagazineInteractionViewmodel() const;
 	bool ShouldHideMagazineInteractionNativeClip() const;
 	bool ShouldDrawMagazineInteractionDetachedMagazine() const;
