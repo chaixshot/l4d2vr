@@ -3325,26 +3325,8 @@ namespace
 
     inline void LogMagazineInteractionDetachedDrawSkip(const char* reason, const std::string& modelName = std::string())
     {
-        const std::string reasonText = reason ? reason : "unknown";
-        if (reasonText == "not-viewmodel" || reasonText == "model-mismatch")
-            return;
-
-        static std::mutex s_skipLogMutex;
-        static std::unordered_map<std::string, std::chrono::steady_clock::time_point> s_lastSkipLog;
-        const auto now = std::chrono::steady_clock::now();
-        const std::string key = reasonText + "|" + modelName;
-        std::lock_guard<std::mutex> lock(s_skipLogMutex);
-        auto& last = s_lastSkipLog[key];
-        if (last.time_since_epoch().count() != 0 &&
-            std::chrono::duration<float>(now - last).count() < 1.0f)
-        {
-            return;
-        }
-        last = now;
-        Game::logMsg(
-            "[VR][MagazineInteraction] detached magazine draw skipped reason=%s model=%s",
-            reasonText.c_str(),
-            modelName.empty() ? "<none>" : modelName.c_str());
+        (void)reason;
+        (void)modelName;
     }
 
     inline bool BuildDetachedSourceMagazineBones(
