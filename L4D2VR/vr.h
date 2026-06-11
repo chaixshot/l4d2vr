@@ -110,18 +110,6 @@ struct HapticMixState
 	std::chrono::steady_clock::time_point lastSubmit{};
 };
 
-enum class ManualReloadState
-{
-	Idle,
-	WatchingNativeClipRemoval,
-	WaitingForFreshMagazineGrab,
-	HoldingFreshMagazine,
-	// Player already inserted the detached copy. Keep the native magazine visibly snapped
-	// into the socket while the hidden Source animation advances to its real post-insert tail.
-	AwaitingNativePostInsertBoundary,
-	ResumingNativeReloadWithMagazine
-};
-
 enum class MagazineInteractionManualState
 {
 	Idle,
@@ -131,14 +119,6 @@ enum class MagazineInteractionManualState
 	WaitingForBackendReload,
 	WaitingForBoltGrab,
 	HoldingBolt
-};
-
-struct ManualReloadDelayedSound
-{
-	std::string sample;
-	float offsetSeconds = 0.0f;
-	float volume = 1.0f;
-	int pitch = 100;
 };
 
 struct MagazineInteractionBoxSnapshot
@@ -1237,107 +1217,18 @@ public:
 	std::chrono::steady_clock::time_point m_MagazineInteractionEmptyFireSoundLastPlayed{};
 	std::atomic<uint32_t> m_MagazineInteractionLeftHandPoseActive{ 0 };
 
-	// Manual magazine reload prototype for detachable-magazine firearms.
-	// The current viewmodel is scanned for a likely clip/magazine root bone. The old native magazine exits
-	// through the original animation, then a movable Source-rendered copy is inserted with the left hand.
-	bool m_ManualReloadEnabled = false;
-	// Temporary controllerless validation path for MouseModeEnabled. It drives the movable native
-	// magazine with keyboard keys so the full state machine can be tested before physical hand input is available.
-	bool m_ManualReloadMouseTestMode = false;
 	// Optional exact per-weapon visual magazine bone overrides. Empty keeps automatic detection.
 	// Config format: ak47:Magazine_Main,m16a1:v_weapon.M4A1_Clip,scar:j_mag1.
-	// MagazineInteraction also uses this map for its magazine/socket bone before automatic detection.
-	std::string m_ManualReloadMagazineBoneOverridesSpec;
-	std::unordered_map<int, std::vector<std::string>> m_ManualReloadMagazineBoneOverrides;
+	std::string m_MagazineInteractionMagazineBoneOverridesSpec;
+	std::unordered_map<int, std::vector<std::string>> m_MagazineInteractionMagazineBoneOverrides;
 	// Optional exact per-weapon bolt/charging-handle bone overrides for MagazineInteraction.
-	// Same format and aliases as ManualReloadMagazineBoneOverrides.
+	// Same format and aliases as the magazine bone override config key.
 	std::string m_MagazineInteractionBoltBoneOverridesSpec;
 	std::unordered_map<int, std::vector<std::string>> m_MagazineInteractionBoltBoneOverrides;
-	// The active manual-reload weapon id is snapshotted at BeginManualReload so the render hook
-	// can resolve the configured override without dereferencing gameplay entity state.
-	int m_ManualReloadWeaponId = 0;
-	// The visible magazine reuses the active Source viewmodel model/material path.
-	// No standalone GLB magazine asset is required.
-	float m_ManualReloadNativeClipLeaveDistanceMeters = 0.05f;
-	float m_ManualReloadMagazineGrabRangeMeters = 0.18f;
-	float m_ManualReloadMagazineGuideStartDepthMeters = 0.10f;
-	float m_ManualReloadMagazineFullInsertDepthMeters = 0.012f;
-	float m_ManualReloadMagazineCaptureRadiusMeters = 0.045f;
-	float m_ManualReloadMagazineCaptureAngleDeg = 35.0f;
-	// Fallback only. Each reload derives its actual outward/insertion axis from the animated native clip movement.
-	Vector m_ManualReloadMagazineInsertionAxisLocal = { 0.0f, -1.0f, 0.0f };
-	Vector m_ManualReloadResolvedInsertionAxisLocal = { 0.0f, -1.0f, 0.0f };
-	bool m_ManualReloadResolvedInsertionAxisValid = false;
-	Vector m_ManualReloadMagazineHandOffsetMeters = { 0.0f, 0.0f, 0.0f };
-	Vector m_ManualReloadMagazineHandRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
-	Vector m_ManualReloadMagazineSocketOffsetMeters = { 0.0f, 0.0f, 0.0f };
-	Vector m_ManualReloadMagazineSocketRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
-	ManualReloadState m_ManualReloadState = ManualReloadState::Idle;
-	C_WeaponCSBase* m_ManualReloadWeapon = nullptr;
-	void* m_ManualReloadViewmodelEntity = nullptr;
-	int m_ManualReloadViewmodelEntityIndex = -1;
-	// Locked per-reload detachable magazine bone. Workshop replacement viewmodels often keep
-	// legacy ValveBiped.weapon_clip helpers while the visible mesh is weighted to a different
-	// custom bone such as Magazine_Main or j_mag1, so the selected bone must remain stable
-	// after resolution instead of being rescored independently for every draw call.
-	std::string m_ManualReloadMagazineModelName;
-	// Visual magazine root used for hiding the native copy and drawing the detached Source-material copy.
-	int m_ManualReloadMagazineBoneIndex = -1;
-	// Motion probe may differ from the visible root. Replacement models often animate a legacy
-	// ValveBiped.weapon_clip helper while the visible mesh is weighted to a custom Magazine/j_mag bone.
-	int m_ManualReloadMagazineMotionBoneIndex = -1;
-	VrHandMatrix4 m_ManualReloadSocketLocal{};
-	VrHandMatrix4 m_ManualReloadSocketWorld{};
-	bool m_ManualReloadSocketValid = false;
-	VrHandMatrix4 m_ManualReloadMotionProbeLocal{};
-	bool m_ManualReloadMotionProbeValid = false;
-	bool m_ManualReloadHideNativeClip = false;
-	bool m_ManualReloadMagazineInsertionArmed = false;
-	int m_ManualReloadFrozenSequence = -1;
-	float m_ManualReloadFrozenCycle = 0.0f;
-	float m_ManualReloadOriginalPlaybackRate = 1.0f;
-	bool m_ManualReloadViewmodelFrozen = false;
-	// While the visible viewmodel is frozen, DrawModelExecute continues sampling the hidden native tail.
-	// After insertion those captured poses are replayed locally even if Source gameplay already returned to idle.
-	float m_ManualReloadVisualResumeDurationSeconds = 0.0f;
-	// Visual-distance reinsertion remains a fallback boundary for models without a useful clip-in sound.
-	// Normally replay starts at the earlier clip-in audio boundary while the magazine subtree is socket-pinned.
-	float m_ManualReloadVisualReplayStartOffsetSeconds = 0.0f;
-	bool m_ManualReloadVisualReplayStartOffsetValid = false;
-	// The first hidden clip-in sound is a more reliable post-insert animation boundary than
-	// replacement-model magazine distance. The magazine subtree is snapped to the socket during
-	// replay, so starting from this earlier pose cannot redraw a duplicate insertion.
-	float m_ManualReloadAudioInsertVisualOffsetSeconds = 0.0f;
-	bool m_ManualReloadAudioInsertVisualOffsetValid = false;
-	bool m_ManualReloadTailCaptureComplete = false;
-	// The visible custom magazine bone is the preferred reinsertion boundary probe.
-	// Legacy helper bones often return only when Source is already idle, which would skip the tail.
-	bool m_ManualReloadNativeVisualClipWasAway = false;
-	float m_ManualReloadNativeVisualClipMaxDistanceMeters = 0.0f;
-	float m_ManualReloadNativeMotionProbeMaxDistanceMeters = 0.0f;
-	std::chrono::steady_clock::time_point m_ManualReloadStarted{};
-	std::chrono::steady_clock::time_point m_ManualReloadResumeStarted{};
-	std::chrono::steady_clock::time_point m_ManualReloadPostInsertBoundaryWaitStarted{};
-	// Hidden native tail sound events are suppressed while the visible pose is paused, then
-	// replayed locally after the player inserts the fresh magazine. The audio hook may run
-	// outside the input thread, so its queue is protected independently.
-	mutable std::mutex m_ManualReloadSoundMutex;
-	std::vector<ManualReloadDelayedSound> m_ManualReloadDelayedSounds;
-	size_t m_ManualReloadDelayedSoundReplayIndex = 0;
-	// Extraction sounds remain live. This gate opens only when an insertion-class sound starts.
-	bool m_ManualReloadSoundInsertTailStarted = false;
-	std::chrono::steady_clock::time_point m_ManualReloadSoundCaptureStarted{};
-	std::chrono::steady_clock::time_point m_ManualReloadSoundReplayStarted{};
-	// Runtime-only keyboard test state. The offset is expressed in calibrated socket-local meters.
-	Vector m_ManualReloadMouseTestMagazineLocalOffsetMeters = { 0.0f, 0.0f, 0.0f };
-	Vector m_ManualReloadMouseTestMagazineLocalRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
-	bool m_ManualReloadMouseTestReloadKeyDownPrev = false;
-	bool m_ManualReloadMouseTestGrabKeyDownPrev = false;
-	bool m_ManualReloadMouseTestDropKeyDownPrev = false;
-	bool m_ManualReloadMouseTestResetKeyDownPrev = false;
-	bool m_ManualReloadMouseTestCancelKeyDownPrev = false;
-	bool m_ManualReloadMouseTestReloadPulseOwned = false;
-	std::chrono::steady_clock::time_point m_ManualReloadMouseTestLastUpdate{};
+	// Shared magazine/socket axis tuning used by MagazineInteraction.
+	Vector m_MagazineInteractionMagazineInsertionAxisLocal = { 0.0f, -1.0f, 0.0f };
+	Vector m_MagazineInteractionMagazineHandOffsetMeters = { 0.0f, 0.0f, 0.0f };
+	Vector m_MagazineInteractionMagazineHandRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	bool m_SplitArmsToControllers = false;
 	float m_HudDistance = 1.3f;
 	float m_FixedHudXOffset = 0.0f;
@@ -2956,27 +2847,6 @@ public:
 	void PlayMagazineInteractionBlockedFireEmptySound();
 	bool CaptureMagazineInteractionSound(int entityIndex, const char* sample, float volume, int flags, int pitch);
 	void CancelMagazineInteractionManual();
-	bool IsManualReloadActive() const;
-	bool IsManualReloadBlockingFire() const;
-	bool ShouldHideManualReloadNativeClip() const;
-	void BeginManualReload(C_BasePlayer* localPlayer);
-	void CancelManualReload();
-	void UpdateManualReloadMouseTestKeyboard(C_BasePlayer* localPlayer);
-	void UpdateManualReload(C_BasePlayer* localPlayer, bool leftGripDown, bool leftGripJustPressed);
-	void OnManualReloadViewmodelPose(
-		const char* modelName,
-		void* viewmodelEntity,
-		int viewmodelEntityIndex,
-		const VrHandMatrix4& rootWorld,
-		const VrHandMatrix4& nativeClipWorld,
-		const VrHandMatrix4& nativeMotionProbeWorld);
-	bool GetManualReloadMagazineWorld(VrHandMatrix4& outWorld) const;
-	bool CaptureManualReloadSound(int entityIndex, const char* sample, float volume, int flags, int pitch);
-	void ReplayManualReloadDelayedSounds();
-	float GetManualReloadReplayDurationSeconds() const;
-	void StartManualReloadPostInsertReplay(const char* reason);
-	bool TryStartManualReloadPostInsertReplay(const char* reason);
-	void UseManualReloadPostInsertFallbackBoundary(const char* reason);
 	void BeginVrHandsEyeRender(const CViewSetup& view, int eyeIndex);
 	void DrawVrHandsWorldDepthMaskBeforeViewmodel();
 	void FinishVrHandsEyeRender();

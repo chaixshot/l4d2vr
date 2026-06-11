@@ -252,7 +252,7 @@ int Hooks::initSourceHooks()
 	//   #5 EmitSound(... float flAttenuation ...)
 	//   #6 EmitSound(... soundlevel_t iSoundlevel ...)
 	// No specialDSP stack argument exists in the L4D2 ABI. Hook both verified overloads
-	// so hidden manual-reload tail sounds can be swallowed and replayed after insertion.
+	// so MagazineInteraction can suppress native reload sounds while physical insertion is active.
 	if (m_Game->m_EngineSound)
 	{
 		void** engineSoundVTable = nullptr;
@@ -282,18 +282,18 @@ int Hooks::initSourceHooks()
 				engineSoundVTable[kEmitSoundLevelVFunc],
 				&dEmitSoundLevel);
 			if (attenuationHookResult == 0 && levelHookResult == 0)
-				Game::logMsg("[VR][ManualReload][Audio] verified L4D2 IEngineSoundClient003 EmitSound hooks installed");
+				Game::logMsg("[VR][MagazineInteraction][Audio] verified L4D2 IEngineSoundClient003 EmitSound hooks installed");
 			else
-				Game::logMsg("[VR][ManualReload][Audio] warning: one or more verified EmitSound hooks failed to install");
+				Game::logMsg("[VR][MagazineInteraction][Audio] warning: one or more verified EmitSound hooks failed to install");
 		}
 		else
 		{
-			Game::logMsg("[VR][ManualReload][Audio] disabled: IEngineSoundClient003 vtable unavailable");
+			Game::logMsg("[VR][MagazineInteraction][Audio] disabled: IEngineSoundClient003 vtable unavailable");
 		}
 	}
 	else
 	{
-		Game::logMsg("[VR][ManualReload][Audio] disabled: IEngineSoundClient003 interface unavailable");
+		Game::logMsg("[VR][MagazineInteraction][Audio] disabled: IEngineSoundClient003 interface unavailable");
 	}
 
 	if (m_Game->m_Offsets->UpdateLaserSight.valid)

@@ -1863,11 +1863,10 @@ int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 	{
 		constexpr int kMagazineInteractionInAttack = (1 << 0);
 		constexpr int kMagazineInteractionInReload = (1 << 13);
-		const bool manualReloadBlocksFire = m_VR->IsManualReloadBlockingFire();
 		const bool magazineInteractionBlocksFire = m_VR->IsMagazineInteractionBlockingFire();
-		if (manualReloadBlocksFire || magazineInteractionBlocksFire)
+		if (magazineInteractionBlocksFire)
 		{
-			if (magazineInteractionBlocksFire && ((to->buttons & kMagazineInteractionInAttack) != 0))
+			if ((to->buttons & kMagazineInteractionInAttack) != 0)
 				m_VR->PlayMagazineInteractionBlockedFireEmptySound();
 			to->buttons &= ~kMagazineInteractionInAttack; // IN_ATTACK
 		}

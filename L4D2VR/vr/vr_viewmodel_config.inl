@@ -1192,10 +1192,8 @@ void VR::ParseConfigFile()
     m_MagazineInteractionBoltBoxLocalOffsetMeters.z = std::clamp(m_MagazineInteractionBoltBoxLocalOffsetMeters.z, -0.25f, 0.25f);
     m_MagazineInteractionBoltPullAxisLocal = getVector3("MagazineInteractionBoltPullAxisLocal", m_MagazineInteractionBoltPullAxisLocal);
     m_MagazineInteractionStaleSeconds = std::clamp(getFloat("MagazineInteractionStaleSeconds", m_MagazineInteractionStaleSeconds), 0.02f, 1.0f);
-    m_ManualReloadEnabled = getBool("ManualReloadEnabled", m_ManualReloadEnabled);
-    m_ManualReloadMouseTestMode = getBool("ManualReloadMouseTestMode", m_ManualReloadMouseTestMode);
-    m_ManualReloadMagazineBoneOverridesSpec = getString("ManualReloadMagazineBoneOverrides", m_ManualReloadMagazineBoneOverridesSpec);
-    m_ManualReloadMagazineBoneOverrides.clear();
+    m_MagazineInteractionMagazineBoneOverridesSpec = getString("ManualReloadMagazineBoneOverrides", m_MagazineInteractionMagazineBoneOverridesSpec);
+    m_MagazineInteractionMagazineBoneOverrides.clear();
     m_MagazineInteractionBoltBoneOverridesSpec = getString("MagazineInteractionBoltBoneOverrides", m_MagazineInteractionBoltBoneOverridesSpec);
     m_MagazineInteractionBoltBoneOverrides.clear();
     m_MagazineInteractionBoltPullAxisLocalOverridesSpec = getString("MagazineInteractionBoltPullAxisLocalOverrides", m_MagazineInteractionBoltPullAxisLocalOverridesSpec);
@@ -1535,8 +1533,8 @@ void VR::ParseConfigFile()
 
         parseBoneOverrideSpec(
             "ManualReloadMagazineBoneOverrides",
-            m_ManualReloadMagazineBoneOverridesSpec,
-            m_ManualReloadMagazineBoneOverrides);
+            m_MagazineInteractionMagazineBoneOverridesSpec,
+            m_MagazineInteractionMagazineBoneOverrides);
         parseBoneOverrideSpec(
             "MagazineInteractionBoltBoneOverrides",
             m_MagazineInteractionBoltBoneOverridesSpec,
@@ -1570,19 +1568,9 @@ void VR::ParseConfigFile()
             89.0f,
             m_MagazineInteractionSocketCaptureAngleDegOverrides);
     }
-    m_ManualReloadNativeClipLeaveDistanceMeters = std::clamp(getFloat("ManualReloadNativeClipLeaveDistanceMeters", m_ManualReloadNativeClipLeaveDistanceMeters), 0.001f, 0.50f);
-    m_ManualReloadMagazineGrabRangeMeters = std::clamp(getFloat("ManualReloadMagazineGrabRangeMeters", m_ManualReloadMagazineGrabRangeMeters), 0.01f, 0.50f);
-    m_ManualReloadMagazineGuideStartDepthMeters = std::clamp(getFloat("ManualReloadMagazineGuideStartDepthMeters", m_ManualReloadMagazineGuideStartDepthMeters), 0.01f, 0.50f);
-    m_ManualReloadMagazineFullInsertDepthMeters = std::clamp(getFloat("ManualReloadMagazineFullInsertDepthMeters", m_ManualReloadMagazineFullInsertDepthMeters), 0.0f, 0.10f);
-    m_ManualReloadMagazineCaptureRadiusMeters = std::clamp(getFloat("ManualReloadMagazineCaptureRadiusMeters", m_ManualReloadMagazineCaptureRadiusMeters), 0.001f, 0.20f);
-    m_ManualReloadMagazineCaptureAngleDeg = std::clamp(getFloat("ManualReloadMagazineCaptureAngleDeg", m_ManualReloadMagazineCaptureAngleDeg), 1.0f, 90.0f);
-    m_ManualReloadMagazineInsertionAxisLocal = getVector3("ManualReloadMagazineInsertionAxisLocal", m_ManualReloadMagazineInsertionAxisLocal);
-    m_ManualReloadMagazineHandOffsetMeters = getVector3("ManualReloadMagazineHandOffsetMeters", m_ManualReloadMagazineHandOffsetMeters);
-    m_ManualReloadMagazineHandRotationOffsetDeg = getVector3("ManualReloadMagazineHandRotationOffsetDeg", m_ManualReloadMagazineHandRotationOffsetDeg);
-    m_ManualReloadMagazineSocketOffsetMeters = getVector3("ManualReloadMagazineSocketOffsetMeters", m_ManualReloadMagazineSocketOffsetMeters);
-    m_ManualReloadMagazineSocketRotationOffsetDeg = getVector3("ManualReloadMagazineSocketRotationOffsetDeg", m_ManualReloadMagazineSocketRotationOffsetDeg);
-    if (!m_ManualReloadEnabled)
-        CancelManualReload();
+    m_MagazineInteractionMagazineInsertionAxisLocal = getVector3("ManualReloadMagazineInsertionAxisLocal", m_MagazineInteractionMagazineInsertionAxisLocal);
+    m_MagazineInteractionMagazineHandOffsetMeters = getVector3("ManualReloadMagazineHandOffsetMeters", m_MagazineInteractionMagazineHandOffsetMeters);
+    m_MagazineInteractionMagazineHandRotationOffsetDeg = getVector3("ManualReloadMagazineHandRotationOffsetDeg", m_MagazineInteractionMagazineHandRotationOffsetDeg);
     m_SplitArmsToControllers = getBool("SplitArmsToControllers", m_SplitArmsToControllers);
     m_HudDistance = getFloat("HudDistance", m_HudDistance);
     m_HudSize = getFloat("HudSize", m_HudSize);

@@ -73,7 +73,6 @@ void VR::ProcessInput()
         m_PrimaryAttackDown = false;
         (void)UpdateMagazineInteraction(nullptr, false, false);
         CancelMagazineInteractionManual();
-        CancelManualReload();
         CancelTeleportTargeting();
         return;
     }
@@ -505,16 +504,6 @@ void VR::ProcessInput()
         reloadJustPressed = false;
         suppressReload = true;
     }
-    // Manual reload reuses the existing left-hand Reload / grip binding.
-    // During the paused phase, a fresh press at the left waist grabs a movable Source-rendered native magazine.
-    // MouseMode can optionally drive the same state machine with temporary keyboard test controls.
-    UpdateManualReloadMouseTestKeyboard(localPlayer);
-    const bool manualReloadMouseTestActive = m_ManualReloadMouseTestMode && m_MouseModeEnabled;
-    UpdateManualReload(
-        localPlayer,
-        manualReloadMouseTestActive ? (m_ManualReloadState == ManualReloadState::HoldingFreshMagazine) : reloadButtonDown,
-        manualReloadMouseTestActive ? false : reloadJustPressed);
-
     vr::InputDigitalActionData_t secondaryAttackActionData{};
     bool secondaryAttackActive = false;
     bool secondaryAttackJustPressed = false;
@@ -1029,7 +1018,7 @@ void VR::ProcessInput()
             }
         }
 
-        if (reloadDataValid && reloadJustPressed && !IsManualReloadActive())
+        if (reloadDataValid && reloadJustPressed)
         {
             if (triggerInventoryFromOrigin(reloadActionData.activeOrigin))
             {
@@ -1199,7 +1188,6 @@ void VR::ProcessInput()
         primaryAttackDown = false;
         primaryAttackJustPressed = false;
     }
-    const bool manualReloadBlocksFire = IsManualReloadBlockingFire();
     const bool magazineInteractionBlocksFire = IsMagazineInteractionBlockingFire();
     const bool usingMountedWeaponForPrimary = vrAwareServerSupportPath && localPlayer && IsUsingMountedGun(localPlayer);
     if (!usingMountedWeaponForPrimary &&
@@ -1209,7 +1197,7 @@ void VR::ProcessInput()
         PlayMagazineInteractionBlockedFireEmptySound();
     }
     if (!usingMountedWeaponForPrimary &&
-        (manualReloadBlocksFire || magazineInteractionBlocksFire || suppressMagazineEmptyClipAutoReload))
+        (magazineInteractionBlocksFire || suppressMagazineEmptyClipAutoReload))
     {
         primaryAttackDown = false;
         primaryAttackJustPressed = false;
@@ -1383,11 +1371,9 @@ void VR::ProcessInput()
 
     const bool wantReload =
         magazineInteractionReloadPulse ||
-        (!crouchButtonDown && reloadButtonDown && !adjustViewmodelActive && !scopeAdjustActive && !IsManualReloadActive());
+        (!crouchButtonDown && reloadButtonDown && !adjustViewmodelActive && !scopeAdjustActive);
     if (wantReload && !m_ReloadCmdOwned)
     {
-        if (!magazineInteractionReloadPulse)
-            BeginManualReload(localPlayer);
         m_Game->ClientCmd_Unrestricted("+reload");
         m_ReloadCmdOwned = true;
         if (magazineInteractionReloadPulse)

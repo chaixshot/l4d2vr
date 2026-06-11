@@ -398,7 +398,6 @@ VrHandSystem::VrHandSystem()
     m_Hands[0].assetFileName = "vr_glove_left_model.glb";
     m_Hands[1].actionPath = "/actions/base/in/skeleton_righthand";
     m_Hands[1].assetFileName = "vr_glove_right_model.glb";
-    m_ManualReloadMagazinePalette = { VrHandMath::ToRows3x4(VrHandMath::Identity()) };
     m_StandaloneMagazineBoxPalette = { VrHandMath::ToRows3x4(VrHandMath::Identity()) };
 }
 
@@ -432,174 +431,6 @@ bool VrHandSystem::ResolveSteamVrAssetPath(const char* fileName, std::string& ou
         "resources" / "rendermodels" / "vr_glove" / fileName;
     outPath = path.string();
     return std::filesystem::exists(path);
-}
-
-bool VrHandSystem::ResolveGameAssetPath(const std::string& relativePath, std::string& outPath) const
-{
-    outPath.clear();
-    if (relativePath.empty())
-        return false;
-
-    const std::filesystem::path configuredPath(relativePath);
-    if (configuredPath.is_absolute())
-    {
-        outPath = configuredPath.string();
-        return std::filesystem::exists(configuredPath);
-    }
-
-    char exePath[MAX_PATH] = {};
-    if (GetModuleFileNameA(nullptr, exePath, MAX_PATH) == 0)
-        return false;
-
-    const std::filesystem::path gameRoot = std::filesystem::path(exePath).parent_path();
-
-    // L4D2VR keeps its own runtime files beside left4dead2.exe (for example
-    // <game root>\VR\manual_reload\m16_clip.glb). Check that location first.
-    const std::filesystem::path rootRelativePath = gameRoot / configuredPath;
-    if (std::filesystem::exists(rootRelativePath))
-    {
-        outPath = rootRelativePath.string();
-        return true;
-    }
-
-    // Keep compatibility with early prototype configs that placed assets under
-    // <game root>\left4dead2\... rather than directly under the game root.
-    const std::filesystem::path left4dead2RelativePath = gameRoot / "left4dead2" / configuredPath;
-    outPath = left4dead2RelativePath.string();
-    return std::filesystem::exists(left4dead2RelativePath);
-}
-
-bool VrHandSystem::EnsureManualReloadMagazineLoaded(const std::string& relativePath, bool debugLog)
-{
-    if (relativePath.empty())
-        return false;
-    if (relativePath == m_ManualReloadMagazineLoadedRelativePath && m_ManualReloadMagazineAsset.IsValid())
-        return true;
-
-    m_ManualReloadMagazineAsset = {};
-    m_ManualReloadMagazineLoadedRelativePath.clear();
-    m_ManualReloadMagazineDrawLogged = false;
-
-    std::string assetPath;
-    if (!ResolveGameAssetPath(relativePath, assetPath))
-    {
-        ReportErrorOnce(std::string("cannot find manual reload magazine GLB: ") + relativePath);
-        return false;
-    }
-
-    std::string error;
-    if (!VrHandAssetLoader::LoadStaticGlb(assetPath, m_ManualReloadMagazineAsset, error))
-    {
-        ReportErrorOnce(error + ": " + assetPath);
-        return false;
-    }
-
-    m_ManualReloadMagazineLoadedRelativePath = relativePath;
-    if (debugLog)
-    {
-        const VrHandVertex& first = m_ManualReloadMagazineAsset.vertices.front();
-        Vector boundsMin(first.position[0], first.position[1], first.position[2]);
-        Vector boundsMax = boundsMin;
-        for (const VrHandVertex& vertex : m_ManualReloadMagazineAsset.vertices)
-        {
-            boundsMin.x = std::min(boundsMin.x, vertex.position[0]);
-            boundsMin.y = std::min(boundsMin.y, vertex.position[1]);
-            boundsMin.z = std::min(boundsMin.z, vertex.position[2]);
-            boundsMax.x = std::max(boundsMax.x, vertex.position[0]);
-            boundsMax.y = std::max(boundsMax.y, vertex.position[1]);
-            boundsMax.z = std::max(boundsMax.z, vertex.position[2]);
-        }
-        Game::logMsg(
-            "[VR][ManualReload] loaded magazine GLB path=%s vertices=%u bounds=(%.4f %.4f %.4f)-(%.4f %.4f %.4f)",
-            relativePath.c_str(),
-            static_cast<unsigned int>(m_ManualReloadMagazineAsset.vertices.size()),
-            boundsMin.x, boundsMin.y, boundsMin.z,
-            boundsMax.x, boundsMax.y, boundsMax.z);
-    }
-    return true;
-}
-
-bool VrHandSystem::DrawManualReloadMagazine(
-    IDirect3DDevice9* device,
-    const CViewSetup& view,
-    float sceneLightScale,
-    const std::string& relativePath,
-    const VrHandMatrix4* world,
-    bool useViewmodelLayer,
-    VrHandDrawPass drawPass)
-{
-    if (!world)
-        return false;
-
-    // A magazine derived from Source viewmodel bones belongs to the viewmodel
-    // layer. Drawing it into the world-visibility stencil pass used by gloves
-    // makes it depend on a mask generated with the wrong projection and can
-    // discard every pixel even though DrawIndexedPrimitive succeeds.
-    if (useViewmodelLayer && drawPass == VrHandDrawPass::WorldVisibilityMask)
-        return false;
-
-    if (!EnsureManualReloadMagazineLoaded(relativePath, true))
-        return false;
-
-    const float projectionAspect =
-        useViewmodelLayer ? ResolveVrHandsViewmodelAspect(view) : ResolveVrHandsSceneAspect(view);
-    const float projectionFov =
-        (useViewmodelLayer && view.fovViewmodel > 0.001f) ? view.fovViewmodel : view.fov;
-    // Source viewmodels are intentionally allowed very close to the camera.
-    // Use a small near plane for the standalone magazine so a hand-held clip
-    // does not vanish while it approaches the weapon or the HMD.
-    const float projectionNear = useViewmodelLayer ? 0.10f : view.zNear;
-    const float projectionFar =
-        (useViewmodelLayer && view.zFarViewmodel > projectionNear) ? view.zFarViewmodel : view.zFar;
-
-    const VrHandMatrix4 projection = VrHandMath::BuildPerspective(
-        projectionFov,
-        projectionAspect,
-        projectionNear,
-        projectionFar);
-    const VrHandMatrix4 camera = VrHandMath::BuildSourceView(view.origin, view.angles);
-    const VrHandMatrix4 cameraWorld = VrHandMath::Multiply(camera, *world);
-    const VrHandMatrix4 wvp = VrHandMath::Multiply(projection, cameraWorld);
-    const VrHandDrawPass rendererPass =
-        useViewmodelLayer ? VrHandDrawPass::ViewmodelStandalone : drawPass;
-
-    std::string error;
-    if (!m_Renderer.Draw(
-            device,
-            2,
-            m_ManualReloadMagazineAsset,
-            m_ManualReloadMagazinePalette,
-            *world,
-            wvp,
-            rendererPass,
-            sceneLightScale,
-            error))
-    {
-        ReportErrorOnce(error);
-        return false;
-    }
-    if (!m_ManualReloadMagazineDrawLogged && rendererPass != VrHandDrawPass::WorldVisibilityMask)
-    {
-        m_ManualReloadMagazineDrawLogged = true;
-        const char* passName = "world-depth";
-        if (rendererPass == VrHandDrawPass::ViewmodelComposite)
-            passName = "viewmodel-composite";
-        else if (rendererPass == VrHandDrawPass::ViewmodelStandalone)
-            passName = "viewmodel-standalone";
-
-        Game::logMsg(
-            "[VR][ManualReload] drew magazine world=(%.2f %.2f %.2f) camera=(%.2f %.2f %.2f) pass=%s fov=%.2f near=%.2f",
-            VrHandMath::Get(*world, 0, 3),
-            VrHandMath::Get(*world, 1, 3),
-            VrHandMath::Get(*world, 2, 3),
-            VrHandMath::Get(cameraWorld, 0, 3),
-            VrHandMath::Get(cameraWorld, 1, 3),
-            VrHandMath::Get(cameraWorld, 2, 3),
-            passName,
-            projectionFov,
-            projectionNear);
-    }
-    return true;
 }
 
 bool VrHandSystem::EnsureStandaloneMagazineBoxLoaded(
@@ -1283,9 +1114,6 @@ bool VrHandSystem::DrawForEye(
     const Vector& leftHandPoseRotationOffsetDeg,
     const Vector& rightHandPoseOffsetMeters,
     const Vector& rightHandPoseRotationOffsetDeg,
-    const std::string& manualReloadMagazineGlbPath,
-    const VrHandMatrix4* manualReloadMagazineWorld,
-    bool manualReloadMagazineUseViewmodelLayer,
     const VrHandMatrix4* standaloneMagazineBoxWorld,
     const Vector& standaloneMagazineBoxMins,
     const Vector& standaloneMagazineBoxMaxs,
@@ -1327,19 +1155,6 @@ bool VrHandSystem::DrawForEye(
                 drawPass);
         }
 
-        // The keyboard-only manual-reload validation path must still render the
-        // independent magazine even when no physical controller skeletal action is active.
-        if (DrawManualReloadMagazine(
-                device,
-                view,
-                sceneLightScale,
-                manualReloadMagazineGlbPath,
-                manualReloadMagazineWorld,
-                manualReloadMagazineUseViewmodelLayer,
-                drawPass))
-        {
-            drewAny = true;
-        }
         if (DrawStandaloneMagazineBox(
                 device,
                 view,
@@ -1483,17 +1298,6 @@ bool VrHandSystem::DrawForEye(
             drewAny = true;
     }
 
-    if (DrawManualReloadMagazine(
-            device,
-            view,
-            sceneLightScale,
-            manualReloadMagazineGlbPath,
-            manualReloadMagazineWorld,
-            manualReloadMagazineUseViewmodelLayer,
-            drawPass))
-    {
-        drewAny = true;
-    }
     if (DrawStandaloneMagazineBox(
             device,
             view,

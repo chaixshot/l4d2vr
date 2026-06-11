@@ -47,9 +47,6 @@ public:
         const Vector& leftHandPoseRotationOffsetDeg,
         const Vector& rightHandPoseOffsetMeters,
         const Vector& rightHandPoseRotationOffsetDeg,
-        const std::string& manualReloadMagazineGlbPath,
-        const VrHandMatrix4* manualReloadMagazineWorld,
-        bool manualReloadMagazineUseViewmodelLayer,
         const VrHandMatrix4* standaloneMagazineBoxWorld,
         const Vector& standaloneMagazineBoxMins,
         const Vector& standaloneMagazineBoxMaxs,
@@ -88,16 +85,6 @@ private:
     bool EnsureAssetsLoaded(bool debugLog);
     bool EnsureInitialized(vr::IVRInput* input, bool rightUseViewmodelPose, bool debugLog);
     bool ResolveSteamVrAssetPath(const char* fileName, std::string& outPath) const;
-    bool ResolveGameAssetPath(const std::string& relativePath, std::string& outPath) const;
-    bool EnsureManualReloadMagazineLoaded(const std::string& relativePath, bool debugLog);
-    bool DrawManualReloadMagazine(
-        IDirect3DDevice9* device,
-        const CViewSetup& view,
-        float sceneLightScale,
-        const std::string& relativePath,
-        const VrHandMatrix4* world,
-        bool useViewmodelLayer,
-        VrHandDrawPass drawPass);
     bool EnsureStandaloneMagazineBoxLoaded(
         const Vector& mins,
         const Vector& maxs,
@@ -161,10 +148,6 @@ private:
     bool m_LeftHandMagazineGripPoseWasEnabled = false;
     bool m_RightViewmodelPalmWorldValid = false;
     bool m_RightViewmodelAnchorValid = false;
-    VrHandMeshAsset m_ManualReloadMagazineAsset;
-    std::vector<VrHandMatrixRows3x4> m_ManualReloadMagazinePalette;
-    std::string m_ManualReloadMagazineLoadedRelativePath;
-    bool m_ManualReloadMagazineDrawLogged = false;
     VrHandMeshAsset m_StandaloneMagazineBoxAsset;
     std::vector<VrHandMatrixRows3x4> m_StandaloneMagazineBoxPalette;
     std::string m_StandaloneMagazineBoxKey;
