@@ -2149,7 +2149,7 @@ namespace
 
         if (useProfile("models/v_models/v_rifle.mdl", Vector(-0.90f, -8.40f, -1.10f), Vector(0.90f, 1.25f, 1.15f), 1)) return true;
         if (useProfile("models/v_models/v_rifle_ak47.mdl", Vector(-0.65f, -9.53f, -0.69f), Vector(0.63f, 1.34f, 7.11f), 1)) return true;
-        if (useProfile("models/v_models/v_desert_rifle.mdl", Vector(-1.81f, -0.73f, -4.73f), Vector(1.69f, 0.72f, 1.61f), 2)) return true;
+        if (useProfile("models/v_models/v_desert_rifle.mdl", Vector(-1.81f, -4.73f, -0.73f), Vector(1.69f, 1.61f, 0.72f), 1)) return true;
         if (useProfile("models/v_models/v_rif_sg552.mdl", Vector(-1.05f, -8.70f, -1.30f), Vector(1.05f, 1.25f, 1.30f), 1)) return true;
 
         if (useProfile("models/v_models/v_huntingrifle.mdl", Vector(-1.17f, -3.11f, -0.86f), Vector(1.17f, 2.23f, 0.86f), 1)) return true;
@@ -3452,9 +3452,9 @@ namespace
                 LogMagazineInteractionDetachedDrawSkip("inactive-or-missing-draw-input", modelName);
             return false;
         }
-        if (!vr->m_Game || vr->m_Game->GetMatQueueMode() != 0)
+        if (!vr->m_Game)
         {
-            LogMagazineInteractionDetachedDrawSkip("mat-queue-not-single-thread", modelName);
+            LogMagazineInteractionDetachedDrawSkip("missing-game", modelName);
             return false;
         }
 
@@ -3502,6 +3502,8 @@ namespace
             return false;
         }
 
+        static std::mutex s_detachedMagazinePoseCacheMutex;
+        std::lock_guard<std::mutex> poseCacheLock(s_detachedMagazinePoseCacheMutex);
         MagazineInteractionDetachedMagazinePoseCache& poseCache = GetMagazineInteractionDetachedMagazinePoseCache();
         const bool cacheMatches =
             poseCache.owner == vr &&

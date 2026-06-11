@@ -1087,8 +1087,8 @@ public:
 	float m_ConfigOverlayDistanceMeters = 1.35f;
 	float m_ConfigOverlaySizeMeters = 2.05f;
 	bool m_HideArms = false;
-	// Independent GLB + ozz-animation VR hand renderer. The initial D3D9 draw path is
-	// deliberately limited to mat_queue_mode 0 until a queued DXVK submission point is added.
+	// Independent GLB + ozz-animation VR hand renderer. In queued rendering, raw D3D9 hand
+	// draws are inserted into Source's material call queue so they run at the correct eye-RT point.
 	bool m_VrHandsEnabled = false;
 	bool m_VrHandsMotionRangeWithoutController = false;
 	bool m_VrHandsRightUseViewmodelPose = false;
@@ -2798,6 +2798,9 @@ public:
 	void ReleaseVRRenderTargetsForDeviceReset();
 	void ReleaseVrHandsD3DResources();
 	bool DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass drawPass);
+	bool DrawVrHandsForEyeImmediate(const CViewSetup& view, int eyeIndex, VrHandDrawPass drawPass, bool allowQueuedMode);
+	bool DrawVrHandsWorldDepthMaskForEyeImmediate(const CViewSetup& view, int eyeIndex, bool allowQueuedMode);
+	bool QueueVrHandsDrawForEye(IMatRenderContext* renderContext, const CViewSetup& view, int eyeIndex, VrHandDrawPass drawPass);
 	void PublishMagazineInteractionBox(
 		const Vector& origin,
 		const Vector& axisX,

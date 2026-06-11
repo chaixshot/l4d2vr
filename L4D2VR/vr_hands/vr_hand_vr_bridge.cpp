@@ -6,6 +6,7 @@
 #include "vr_hand_math.h"
 
 #include <d3d9.h>
+#include <d3d9_vr.h>
 
 #include <algorithm>
 #include <cfloat>
@@ -23,6 +24,121 @@ VR::~VR() = default;
 namespace
 {
     std::string MagazineInteractionPrepareConsoleSoundSample(const std::string& rawSample);
+
+    class ScopedVrHandsQueuedD3DLock
+    {
+    public:
+        explicit ScopedVrHandsQueuedD3DLock(bool enabled)
+        {
+            if (enabled && g_D3DVR9 && SUCCEEDED(g_D3DVR9->LockDevice()))
+                m_Locked = true;
+        }
+
+        ~ScopedVrHandsQueuedD3DLock()
+        {
+            if (m_Locked && g_D3DVR9)
+                g_D3DVR9->UnlockDevice();
+        }
+
+        ScopedVrHandsQueuedD3DLock(const ScopedVrHandsQueuedD3DLock&) = delete;
+        ScopedVrHandsQueuedD3DLock& operator=(const ScopedVrHandsQueuedD3DLock&) = delete;
+
+    private:
+        bool m_Locked = false;
+    };
+
+    class ScopedVrHandsD3DTarget
+    {
+    public:
+        ScopedVrHandsD3DTarget(
+            IDirect3DDevice9* device,
+            IDirect3DSurface9* target,
+            uint32_t width,
+            uint32_t height,
+            bool forceBindTarget)
+            : m_Device(device),
+            m_ForceBindTarget(forceBindTarget)
+        {
+            if (!m_Device || !target || !m_ForceBindTarget)
+                return;
+
+            if (SUCCEEDED(m_Device->GetRenderTarget(0, &m_OldRenderTarget)))
+                m_HaveOldRenderTarget = true;
+            m_HaveOldViewport = SUCCEEDED(m_Device->GetViewport(&m_OldViewport));
+
+            if (FAILED(m_Device->SetRenderTarget(0, target)))
+                return;
+
+            if (width > 0 && height > 0)
+            {
+                D3DVIEWPORT9 viewport{};
+                viewport.X = 0;
+                viewport.Y = 0;
+                viewport.Width = width;
+                viewport.Height = height;
+                viewport.MinZ = 0.0f;
+                viewport.MaxZ = 1.0f;
+                m_Device->SetViewport(&viewport);
+            }
+
+            m_Bound = true;
+        }
+
+        ~ScopedVrHandsD3DTarget()
+        {
+            if (!m_Device || !m_ForceBindTarget)
+                return;
+
+            if (m_Bound)
+            {
+                if (m_HaveOldRenderTarget)
+                    m_Device->SetRenderTarget(0, m_OldRenderTarget);
+                if (m_HaveOldViewport)
+                    m_Device->SetViewport(&m_OldViewport);
+            }
+            if (m_OldRenderTarget)
+                m_OldRenderTarget->Release();
+        }
+
+        bool IsBound() const { return !m_ForceBindTarget || m_Bound; }
+
+        ScopedVrHandsD3DTarget(const ScopedVrHandsD3DTarget&) = delete;
+        ScopedVrHandsD3DTarget& operator=(const ScopedVrHandsD3DTarget&) = delete;
+
+    private:
+        IDirect3DDevice9* m_Device = nullptr;
+        IDirect3DSurface9* m_OldRenderTarget = nullptr;
+        D3DVIEWPORT9 m_OldViewport{};
+        bool m_ForceBindTarget = false;
+        bool m_HaveOldRenderTarget = false;
+        bool m_HaveOldViewport = false;
+        bool m_Bound = false;
+    };
+
+    class ScopedVrHandsRenderSnapshot
+    {
+    public:
+        explicit ScopedVrHandsRenderSnapshot(bool enabled)
+            : m_Enabled(enabled),
+            m_Previous(VR::t_UseRenderFrameSnapshot)
+        {
+            if (m_Enabled)
+                VR::t_UseRenderFrameSnapshot = true;
+        }
+
+        ~ScopedVrHandsRenderSnapshot()
+        {
+            if (m_Enabled)
+                VR::t_UseRenderFrameSnapshot = m_Previous;
+        }
+
+        ScopedVrHandsRenderSnapshot(const ScopedVrHandsRenderSnapshot&) = delete;
+        ScopedVrHandsRenderSnapshot& operator=(const ScopedVrHandsRenderSnapshot&) = delete;
+
+    private:
+        bool m_Enabled = false;
+        bool m_Previous = false;
+    };
 
     Vector MagazineInteractionNormalizeAxis(const Vector& axis, const Vector& fallback)
     {
@@ -3785,56 +3901,100 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
 
 bool VR::DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass drawPass)
 {
-    // Raw D3D9 commands issued directly from Source RenderView are safe only in
-    // single-threaded rendering. The queued path needs a DXVK-side submission point.
-    if (!m_VrHandsEnabled || !m_IsVREnabled || !m_Input || !m_Game || m_Game->GetMatQueueMode() != 0)
+    return DrawVrHandsForEyeImmediate(view, eyeIndex, drawPass, false);
+}
+
+bool VR::DrawVrHandsForEyeImmediate(
+    const CViewSetup& view,
+    int eyeIndex,
+    VrHandDrawPass drawPass,
+    bool allowQueuedMode)
+{
+    if (!m_VrHandsEnabled || !m_IsVREnabled || !m_Input || !m_Game)
         return false;
 
-    IDirect3DSurface9* surface = (eyeIndex == 0) ? m_D9LeftEyeSurface : m_D9RightEyeSurface;
+    const int queueMode = m_Game->GetMatQueueMode();
+    if (queueMode != 0 && !allowQueuedMode)
+        return false;
+
+    if (queueMode != 0 && !g_D3DVR9)
+        return false;
+
+    IDirect3DSurface9* surface = nullptr;
+    {
+        std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
+        if (m_CreatingTextureID != Texture_None)
+            return false;
+
+        surface = (eyeIndex == 0) ? m_D9LeftEyeSurface : m_D9RightEyeSurface;
+        if (surface)
+            surface->AddRef();
+    }
     if (!surface)
         return false;
 
     IDirect3DDevice9* device = nullptr;
     if (FAILED(surface->GetDevice(&device)) || !device)
-        return false;
-
-    if (!m_VrHands)
-        m_VrHands = std::make_unique<VrHandSystem>();
-
-    float sceneLightScale = 1.0f;
-    if (m_AutoFlashlightHasScreenLuma)
     {
-        const float localLuma = std::max(
-            m_AutoFlashlightCenterMedianLuma,
-            m_AutoFlashlightPeripheralMedianLuma * 0.35f);
-        sceneLightScale = std::clamp(localLuma / 110.0f, 0.08f, 1.0f);
+        surface->Release();
+        return false;
     }
 
-    // Detached magazines are primarily rendered by repeating the native Source
-    // viewmodel draw with every non-clip bone moved out of view. While a fresh
-    // magazine is waiting/held, keep a lightweight standalone wire box visible as a
-    // fallback because the matching weapon viewmodel draw is not guaranteed to
-    // occur every frame.
-    VrHandMatrix4 standaloneMagazineBoxWorld{};
-    const VrHandMatrix4* standaloneMagazineBoxWorldPtr = nullptr;
-    Vector standaloneMagazineBoxMins(0.0f, 0.0f, 0.0f);
-    Vector standaloneMagazineBoxMaxs(0.0f, 0.0f, 0.0f);
-    const bool standaloneMagazineBoxUseViewmodelLayer = true;
-    VrHandMatrix4 magazineSocketCaptureBoxWorld{};
-    const VrHandMatrix4* magazineSocketCaptureBoxWorldPtr = nullptr;
-    Vector magazineSocketCaptureBoxMins(0.0f, 0.0f, 0.0f);
-    Vector magazineSocketCaptureBoxMaxs(0.0f, 0.0f, 0.0f);
-    const bool magazineSocketCaptureBoxUseViewmodelLayer = true;
-    VrHandMatrix4 currentMagazineBoxWorld{};
-    const VrHandMatrix4* currentMagazineBoxWorldPtr = nullptr;
-    Vector currentMagazineBoxMins(0.0f, 0.0f, 0.0f);
-    Vector currentMagazineBoxMaxs(0.0f, 0.0f, 0.0f);
-    const bool currentMagazineBoxUseViewmodelLayer = true;
-    VrHandMatrix4 currentBoltBoxWorld{};
-    const VrHandMatrix4* currentBoltBoxWorldPtr = nullptr;
-    Vector currentBoltBoxMins(0.0f, 0.0f, 0.0f);
-    Vector currentBoltBoxMaxs(0.0f, 0.0f, 0.0f);
-    const bool currentBoltBoxUseViewmodelLayer = true;
+    bool drewAny = false;
+    {
+        ScopedVrHandsQueuedD3DLock queuedLock(queueMode != 0);
+        ScopedVrHandsD3DTarget targetScope(
+            device,
+            surface,
+            m_RenderWidth,
+            m_RenderHeight,
+            queueMode != 0);
+        if (!targetScope.IsBound())
+        {
+            device->Release();
+            surface->Release();
+            return false;
+        }
+
+        if (!m_VrHands)
+            m_VrHands = std::make_unique<VrHandSystem>();
+
+        ScopedVrHandsRenderSnapshot renderSnapshot(queueMode != 0 && allowQueuedMode);
+
+        float sceneLightScale = 1.0f;
+        if (m_AutoFlashlightHasScreenLuma)
+        {
+            const float localLuma = std::max(
+                m_AutoFlashlightCenterMedianLuma,
+                m_AutoFlashlightPeripheralMedianLuma * 0.35f);
+            sceneLightScale = std::clamp(localLuma / 110.0f, 0.08f, 1.0f);
+        }
+
+        // Detached magazines are primarily rendered by repeating the native Source
+        // viewmodel draw with every non-clip bone moved out of view. While a fresh
+        // magazine is waiting/held, keep a lightweight standalone wire box visible as a
+        // fallback because the matching weapon viewmodel draw is not guaranteed to
+        // occur every frame.
+        VrHandMatrix4 standaloneMagazineBoxWorld{};
+        const VrHandMatrix4* standaloneMagazineBoxWorldPtr = nullptr;
+        Vector standaloneMagazineBoxMins(0.0f, 0.0f, 0.0f);
+        Vector standaloneMagazineBoxMaxs(0.0f, 0.0f, 0.0f);
+        const bool standaloneMagazineBoxUseViewmodelLayer = true;
+        VrHandMatrix4 magazineSocketCaptureBoxWorld{};
+        const VrHandMatrix4* magazineSocketCaptureBoxWorldPtr = nullptr;
+        Vector magazineSocketCaptureBoxMins(0.0f, 0.0f, 0.0f);
+        Vector magazineSocketCaptureBoxMaxs(0.0f, 0.0f, 0.0f);
+        const bool magazineSocketCaptureBoxUseViewmodelLayer = true;
+        VrHandMatrix4 currentMagazineBoxWorld{};
+        const VrHandMatrix4* currentMagazineBoxWorldPtr = nullptr;
+        Vector currentMagazineBoxMins(0.0f, 0.0f, 0.0f);
+        Vector currentMagazineBoxMaxs(0.0f, 0.0f, 0.0f);
+        const bool currentMagazineBoxUseViewmodelLayer = true;
+        VrHandMatrix4 currentBoltBoxWorld{};
+        const VrHandMatrix4* currentBoltBoxWorldPtr = nullptr;
+        Vector currentBoltBoxMins(0.0f, 0.0f, 0.0f);
+        Vector currentBoltBoxMaxs(0.0f, 0.0f, 0.0f);
+        const bool currentBoltBoxUseViewmodelLayer = true;
     if (m_MagazineBoxDebugEnabled &&
         (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
             m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine) &&
@@ -3911,10 +4071,14 @@ bool VR::DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass 
                 std::max(0.0f, m_MagazineInteractionBoltGrabPaddingMeters) * m_VRScale);
         }
     }
+    const Vector leftControllerPosition = GetLeftControllerAbsPos();
+    const QAngle leftControllerAngles = GetLeftControllerAbsAngle();
+    const Vector rightControllerPosition = GetRightControllerAbsPos();
+    const QAngle rightControllerAngles = GetRightControllerAbsAngle();
     const Vector currentViewmodelPosition = GetRecommendedViewmodelAbsPos();
     const QAngle currentViewmodelAngles = GetRecommendedViewmodelAbsAngle();
 
-    const bool drewAny = m_VrHands->DrawForEye(
+    drewAny = m_VrHands->DrawForEye(
         device,
         m_Input,
         view,
@@ -3926,10 +4090,10 @@ bool VR::DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass 
         m_MouseModeEnabled,
         m_VrHandsDebugLog,
         sceneLightScale,
-        m_LeftControllerPosAbs,
-        m_LeftControllerAngAbs,
-        m_RightControllerPosAbs,
-        m_RightControllerAngAbs,
+        leftControllerPosition,
+        leftControllerAngles,
+        rightControllerPosition,
+        rightControllerAngles,
         currentViewmodelPosition,
         currentViewmodelAngles,
         m_VrHandsLeftPoseOffsetMeters,
@@ -3954,8 +4118,71 @@ bool VR::DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass 
         currentBoltBoxUseViewmodelLayer,
         m_MagazineInteractionLeftHandPoseActive.load(std::memory_order_relaxed) != 0,
         drawPass);
+    }
     device->Release();
+    surface->Release();
     return drewAny;
+}
+
+bool VR::DrawVrHandsWorldDepthMaskForEyeImmediate(const CViewSetup& view, int eyeIndex, bool allowQueuedMode)
+{
+    if (!m_VrHandsEnabled || !m_IsVREnabled || !m_Input || !m_Game)
+        return false;
+
+    const int queueMode = m_Game->GetMatQueueMode();
+    if (queueMode != 0 && !allowQueuedMode)
+        return false;
+
+    if (queueMode != 0 && !g_D3DVR9)
+        return false;
+
+    IDirect3DSurface9* surface = nullptr;
+    {
+        std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
+        if (m_CreatingTextureID != Texture_None)
+            return false;
+
+        surface = (eyeIndex == 0) ? m_D9LeftEyeSurface : m_D9RightEyeSurface;
+        if (surface)
+            surface->AddRef();
+    }
+    if (!surface)
+        return false;
+
+    IDirect3DDevice9* device = nullptr;
+    if (FAILED(surface->GetDevice(&device)) || !device)
+    {
+        surface->Release();
+        return false;
+    }
+
+    bool stencilReady = false;
+    {
+        ScopedVrHandsQueuedD3DLock queuedLock(queueMode != 0);
+        ScopedVrHandsD3DTarget targetScope(
+            device,
+            surface,
+            m_RenderWidth,
+            m_RenderHeight,
+            queueMode != 0);
+        if (targetScope.IsBound())
+        {
+            if (!m_VrHands)
+                m_VrHands = std::make_unique<VrHandSystem>();
+
+            stencilReady = m_VrHands->ClearViewmodelOcclusionStencil(device);
+        }
+    }
+    device->Release();
+    surface->Release();
+    if (!stencilReady)
+        return false;
+
+    return DrawVrHandsForEyeImmediate(
+        view,
+        eyeIndex,
+        VrHandDrawPass::WorldVisibilityMask,
+        allowQueuedMode);
 }
 
 void VR::BeginVrHandsEyeRender(const CViewSetup& view, int eyeIndex)
@@ -3963,7 +4190,7 @@ void VR::BeginVrHandsEyeRender(const CViewSetup& view, int eyeIndex)
     m_VrHandsActiveEyeView = nullptr;
     m_VrHandsActiveEyeIndex = -1;
     m_VrHandsWorldMaskDrawn = false;
-    if (!m_VrHandsEnabled || !m_IsVREnabled || !m_Input || !m_Game || m_Game->GetMatQueueMode() != 0)
+    if (!m_VrHandsEnabled || !m_IsVREnabled || !m_Input || !m_Game)
         return;
 
     m_VrHandsActiveEyeView = &view;
@@ -3975,26 +4202,23 @@ void VR::DrawVrHandsWorldDepthMaskBeforeViewmodel()
     if (!m_VrHandsActiveEyeView || m_VrHandsActiveEyeIndex < 0 || m_VrHandsWorldMaskDrawn)
         return;
 
-    IDirect3DSurface9* surface = (m_VrHandsActiveEyeIndex == 0) ? m_D9LeftEyeSurface : m_D9RightEyeSurface;
-    if (!surface)
+    const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
+    if (queueMode != 0)
+    {
+        IMatRenderContext* renderContext =
+            m_Game && m_Game->m_MaterialSystem ? m_Game->m_MaterialSystem->GetRenderContext() : nullptr;
+        m_VrHandsWorldMaskDrawn = QueueVrHandsDrawForEye(
+            renderContext,
+            *m_VrHandsActiveEyeView,
+            m_VrHandsActiveEyeIndex,
+            VrHandDrawPass::WorldVisibilityMask);
         return;
+    }
 
-    IDirect3DDevice9* device = nullptr;
-    if (FAILED(surface->GetDevice(&device)) || !device)
-        return;
-
-    if (!m_VrHands)
-        m_VrHands = std::make_unique<VrHandSystem>();
-
-    const bool stencilReady = m_VrHands->ClearViewmodelOcclusionStencil(device);
-    device->Release();
-    if (!stencilReady)
-        return;
-
-    m_VrHandsWorldMaskDrawn = DrawVrHandsForEye(
+    m_VrHandsWorldMaskDrawn = DrawVrHandsWorldDepthMaskForEyeImmediate(
         *m_VrHandsActiveEyeView,
         m_VrHandsActiveEyeIndex,
-        VrHandDrawPass::WorldVisibilityMask);
+        false);
 }
 
 void VR::FinishVrHandsEyeRender()
@@ -4009,10 +4233,18 @@ void VR::FinishVrHandsEyeRender()
     if (!view || eyeIndex < 0)
         return;
 
-    DrawVrHandsForEye(
-        *view,
-        eyeIndex,
-        worldMaskDrawn ? VrHandDrawPass::ViewmodelComposite : VrHandDrawPass::WorldDepth);
+    const VrHandDrawPass drawPass =
+        worldMaskDrawn ? VrHandDrawPass::ViewmodelComposite : VrHandDrawPass::WorldDepth;
+    const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
+    if (queueMode != 0)
+    {
+        IMatRenderContext* renderContext =
+            m_Game && m_Game->m_MaterialSystem ? m_Game->m_MaterialSystem->GetRenderContext() : nullptr;
+        QueueVrHandsDrawForEye(renderContext, *view, eyeIndex, drawPass);
+        return;
+    }
+
+    DrawVrHandsForEye(*view, eyeIndex, drawPass);
 }
 
 void VR::ReleaseVrHandsD3DResources()

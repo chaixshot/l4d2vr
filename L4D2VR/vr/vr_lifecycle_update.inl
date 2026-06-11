@@ -76,6 +76,63 @@ namespace
         bool m_AllowDuplicatePoseSubmit = false;
     };
 
+    class VrHandsQueuedDrawFunctor final : public CFunctor
+    {
+    public:
+        VrHandsQueuedDrawFunctor(
+            VR* vr,
+            uint32_t epoch,
+            const CViewSetup& view,
+            int eyeIndex,
+            VrHandDrawPass drawPass)
+            : m_VR(vr),
+            m_Epoch(epoch),
+            m_View(view),
+            m_EyeIndex(eyeIndex),
+            m_DrawPass(drawPass)
+        {
+        }
+
+        int AddRef() override
+        {
+            return static_cast<int>(m_RefCount.fetch_add(1, std::memory_order_acq_rel) + 1);
+        }
+
+        int Release() override
+        {
+            const long remaining = m_RefCount.fetch_sub(1, std::memory_order_acq_rel) - 1;
+            if (remaining == 0)
+                delete this;
+            return static_cast<int>(remaining);
+        }
+
+        void operator()() override
+        {
+            VR* vr = m_VR;
+            if (!vr)
+                return;
+
+            if (vr->m_SourceRenderQueueMarkerEpoch.load(std::memory_order_acquire) != m_Epoch)
+                return;
+
+            if (m_DrawPass == VrHandDrawPass::WorldVisibilityMask)
+            {
+                vr->DrawVrHandsWorldDepthMaskForEyeImmediate(m_View, m_EyeIndex, true);
+                return;
+            }
+
+            vr->DrawVrHandsForEyeImmediate(m_View, m_EyeIndex, m_DrawPass, true);
+        }
+
+    private:
+        std::atomic<long> m_RefCount{ 0 };
+        VR* m_VR = nullptr;
+        uint32_t m_Epoch = 0;
+        CViewSetup m_View{};
+        int m_EyeIndex = -1;
+        VrHandDrawPass m_DrawPass = VrHandDrawPass::WorldDepth;
+    };
+
     inline bool IsSourceQueueReadableProtection(DWORD protect)
     {
         if (protect & PAGE_GUARD)
@@ -1938,6 +1995,82 @@ void VR::InvalidateSourceRenderQueueMarkers()
     m_SourceRenderQueueMarkerEpoch.fetch_add(1, std::memory_order_acq_rel);
     m_SourceRenderQueueMarkerQueuedId.store(0, std::memory_order_release);
     m_SourceRenderQueueMarkerCompletedId.store(0, std::memory_order_release);
+}
+
+bool VR::QueueVrHandsDrawForEye(
+    IMatRenderContext* renderContext,
+    const CViewSetup& view,
+    int eyeIndex,
+    VrHandDrawPass drawPass)
+{
+    if (!renderContext || !m_VrHandsEnabled || !m_IsVREnabled || !m_Input || !m_Game)
+        return false;
+
+    if (m_Game->GetMatQueueMode() == 0)
+        return false;
+
+    void* contextVtable = nullptr;
+    void* getCallQueueFn = nullptr;
+    ICallQueue* callQueue = GetSourceRenderContextCallQueue(renderContext, &contextVtable, &getCallQueueFn);
+    if (!callQueue)
+    {
+        if (m_RenderPipelineDebugLog)
+        {
+            static std::chrono::steady_clock::time_point s_lastMissingVrHandsQueueLog{};
+            if (!ShouldThrottle(s_lastMissingVrHandsQueueLog, m_RenderPipelineDebugLogHz))
+            {
+                Game::logMsg("[VR][VrHands][Queued] source call queue missing; skipped queued hand draw tid=%lu ctx=%p ctxVtable=%p getCallQueue=%p eye=%d pass=%d",
+                    GetCurrentThreadId(),
+                    renderContext,
+                    contextVtable,
+                    getCallQueueFn,
+                    eyeIndex,
+                    static_cast<int>(drawPass));
+            }
+        }
+        return false;
+    }
+
+    void* callQueueVtable = nullptr;
+    if (!IsSourceCallQueueUsable(callQueue, &callQueueVtable))
+    {
+        if (m_RenderPipelineDebugLog)
+        {
+            static std::chrono::steady_clock::time_point s_lastInvalidVrHandsQueueLog{};
+            if (!ShouldThrottle(s_lastInvalidVrHandsQueueLog, m_RenderPipelineDebugLogHz))
+            {
+                Game::logMsg("[VR][VrHands][Queued] source call queue invalid; skipped queued hand draw tid=%lu ctx=%p ctxVtable=%p getCallQueue=%p queue=%p queueVtable=%p eye=%d pass=%d",
+                    GetCurrentThreadId(),
+                    renderContext,
+                    contextVtable,
+                    getCallQueueFn,
+                    callQueue,
+                    callQueueVtable,
+                    eyeIndex,
+                    static_cast<int>(drawPass));
+            }
+        }
+        return false;
+    }
+
+    const uint32_t epoch = m_SourceRenderQueueMarkerEpoch.load(std::memory_order_acquire);
+    callQueue->QueueFunctor(new VrHandsQueuedDrawFunctor(this, epoch, view, eyeIndex, drawPass));
+
+    if (m_VrHandsDebugLog)
+    {
+        static thread_local std::chrono::steady_clock::time_point s_lastQueuedVrHandsDrawLog{};
+        if (!ShouldThrottle(s_lastQueuedVrHandsDrawLog, m_RenderPipelineDebugLogHz))
+        {
+            Game::logMsg("[VR][VrHands][Queued] queued hand draw tid=%lu epoch=%u eye=%d pass=%d ctx=%p queue=%p",
+                GetCurrentThreadId(),
+                epoch,
+                eyeIndex,
+                static_cast<int>(drawPass),
+                renderContext,
+                callQueue);
+        }
+    }
+    return true;
 }
 
 bool VR::QueueSourceRenderCompletionMarker(
