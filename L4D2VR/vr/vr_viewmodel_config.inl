@@ -637,11 +637,10 @@ void VR::ParseConfigFile()
         {
             trim(key);
             std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return std::tolower(c); });
-            return key == "magazineinteractionboltpullaxislocaloverrides" ||
-                key == "magazineinteractionsocketcaptureboxhalfextentsmetersoverrides" ||
-                key == "magazineinteractionsocketcaptureboxlocaloffsetmetersoverrides" ||
-                key == "magazineinteractionsocketcaptureboxlocalrotationoffsetdegoverrides" ||
-                key == "magazineinteractionsocketcaptureangledegoverrides";
+            static constexpr char overrideSuffix[] = "overrides";
+            const size_t suffixLength = sizeof(overrideSuffix) - 1;
+            return key.size() >= suffixLength &&
+                key.compare(key.size() - suffixLength, suffixLength, overrideSuffix) == 0;
         };
 
     auto parseConfigPath = [&](const char* path)->bool
@@ -1198,6 +1197,8 @@ void VR::ParseConfigFile()
     m_MagazineInteractionBoltBoneOverrides.clear();
     m_MagazineInteractionBoltPullAxisLocalOverridesSpec = getString("MagazineInteractionBoltPullAxisLocalOverrides", m_MagazineInteractionBoltPullAxisLocalOverridesSpec);
     m_MagazineInteractionBoltPullAxisLocalOverrides.clear();
+    m_MagazineInteractionBoltBoxLocalOffsetMetersOverridesSpec = getString("MagazineInteractionBoltBoxLocalOffsetMetersOverrides", m_MagazineInteractionBoltBoxLocalOffsetMetersOverridesSpec);
+    m_MagazineInteractionBoltBoxLocalOffsetMetersOverrides.clear();
     m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverridesSpec = getString("MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides", m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverridesSpec);
     m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides.clear();
     m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverridesSpec = getString("MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides", m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverridesSpec);
@@ -1543,6 +1544,12 @@ void VR::ParseConfigFile()
             "MagazineInteractionBoltPullAxisLocalOverrides",
             m_MagazineInteractionBoltPullAxisLocalOverridesSpec,
             m_MagazineInteractionBoltPullAxisLocalOverrides);
+        parseVector3OverrideSpec(
+            "MagazineInteractionBoltBoxLocalOffsetMetersOverrides",
+            m_MagazineInteractionBoltBoxLocalOffsetMetersOverridesSpec,
+            -0.25f,
+            0.25f,
+            m_MagazineInteractionBoltBoxLocalOffsetMetersOverrides);
         parseVector3OverrideSpec(
             "MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides",
             m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverridesSpec,

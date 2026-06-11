@@ -1701,8 +1701,11 @@ namespace
         return value * (1.0f / length);
     }
 
-    inline int ResolveMagazineInteractionWeaponIdForConfig(const VR* vr)
+    inline int ResolveMagazineInteractionWeaponIdForConfig(const VR* vr, int preferredWeaponId = 0)
     {
+        if (preferredWeaponId > 0)
+            return preferredWeaponId;
+
         if (!vr)
             return 0;
 
@@ -1714,13 +1717,14 @@ namespace
 
     inline Vector ResolveMagazineInteractionBoltPullAxisLocal(
         const VR* vr,
+        int preferredWeaponId,
         bool& outUsedOverride)
     {
         outUsedOverride = false;
         if (!vr)
             return Vector(0.0f, 1.0f, 0.0f);
 
-        const int weaponId = ResolveMagazineInteractionWeaponIdForConfig(vr);
+        const int weaponId = ResolveMagazineInteractionWeaponIdForConfig(vr, preferredWeaponId);
         if (weaponId > 0)
         {
             const auto axisIt = vr->m_MagazineInteractionBoltPullAxisLocalOverrides.find(weaponId);
@@ -1734,19 +1738,40 @@ namespace
         return vr->m_MagazineInteractionBoltPullAxisLocal;
     }
 
+    inline Vector ResolveMagazineInteractionBoltBoxLocalOffsetMeters(const VR* vr, int preferredWeaponId)
+    {
+        if (!vr)
+            return Vector(0.0f, 0.0f, 0.0f);
+
+        Vector value = vr->m_MagazineInteractionBoltBoxLocalOffsetMeters;
+        const int weaponId = ResolveMagazineInteractionWeaponIdForConfig(vr, preferredWeaponId);
+        if (weaponId > 0)
+        {
+            const auto offsetIt = vr->m_MagazineInteractionBoltBoxLocalOffsetMetersOverrides.find(weaponId);
+            if (offsetIt != vr->m_MagazineInteractionBoltBoxLocalOffsetMetersOverrides.end())
+                value = offsetIt->second;
+        }
+
+        value.x = std::clamp(value.x, -0.25f, 0.25f);
+        value.y = std::clamp(value.y, -0.25f, 0.25f);
+        value.z = std::clamp(value.z, -0.25f, 0.25f);
+        return value;
+    }
+
     inline Vector BuildMagazineInteractionBoltPullAxisWorld(
         VR* vr,
         const std::string& modelName,
         const vr_vm_stabilize::Mat3x4* sourceBones,
         int numBones,
         const std::vector<int>& boneParents,
+        int weaponId,
         int boltBone,
         const vr_vm_stabilize::Mat3x4& boltWorld,
         const void* pModelToWorld)
     {
         const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
         bool usedAxisOverride = false;
-        Vector configuredLocalAxis = ResolveMagazineInteractionBoltPullAxisLocal(vr, usedAxisOverride);
+        Vector configuredLocalAxis = ResolveMagazineInteractionBoltPullAxisLocal(vr, weaponId, usedAxisOverride);
         const bool legacyM16Axis =
             !usedAxisOverride &&
             lowerModel.find("models/v_models/v_rifle.mdl") != std::string::npos &&
@@ -3144,16 +3169,18 @@ namespace
                     std::max(0.005f, vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.x) * vr->m_VRScale,
                     std::max(0.005f, vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.y) * vr->m_VRScale,
                     std::max(0.005f, vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.z) * vr->m_VRScale);
+                const Vector boltOffsetMeters = ResolveMagazineInteractionBoltBoxLocalOffsetMeters(vr, magazineInteractionWeaponId);
                 const Vector boltLocalOffset(
-                    vr->m_MagazineInteractionBoltBoxLocalOffsetMeters.x * vr->m_VRScale,
-                    vr->m_MagazineInteractionBoltBoxLocalOffsetMeters.y * vr->m_VRScale,
-                    vr->m_MagazineInteractionBoltBoxLocalOffsetMeters.z * vr->m_VRScale);
+                    boltOffsetMeters.x * vr->m_VRScale,
+                    boltOffsetMeters.y * vr->m_VRScale,
+                    boltOffsetMeters.z * vr->m_VRScale);
                 const Vector pullAxisWorld = BuildMagazineInteractionBoltPullAxisWorld(
                     vr,
                     modelName,
                     sourceBones,
                     numBones,
                     boneParents,
+                    magazineInteractionWeaponId,
                     boltBone,
                     boltWorld,
                     pModelToWorld);
@@ -3187,9 +3214,9 @@ namespace
                         vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.x,
                         vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.y,
                         vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.z,
-                        vr->m_MagazineInteractionBoltBoxLocalOffsetMeters.x,
-                        vr->m_MagazineInteractionBoltBoxLocalOffsetMeters.y,
-                        vr->m_MagazineInteractionBoltBoxLocalOffsetMeters.z);
+                        boltOffsetMeters.x,
+                        boltOffsetMeters.y,
+                        boltOffsetMeters.z);
                     bool shouldLog = false;
                     {
                         std::lock_guard<std::mutex> lock(s_boltBoxLogMutex);

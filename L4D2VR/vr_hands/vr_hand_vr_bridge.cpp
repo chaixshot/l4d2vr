@@ -2301,6 +2301,7 @@ void VR::CancelMagazineInteractionManual()
     m_MagazineInteractionBoltGrabStartPullDistance = 0.0f;
     m_MagazineInteractionBoltPullDistance = 0.0f;
     m_MagazineInteractionBoltMaxPullDistance = 0.0f;
+    m_MagazineInteractionBoltGrabRequiresGripRelease = false;
     m_MagazineInteractionBoltReachedRear = false;
     m_MagazineInteractionBoltPullAxisSignLocked = false;
     m_MagazineInteractionShotgunStableCaptureValid = false;
@@ -2717,6 +2718,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_MagazineInteractionBoltGrabStartPullDistance = 0.0f;
         m_MagazineInteractionBoltPullDistance = 0.0f;
         m_MagazineInteractionBoltMaxPullDistance = requiredPull;
+        m_MagazineInteractionBoltGrabRequiresGripRelease = leftGripDown;
         m_MagazineInteractionBoltReachedRear = false;
         m_MagazineInteractionBoltPullAxisSignLocked = false;
         m_MagazineInteractionBoltStageStarted = now;
@@ -2749,6 +2751,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             boltBoxHalfExtentsMeters.z,
             boltBox.modelName.c_str(),
             reason ? reason : "unknown");
+        if (m_MagazineInteractionBoltGrabRequiresGripRelease)
+            Game::logMsg("[VR][MagazineInteraction] bolt stage armed while left grip is still held; bolt grab requires release first");
         return true;
     };
 
@@ -3212,6 +3216,15 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
         setBoltPullDistance(0.0f);
 
+        if (m_MagazineInteractionBoltGrabRequiresGripRelease)
+        {
+            if (leftGripDown)
+                return false;
+
+            m_MagazineInteractionBoltGrabRequiresGripRelease = false;
+            Game::logMsg("[VR][MagazineInteraction] left grip released after magazine insertion; bolt grab enabled");
+        }
+
         if (!m_MagazineInteractionBoltRestValid)
         {
             const float elapsed = std::chrono::duration<float>(now - m_MagazineInteractionBoltStageStarted).count();
@@ -3276,6 +3289,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             Game::logMsg("[VR][MagazineInteraction] bolt hold lost rest pose; canceling bolt hold");
             m_MagazineInteractionState = MagazineInteractionManualState::WaitingForBoltGrab;
             m_MagazineInteractionLeftHandHolding = false;
+            m_MagazineInteractionBoltGrabRequiresGripRelease = leftGripDown;
             m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
             return false;
         }
@@ -3297,6 +3311,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 setBoltPullDistance(0.0f);
                 m_MagazineInteractionState = MagazineInteractionManualState::WaitingForBoltGrab;
                 m_MagazineInteractionLeftHandHolding = false;
+                m_MagazineInteractionBoltGrabRequiresGripRelease = false;
                 m_MagazineInteractionBoltGrabbedAt = {};
                 m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
                 Game::logMsg("[VR][MagazineInteraction] bolt released before rear threshold; bolt returned to rest");

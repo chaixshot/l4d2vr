@@ -136,6 +136,7 @@ MagazineInteractionBoltBoxHalfExtentsMetersX=0.045
 MagazineInteractionBoltBoxHalfExtentsMetersY=0.035
 MagazineInteractionBoltBoxHalfExtentsMetersZ=0.035
 MagazineInteractionBoltBoxLocalOffsetMeters=0.000,0.000,0.000
+MagazineInteractionBoltBoxLocalOffsetMetersOverrides=
 MagazineInteractionBoltBoxLocalOffsetMetersX=0.000
 MagazineInteractionBoltBoxLocalOffsetMetersY=0.000
 MagazineInteractionBoltBoxLocalOffsetMetersZ=0.000

@@ -1136,6 +1136,8 @@ public:
 	float m_MagazineInteractionBoltReturnDistanceMeters = 0.018f;
 	Vector m_MagazineInteractionBoltBoxHalfExtentsMeters = { 0.045f, 0.035f, 0.035f };
 	Vector m_MagazineInteractionBoltBoxLocalOffsetMeters = { 0.0f, 0.0f, 0.0f };
+	std::string m_MagazineInteractionBoltBoxLocalOffsetMetersOverridesSpec;
+	std::unordered_map<int, Vector> m_MagazineInteractionBoltBoxLocalOffsetMetersOverrides;
 	Vector m_MagazineInteractionBoltPullAxisLocal = { 0.0f, 0.0f, 1.0f };
 	// Optional exact per-weapon bolt pull axes. Config format:
 	// m16:0,0,1;scar:0,1,0;magnum:-1,0,0. Empty falls back to MagazineInteractionBoltPullAxisLocal.
@@ -1193,6 +1195,7 @@ public:
 	float m_MagazineInteractionBoltGrabStartPullDistance = 0.0f;
 	float m_MagazineInteractionBoltPullDistance = 0.0f;
 	float m_MagazineInteractionBoltMaxPullDistance = 0.0f;
+	bool m_MagazineInteractionBoltGrabRequiresGripRelease = false;
 	bool m_MagazineInteractionBoltReachedRear = false;
 	bool m_MagazineInteractionBoltPullAxisSignLocked = false;
 	bool m_MagazineInteractionShotgunStableCaptureValid = false;
