@@ -882,6 +882,45 @@ namespace
         return out;
     }
 
+    MagazineInteractionBoxSnapshot MagazineInteractionBuildWorldBoxSnapshotAtCenter(
+        const MagazineInteractionBoxSnapshot& localBox,
+        const VrHandMatrix4& world,
+        const Vector& desiredCenter)
+    {
+        MagazineInteractionBoxSnapshot out = MagazineInteractionBuildWorldBoxSnapshot(localBox, world);
+        const Vector centerLocal = MagazineInteractionBoxCenterLocal(out);
+        out.origin =
+            desiredCenter -
+            out.axisX * centerLocal.x -
+            out.axisY * centerLocal.y -
+            out.axisZ * centerLocal.z;
+        return out;
+    }
+
+    void MagazineInteractionInflateLocalBox(Vector& mins, Vector& maxs, float padding)
+    {
+        if (!(padding > 0.0f))
+            return;
+
+        mins.x -= padding;
+        mins.y -= padding;
+        mins.z -= padding;
+        maxs.x += padding;
+        maxs.y += padding;
+        maxs.z += padding;
+    }
+
+    Vector MagazineInteractionFreshMagazineHalfExtentsSourceUnits(const VR* vr)
+    {
+        if (!vr)
+            return Vector(0.0f, 0.0f, 0.0f);
+
+        return Vector(
+            std::max(0.005f, vr->m_MagazineInteractionFreshMagazineBoxHalfExtentsMeters.x) * vr->m_VRScale,
+            std::max(0.005f, vr->m_MagazineInteractionFreshMagazineBoxHalfExtentsMeters.y) * vr->m_VRScale,
+            std::max(0.005f, vr->m_MagazineInteractionFreshMagazineBoxHalfExtentsMeters.z) * vr->m_VRScale);
+    }
+
     bool MagazineInteractionBuildModelBasisWorld(
         const MagazineInteractionBoxSnapshot& box,
         VrHandMatrix4& outWorld)
@@ -3409,9 +3448,10 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 pickupBox.origin);
             if (MagazineInteractionMatrixLooksRenderable(pickupMagazineWorld))
             {
-                freshGrabBox = MagazineInteractionBuildWorldBoxSnapshot(
+                freshGrabBox = MagazineInteractionBuildWorldBoxSnapshotAtCenter(
                     pickupBox,
-                    pickupMagazineWorld);
+                    pickupMagazineWorld,
+                    pickupBox.origin);
                 pickupBox = freshGrabBox;
                 hasPickupBox = true;
             }
@@ -3802,8 +3842,14 @@ bool VR::DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass 
         GetMagazineInteractionDetachedMagazineWorld(standaloneMagazineBoxWorld))
     {
         standaloneMagazineBoxWorldPtr = &standaloneMagazineBoxWorld;
-        standaloneMagazineBoxMins = m_MagazineInteractionSocketBox.mins;
-        standaloneMagazineBoxMaxs = m_MagazineInteractionSocketBox.maxs;
+        const Vector centerLocal = MagazineInteractionBoxCenterLocal(m_MagazineInteractionSocketBox);
+        const Vector freshHalf = MagazineInteractionFreshMagazineHalfExtentsSourceUnits(this);
+        standaloneMagazineBoxMins = centerLocal - freshHalf;
+        standaloneMagazineBoxMaxs = centerLocal + freshHalf;
+        MagazineInteractionInflateLocalBox(
+            standaloneMagazineBoxMins,
+            standaloneMagazineBoxMaxs,
+            std::max(0.0f, m_MagazineInteractionFreshMagazineGrabRangeMeters) * m_VRScale);
     }
     if (m_MagazineBoxDebugEnabled &&
         m_MagazineInteractionSocketValid &&
@@ -3846,12 +3892,24 @@ bool VR::DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass 
             };
 
         MagazineInteractionBoxSnapshot debugBox{};
-        if (GetMagazineInteractionBox(debugBox))
-            tryUseDebugBox(debugBox, currentMagazineBoxWorld, currentMagazineBoxWorldPtr, currentMagazineBoxMins, currentMagazineBoxMaxs);
+        if (GetMagazineInteractionBox(debugBox) &&
+            tryUseDebugBox(debugBox, currentMagazineBoxWorld, currentMagazineBoxWorldPtr, currentMagazineBoxMins, currentMagazineBoxMaxs))
+        {
+            MagazineInteractionInflateLocalBox(
+                currentMagazineBoxMins,
+                currentMagazineBoxMaxs,
+                std::max(0.0f, m_MagazineInteractionGrabPaddingMeters) * m_VRScale);
+        }
 
         MagazineInteractionBoxSnapshot boltDebugBox{};
-        if (GetMagazineInteractionBoltBox(boltDebugBox))
-            tryUseDebugBox(boltDebugBox, currentBoltBoxWorld, currentBoltBoxWorldPtr, currentBoltBoxMins, currentBoltBoxMaxs);
+        if (GetMagazineInteractionBoltBox(boltDebugBox) &&
+            tryUseDebugBox(boltDebugBox, currentBoltBoxWorld, currentBoltBoxWorldPtr, currentBoltBoxMins, currentBoltBoxMaxs))
+        {
+            MagazineInteractionInflateLocalBox(
+                currentBoltBoxMins,
+                currentBoltBoxMaxs,
+                std::max(0.0f, m_MagazineInteractionBoltGrabPaddingMeters) * m_VRScale);
+        }
     }
     const Vector currentViewmodelPosition = GetRecommendedViewmodelAbsPos();
     const QAngle currentViewmodelAngles = GetRecommendedViewmodelAbsAngle();
