@@ -275,8 +275,9 @@ void VR::ProcessInput()
     // While aiming teleport, Use is reserved as a modifier that ignores playerclip
     // barriers. Do not also send +use into gameplay.
     const bool wantUse = PressedDigitalAction(m_ActionUse) && !m_TeleportTargetingActive;
-    m_ServerUseControllerAimActive = wantUse;
-    if (wantUse)
+    const bool vrAwareServerSupportPath = !m_ForceNonVRServerMovement;
+    m_ServerUseControllerAimActive = vrAwareServerSupportPath && wantUse;
+    if (m_ServerUseControllerAimActive)
     {
         m_ServerUseControllerAimUntil =
             std::chrono::steady_clock::now() +
@@ -1200,12 +1201,15 @@ void VR::ProcessInput()
     }
     const bool manualReloadBlocksFire = IsManualReloadBlockingFire();
     const bool magazineInteractionBlocksFire = IsMagazineInteractionBlockingFire();
-    if ((magazineInteractionBlocksFire || suppressMagazineEmptyClipAutoReload) &&
+    const bool usingMountedWeaponForPrimary = vrAwareServerSupportPath && localPlayer && IsUsingMountedGun(localPlayer);
+    if (!usingMountedWeaponForPrimary &&
+        (magazineInteractionBlocksFire || suppressMagazineEmptyClipAutoReload) &&
         primaryAttackDown)
     {
         PlayMagazineInteractionBlockedFireEmptySound();
     }
-    if (manualReloadBlocksFire || magazineInteractionBlocksFire || suppressMagazineEmptyClipAutoReload)
+    if (!usingMountedWeaponForPrimary &&
+        (manualReloadBlocksFire || magazineInteractionBlocksFire || suppressMagazineEmptyClipAutoReload))
     {
         primaryAttackDown = false;
         primaryAttackJustPressed = false;

@@ -255,4 +255,9 @@ public:
 
 	static inline thread_local HUDPushStep m_HUDStep = HUDPushStep::None;
 	static inline thread_local bool m_PushedHud = false;
+	static inline thread_local bool m_ServerCommandControllerAimOverride = false;
+	static inline thread_local void* m_ServerCommandControllerAimPlayer = nullptr;
+	static inline thread_local Vector m_ServerCommandControllerAimOrigin = { 0.0f, 0.0f, 0.0f };
+	static inline thread_local QAngle m_ServerCommandControllerAimAngles = { 0.0f, 0.0f, 0.0f };
+	static inline thread_local int m_ServerCommandControllerAimReason = 0;
 };

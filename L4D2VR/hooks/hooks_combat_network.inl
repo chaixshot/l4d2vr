@@ -1401,6 +1401,10 @@ float __fastcall Hooks::dProcessUsercmds(void* ecx, void* edx, edict_t* player,
 	int dropped_packets, bool ignore, bool paused)
 {
 	// ★ 进入该钩子，说明本进程正在跑“服务器”逻辑（listen/dedicated）
+	m_ServerCommandControllerAimOverride = false;
+	m_ServerCommandControllerAimPlayer = nullptr;
+	m_ServerCommandControllerAimReason = 0;
+
 	Hooks::s_ServerUnderstandsVR = true;
 
 	// Function pointer for CBaseEntity::entindex
@@ -1493,6 +1497,10 @@ float __fastcall Hooks::dProcessUsercmds(void* ecx, void* edx, edict_t* player,
 	ApplyServerRoomscale1To1Move(pPlayer, pUnknown, index);
 
 	float result = hkProcessUsercmds.fOriginal(ecx, player, buf, numcmds, totalcmds, dropped_packets, ignore, paused);
+
+	m_ServerCommandControllerAimOverride = false;
+	m_ServerCommandControllerAimPlayer = nullptr;
+	m_ServerCommandControllerAimReason = 0;
 
 	// A blocked direct roomscale move is injected into one decoded server CUserCmd so
 	// Source's normal player movement can run StepMove. Reconcile the resulting planar
@@ -1596,8 +1604,99 @@ float __fastcall Hooks::dProcessUsercmds(void* ecx, void* edx, edict_t* player,
 	return result;
 }
 
+namespace
+{
+	static bool ServerWeaponIdIsThrowable(int weaponId)
+	{
+		return weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::MOLOTOV) ||
+			weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::PIPE_BOMB) ||
+			weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::VOMITJAR);
+	}
+
+	static const char* ServerControllerAimReasonName(int reason)
+	{
+		switch (reason)
+		{
+		case 2: return "throw";
+		case 3: return "throw-grace";
+		case 4: return "mounted";
+		default: return "unknown";
+		}
+	}
+
+	static bool TryGetServerCurrentWeapon(Server_WeaponCSBase*& weapon, int& weaponId)
+	{
+		weapon = nullptr;
+		weaponId = static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
+
+		if (!Hooks::m_Game ||
+			!Hooks::m_Game->m_CurrentUsercmdPlayer ||
+			!Hooks::m_Game->m_Offsets ||
+			!Hooks::m_Game->m_Offsets->GetActiveWeapon.address)
+		{
+			return false;
+		}
+
+		typedef Server_WeaponCSBase* (__thiscall* tGetActiveWep)(void* thisptr);
+		static tGetActiveWep oGetActiveWep = (tGetActiveWep)(Hooks::m_Game->m_Offsets->GetActiveWeapon.address);
+		if (!oGetActiveWep)
+			return false;
+
+#ifdef _MSC_VER
+		__try
+		{
+			weapon = oGetActiveWep(Hooks::m_Game->m_CurrentUsercmdPlayer);
+			if (weapon)
+				weaponId = weapon->GetWeaponID();
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			weapon = nullptr;
+			weaponId = static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
+			return false;
+		}
+#else
+		weapon = oGetActiveWep(Hooks::m_Game->m_CurrentUsercmdPlayer);
+		if (weapon)
+			weaponId = weapon->GetWeaponID();
+#endif
+
+		return weapon != nullptr;
+	}
+
+	static bool IsCurrentServerPlayerUsingMountedWeapon()
+	{
+		if (!Hooks::m_Game || !Hooks::m_Game->m_CurrentUsercmdPlayer)
+			return false;
+
+#ifdef _MSC_VER
+		__try
+		{
+			const auto* base = reinterpret_cast<const uint8_t*>(Hooks::m_Game->m_CurrentUsercmdPlayer);
+			return base[VR::kUsingMountedGunOffset] != 0 || base[VR::kUsingMountedWeaponOffset] != 0;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+#else
+		const auto* base = reinterpret_cast<const uint8_t*>(Hooks::m_Game->m_CurrentUsercmdPlayer);
+		return base[VR::kUsingMountedGunOffset] != 0 || base[VR::kUsingMountedWeaponOffset] != 0;
+#endif
+	}
+}
+
 int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 {
+	static thread_local uintptr_t s_serverThrowableAimWeapon = 0;
+	static thread_local bool s_serverThrowableAimPrevAttackDown = false;
+	static thread_local bool s_serverThrowableAimPrevWeaponThrowable = false;
+	static thread_local int s_serverThrowableAimTicks = 0;
+
+	m_ServerCommandControllerAimOverride = false;
+	m_ServerCommandControllerAimPlayer = nullptr;
+	m_ServerCommandControllerAimReason = 0;
+
 	Hooks::s_ServerUnderstandsVR = true;
 	hkReadUsercmd.fOriginal(buf, move, from);
 
@@ -1654,6 +1753,81 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 		move->viewangles.x = decodedAngle;
 		move->viewangles.z = 0;
 		move->upmove = 0;
+
+		Server_WeaponCSBase* serverWeapon = nullptr;
+		int serverWeaponId = static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
+		TryGetServerCurrentWeapon(serverWeapon, serverWeaponId);
+		const uintptr_t weaponTag = reinterpret_cast<uintptr_t>(serverWeapon);
+		if (weaponTag != s_serverThrowableAimWeapon)
+		{
+			if (s_serverThrowableAimPrevWeaponThrowable && s_serverThrowableAimPrevAttackDown)
+				s_serverThrowableAimTicks = std::max(s_serverThrowableAimTicks, 48);
+			s_serverThrowableAimWeapon = weaponTag;
+			s_serverThrowableAimPrevAttackDown = false;
+			s_serverThrowableAimPrevWeaponThrowable = false;
+		}
+
+		constexpr int kIN_ATTACK = (1 << 0);
+		const bool attackDown = (move->buttons & kIN_ATTACK) != 0;
+		const bool activeWeaponIsThrowable = ServerWeaponIdIsThrowable(serverWeaponId);
+		bool commandControllerAim = false;
+		int commandControllerAimReason = 0;
+
+		if (activeWeaponIsThrowable)
+		{
+			if (attackDown || (s_serverThrowableAimPrevAttackDown && !attackDown))
+				s_serverThrowableAimTicks = std::max(s_serverThrowableAimTicks, 48);
+			commandControllerAim = attackDown || (s_serverThrowableAimTicks > 0);
+			commandControllerAimReason = attackDown ? 2 : 3;
+			if (s_serverThrowableAimTicks > 0)
+				--s_serverThrowableAimTicks;
+		}
+		else
+		{
+			commandControllerAim = s_serverThrowableAimTicks > 0;
+			commandControllerAimReason = 3;
+			if (s_serverThrowableAimTicks > 0)
+				--s_serverThrowableAimTicks;
+		}
+
+		s_serverThrowableAimPrevAttackDown = activeWeaponIsThrowable && attackDown;
+		s_serverThrowableAimPrevWeaponThrowable = activeWeaponIsThrowable;
+
+		if (IsCurrentServerPlayerUsingMountedWeapon())
+		{
+			commandControllerAim = true;
+			commandControllerAimReason = 4;
+		}
+
+		if (commandControllerAim)
+		{
+			const Player& vrPlayer = m_Game->m_PlayersVRInfo[i];
+			m_ServerCommandControllerAimOverride = true;
+			m_ServerCommandControllerAimPlayer = m_Game->m_CurrentUsercmdPlayer;
+			m_ServerCommandControllerAimOrigin = vrPlayer.controllerPos;
+			m_ServerCommandControllerAimAngles = vrPlayer.controllerAngle;
+			NormalizeAndClampViewAngles(m_ServerCommandControllerAimAngles);
+			m_ServerCommandControllerAimReason = commandControllerAimReason;
+
+			static std::chrono::steady_clock::time_point s_lastServerCommandAimLog{};
+			const auto now = std::chrono::steady_clock::now();
+			if (s_lastServerCommandAimLog.time_since_epoch().count() == 0 ||
+				std::chrono::duration<float>(now - s_lastServerCommandAimLog).count() >= 0.50f)
+			{
+				s_lastServerCommandAimLog = now;
+				Game::logMsg(
+					"[VR][UseAim] server command controller eye override reason=%s weaponId=%d buttons=0x%X origin=(%.1f %.1f %.1f) angles=(%.1f %.1f %.1f)",
+					ServerControllerAimReasonName(commandControllerAimReason),
+					serverWeaponId,
+					move->buttons,
+					m_ServerCommandControllerAimOrigin.x,
+					m_ServerCommandControllerAimOrigin.y,
+					m_ServerCommandControllerAimOrigin.z,
+					m_ServerCommandControllerAimAngles.x,
+					m_ServerCommandControllerAimAngles.y,
+					m_ServerCommandControllerAimAngles.z);
+			}
+		}
 	}
 	else
 	{
@@ -1677,10 +1851,15 @@ void __fastcall Hooks::dWriteUsercmdDeltaToBuffer(void* ecx, void* edx, int a1, 
 
 int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 {
+	const bool localUsingMountedWeapon = m_VR &&
+		m_VR->m_IsVREnabled &&
+		!m_VR->m_ForceNonVRServerMovement &&
+		IsLocalClientUsingMountedWeapon();
+
 	// Final outgoing-command guard for manual reload. CreateMove already clears IN_ATTACK,
 	// but keep the wire path authoritative as well so standard and encoded server commands
 	// both remain decoupled from the local physical magazine interaction.
-	if (to && m_VR)
+	if (to && m_VR && !localUsingMountedWeapon)
 	{
 		constexpr int kMagazineInteractionInAttack = (1 << 0);
 		constexpr int kMagazineInteractionInReload = (1 << 13);
@@ -1726,7 +1905,7 @@ int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 	CVerifiedUserCmd* pVerifiedCommands = *(CVerifiedUserCmd**)((uintptr_t)m_Input + 0xF0);
 	CVerifiedUserCmd* pVerified = &pVerifiedCommands[(to->command_number) % 150];
 
-	if (to && m_VR->ShouldSuppressPrimaryFire(to, nullptr))
+	if (to && !localUsingMountedWeapon && m_VR->ShouldSuppressPrimaryFire(to, nullptr))
 	{
 		to->buttons &= ~(1 << 0); // IN_ATTACK
 	}

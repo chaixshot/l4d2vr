@@ -5088,7 +5088,10 @@ namespace
 
 	static bool IsServerUseControllerAimWindowActive()
 	{
-		if (!Hooks::m_VR)
+		if (!Hooks::m_VR || !Hooks::m_VR->m_IsVREnabled)
+			return false;
+
+		if (Hooks::m_VR->m_ForceNonVRServerMovement)
 			return false;
 
 		const auto now = std::chrono::steady_clock::now();
@@ -5100,6 +5103,9 @@ namespace
 	static bool TryBuildServerUseControllerPose(void* player, Vector& origin, QAngle& angles)
 	{
 		if (!Hooks::m_Game || !player)
+			return false;
+
+		if (!Hooks::m_VR || Hooks::m_VR->m_ForceNonVRServerMovement)
 			return false;
 
 		const int playerIndex = Hooks::m_Game->m_CurrentUsercmdID;
@@ -5121,12 +5127,40 @@ namespace
 		return IsFiniteVector3(origin) && IsFiniteViewAngle(angles);
 	}
 
+	static bool TryGetServerControllerAimOverride(void* player, Vector& origin, QAngle& angles, int& reason)
+	{
+		if (!player)
+			return false;
+
+		if (g_ServerUseControllerAimOverride && player == g_ServerUseControllerAimPlayer)
+		{
+			origin = g_ServerUseControllerAimOrigin;
+			angles = g_ServerUseControllerAimAngles;
+			reason = 1;
+			return IsFiniteVector3(origin) && IsFiniteViewAngle(angles);
+		}
+
+		if (Hooks::m_ServerCommandControllerAimOverride &&
+			player == Hooks::m_ServerCommandControllerAimPlayer)
+		{
+			origin = Hooks::m_ServerCommandControllerAimOrigin;
+			angles = Hooks::m_ServerCommandControllerAimAngles;
+			reason = Hooks::m_ServerCommandControllerAimReason;
+			return IsFiniteVector3(origin) && IsFiniteViewAngle(angles);
+		}
+
+		return false;
+	}
+
 	static bool TryBuildClientUseControllerPose(void* player, Vector& origin, QAngle& angles)
 	{
 		if (!Hooks::m_Game || !Hooks::m_VR || !player)
 			return false;
 
 		if (!Hooks::m_VR->m_IsVREnabled)
+			return false;
+
+		if (Hooks::m_VR->m_ForceNonVRServerMovement)
 			return false;
 
 		if (!Hooks::m_Game->m_EngineClient || !Hooks::m_Game->m_EngineClient->IsInGame())
@@ -5210,9 +5244,12 @@ namespace
 
 Vector* Hooks::dEyePosition(void* ecx, void* edx, Vector* eyePos)
 {
-	if (eyePos && g_ServerUseControllerAimOverride && ecx == g_ServerUseControllerAimPlayer)
+	Vector controllerOrigin;
+	QAngle controllerAngles;
+	int overrideReason = 0;
+	if (eyePos && TryGetServerControllerAimOverride(ecx, controllerOrigin, controllerAngles, overrideReason))
 	{
-		*eyePos = g_ServerUseControllerAimOrigin;
+		*eyePos = controllerOrigin;
 		return eyePos;
 	}
 
@@ -5232,7 +5269,10 @@ Vector* Hooks::dEyePosition(void* ecx, void* edx, Vector* eyePos)
 
 Vector* Hooks::dServerPlayerEyePosition(void* ecx, void* edx, Vector* eyePos)
 {
-	if (eyePos && g_ServerUseControllerAimOverride && ecx == g_ServerUseControllerAimPlayer)
+	Vector controllerOrigin;
+	QAngle controllerAngles;
+	int overrideReason = 0;
+	if (eyePos && TryGetServerControllerAimOverride(ecx, controllerOrigin, controllerAngles, overrideReason))
 	{
 		static std::chrono::steady_clock::time_point s_lastServerEyePositionOverrideLog{};
 		const auto now = std::chrono::steady_clock::now();
@@ -5241,12 +5281,13 @@ Vector* Hooks::dServerPlayerEyePosition(void* ecx, void* edx, Vector* eyePos)
 		{
 			s_lastServerEyePositionOverrideLog = now;
 			Game::logMsg(
-				"[VR][UseAim] ServerPlayerEyePosition override origin=(%.1f %.1f %.1f)",
-				g_ServerUseControllerAimOrigin.x,
-				g_ServerUseControllerAimOrigin.y,
-				g_ServerUseControllerAimOrigin.z);
+				"[VR][UseAim] ServerPlayerEyePosition override reason=%d origin=(%.1f %.1f %.1f)",
+				overrideReason,
+				controllerOrigin.x,
+				controllerOrigin.y,
+				controllerOrigin.z);
 		}
-		*eyePos = g_ServerUseControllerAimOrigin;
+		*eyePos = controllerOrigin;
 		return eyePos;
 	}
 
@@ -5278,7 +5319,10 @@ void Hooks::dClientPlayerEyeVectors(void* ecx, void* edx, Vector* forward, Vecto
 
 const QAngle* Hooks::dServerPlayerEyeAngles(void* ecx, void* edx)
 {
-	if (g_ServerUseControllerAimOverride && ecx == g_ServerUseControllerAimPlayer)
+	Vector controllerOrigin;
+	QAngle controllerAngles;
+	int overrideReason = 0;
+	if (TryGetServerControllerAimOverride(ecx, controllerOrigin, controllerAngles, overrideReason))
 	{
 		static std::chrono::steady_clock::time_point s_lastServerEyeAnglesOverrideLog{};
 		const auto now = std::chrono::steady_clock::now();
@@ -5287,12 +5331,14 @@ const QAngle* Hooks::dServerPlayerEyeAngles(void* ecx, void* edx)
 		{
 			s_lastServerEyeAnglesOverrideLog = now;
 			Game::logMsg(
-				"[VR][UseAim] ServerPlayerEyeAngles override angles=(%.1f %.1f %.1f)",
-				g_ServerUseControllerAimAngles.x,
-				g_ServerUseControllerAimAngles.y,
-				g_ServerUseControllerAimAngles.z);
+				"[VR][UseAim] ServerPlayerEyeAngles override reason=%d angles=(%.1f %.1f %.1f)",
+				overrideReason,
+				controllerAngles.x,
+				controllerAngles.y,
+				controllerAngles.z);
 		}
-		return &g_ServerUseControllerAimAngles;
+		Hooks::m_ServerCommandControllerAimAngles = controllerAngles;
+		return &Hooks::m_ServerCommandControllerAimAngles;
 	}
 
 	return hkServerPlayerEyeAngles.fOriginal(ecx);

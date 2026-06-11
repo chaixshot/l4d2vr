@@ -665,7 +665,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 				if (weaponTag != s_vrAwareThrowableAimWeapon)
 				{
 					if (s_vrAwareThrowableAimPrevWeaponThrowable && s_vrAwareThrowableAimPrevAttackDown)
-						s_vrAwareThrowableAimTicks = std::max(s_vrAwareThrowableAimTicks, 8);
+						s_vrAwareThrowableAimTicks = std::max(s_vrAwareThrowableAimTicks, 48);
 					s_vrAwareThrowableAimWeapon = weaponTag;
 					s_vrAwareThrowableAimPrevAttackDown = false;
 					s_vrAwareThrowableAimPrevWeaponThrowable = false;
@@ -691,7 +691,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 				if (activeWeaponIsThrowable)
 				{
 					if (attackDown || (s_vrAwareThrowableAimPrevAttackDown && !attackDown))
-						s_vrAwareThrowableAimTicks = 8;
+						s_vrAwareThrowableAimTicks = 48;
 					useControllerCmdView = attackDown || (s_vrAwareThrowableAimTicks > 0);
 					if (useControllerCmdView)
 					{
@@ -1389,7 +1389,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 	// Aim-line friendly-fire guard:
 	// Compute teammate hit at input-tick rate (CreateMove) and latch suppression until attack is released.
 	C_BasePlayer* ffLocalPlayer = nullptr;
-	if (m_VR->m_BlockFireOnFriendlyAimEnabled)
+	const bool localUsingMountedWeapon = !m_VR->m_ForceNonVRServerMovement && IsLocalClientUsingMountedWeapon();
+	if (m_VR->m_BlockFireOnFriendlyAimEnabled && !localUsingMountedWeapon)
 	{
 		const int ffIdx = m_Game->m_EngineClient->GetLocalPlayer();
 		if (ffIdx > 0)
@@ -1400,7 +1401,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 	// (healing, giving ammo/upgrade pack, reviving, etc.). These actions intentionally target
 	// teammates and require holding IN_ATTACK.
 	const bool ffDoingUseAction = ffLocalPlayer ? (ReadNetvar<int>(ffLocalPlayer, 0x1ba8) != 0) : false; // m_iCurrentUseAction
-	if (!ffDoingUseAction && m_VR->ShouldSuppressPrimaryFire(cmd, ffLocalPlayer))
+	if (!localUsingMountedWeapon && !ffDoingUseAction && m_VR->ShouldSuppressPrimaryFire(cmd, ffLocalPlayer))
 	{
 		cmd->buttons &= ~(1 << 0); // IN_ATTACK
 	}
@@ -1412,20 +1413,21 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 	constexpr int kMagazineInteractionInReload = (1 << 13);
 	const bool manualReloadBlocksFire = m_VR->IsManualReloadBlockingFire();
 	const bool magazineInteractionBlocksFire = m_VR->IsMagazineInteractionBlockingFire();
-	if (manualReloadBlocksFire || magazineInteractionBlocksFire)
+	if (!localUsingMountedWeapon && (manualReloadBlocksFire || magazineInteractionBlocksFire))
 	{
 		if (magazineInteractionBlocksFire && ((cmd->buttons & kMagazineInteractionInAttack) != 0))
 			m_VR->PlayMagazineInteractionBlockedFireEmptySound();
 		cmd->buttons &= ~kMagazineInteractionInAttack; // IN_ATTACK
 	}
-	if (m_VR->IsMagazineInteractionLeftHandActive() &&
+	if (!localUsingMountedWeapon &&
+		m_VR->IsMagazineInteractionLeftHandActive() &&
 		!m_VR->IsMagazineInteractionReloadCommandActive())
 	{
 		cmd->buttons &= ~kMagazineInteractionInReload; // IN_RELOAD
 	}
 	const bool suppressMagazineEmptyClipAutoReload =
 		m_VR->ShouldSuppressMagazineInteractionEmptyClipAutoReload(nullptr);
-	if (suppressMagazineEmptyClipAutoReload)
+	if (!localUsingMountedWeapon && suppressMagazineEmptyClipAutoReload)
 	{
 		if ((cmd->buttons & kMagazineInteractionInAttack) != 0)
 			m_VR->PlayMagazineInteractionBlockedFireEmptySound();

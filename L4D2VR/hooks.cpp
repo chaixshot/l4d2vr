@@ -157,6 +157,35 @@ static bool IsLocalServerActiveWeapon(void* weapon)
 #endif
 }
 
+static bool IsLocalClientUsingMountedWeapon()
+{
+	if (!Hooks::m_Game || !Hooks::m_Game->m_EngineClient)
+		return false;
+
+	const int localPlayerIndex = Hooks::m_Game->m_EngineClient->GetLocalPlayer();
+	if (localPlayerIndex <= 0)
+		return false;
+
+	C_BasePlayer* localPlayer = reinterpret_cast<C_BasePlayer*>(Hooks::m_Game->GetClientEntity(localPlayerIndex));
+	if (!localPlayer)
+		return false;
+
+#ifdef _MSC_VER
+	__try
+	{
+		const auto* base = reinterpret_cast<const uint8_t*>(localPlayer);
+		return base[VR::kUsingMountedGunOffset] != 0 || base[VR::kUsingMountedWeaponOffset] != 0;
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+		return false;
+	}
+#else
+	const auto* base = reinterpret_cast<const uint8_t*>(localPlayer);
+	return base[VR::kUsingMountedGunOffset] != 0 || base[VR::kUsingMountedWeaponOffset] != 0;
+#endif
+}
+
 static void NotifyLocalMeleeCollisionHaptics(bool serverCollision, void* weapon, int collisionResult, int entitiesHitBefore, int entitiesHitAfter)
 {
 	const bool collided = (collisionResult != 0)

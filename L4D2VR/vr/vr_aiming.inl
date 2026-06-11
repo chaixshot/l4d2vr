@@ -1677,11 +1677,11 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
         m_HasAimConvergePoint = false;
         UpdateAimTeammateHudTarget(localPlayer, Vector{}, Vector{}, false);
 
+        // Match the VR-aware throw path: that server route now resolves throwable aim
+        // from the controller pose. ForceNonVRServerMovement already used this source.
         Vector pitchSource = direction;
         if ((useMouse || frontViewEyeAim) && !eyeDir.IsZero())
             pitchSource = eyeDir;
-        else if (!m_ForceNonVRServerMovement && !m_HmdForward.IsZero())
-            pitchSource = m_HmdForward;
 
         DrawThrowArc(origin, direction, pitchSource);
         return;
