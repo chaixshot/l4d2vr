@@ -1083,6 +1083,8 @@ public:
 	Vector m_VrHandsLeftPoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	Vector m_VrHandsRightPoseOffsetMeters = { 0.0f, 0.0f, 0.0f };
 	Vector m_VrHandsRightPoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
+	Vector m_VrHandsLeftHandedViewmodelPoseOffsetMeters = { 0.0f, 0.0f, 0.0f };
+	Vector m_VrHandsLeftHandedViewmodelPoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	// Built-in config overlay placement. Parsed by ParseConfigFile() so config hot-reload can update it.
 	float m_ConfigOverlayDistanceMeters = 1.35f;
 	float m_ConfigOverlaySizeMeters = 2.05f;
@@ -1111,6 +1113,7 @@ public:
 	float m_MagazineInteractionPullTriggerMeters = 0.08f;
 	float m_MagazineInteractionPullTriggerByMagazineMeters = 0.025f;
 	float m_MagazineInteractionFreshMagazineGrabRangeMeters = 0.18f;
+	Vector m_MagazineInteractionFreshMagazinePickupOffsetMeters = { 0.45f, -0.28f, 0.25f };
 	Vector m_MagazineInteractionFreshMagazineBoxHalfExtentsMeters = { 0.055f, 0.045f, 0.12f };
 	Vector m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters = { -0.12f, 0.0f, 0.0f };
 	float m_MagazineInteractionSocketCaptureRadiusMeters = 0.06f;
@@ -1198,6 +1201,8 @@ public:
 	bool m_MagazineInteractionBoltGrabRequiresGripRelease = false;
 	bool m_MagazineInteractionBoltReachedRear = false;
 	bool m_MagazineInteractionBoltPullAxisSignLocked = false;
+	bool m_MagazineInteractionBoltStageBeforeBackendReloadComplete = false;
+	bool m_MagazineInteractionBoltCompletedBeforeBackendReload = false;
 	bool m_MagazineInteractionShotgunStableCaptureValid = false;
 	std::chrono::steady_clock::time_point m_MagazineInteractionStarted{};
 	std::chrono::steady_clock::time_point m_MagazineInteractionFreshGrabbedAt{};

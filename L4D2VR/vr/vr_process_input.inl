@@ -247,29 +247,6 @@ void VR::ProcessInput()
     }
 
     const bool jumpGestureActive = currentTime < m_JumpGestureHoldUntil;
-    if (isObserverOrIdle)
-    {
-        // Avoid leaving +jump latched while spectating.
-        if (m_JumpCmdOwned)
-        {
-            m_Game->ClientCmd_Unrestricted("-jump");
-            m_JumpCmdOwned = false;
-        }
-    }
-    else
-    {
-        const bool wantJump = PressedDigitalAction(m_ActionJump) || jumpGestureActive;
-        if (wantJump && !m_JumpCmdOwned)
-        {
-            m_Game->ClientCmd_Unrestricted("+jump");
-            m_JumpCmdOwned = true;
-        }
-        else if (!wantJump && m_JumpCmdOwned)
-        {
-            m_Game->ClientCmd_Unrestricted("-jump");
-            m_JumpCmdOwned = false;
-        }
-    }
 
     // While aiming teleport, Use is reserved as a modifier that ignores playerclip
     // barriers. Do not also send +use into gameplay.
@@ -431,6 +408,14 @@ void VR::ProcessInput()
 
             return info.trackedDeviceIndex == roleIndex;
         };
+    auto roleForGameplayHand = [&](bool leftHand) -> vr::ETrackedControllerRole
+        {
+            return IsGameplayHandLeftPhysical(leftHand)
+                ? vr::TrackedControllerRole_LeftHand
+                : vr::TrackedControllerRole_RightHand;
+        };
+    const vr::ETrackedControllerRole gameplayLeftRole = roleForGameplayHand(true);
+    const vr::ETrackedControllerRole gameplayRightRole = roleForGameplayHand(false);
 
     vr::InputDigitalActionData_t primaryAttackActionData{};
     bool primaryAttackDown = false;
@@ -441,7 +426,7 @@ void VR::ProcessInput()
     vr::InputDigitalActionData_t jumpActionData{};
     bool jumpButtonDown = false;
     bool jumpJustPressed = false;
-    getActionState(&m_ActionJump, jumpActionData, jumpButtonDown, jumpJustPressed);
+    bool jumpDataValid = getActionState(&m_ActionJump, jumpActionData, jumpButtonDown, jumpJustPressed);
 
     vr::InputDigitalActionData_t useActionData{};
     bool useButtonDown = false;
@@ -462,20 +447,28 @@ void VR::ProcessInput()
     bool reloadButtonDown = false;
     bool reloadJustPressed = false;
     bool reloadDataValid = getActionState(&m_ActionReload, reloadActionData, reloadButtonDown, reloadJustPressed);
+    // Manual magazine handling uses the gameplay left/off hand. In LeftHanded mode
+    // that is the physical right controller after the pose remap in GetPoses().
     const bool reloadFromLeftHand =
         reloadDataValid &&
-        (originMatchesRole(reloadActionData.activeOrigin, vr::TrackedControllerRole_LeftHand) ||
+        (originMatchesRole(reloadActionData.activeOrigin, gameplayLeftRole) ||
             reloadActionData.activeOrigin == vr::k_ulInvalidInputValueHandle);
     const bool crouchFromLeftHand =
         crouchDataValid &&
-        (originMatchesRole(crouchActionData.activeOrigin, vr::TrackedControllerRole_LeftHand) ||
+        (originMatchesRole(crouchActionData.activeOrigin, gameplayLeftRole) ||
             crouchActionData.activeOrigin == vr::k_ulInvalidInputValueHandle);
+    const bool jumpFromLeftHand =
+        jumpDataValid &&
+        (originMatchesRole(jumpActionData.activeOrigin, gameplayLeftRole) ||
+            jumpActionData.activeOrigin == vr::k_ulInvalidInputValueHandle);
     const bool magazineGripDown =
         (reloadFromLeftHand && reloadButtonDown) ||
-        (crouchFromLeftHand && crouchButtonDown);
+        (crouchFromLeftHand && crouchButtonDown) ||
+        (jumpFromLeftHand && jumpButtonDown);
     const bool magazineGripJustPressed =
         (reloadFromLeftHand && reloadJustPressed) ||
-        (crouchFromLeftHand && crouchJustPressed);
+        (crouchFromLeftHand && crouchJustPressed) ||
+        (jumpFromLeftHand && jumpJustPressed);
     const bool magazineInteractionReloadPulse = UpdateMagazineInteraction(
         localPlayer,
         magazineGripDown,
@@ -493,6 +486,34 @@ void VR::ProcessInput()
             crouchButtonDown = false;
             crouchJustPressed = false;
             suppressCrouch = true;
+        }
+        if (jumpFromLeftHand)
+        {
+            jumpButtonDown = false;
+            jumpJustPressed = false;
+        }
+    }
+    if (isObserverOrIdle)
+    {
+        // Avoid leaving +jump latched while spectating.
+        if (m_JumpCmdOwned)
+        {
+            m_Game->ClientCmd_Unrestricted("-jump");
+            m_JumpCmdOwned = false;
+        }
+    }
+    else
+    {
+        const bool wantJump = jumpButtonDown || jumpGestureActive;
+        if (wantJump && !m_JumpCmdOwned)
+        {
+            m_Game->ClientCmd_Unrestricted("+jump");
+            m_JumpCmdOwned = true;
+        }
+        else if (!wantJump && m_JumpCmdOwned)
+        {
+            m_Game->ClientCmd_Unrestricted("-jump");
+            m_JumpCmdOwned = false;
         }
     }
     const bool suppressMagazineEmptyClipAutoReload =
@@ -981,9 +1002,9 @@ void VR::ProcessInput()
 
         auto triggerInventoryFromOrigin = [&](vr::VRInputValueHandle_t origin) -> bool
             {
-                if (originMatchesRole(origin, vr::TrackedControllerRole_RightHand))
+                if (originMatchesRole(origin, gameplayRightRole))
                     return triggerInventoryAtPos(m_RightControllerPosAbs);
-                if (originMatchesRole(origin, vr::TrackedControllerRole_LeftHand))
+                if (originMatchesRole(origin, gameplayLeftRole))
                     return triggerInventoryAtPos(m_LeftControllerPosAbs);
 
                 // If origin can't be resolved, check both hands (prefer right).
@@ -1061,34 +1082,34 @@ void VR::ProcessInput()
             return false;
         };
 
-    suppressIfNeeded(jumpActionData, vr::TrackedControllerRole_LeftHand, m_SuppressActionsUntilGripReleaseLeft, jumpButtonDown, jumpJustPressed);
-    suppressIfNeeded(jumpActionData, vr::TrackedControllerRole_RightHand, m_SuppressActionsUntilGripReleaseRight, jumpButtonDown, jumpJustPressed);
+    suppressIfNeeded(jumpActionData, gameplayLeftRole, m_SuppressActionsUntilGripReleaseLeft, jumpButtonDown, jumpJustPressed);
+    suppressIfNeeded(jumpActionData, gameplayRightRole, m_SuppressActionsUntilGripReleaseRight, jumpButtonDown, jumpJustPressed);
 
-    suppressIfNeeded(useActionData, vr::TrackedControllerRole_LeftHand, m_SuppressActionsUntilGripReleaseLeft, useButtonDown, useJustPressed);
-    suppressIfNeeded(useActionData, vr::TrackedControllerRole_RightHand, m_SuppressActionsUntilGripReleaseRight, useButtonDown, useJustPressed);
+    suppressIfNeeded(useActionData, gameplayLeftRole, m_SuppressActionsUntilGripReleaseLeft, useButtonDown, useJustPressed);
+    suppressIfNeeded(useActionData, gameplayRightRole, m_SuppressActionsUntilGripReleaseRight, useButtonDown, useJustPressed);
 
     if (reloadDataValid)
     {
-        suppressReload |= suppressIfNeeded(reloadActionData, vr::TrackedControllerRole_LeftHand, m_SuppressActionsUntilGripReleaseLeft, reloadButtonDown, reloadJustPressed);
-        suppressReload |= suppressIfNeeded(reloadActionData, vr::TrackedControllerRole_RightHand, m_SuppressActionsUntilGripReleaseRight, reloadButtonDown, reloadJustPressed);
+        suppressReload |= suppressIfNeeded(reloadActionData, gameplayLeftRole, m_SuppressActionsUntilGripReleaseLeft, reloadButtonDown, reloadJustPressed);
+        suppressReload |= suppressIfNeeded(reloadActionData, gameplayRightRole, m_SuppressActionsUntilGripReleaseRight, reloadButtonDown, reloadJustPressed);
     }
 
     if (crouchDataValid)
     {
-        suppressCrouch |= suppressIfNeeded(crouchActionData, vr::TrackedControllerRole_LeftHand, m_SuppressActionsUntilGripReleaseLeft, crouchButtonDown, crouchJustPressed);
-        suppressCrouch |= suppressIfNeeded(crouchActionData, vr::TrackedControllerRole_RightHand, m_SuppressActionsUntilGripReleaseRight, crouchButtonDown, crouchJustPressed);
+        suppressCrouch |= suppressIfNeeded(crouchActionData, gameplayLeftRole, m_SuppressActionsUntilGripReleaseLeft, crouchButtonDown, crouchJustPressed);
+        suppressCrouch |= suppressIfNeeded(crouchActionData, gameplayRightRole, m_SuppressActionsUntilGripReleaseRight, crouchButtonDown, crouchJustPressed);
     }
 
     if (flashlightDataValid)
     {
-        suppressIfNeeded(flashlightActionData, vr::TrackedControllerRole_LeftHand, m_SuppressActionsUntilGripReleaseLeft, flashlightButtonDown, flashlightJustPressed);
-        suppressIfNeeded(flashlightActionData, vr::TrackedControllerRole_RightHand, m_SuppressActionsUntilGripReleaseRight, flashlightButtonDown, flashlightJustPressed);
+        suppressIfNeeded(flashlightActionData, gameplayLeftRole, m_SuppressActionsUntilGripReleaseLeft, flashlightButtonDown, flashlightJustPressed);
+        suppressIfNeeded(flashlightActionData, gameplayRightRole, m_SuppressActionsUntilGripReleaseRight, flashlightButtonDown, flashlightJustPressed);
     }
 
     if (resetDataValid)
     {
-        suppressIfNeeded(resetActionData, vr::TrackedControllerRole_LeftHand, m_SuppressActionsUntilGripReleaseLeft, resetButtonDown, resetJustPressed);
-        suppressIfNeeded(resetActionData, vr::TrackedControllerRole_RightHand, m_SuppressActionsUntilGripReleaseRight, resetButtonDown, resetJustPressed);
+        suppressIfNeeded(resetActionData, gameplayLeftRole, m_SuppressActionsUntilGripReleaseLeft, resetButtonDown, resetJustPressed);
+        suppressIfNeeded(resetActionData, gameplayRightRole, m_SuppressActionsUntilGripReleaseRight, resetButtonDown, resetJustPressed);
     }
 
     // Spectator/idle: map VR buttons to Source observer controls.

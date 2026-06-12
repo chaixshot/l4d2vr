@@ -34,6 +34,7 @@ public:
         float modelScale,
         bool motionRangeWithoutController,
         bool rightUseViewmodelPose,
+        bool leftHanded,
         bool allowControllerlessTestPose,
         bool debugLog,
         float sceneLightScale,
@@ -83,7 +84,7 @@ private:
     };
 
     bool EnsureAssetsLoaded(bool debugLog);
-    bool EnsureInitialized(vr::IVRInput* input, bool rightUseViewmodelPose, bool debugLog);
+    bool EnsureInitialized(vr::IVRInput* input, bool rightUseViewmodelPose, bool leftHanded, bool debugLog);
     bool ResolveSteamVrAssetPath(const char* fileName, std::string& outPath) const;
     bool EnsureStandaloneMagazineBoxLoaded(
         const Vector& mins,
@@ -106,6 +107,7 @@ private:
         vr::IVRInput* input,
         bool motionRangeWithoutController,
         bool rightUseViewmodelPose,
+        bool leftHanded,
         bool leftHandMagazineGripPose,
         bool debugLog);
     bool DrawControllerlessTestPose(
@@ -114,6 +116,7 @@ private:
         float vrScale,
         float modelScale,
         bool rightUseViewmodelPose,
+        bool leftHanded,
         float sceneLightScale,
         bool debugLog,
         const Vector& leftHandPoseOffsetMeters,
@@ -121,7 +124,7 @@ private:
         const Vector& rightHandPoseOffsetMeters,
         const Vector& rightHandPoseRotationOffsetDeg,
         VrHandDrawPass drawPass);
-    bool BuildRightViewmodelPalette(const VrHandVmPose::Snapshot& snapshot, std::vector<VrHandMatrixRows3x4>& outPalette);
+    bool BuildRightViewmodelPalette(const VrHandVmPose::Snapshot& snapshot, int targetHandIndex, std::vector<VrHandMatrixRows3x4>& outPalette);
     bool BuildRightViewmodelWorld(
         float sourceUnitsPerMeter,
         float modelScale,
@@ -138,6 +141,7 @@ private:
     std::unordered_set<std::string> m_ReportedErrors;
     bool m_AssetLoadAttempted = false;
     bool m_AssetsLoaded = false;
+    bool m_DependencyUnavailable = false;
     bool m_InitializationAttempted = false;
     bool m_Initialized = false;
     bool m_DebugInitializationLogged = false;
@@ -145,7 +149,10 @@ private:
     bool m_DebugRightViewmodelPoseLogged = false;
     bool m_DebugRightViewmodelPoseMissingLogged = false;
     bool m_RightViewmodelPoseWasEnabled = false;
+    int m_RightViewmodelPoseHandIndex = 1;
     bool m_LeftHandMagazineGripPoseWasEnabled = false;
+    std::vector<VrHandMatrixRows3x4> m_RightViewmodelPalette;
+    bool m_RightViewmodelPaletteValid = false;
     bool m_RightViewmodelPalmWorldValid = false;
     bool m_RightViewmodelAnchorValid = false;
     VrHandMeshAsset m_StandaloneMagazineBoxAsset;

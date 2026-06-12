@@ -1108,6 +1108,8 @@ void VR::ParseConfigFile()
         m_VrHandsLeftPoseRotationOffsetDeg = clampVector(getVector3("VrHandsLeftPoseRotationOffsetDeg", m_VrHandsLeftPoseRotationOffsetDeg), -180.0f, 180.0f);
         m_VrHandsRightPoseOffsetMeters = clampVector(getVector3("VrHandsRightPoseOffsetMeters", m_VrHandsRightPoseOffsetMeters), -1.0f, 1.0f);
         m_VrHandsRightPoseRotationOffsetDeg = clampVector(getVector3("VrHandsRightPoseRotationOffsetDeg", m_VrHandsRightPoseRotationOffsetDeg), -180.0f, 180.0f);
+        m_VrHandsLeftHandedViewmodelPoseOffsetMeters = clampVector(getVector3("VrHandsLeftHandedViewmodelPoseOffsetMeters", m_VrHandsLeftHandedViewmodelPoseOffsetMeters), -1.0f, 1.0f);
+        m_VrHandsLeftHandedViewmodelPoseRotationOffsetDeg = clampVector(getVector3("VrHandsLeftHandedViewmodelPoseRotationOffsetDeg", m_VrHandsLeftHandedViewmodelPoseRotationOffsetDeg), -180.0f, 180.0f);
     }
     // Built-in config overlay placement. Keep this in the normal hot-reload path.
     m_ConfigOverlayDistanceMeters = std::clamp(getFloat("ConfigOverlayDistanceMeters", m_ConfigOverlayDistanceMeters), 0.6f, 3.0f);
@@ -1138,6 +1140,10 @@ void VR::ParseConfigFile()
     m_ThirdPersonScopeOverlayOffset.z = getFloat("ThirdPersonScopeOverlayOffsetZ", m_ThirdPersonScopeOverlayOffset.z);
     m_HideArms = getBool("HideArms", m_HideArms);
     m_VrHandsEnabled = getBool("VrHandsEnabled", m_VrHandsEnabled);
+    if (m_VrHandsEnabled)
+        m_HideArms = true;
+    else
+        m_HideArms = false;
     m_VrHandsMotionRangeWithoutController = getBool("VrHandsMotionRangeWithoutController", m_VrHandsMotionRangeWithoutController);
     m_VrHandsDebugLog = getBool("VrHandsDebugLog", m_VrHandsDebugLog);
     m_VrHandsModelScale = std::clamp(getFloat("VrHandsModelScale", m_VrHandsModelScale), 0.25f, 4.0f);
@@ -1146,11 +1152,17 @@ void VR::ParseConfigFile()
     m_MagazineBoxDebugFallbackHalfExtentsMeters = getVector3("MagazineBoxDebugFallbackHalfExtentsMeters", m_MagazineBoxDebugFallbackHalfExtentsMeters);
     m_MagazineBoxDebugPaddingMeters = getVector3("MagazineBoxDebugPaddingMeters", m_MagazineBoxDebugPaddingMeters);
     m_MagazineInteractionEnabled = getBool("MagazineInteractionEnabled", m_MagazineInteractionEnabled);
+    if (!m_VrHandsEnabled)
+        m_MagazineInteractionEnabled = false;
     m_MagazineInteractionSuppressEmptyClipAutoReload = getBool("MagazineInteractionSuppressEmptyClipAutoReload", m_MagazineInteractionSuppressEmptyClipAutoReload);
     m_MagazineInteractionGrabPaddingMeters = std::clamp(getFloat("MagazineInteractionGrabPaddingMeters", m_MagazineInteractionGrabPaddingMeters), 0.0f, 0.25f);
     m_MagazineInteractionPullTriggerMeters = std::clamp(getFloat("MagazineInteractionPullTriggerMeters", m_MagazineInteractionPullTriggerMeters), 0.0f, 0.50f);
     m_MagazineInteractionPullTriggerByMagazineMeters = std::clamp(getFloat("MagazineInteractionPullTriggerByMagazineMeters", m_MagazineInteractionPullTriggerByMagazineMeters), 0.0f, 0.50f);
     m_MagazineInteractionFreshMagazineGrabRangeMeters = std::clamp(getFloat("MagazineInteractionFreshMagazineGrabRangeMeters", m_MagazineInteractionFreshMagazineGrabRangeMeters), 0.0f, 0.50f);
+    m_MagazineInteractionFreshMagazinePickupOffsetMeters = getVector3("MagazineInteractionFreshMagazinePickupOffsetMeters", m_MagazineInteractionFreshMagazinePickupOffsetMeters);
+    m_MagazineInteractionFreshMagazinePickupOffsetMeters.x = std::clamp(m_MagazineInteractionFreshMagazinePickupOffsetMeters.x, -1.50f, 1.50f);
+    m_MagazineInteractionFreshMagazinePickupOffsetMeters.y = std::clamp(m_MagazineInteractionFreshMagazinePickupOffsetMeters.y, -1.50f, 1.50f);
+    m_MagazineInteractionFreshMagazinePickupOffsetMeters.z = std::clamp(m_MagazineInteractionFreshMagazinePickupOffsetMeters.z, -1.50f, 1.50f);
     m_MagazineInteractionFreshMagazineBoxHalfExtentsMeters = getVector3("MagazineInteractionFreshMagazineBoxHalfExtentsMeters", m_MagazineInteractionFreshMagazineBoxHalfExtentsMeters);
     m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters = getVector3("MagazineInteractionFreshMagazineSocketLocalOffsetMeters", m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters);
     m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters.x = std::clamp(m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters.x, -0.50f, 0.50f);

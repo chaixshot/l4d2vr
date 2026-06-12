@@ -450,9 +450,9 @@ namespace
             + bodyRight * (vr->m_InventoryBodyOriginOffset.y * vr->m_VRScale)
             + worldUp * (vr->m_InventoryBodyOriginOffset.z * vr->m_VRScale);
         const Vector pickup = bodyOrigin
-            + bodyForward * (vr->m_InventoryLeftWaistOffset.x * vr->m_VRScale)
-            + bodyRight * (vr->m_InventoryLeftWaistOffset.y * vr->m_VRScale)
-            + worldUp * (vr->m_InventoryLeftWaistOffset.z * vr->m_VRScale);
+            + bodyForward * (vr->m_MagazineInteractionFreshMagazinePickupOffsetMeters.x * vr->m_VRScale)
+            + bodyRight * (vr->m_MagazineInteractionFreshMagazinePickupOffsetMeters.y * vr->m_VRScale)
+            + worldUp * (vr->m_MagazineInteractionFreshMagazinePickupOffsetMeters.z * vr->m_VRScale);
         Vector viewmodelPickup = pickup;
         Vector reprojectedPickup{};
         if (MagazineInteractionReprojectScenePointToViewmodelLayer(vr, pickup, reprojectedPickup))
@@ -2459,6 +2459,8 @@ void VR::CancelMagazineInteractionManual()
     m_MagazineInteractionBoltGrabRequiresGripRelease = false;
     m_MagazineInteractionBoltReachedRear = false;
     m_MagazineInteractionBoltPullAxisSignLocked = false;
+    m_MagazineInteractionBoltStageBeforeBackendReloadComplete = false;
+    m_MagazineInteractionBoltCompletedBeforeBackendReload = false;
     m_MagazineInteractionShotgunStableCaptureValid = false;
     m_MagazineInteractionStarted = {};
     m_MagazineInteractionFreshGrabbedAt = {};
@@ -2487,6 +2489,7 @@ void VR::CancelMagazineInteractionManual()
 bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown, bool leftGripJustPressed)
 {
     const auto now = std::chrono::steady_clock::now();
+    const bool magazineInteractionPhysicalLeftHand = IsGameplayHandLeftPhysical(true);
     if (m_MagazineInteractionSuppressLeftInputUntilRelease && !leftGripDown)
     {
         m_MagazineInteractionSuppressLeftInputUntilRelease = false;
@@ -2836,7 +2839,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         setBoltPullDistance(m_MagazineInteractionBoltPullDistance);
     };
 
-    auto beginBoltStage = [&](C_WeaponCSBase::WeaponID weaponId, const char* reason) -> bool
+    auto beginBoltStage = [&](C_WeaponCSBase::WeaponID weaponId, const char* reason, bool backendReloadStillPending = false) -> bool
     {
         if (!MagazineInteractionWeaponRequiresManualBolt(weaponId))
             return false;
@@ -2876,6 +2879,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_MagazineInteractionBoltGrabRequiresGripRelease = leftGripDown;
         m_MagazineInteractionBoltReachedRear = false;
         m_MagazineInteractionBoltPullAxisSignLocked = false;
+        m_MagazineInteractionBoltStageBeforeBackendReloadComplete = backendReloadStillPending;
+        m_MagazineInteractionBoltCompletedBeforeBackendReload = false;
         m_MagazineInteractionBoltStageStarted = now;
         m_MagazineInteractionBoltGrabbedAt = {};
         setBoltPullDistance(0.0f);
@@ -2889,7 +2894,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             ? ((boltBox.maxs - boltBox.mins) * (0.5f / m_VRScale))
             : Vector(0.0f, 0.0f, 0.0f);
         Game::logMsg(
-            "[VR][MagazineInteraction] backend reload complete; bolt stage armed weaponId=%d ent=%d bone=%d pull=%.2f return=%.2f axis=(%.2f %.2f %.2f) boxOffsetMeters=(%.3f %.3f %.3f) boxHalfExtentsMeters=(%.3f %.3f %.3f) model=%s reason=%s",
+            "[VR][MagazineInteraction] %s; bolt stage armed weaponId=%d ent=%d bone=%d pull=%.2f return=%.2f axis=(%.2f %.2f %.2f) boxOffsetMeters=(%.3f %.3f %.3f) boxHalfExtentsMeters=(%.3f %.3f %.3f) model=%s reason=%s",
+            backendReloadStillPending ? "backend reload still pending" : "backend reload complete",
             static_cast<int>(weaponId),
             boltBox.entityIndex,
             boltBox.boneIndex,
@@ -2915,7 +2921,31 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
     {
         setBoltPullDistance(0.0f);
         MagazineInteractionPlayBoltSound(this, true);
-        TriggerPhysicalHandHapticPulse(true, 0.030f, 95.0f, 0.45f, 2);
+        TriggerPhysicalHandHapticPulse(magazineInteractionPhysicalLeftHand, 0.030f, 95.0f, 0.45f, 2);
+        if (m_MagazineInteractionBoltStageBeforeBackendReloadComplete)
+        {
+            m_MagazineInteractionState = MagazineInteractionManualState::WaitingForBackendReload;
+            m_MagazineInteractionLeftHandHolding = false;
+            m_MagazineInteractionBoltRestValid = false;
+            m_MagazineInteractionBoltRestWorld = {};
+            m_MagazineInteractionBoltWorld = {};
+            m_MagazineInteractionBoltGrabStartLeftControllerPosAbs = {};
+            m_MagazineInteractionBoltGrabStartPullDistance = 0.0f;
+            m_MagazineInteractionBoltPullDistance = 0.0f;
+            m_MagazineInteractionBoltMaxPullDistance = 0.0f;
+            m_MagazineInteractionBoltGrabRequiresGripRelease = false;
+            m_MagazineInteractionBoltReachedRear = false;
+            m_MagazineInteractionBoltPullAxisSignLocked = false;
+            m_MagazineInteractionBoltStageBeforeBackendReloadComplete = false;
+            m_MagazineInteractionBoltCompletedBeforeBackendReload = true;
+            m_MagazineInteractionBoltStageStarted = {};
+            m_MagazineInteractionBoltGrabbedAt = {};
+            m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
+            Game::logMsg(
+                "[VR][MagazineInteraction] bolt returned to battery before backend reload completed; fire remains blocked reason=%s",
+                reason ? reason : "unknown");
+            return;
+        }
         Game::logMsg(
             "[VR][MagazineInteraction] bolt returned to battery; physical reload complete reason=%s",
             reason ? reason : "unknown");
@@ -3047,6 +3077,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_MagazineInteractionShotgunShellsLoadedThisSession = 0;
         m_MagazineInteractionShotgunLastInterruptedClip = -1;
         m_MagazineInteractionShotgunStableCaptureValid = false;
+        m_MagazineInteractionBoltStageBeforeBackendReloadComplete = false;
+        m_MagazineInteractionBoltCompletedBeforeBackendReload = false;
         m_MagazineInteractionShotgunStableCaptureBox = {};
         m_MagazineInteractionShotgunStableCaptureModelLocal = {};
         m_MagazineInteractionWeapon = activeWeapon;
@@ -3317,6 +3349,22 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 return false;
             }
 
+            if (m_MagazineInteractionBoltCompletedBeforeBackendReload)
+            {
+                Game::logMsg(
+                    "[VR][MagazineInteraction] backend reload complete after early physical bolt elapsed=%.3fs clip=%d startClip=%d max=%d updated=%d",
+                    elapsed,
+                    activeClip,
+                    m_MagazineInteractionStartClip,
+                    maxClip,
+                    clipUpdated ? 1 : 0);
+                const bool suppressLeftInputUntilRelease = leftGripDown;
+                CancelMagazineInteractionManual();
+                if (suppressLeftInputUntilRelease)
+                    m_MagazineInteractionSuppressLeftInputUntilRelease = true;
+                return false;
+            }
+
             Game::logMsg(
                 "[VR][MagazineInteraction] native reload animation skipped; backend reload wait complete elapsed=%.3fs clip=%d startClip=%d max=%d updated=%d; entering bolt stage",
                 elapsed,
@@ -3506,7 +3554,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         {
             m_MagazineInteractionBoltReachedRear = true;
             MagazineInteractionPlayBoltSound(this, false);
-            TriggerPhysicalHandHapticPulse(true, 0.024f, 110.0f, 0.38f, 2);
+            TriggerPhysicalHandHapticPulse(magazineInteractionPhysicalLeftHand, 0.024f, 110.0f, 0.38f, 2);
             Game::logMsg(
                 "[VR][MagazineInteraction] bolt rear threshold reached pull=%.2f required=%.2f handProjected=%.2f",
                 m_MagazineInteractionBoltPullDistance,
@@ -3699,15 +3747,20 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             MagazineInteractionPlayClipInSound(this);
             if (m_MagazineInteractionShotgunShellMode)
                 startImmediateReloadCommand("shotgun-shell-inserted");
-            m_MagazineInteractionState = MagazineInteractionManualState::WaitingForBackendReload;
             m_MagazineInteractionLeftHandHolding = false;
             m_MagazineInteractionPostInsertStarted = now;
             m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
+            const bool boltArmedBeforeBackend =
+                !m_MagazineInteractionShotgunShellMode &&
+                beginBoltStage(activeWeaponId, "magazine-inserted-backend-pending", true);
+            if (!boltArmedBeforeBackend)
+                m_MagazineInteractionState = MagazineInteractionManualState::WaitingForBackendReload;
             Game::logMsg(
-                "[VR][MagazineInteraction] fresh %s inserted into MagazineSocket; waiting for backend reload clip=%d startClip=%d",
+                "[VR][MagazineInteraction] fresh %s inserted into MagazineSocket; waiting for backend reload clip=%d startClip=%d boltArmed=%d",
                 m_MagazineInteractionShotgunShellMode ? "shotgun shell" : "magazine",
                 activeClip,
-                m_MagazineInteractionStartClip);
+                m_MagazineInteractionStartClip,
+                boltArmedBeforeBackend ? 1 : 0);
         }
         return reloadCommandPending();
     }
@@ -4077,6 +4130,17 @@ bool VR::DrawVrHandsForEyeImmediate(
     const QAngle rightControllerAngles = GetRightControllerAbsAngle();
     const Vector currentViewmodelPosition = GetRecommendedViewmodelAbsPos();
     const QAngle currentViewmodelAngles = GetRecommendedViewmodelAbsAngle();
+    Vector rightHandPoseOffsetMeters = m_VrHandsRightPoseOffsetMeters;
+    Vector rightHandPoseRotationOffsetDeg = m_VrHandsRightPoseRotationOffsetDeg;
+    if (m_LeftHanded && m_VrHandsRightUseViewmodelPose)
+    {
+        rightHandPoseOffsetMeters.x += m_VrHandsLeftHandedViewmodelPoseOffsetMeters.x;
+        rightHandPoseOffsetMeters.y += m_VrHandsLeftHandedViewmodelPoseOffsetMeters.y;
+        rightHandPoseOffsetMeters.z += m_VrHandsLeftHandedViewmodelPoseOffsetMeters.z;
+        rightHandPoseRotationOffsetDeg.x += m_VrHandsLeftHandedViewmodelPoseRotationOffsetDeg.x;
+        rightHandPoseRotationOffsetDeg.y += m_VrHandsLeftHandedViewmodelPoseRotationOffsetDeg.y;
+        rightHandPoseRotationOffsetDeg.z += m_VrHandsLeftHandedViewmodelPoseRotationOffsetDeg.z;
+    }
 
     drewAny = m_VrHands->DrawForEye(
         device,
@@ -4087,6 +4151,7 @@ bool VR::DrawVrHandsForEyeImmediate(
         m_VrHandsModelScale,
         m_VrHandsMotionRangeWithoutController,
         m_VrHandsRightUseViewmodelPose,
+        m_LeftHanded,
         m_MouseModeEnabled,
         m_VrHandsDebugLog,
         sceneLightScale,
@@ -4098,8 +4163,8 @@ bool VR::DrawVrHandsForEyeImmediate(
         currentViewmodelAngles,
         m_VrHandsLeftPoseOffsetMeters,
         m_VrHandsLeftPoseRotationOffsetDeg,
-        m_VrHandsRightPoseOffsetMeters,
-        m_VrHandsRightPoseRotationOffsetDeg,
+        rightHandPoseOffsetMeters,
+        rightHandPoseRotationOffsetDeg,
         standaloneMagazineBoxWorldPtr,
         standaloneMagazineBoxMins,
         standaloneMagazineBoxMaxs,

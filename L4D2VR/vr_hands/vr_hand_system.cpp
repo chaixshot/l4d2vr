@@ -640,6 +640,8 @@ bool VrHandSystem::DrawStandaloneMagazineBox(
 
 bool VrHandSystem::EnsureAssetsLoaded(bool debugLog)
 {
+    if (m_DependencyUnavailable)
+        return false;
     if (m_AssetsLoaded)
         return true;
     if (m_AssetLoadAttempted)
@@ -651,14 +653,14 @@ bool VrHandSystem::EnsureAssetsLoaded(bool debugLog)
         std::string assetPath;
         if (!ResolveSteamVrAssetPath(hand.assetFileName, assetPath))
         {
-            ReportErrorOnce(std::string("cannot find SteamVR glove asset: ") + hand.assetFileName);
+            m_DependencyUnavailable = true;
             return false;
         }
 
         std::string error;
         if (!VrHandAssetLoader::LoadGlb(assetPath, hand.asset, error))
         {
-            ReportErrorOnce(error + ": " + assetPath);
+            m_DependencyUnavailable = true;
             return false;
         }
     }
@@ -674,15 +676,18 @@ bool VrHandSystem::EnsureAssetsLoaded(bool debugLog)
     return true;
 }
 
-bool VrHandSystem::EnsureInitialized(vr::IVRInput* input, bool rightUseViewmodelPose, bool debugLog)
+bool VrHandSystem::EnsureInitialized(vr::IVRInput* input, bool rightUseViewmodelPose, bool leftHanded, bool debugLog)
 {
+    if (m_DependencyUnavailable)
+        return false;
     if (!input || !EnsureAssetsLoaded(debugLog))
         return false;
 
+    const int viewmodelPoseHandIndex = rightUseViewmodelPose ? (leftHanded ? 0 : 1) : -1;
     for (size_t handIndex = 0; handIndex < m_Hands.size(); ++handIndex)
     {
         HandState& hand = m_Hands[handIndex];
-        if (handIndex == 1u && rightUseViewmodelPose)
+        if (static_cast<int>(handIndex) == viewmodelPoseHandIndex)
             continue;
         if (hand.skeletonInitialized)
             continue;
@@ -691,7 +696,7 @@ bool VrHandSystem::EnsureInitialized(vr::IVRInput* input, bool rightUseViewmodel
             (input->GetActionHandle(hand.actionPath, &hand.action) != vr::VRInputError_None ||
                 hand.action == vr::k_ulInvalidActionHandle))
         {
-            ReportErrorOnce(std::string("missing SteamVR skeletal action: ") + hand.actionPath);
+            m_DependencyUnavailable = true;
             return false;
         }
 
@@ -715,24 +720,44 @@ bool VrHandSystem::EnsureInitialized(vr::IVRInput* input, bool rightUseViewmodel
         std::string error;
         if (!hand.skeleton.Initialize(input, hand.action, error))
         {
-            ReportErrorOnce(error + ": " + hand.actionPath);
+            m_DependencyUnavailable = true;
             return false;
         }
         hand.skeletonInitialized = true;
     }
 
-    m_Initialized = m_Hands[0].skeletonInitialized &&
-        (rightUseViewmodelPose || m_Hands[1].skeletonInitialized);
+    m_Initialized = true;
+    for (size_t handIndex = 0; handIndex < m_Hands.size(); ++handIndex)
+    {
+        if (static_cast<int>(handIndex) == viewmodelPoseHandIndex)
+            continue;
+        if (!m_Hands[handIndex].skeletonInitialized)
+        {
+            m_Initialized = false;
+            break;
+        }
+    }
     if (m_Initialized && debugLog && !m_DebugInitializationLogged)
     {
         m_DebugInitializationLogged = true;
         if (rightUseViewmodelPose)
         {
-            Game::logMsg(
-                "[VR][Hands] initialized left=%d joints/%u vertices right=viewmodel/%u vertices",
-                m_Hands[0].skeleton.JointCount(),
-                static_cast<unsigned int>(m_Hands[0].asset.vertices.size()),
-                static_cast<unsigned int>(m_Hands[1].asset.vertices.size()));
+            if (leftHanded)
+            {
+                Game::logMsg(
+                    "[VR][Hands] initialized left=viewmodel/%u vertices right=%d joints/%u vertices",
+                    static_cast<unsigned int>(m_Hands[0].asset.vertices.size()),
+                    m_Hands[1].skeleton.JointCount(),
+                    static_cast<unsigned int>(m_Hands[1].asset.vertices.size()));
+            }
+            else
+            {
+                Game::logMsg(
+                    "[VR][Hands] initialized left=%d joints/%u vertices right=viewmodel/%u vertices",
+                    m_Hands[0].skeleton.JointCount(),
+                    static_cast<unsigned int>(m_Hands[0].asset.vertices.size()),
+                    static_cast<unsigned int>(m_Hands[1].asset.vertices.size()));
+            }
         }
         else
         {
@@ -749,12 +774,17 @@ bool VrHandSystem::EnsureInitialized(vr::IVRInput* input, bool rightUseViewmodel
 
 bool VrHandSystem::BuildRightViewmodelPalette(
     const VrHandVmPose::Snapshot& snapshot,
+    int targetHandIndex,
     std::vector<VrHandMatrixRows3x4>& outPalette)
 {
     outPalette.clear();
     m_RightViewmodelPalmWorldValid = false;
 
-    HandState& hand = m_Hands[1];
+    if (targetHandIndex < 0 || targetHandIndex >= static_cast<int>(m_Hands.size()))
+        return false;
+
+    const bool targetLeftHand = targetHandIndex == 0;
+    HandState& hand = m_Hands[static_cast<size_t>(targetHandIndex)];
     const VrHandMeshAsset& asset = hand.asset;
     if (!asset.IsValid() || snapshot.boneWorldMatrices.size() < snapshot.boneNames.size())
         return false;
@@ -763,9 +793,11 @@ bool VrHandSystem::BuildRightViewmodelPalette(
     if (vmPalm < 0 || vmPalm >= static_cast<int>(snapshot.boneWorldMatrices.size()))
         return false;
 
-    if (m_RightViewmodelPoseModel != snapshot.modelName)
+    if (m_RightViewmodelPoseModel != snapshot.modelName ||
+        m_RightViewmodelPoseHandIndex != targetHandIndex)
     {
         m_RightViewmodelPoseModel = snapshot.modelName;
+        m_RightViewmodelPoseHandIndex = targetHandIndex;
         m_RightViewmodelAnchorModel.clear();
         m_RightViewmodelAnchorValid = false;
     }
@@ -793,7 +825,7 @@ bool VrHandSystem::BuildRightViewmodelPalette(
 
     if (!m_RightViewmodelAnchorValid || m_RightViewmodelAnchorModel != snapshot.modelName)
     {
-        const int gloveWrist = FindVrHandsNameIndex(asset.jointNames, "wrist_r");
+        const int gloveWrist = FindVrHandsNameIndex(asset.jointNames, targetLeftHand ? "wrist_l" : "wrist_r");
         if (gloveWrist < 0 || gloveWrist >= static_cast<int>(asset.bindMatrices.size()) ||
             !VrHandMath::Invert4x4(
                 asset.bindMatrices[static_cast<size_t>(gloveWrist)],
@@ -810,16 +842,24 @@ bool VrHandSystem::BuildRightViewmodelPalette(
             "ValveBiped.Bip01_R_Finger3",
             "ValveBiped.Bip01_R_Finger4"
         };
-        static const char* kGloveFingerRoots[] =
+        static const char* kGloveFingerRootsRight[] =
         {
             "finger_index_meta_r",
             "finger_middle_meta_r",
             "finger_ring_meta_r",
             "finger_pinky_meta_r"
         };
+        static const char* kGloveFingerRootsLeft[] =
+        {
+            "finger_index_meta_l",
+            "finger_middle_meta_l",
+            "finger_ring_meta_l",
+            "finger_pinky_meta_l"
+        };
+        const char* const* gloveFingerRootNames = targetLeftHand ? kGloveFingerRootsLeft : kGloveFingerRootsRight;
 
         std::array<VrHandsVec3, 4> vmFingerRoots{};
-        std::array<VrHandsVec3, 4> gloveFingerRoots{};
+        std::array<VrHandsVec3, 4> gloveFingerRootPositions{};
         for (size_t finger = 0; finger < vmFingerRoots.size(); ++finger)
         {
             if (!GetVrHandsVmBonePositionInPalmSpace(
@@ -830,8 +870,8 @@ bool VrHandSystem::BuildRightViewmodelPalette(
                 !GetVrHandsAssetBindPositionInWristSpace(
                     asset,
                     m_RightViewmodelGloveWristBindInverse,
-                    kGloveFingerRoots[finger],
-                    gloveFingerRoots[finger]))
+                    gloveFingerRootNames[finger],
+                    gloveFingerRootPositions[finger]))
             {
                 m_RightViewmodelPalmWorldValid = false;
                 return false;
@@ -841,7 +881,7 @@ bool VrHandSystem::BuildRightViewmodelPalette(
         VrHandMatrix4 vmPalmBasis{};
         VrHandMatrix4 glovePalmBasis{};
         if (!BuildVrHandsPalmBasis(vmFingerRoots, vmPalmBasis) ||
-            !BuildVrHandsPalmBasis(gloveFingerRoots, glovePalmBasis))
+            !BuildVrHandsPalmBasis(gloveFingerRootPositions, glovePalmBasis))
         {
             m_RightViewmodelPalmWorldValid = false;
             return false;
@@ -866,7 +906,7 @@ bool VrHandSystem::BuildRightViewmodelPalette(
         { "ValveBiped.Bip01_R_Finger3", "ValveBiped.Bip01_R_Finger31", "ValveBiped.Bip01_R_Finger32" },
         { "ValveBiped.Bip01_R_Finger4", "ValveBiped.Bip01_R_Finger41", "ValveBiped.Bip01_R_Finger42" },
     };
-    static const VrHandsGloveFingerChain kChains[] =
+    static const VrHandsGloveFingerChain kChainsRight[] =
     {
         { "finger_thumb_0_r", "finger_thumb_1_r", "finger_thumb_2_r" },
         { "finger_index_0_r", "finger_index_1_r", "finger_index_2_r" },
@@ -874,6 +914,15 @@ bool VrHandSystem::BuildRightViewmodelPalette(
         { "finger_ring_0_r", "finger_ring_1_r", "finger_ring_2_r" },
         { "finger_pinky_0_r", "finger_pinky_1_r", "finger_pinky_2_r" },
     };
+    static const VrHandsGloveFingerChain kChainsLeft[] =
+    {
+        { "finger_thumb_0_l", "finger_thumb_1_l", "finger_thumb_2_l" },
+        { "finger_index_0_l", "finger_index_1_l", "finger_index_2_l" },
+        { "finger_middle_0_l", "finger_middle_1_l", "finger_middle_2_l" },
+        { "finger_ring_0_l", "finger_ring_1_l", "finger_ring_2_l" },
+        { "finger_pinky_0_l", "finger_pinky_1_l", "finger_pinky_2_l" },
+    };
+    const VrHandsGloveFingerChain* chains = targetLeftHand ? kChainsLeft : kChainsRight;
 
     int appliedFingerCount = 0;
     for (size_t finger = 0; finger < 5u; ++finger)
@@ -882,7 +931,7 @@ bool VrHandSystem::BuildRightViewmodelPalette(
         if (!ComputeVrHandsVmFingerCurl(snapshot, palmInverse, kSources[finger], curl))
             continue;
 
-        const char* joints[] = { kChains[finger].joint0, kChains[finger].joint1, kChains[finger].joint2 };
+        const char* joints[] = { chains[finger].joint0, chains[finger].joint1, chains[finger].joint2 };
         bool applied = true;
         for (size_t segment = 0; segment < 3u; ++segment)
         {
@@ -893,9 +942,9 @@ bool VrHandSystem::BuildRightViewmodelPalette(
                 break;
             }
 
-            // The right SteamVR glove is already authored as a mirrored right-hand rig.
-            // Positive local-Z flexion bends the fingers into the palm. Negating it
-            // opens them outwards and produces the inverted grip seen in-game.
+            // SteamVR glove rigs use positive local-Z flexion for into-palm curl.
+            // Keep the right viewmodel as the curl source, but write it into the
+            // selected left/right glove chain.
             localMatrices[static_cast<size_t>(joint)] = VrHandMath::Multiply(
                 localMatrices[static_cast<size_t>(joint)],
                 MakeVrHandsLocalZRotation(curl[segment]));
@@ -997,6 +1046,7 @@ void VrHandSystem::UpdatePoses(
     vr::IVRInput* input,
     bool motionRangeWithoutController,
     bool rightUseViewmodelPose,
+    bool leftHanded,
     bool leftHandMagazineGripPose,
     bool debugLog)
 {
@@ -1007,6 +1057,9 @@ void VrHandSystem::UpdatePoses(
         m_RightViewmodelPalmFromModelRootValid = false;
         m_RightViewmodelAnchorValid = false;
         m_RightViewmodelPoseModel.clear();
+        m_RightViewmodelPoseHandIndex = 1;
+        m_RightViewmodelPalette.clear();
+        m_RightViewmodelPaletteValid = false;
         m_DebugRightViewmodelPoseLogged = false;
         m_DebugRightViewmodelPoseMissingLogged = false;
     }
@@ -1023,28 +1076,25 @@ void VrHandSystem::UpdatePoses(
         magazineGripOverride.maxCurl = { 0.48f, 0.58f, 0.62f, 0.64f, 0.64f };
     }
 
+    m_RightViewmodelPaletteValid = false;
+    const size_t magazineGripPhysicalHandIndex = leftHanded ? 1u : 0u;
     for (size_t handIndex = 0; handIndex < m_Hands.size(); ++handIndex)
     {
         HandState& hand = m_Hands[handIndex];
         hand.paletteValid = false;
-        if (handIndex == 1u && rightUseViewmodelPose)
-            continue;
         if (!hand.skeletonInitialized)
             continue;
 
         std::string error;
         if (!hand.skeleton.Update(input, motionRange, error))
         {
-            if (!error.empty())
-                ReportErrorOnce(error + ": " + hand.actionPath);
             continue;
         }
         const VrHandFingerCurlOverride* fingerCurlOverride =
-            (handIndex == 0u && leftHandMagazineGripPose) ? &magazineGripOverride : nullptr;
+            (handIndex == magazineGripPhysicalHandIndex && leftHandMagazineGripPose) ? &magazineGripOverride : nullptr;
         if (!hand.skeleton.BuildSkinningPalette(hand.asset, hand.palette, error, fingerCurlOverride))
         {
-            if (!error.empty())
-                ReportErrorOnce(error + ": " + hand.asset.sourcePath);
+            m_DependencyUnavailable = true;
             continue;
         }
         hand.paletteValid = true;
@@ -1053,11 +1103,12 @@ void VrHandSystem::UpdatePoses(
     bool hasRightViewmodelPose = false;
     if (rightUseViewmodelPose)
     {
+        const int viewmodelPoseHandIndex = leftHanded ? 0 : 1;
         VrHandVmPose::Snapshot snapshot{};
         if (VrHandVmPose::GetLatest(snapshot, kVrHandsVmPoseMaxAgeMs) &&
-            BuildRightViewmodelPalette(snapshot, m_Hands[1].palette))
+            BuildRightViewmodelPalette(snapshot, viewmodelPoseHandIndex, m_RightViewmodelPalette))
         {
-            m_Hands[1].paletteValid = true;
+            m_RightViewmodelPaletteValid = true;
             hasRightViewmodelPose = true;
             if (debugLog && !m_DebugRightViewmodelPoseLogged)
             {
@@ -1083,9 +1134,10 @@ void VrHandSystem::UpdatePoses(
         {
             lastLogTick = now;
             Game::logMsg(
-                "[VR][Hands] pose left=%d right=%d rightSource=%s motionRange=%s",
+                "[VR][Hands] pose left=%d right=%d rightVm=%d rightSource=%s motionRange=%s",
                 m_Hands[0].paletteValid ? 1 : 0,
                 m_Hands[1].paletteValid ? 1 : 0,
+                m_RightViewmodelPaletteValid ? 1 : 0,
                 rightUseViewmodelPose ? (hasRightViewmodelPose ? "viewmodel" : "viewmodel-waiting") : "openvr",
                 motionRangeWithoutController ? "without-controller" : "with-controller");
         }
@@ -1101,6 +1153,7 @@ bool VrHandSystem::DrawForEye(
     float modelScale,
     bool motionRangeWithoutController,
     bool rightUseViewmodelPose,
+    bool leftHanded,
     bool allowControllerlessTestPose,
     bool debugLog,
     float sceneLightScale,
@@ -1133,10 +1186,13 @@ bool VrHandSystem::DrawForEye(
     bool leftHandMagazineGripPose,
     VrHandDrawPass drawPass)
 {
-    if (!device || !input)
+    if (m_DependencyUnavailable || !device || !input)
         return false;
-    if (!EnsureInitialized(input, rightUseViewmodelPose, debugLog))
+    if (!EnsureInitialized(input, rightUseViewmodelPose, leftHanded, debugLog))
     {
+        if (m_DependencyUnavailable)
+            return false;
+
         bool drewAny = false;
         if (allowControllerlessTestPose)
         {
@@ -1146,6 +1202,7 @@ bool VrHandSystem::DrawForEye(
                 vrScale,
                 modelScale,
                 rightUseViewmodelPose,
+                leftHanded,
                 sceneLightScale,
                 debugLog,
                 leftHandPoseOffsetMeters,
@@ -1218,10 +1275,38 @@ bool VrHandSystem::DrawForEye(
     {
         m_LeftHandMagazineGripPoseWasEnabled = leftHandMagazineGripPose;
         m_Hands[0].paletteValid = false;
+        m_Hands[1].paletteValid = false;
     }
 
-    if (rightUseViewmodelPose || eyeIndex == 0 || !m_Hands[0].paletteValid || !m_Hands[1].paletteValid)
-        UpdatePoses(input, motionRangeWithoutController, rightUseViewmodelPose, leftHandMagazineGripPose, debugLog);
+    auto physicalHandIndexForGameplay = [&](int gameplayHandIndex) -> int
+        {
+            return leftHanded ? (1 - gameplayHandIndex) : gameplayHandIndex;
+        };
+    auto needsPoseUpdate = [&]() -> bool
+        {
+            if (rightUseViewmodelPose || eyeIndex == 0)
+                return true;
+
+            for (int gameplayHandIndex = 0; gameplayHandIndex < static_cast<int>(m_Hands.size()); ++gameplayHandIndex)
+            {
+                if (gameplayHandIndex == 1 && rightUseViewmodelPose)
+                {
+                    if (!m_RightViewmodelPaletteValid)
+                        return true;
+                    continue;
+                }
+
+                const int physicalHandIndex = physicalHandIndexForGameplay(gameplayHandIndex);
+                if (physicalHandIndex < 0 || physicalHandIndex >= static_cast<int>(m_Hands.size()))
+                    return true;
+                if (!m_Hands[static_cast<size_t>(physicalHandIndex)].paletteValid)
+                    return true;
+            }
+            return false;
+        };
+
+    if (needsPoseUpdate())
+        UpdatePoses(input, motionRangeWithoutController, rightUseViewmodelPose, leftHanded, leftHandMagazineGripPose, debugLog);
 
     const VrHandMatrix4 sceneProjection = BuildVrHandsProjection(view, false);
     const bool leftHandUsesMagazineViewmodelLayer =
@@ -1245,12 +1330,23 @@ bool VrHandSystem::DrawForEye(
     const Vector rotationOffsets[2] = { leftHandPoseRotationOffsetDeg, rightHandPoseRotationOffsetDeg };
     for (int handIndex = 0; handIndex < static_cast<int>(m_Hands.size()); ++handIndex)
     {
-        const HandState& hand = m_Hands[static_cast<size_t>(handIndex)];
-        if (!hand.paletteValid)
+        const bool useRightViewmodelPose = handIndex == 1 && rightUseViewmodelPose;
+        const int physicalHandIndex = useRightViewmodelPose
+            ? (leftHanded ? 0 : 1)
+            : physicalHandIndexForGameplay(handIndex);
+        if (physicalHandIndex < 0 || physicalHandIndex >= static_cast<int>(m_Hands.size()))
+            continue;
+
+        const HandState& hand = m_Hands[static_cast<size_t>(physicalHandIndex)];
+        const std::vector<VrHandMatrixRows3x4>& palette =
+            useRightViewmodelPose ? m_RightViewmodelPalette : hand.palette;
+        const bool paletteValid =
+            useRightViewmodelPose ? m_RightViewmodelPaletteValid : hand.paletteValid;
+        if (!paletteValid)
             continue;
 
         VrHandMatrix4 world{};
-        if (handIndex == 1 && rightUseViewmodelPose)
+        if (useRightViewmodelPose)
         {
             // VM mode is bound directly to the captured viewmodel palm. Keep the
             // existing right-hand controls as a final local micro-adjustment layer.
@@ -1277,7 +1373,7 @@ bool VrHandSystem::DrawForEye(
         }
 
         const bool useViewmodelLayer =
-            (handIndex == 1 && rightUseViewmodelPose) ||
+            useRightViewmodelPose ||
             (handIndex == 0 && leftHandUsesMagazineViewmodelLayer);
         if (handIndex == 0 && leftHandUsesMagazineViewmodelLayer &&
             drawPass == VrHandDrawPass::WorldVisibilityMask)
@@ -1292,7 +1388,7 @@ bool VrHandSystem::DrawForEye(
             ? VrHandDrawPass::ViewmodelStandalone
             : drawPass;
         std::string error;
-        if (!m_Renderer.Draw(device, handIndex, hand.asset, hand.palette, world, wvp, handDrawPass, sceneLightScale, error))
+        if (!m_Renderer.Draw(device, handIndex, hand.asset, palette, world, wvp, handDrawPass, sceneLightScale, error))
             ReportErrorOnce(error);
         else
             drewAny = true;
@@ -1363,6 +1459,7 @@ bool VrHandSystem::DrawControllerlessTestPose(
     float vrScale,
     float modelScale,
     bool rightUseViewmodelPose,
+    bool leftHanded,
     float sceneLightScale,
     bool debugLog,
     const Vector& leftHandPoseOffsetMeters,
@@ -1397,26 +1494,37 @@ bool VrHandSystem::DrawControllerlessTestPose(
     bool drewAny = false;
     const Vector positionOffsets[2] = { leftHandPoseOffsetMeters, rightHandPoseOffsetMeters };
     const Vector rotationOffsets[2] = { leftHandPoseRotationOffsetDeg, rightHandPoseRotationOffsetDeg };
+    auto physicalHandIndexForGameplay = [&](int gameplayHandIndex) -> int
+        {
+            return leftHanded ? (1 - gameplayHandIndex) : gameplayHandIndex;
+        };
 
     for (int handIndex = 0; handIndex < static_cast<int>(m_Hands.size()); ++handIndex)
     {
-        const HandState& hand = m_Hands[static_cast<size_t>(handIndex)];
+        const bool useRightViewmodelPose = handIndex == 1 && rightUseViewmodelPose;
+        const int physicalHandIndex = useRightViewmodelPose
+            ? (leftHanded ? 0 : 1)
+            : physicalHandIndexForGameplay(handIndex);
+        if (physicalHandIndex < 0 || physicalHandIndex >= static_cast<int>(m_Hands.size()))
+            continue;
+
+        const HandState& hand = m_Hands[static_cast<size_t>(physicalHandIndex)];
         if (!hand.asset.IsValid() || hand.asset.jointNames.empty())
             continue;
 
         std::vector<VrHandMatrixRows3x4> bindPalette(hand.asset.jointNames.size(), VrHandMath::ToRows3x4(VrHandMath::Identity()));
-        if (handIndex == 1 && rightUseViewmodelPose)
+        if (useRightViewmodelPose)
         {
             VrHandVmPose::Snapshot snapshot{};
             if (!VrHandVmPose::GetLatest(snapshot, kVrHandsVmPoseMaxAgeMs) ||
-                !BuildRightViewmodelPalette(snapshot, bindPalette))
+                !BuildRightViewmodelPalette(snapshot, physicalHandIndex, bindPalette))
             {
                 continue;
             }
         }
 
         VrHandMatrix4 world{};
-        if (handIndex == 1 && rightUseViewmodelPose)
+        if (useRightViewmodelPose)
         {
             // VM mode stays attached to the captured viewmodel palm even when the
             // controllerless mouse-mode test path is active.
@@ -1441,7 +1549,7 @@ bool VrHandSystem::DrawControllerlessTestPose(
                 positionOffsets[handIndex],
                 rotationOffsets[handIndex]);
         }
-        const bool useViewmodelLayer = handIndex == 1 && rightUseViewmodelPose;
+        const bool useViewmodelLayer = useRightViewmodelPose;
         const VrHandMatrix4& projection = useViewmodelLayer ? viewmodelProjection : sceneProjection;
         const VrHandMatrix4 wvp = VrHandMath::Multiply(projection, VrHandMath::Multiply(camera, world));
         std::string error;
@@ -1461,6 +1569,9 @@ bool VrHandSystem::DrawControllerlessTestPose(
 
 bool VrHandSystem::ClearViewmodelOcclusionStencil(IDirect3DDevice9* device)
 {
+    if (m_DependencyUnavailable)
+        return false;
+
     std::string error;
     if (m_Renderer.ClearViewmodelOcclusionStencil(device, error))
         return true;
