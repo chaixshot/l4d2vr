@@ -34,6 +34,7 @@ ThirdPersonScopeOverlayOffsetZ=-0.3
 
 Roomscale1To1DebugLog=false
 AutoMatQueueMode=false
+VrRecommendedVideoSettingsEnabled=false
 QueuedRenderHmdYawUsesTurnPath=false
 QueuedSubmitWaitMs=1
 QueuedSubmitUseRenderPoseToken=true
@@ -206,6 +207,7 @@ AimLineFrameDurationMultiplier=0
 AimLineColor=255,0,0,100
 AimLineMinHitDistance=0
 
+MotionGesturesEnabled=true
 MotionGestureSwingThreshold=2
 MotionGesturePushThreshold=1.5
 MotionGestureDownSwingThreshold=2.0

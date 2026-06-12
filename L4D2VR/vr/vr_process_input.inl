@@ -246,7 +246,7 @@ void VR::ProcessInput()
         isObserverOrIdle = (teamNum == 1) || (lifeState != 0) || (obsMode != 0);
     }
 
-    const bool jumpGestureActive = currentTime < m_JumpGestureHoldUntil;
+    const bool jumpGestureActive = m_MotionGesturesEnabled && currentTime < m_JumpGestureHoldUntil;
 
     // While aiming teleport, Use is reserved as a modifier that ignores playerclip
     // barriers. Do not also send +use into gameplay.
@@ -530,7 +530,7 @@ void VR::ProcessInput()
     bool secondaryAttackJustPressed = false;
     bool secondaryAttackDataValid = getActionState(&m_ActionSecondaryAttack, secondaryAttackActionData, secondaryAttackActive, secondaryAttackJustPressed);
 
-    const bool gestureSecondaryAttackActive = currentTime < m_SecondaryAttackGestureHoldUntil;
+    const bool gestureSecondaryAttackActive = m_MotionGesturesEnabled && currentTime < m_SecondaryAttackGestureHoldUntil;
 
     vr::InputDigitalActionData_t flashlightActionData{};
     bool flashlightButtonDown = false;
@@ -544,7 +544,7 @@ void VR::ProcessInput()
     const bool inventoryQuickSwitchHeld = m_InventoryQuickSwitchEnabled && inventoryQuickSwitchDataValid && inventoryQuickSwitchDown;
     if (inventoryQuickSwitchHeld)
         m_ReloadGestureHoldUntil = currentTime;
-    const bool gestureReloadActive = !inventoryQuickSwitchHeld && currentTime < m_ReloadGestureHoldUntil;
+    const bool gestureReloadActive = m_MotionGesturesEnabled && !inventoryQuickSwitchHeld && currentTime < m_ReloadGestureHoldUntil;
 
     vr::InputDigitalActionData_t autoAimToggleActionData{};
     [[maybe_unused]] bool autoAimToggleDown = false;

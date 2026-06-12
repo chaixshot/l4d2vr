@@ -38,6 +38,8 @@ class Game;
 class C_BaseEntity;
 class C_BasePlayer;
 class C_WeaponCSBase;
+
+bool L4D2VR_ApplyRecommendedVideoSettings();
 class CUserCmd;
 struct IDirect3DDevice9;
 struct IDirect3DTexture9;
@@ -1472,6 +1474,7 @@ public:
 	CustomActionBinding m_CustomAction4Binding{};
 	CustomActionBinding m_CustomAction5Binding{};
 
+	bool m_MotionGesturesEnabled = true;
 	float m_MotionGestureSwingThreshold = 2.0f;
 	float m_MotionGesturePushThreshold = 1.5f;
 	float m_MotionGestureDownSwingThreshold = 2.0f;
@@ -1533,6 +1536,11 @@ public:
 
 	// One-shot menu ConVar injection: apply launch-style visual defaults after the first main-menu entry.
 	bool m_MainMenuOneShotVisualCvarsInjected = false;
+
+	// Optional persisted video.txt profile for VR. Applied once when enabled and again after returning to the main menu.
+	bool m_VrRecommendedVideoSettingsEnabled = false;
+	bool m_VrRecommendedVideoSettingsApplyPending = false;
+	bool m_VrRecommendedVideoSettingsAppliedThisSession = false;
 
 	// Auto fps_max in main menu: set fps_max to match HMD refresh rate when VR is active.
 	bool m_MenuFpsMaxSent = false;
@@ -2790,6 +2798,7 @@ public:
 	void ApplyShadowSettingsIfNeeded(bool forceApply = false);
 	void ApplyFlashlightEnhancementIfNeeded();
 	void ApplyLocalVScriptConvarsIfNeeded();
+	void ApplyVrRecommendedVideoSettingsIfNeeded(const char* reason);
 	void AuditLocalVScriptConvarsCurrentValues(const char* reason);
 	bool TryGetTrackedProtectedConvarValue(const char* name, std::string& outValue) const;
 	void CaptureFlashlightEnhancementDefaults();

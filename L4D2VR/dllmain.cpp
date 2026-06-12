@@ -470,14 +470,83 @@ namespace
         const wchar_t* value;
     };
 
+    constexpr char kVrRecommendedVideoSettingsConfigKey[] = "VrRecommendedVideoSettingsEnabled";
+
     constexpr VideoCfgDesiredSetting kDesiredVideoCfgSettings[] =
     {
+        { L"\"setting.cpu_level\"", L"1" },
+        { L"\"setting.gpu_level\"", L"2" },
         { L"\"setting.mat_antialias\"", L"1" },
+        { L"\"setting.mat_aaquality\"", L"0" },
         { L"\"setting.mat_vsync\"", L"0" },
+        { L"\"setting.mat_triplebuffered\"", L"0" },
+        { L"\"setting.mat_grain_scale_override\"", L"0" },
+        { L"\"setting.mat_monitorgamma\"", L"2.200000" },
+        { L"\"setting.gpu_mem_level\"", L"1" },
+        { L"\"setting.mem_level\"", L"0" },
         { L"\"setting.mat_queue_mode\"", L"0" },
+        { L"\"setting.aspectratiomode\"", L"1" },
         { L"\"setting.fullscreen\"", L"0" },
         { L"\"setting.nowindowborder\"", L"1" },
     };
+
+    bool ConfigValueIsEnabled(std::string value)
+    {
+        value = TrimAsciiWhitespace(value);
+        if (value.size() >= 2 &&
+            ((value.front() == '"' && value.back() == '"') ||
+                (value.front() == '\'' && value.back() == '\'')))
+        {
+            value = value.substr(1, value.size() - 2);
+        }
+
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+            });
+        return value == "1" || value == "true" || value == "yes" || value == "on";
+    }
+
+    bool IsVrRecommendedVideoSettingsEnabledInConfig()
+    {
+        const std::filesystem::path gameRootPath = GetGameRootPath();
+        if (gameRootPath.empty())
+            return false;
+
+        const std::filesystem::path configPath = gameRootPath / L"VR" / L"config.txt";
+        std::ifstream input(configPath);
+        if (!input.is_open())
+            return false;
+
+        std::string line;
+        while (std::getline(input, line))
+        {
+            if (!line.empty() && line.back() == '\r')
+                line.pop_back();
+
+            line = TrimAsciiWhitespace(line);
+            if (line.empty() || line.rfind("//", 0) == 0 || line[0] == '#' || line[0] == ';')
+                continue;
+
+            size_t cut = line.find_first_of("#;");
+            const size_t slashComment = line.find("//");
+            if (slashComment != std::string::npos)
+                cut = (cut == std::string::npos) ? slashComment : (std::min)(cut, slashComment);
+            if (cut != std::string::npos)
+                line.erase(cut);
+
+            const size_t equals = line.find('=');
+            if (equals == std::string::npos)
+                continue;
+
+            const std::string key = TrimAsciiWhitespace(line.substr(0, equals));
+            if (_stricmp(key.c_str(), kVrRecommendedVideoSettingsConfigKey) != 0)
+                continue;
+
+            return ConfigValueIsEnabled(line.substr(equals + 1));
+        }
+
+        return false;
+    }
 
     void InsertVideoCfgLineBeforeClosingBrace(std::vector<std::wstring>& lines, const wchar_t* key, const wchar_t* value)
     {
@@ -549,7 +618,7 @@ namespace
         }
 
         if (!changed)
-            return false;
+            return true;
 
         std::wofstream output(videoCfgPath, std::ios::trunc);
         if (!output.is_open())
@@ -574,7 +643,11 @@ namespace
         // display-mode changes. Apply the runtime ConVars as well so the current session
         // stays clamped while the worker keeps the persisted file corrected for next launch.
         g_Game->SetConVarInt("mat_antialias", 1);
+        g_Game->SetConVarInt("mat_aaquality", 0);
         g_Game->SetConVarInt("mat_vsync", 0);
+        g_Game->SetConVarInt("mat_triplebuffered", 0);
+        g_Game->SetConVarFloat("mat_grain_scale_override", 0.0f);
+        g_Game->SetConVarFloat("mat_monitorgamma", 2.2f);
     }
 
     DWORD WINAPI MaintainVideoCfgSettingsWorker(LPVOID)
@@ -585,6 +658,9 @@ namespace
         constexpr int kAttempts = 120;
         for (int i = 0; i < kAttempts; ++i)
         {
+            if (!IsVrRecommendedVideoSettingsEnabledInConfig())
+                return 0;
+
             ApplyRuntimeVideoSettings();
             EnsureVideoCfgSettings();
 
@@ -2338,6 +2414,7 @@ namespace
     constexpr OneShotConfigMigration kOneShotConfigMigrations[] =
     {
         { "2026-05-23_auto_mat_queue_mode_default_false", "AutoMatQueueMode", "false" },
+        { "2026-06-12_vr_recommended_video_settings_default_false", "VrRecommendedVideoSettingsEnabled", "false" },
     };
 
     std::unordered_set<std::string> ReadAppliedConfigMigrationIds(const std::filesystem::path& statePath)
@@ -2518,6 +2595,12 @@ namespace
     }
 }
 
+bool L4D2VR_ApplyRecommendedVideoSettings()
+{
+    ApplyRuntimeVideoSettings();
+    return EnsureVideoCfgSettings();
+}
+
 DWORD WINAPI InitL4D2VR(HMODULE hModule)
 {
 #ifdef _DEBUG
@@ -2553,17 +2636,23 @@ DWORD WINAPI InitL4D2VR(HMODULE hModule)
     CreateThread(nullptr, 0, FocusGameWindowWorker, nullptr, 0, nullptr);
     CreateThread(nullptr, 0, MaintainWindowTitleWorker, nullptr, 0, nullptr);
 
+    const bool recommendedVideoSettingsEnabled = IsVrRecommendedVideoSettingsEnabledInConfig();
+
     // First pass before engine interfaces are ready. A later worker repeats this because
     // the Source material system can save video.txt again after a display-mode change.
-    EnsureVideoCfgSettings();
+    if (recommendedVideoSettingsEnabled)
+        EnsureVideoCfgSettings();
 
     g_Game = new Game();
 
     if (CheckWorkshopUpdateOnce())
         return 0;
 
-    ApplyRuntimeVideoSettings();
-    CreateThread(nullptr, 0, MaintainVideoCfgSettingsWorker, nullptr, 0, nullptr);
+    if (recommendedVideoSettingsEnabled)
+    {
+        ApplyRuntimeVideoSettings();
+        CreateThread(nullptr, 0, MaintainVideoCfgSettingsWorker, nullptr, 0, nullptr);
+    }
 
     return 0;
 }

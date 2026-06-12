@@ -1338,6 +1338,13 @@ void VR::Update()
     const bool returnedToMainMenu = s_WasInGameLastUpdate && !inGameAtUpdateStart;
     s_WasInGameLastUpdate = inGameAtUpdateStart;
 
+    if (m_VrRecommendedVideoSettingsEnabled &&
+        (m_VrRecommendedVideoSettingsApplyPending || returnedToMainMenu))
+    {
+        ApplyVrRecommendedVideoSettingsIfNeeded(
+            returnedToMainMenu ? "returned_to_main_menu" : "enabled");
+    }
+
     if (m_IsVREnabled && g_D3DVR9)
     {
         // Prevents crashing at menu

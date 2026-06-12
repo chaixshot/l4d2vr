@@ -80,8 +80,9 @@ VS_OUTPUT main(VS_INPUT input)
         dot(p, gWorldViewProjectionRows[2]),
         dot(p, gWorldViewProjectionRows[3]));
     output.uv = input.uv;
-    output.light = saturate((gLightDirectionAmbient.w +
-        max(dot(worldNormal, -gLightDirectionAmbient.xyz), 0.0) * 0.62) * gWorldNormalRows[2].w);
+    float rawLight = (gLightDirectionAmbient.w +
+        max(dot(worldNormal, -gLightDirectionAmbient.xyz), 0.0) * 0.62) * gWorldNormalRows[2].w;
+    output.light = max(saturate(rawLight), 0.22);
     return output;
 }
 )HLSL";

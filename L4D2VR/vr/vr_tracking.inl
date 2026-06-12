@@ -1556,6 +1556,20 @@ void VR::UpdateMotionGestures(C_BasePlayer* localPlayer)
         return;
     }
 
+    if (!m_MotionGesturesEnabled)
+    {
+        m_SecondaryAttackGestureHoldUntil = {};
+        m_ReloadGestureHoldUntil = {};
+        m_JumpGestureHoldUntil = {};
+        m_SecondaryGestureCooldownEnd = {};
+        m_ReloadGestureCooldownEnd = {};
+        m_JumpGestureCooldownEnd = {};
+        m_PrevLeftControllerLocalPos = m_LeftControllerPose.TrackedDevicePos;
+        m_PrevRightControllerLocalPos = m_RightControllerPose.TrackedDevicePos;
+        m_PrevHmdLocalPos = m_HmdPose.TrackedDevicePos;
+        return;
+    }
+
     const Vector leftDelta = m_LeftControllerPose.TrackedDevicePos - m_PrevLeftControllerLocalPos;
     const Vector rightDelta = m_RightControllerPose.TrackedDevicePos - m_PrevRightControllerLocalPos;
     const Vector hmdDelta = m_HmdPose.TrackedDevicePos - m_PrevHmdLocalPos;

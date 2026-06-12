@@ -1702,6 +1702,7 @@ void VR::ParseConfigFile()
     m_LedgeGuardMinMoveSpeed = std::clamp(getFloat("LedgeGuardMinMoveSpeed", m_LedgeGuardMinMoveSpeed), 0.0f, 450.0f);
     m_LedgeGuardDebugLog = getBool("LedgeGuardDebugLog", m_LedgeGuardDebugLog);
     m_LedgeGuardDebugLogHz = std::clamp(getFloat("LedgeGuardDebugLogHz", m_LedgeGuardDebugLogHz), 0.0f, 60.0f);
+    m_MotionGesturesEnabled = getBool("MotionGesturesEnabled", m_MotionGesturesEnabled);
     m_MotionGestureSwingThreshold = std::max(0.0f, getFloat("MotionGestureSwingThreshold", m_MotionGestureSwingThreshold));
     m_MotionGesturePushThreshold = std::max(0.0f, getFloat("MotionGesturePushThreshold", m_MotionGesturePushThreshold));
     m_MotionGestureDownSwingThreshold = std::max(0.0f, getFloat("MotionGestureDownSwingThreshold", m_MotionGestureDownSwingThreshold));
@@ -1860,6 +1861,20 @@ void VR::ParseConfigFile()
         m_AutoMatQueueModeLastCmdTime = {};
         m_MenuFpsMaxSent = false;
         m_MenuFpsMaxLastHz = 0;
+    }
+
+    const bool prevVrRecommendedVideoSettingsEnabled = m_VrRecommendedVideoSettingsEnabled;
+    m_VrRecommendedVideoSettingsEnabled =
+        getBool("VrRecommendedVideoSettingsEnabled", m_VrRecommendedVideoSettingsEnabled);
+    if (m_VrRecommendedVideoSettingsEnabled)
+    {
+        if (!prevVrRecommendedVideoSettingsEnabled || !m_VrRecommendedVideoSettingsAppliedThisSession)
+            m_VrRecommendedVideoSettingsApplyPending = true;
+    }
+    else
+    {
+        m_VrRecommendedVideoSettingsApplyPending = false;
+        m_VrRecommendedVideoSettingsAppliedThisSession = false;
     }
 
     // Multicore rendering: explicit minimum render-thread wait budget (ms) for a fresher
@@ -2850,6 +2865,21 @@ void VR::ApplyFlashlightEnhancementIfNeeded()
         std::lock_guard<std::mutex> lock(m_LocalVScriptConvarLockMutex);
         m_FlashlightEnhancementProtectedConvars = std::move(protectedConvars);
     }
+}
+
+void VR::ApplyVrRecommendedVideoSettingsIfNeeded(const char* reason)
+{
+    if (!m_VrRecommendedVideoSettingsEnabled)
+        return;
+
+    const bool ok = L4D2VR_ApplyRecommendedVideoSettings();
+    m_VrRecommendedVideoSettingsApplyPending = false;
+    m_VrRecommendedVideoSettingsAppliedThisSession = true;
+
+    Game::logMsg(
+        "[VR][VideoSettings] %s VR recommended video settings reason=%s",
+        ok ? "applied" : "failed to apply",
+        (reason && *reason) ? reason : "unspecified");
 }
 
 namespace
