@@ -1094,6 +1094,7 @@ void VR::ParseConfigFile()
     parseCustomActionBinding("CustomAction5Command", m_CustomAction5Binding);
 
     m_LeftHanded = getBool("LeftHanded", m_LeftHanded);
+    m_LeftHandedSwapInputActions = getBool("LeftHandedSwapInputActions", m_LeftHandedSwapInputActions);
     m_VRScale = getFloat("VRScale", m_VRScale);
     m_IpdScale = getFloat("IPDScale", m_IpdScale);
     {

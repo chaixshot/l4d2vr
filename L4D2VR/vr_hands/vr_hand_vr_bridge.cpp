@@ -190,6 +190,43 @@ namespace
         return 1.0f / std::tan(fov * 0.5f);
     }
 
+    bool MagazineInteractionResolveViewFrame(
+        const VR* vr,
+        Vector& outViewOrigin,
+        Vector& outForward,
+        Vector& outRight,
+        Vector& outUp)
+    {
+        if (!vr)
+            return false;
+
+        VR* mutableVr = const_cast<VR*>(vr);
+        const Vector viewAngles = mutableVr->GetViewAngle();
+        const Vector viewLeft = mutableVr->GetViewOriginLeft();
+        const Vector viewRight = mutableVr->GetViewOriginRight();
+
+        QAngle eyeAngles(viewAngles.x, viewAngles.y, viewAngles.z);
+        Vector forward{};
+        Vector right{};
+        Vector up{};
+        QAngle::AngleVectors(eyeAngles, &forward, &right, &up);
+        forward = VrHandMath::Normalize(forward);
+        right = VrHandMath::Normalize(right);
+        up = VrHandMath::Normalize(up);
+        if (forward.Length() <= 0.0001f || right.Length() <= 0.0001f || up.Length() <= 0.0001f)
+            return false;
+
+        const Vector viewOrigin = (viewLeft + viewRight) * 0.5f;
+        if (!std::isfinite(viewOrigin.x) || !std::isfinite(viewOrigin.y) || !std::isfinite(viewOrigin.z))
+            return false;
+
+        outViewOrigin = viewOrigin;
+        outForward = forward;
+        outRight = right;
+        outUp = up;
+        return true;
+    }
+
     bool MagazineInteractionReprojectScenePointToViewmodelLayer(
         const VR* vr,
         const Vector& scenePoint,
@@ -215,19 +252,13 @@ namespace
         if (!(viewmodelXScale > 0.0001f) || !(viewmodelYScale > 0.0001f))
             return false;
 
+        Vector viewOrigin{};
         Vector forward{};
         Vector right{};
         Vector up{};
-        QAngle eyeAngles(vr->m_HmdAngAbs.x, vr->m_HmdAngAbs.y, vr->m_HmdAngAbs.z);
-        QAngle::AngleVectors(eyeAngles, &forward, &right, &up);
-        forward = VrHandMath::Normalize(forward);
-        right = VrHandMath::Normalize(right);
-        up = VrHandMath::Normalize(up);
-        if (forward.Length() <= 0.0001f || right.Length() <= 0.0001f || up.Length() <= 0.0001f)
+        if (!MagazineInteractionResolveViewFrame(vr, viewOrigin, forward, right, up))
             return false;
 
-        const Vector viewOrigin =
-            vr->m_HmdPosAbs + forward * (-(vr->m_EyeZ * vr->m_VRScale));
         const Vector delta = scenePoint - viewOrigin;
         const float viewX = VrHandMath::Dot(delta, right);
         const float viewY = VrHandMath::Dot(delta, up);
@@ -418,6 +449,47 @@ namespace
         return true;
     }
 
+    bool MagazineInteractionResolveFreshPickupBodyAxes(
+        const VR* vr,
+        Vector& outForward,
+        Vector& outRight)
+    {
+        if (!vr)
+            return false;
+
+        const Vector worldUp(0.0f, 0.0f, 1.0f);
+        Vector bodyForward{};
+        Vector bodyRight{};
+        if (vr->m_MagazineInteractionFreshPickupBasisValid)
+        {
+            bodyForward = vr->m_MagazineInteractionFreshPickupForward;
+            bodyRight = vr->m_MagazineInteractionFreshPickupRight;
+        }
+        else if (!MagazineInteractionBuildFreshPickupBodyBasis(vr, bodyForward, bodyRight))
+        {
+            return false;
+        }
+
+        bodyForward = VrHandMath::Normalize(bodyForward);
+        if (bodyForward.Length() <= 0.0001f)
+            bodyForward = Vector(1.0f, 0.0f, 0.0f);
+
+        if (!vr->m_MagazineInteractionFreshPickupBasisValid)
+        {
+            bodyRight = Vector(
+                bodyForward.y * worldUp.z - bodyForward.z * worldUp.y,
+                bodyForward.z * worldUp.x - bodyForward.x * worldUp.z,
+                bodyForward.x * worldUp.y - bodyForward.y * worldUp.x);
+        }
+        bodyRight = VrHandMath::Normalize(bodyRight);
+        if (bodyRight.Length() <= 0.0001f)
+            bodyRight = Vector(0.0f, -1.0f, 0.0f);
+
+        outForward = bodyForward;
+        outRight = bodyRight;
+        return true;
+    }
+
     bool MagazineInteractionBuildFreshMagazinePickupBox(
         VR* vr,
         MagazineInteractionBoxSnapshot& outBox,
@@ -427,23 +499,11 @@ namespace
             return false;
 
         MagazineInteractionEnsureFreshPickupBodyBasis(vr);
-        Vector bodyForward = vr->m_MagazineInteractionFreshPickupBasisValid
-            ? vr->m_MagazineInteractionFreshPickupForward
-            : Vector(1.0f, 0.0f, 0.0f);
-        bodyForward = VrHandMath::Normalize(bodyForward);
-        if (bodyForward.Length() <= 0.0001f)
-            bodyForward = Vector(1.0f, 0.0f, 0.0f);
-
+        Vector bodyForward{};
+        Vector bodyRight{};
+        if (!MagazineInteractionResolveFreshPickupBodyAxes(vr, bodyForward, bodyRight))
+            return false;
         const Vector worldUp(0.0f, 0.0f, 1.0f);
-        Vector bodyRight = vr->m_MagazineInteractionFreshPickupBasisValid
-            ? vr->m_MagazineInteractionFreshPickupRight
-            : Vector(
-                bodyForward.y * worldUp.z - bodyForward.z * worldUp.y,
-                bodyForward.z * worldUp.x - bodyForward.x * worldUp.z,
-                bodyForward.x * worldUp.y - bodyForward.y * worldUp.x);
-        bodyRight = VrHandMath::Normalize(bodyRight);
-        if (bodyRight.Length() <= 0.0001f)
-            bodyRight = Vector(0.0f, -1.0f, 0.0f);
 
         const Vector bodyOrigin = vr->m_HmdPosAbs
             + bodyForward * (vr->m_InventoryBodyOriginOffset.x * vr->m_VRScale)
@@ -1126,6 +1186,131 @@ namespace
         VrHandMath::Set(out, 1, 3, origin.y);
         VrHandMath::Set(out, 2, 3, origin.z);
         return out;
+    }
+
+    VrHandMatrix4 MagazineInteractionBuildFreshHandMagazineWorldFromController(
+        const VR* vr,
+        const VrHandMatrix4& controllerWorld)
+    {
+        if (!vr)
+            return VrHandMath::Identity();
+
+        const VrHandMatrix4 local = MagazineInteractionBuildLocalTransform(
+            vr->m_VRScale,
+            vr->m_MagazineInteractionMagazineHandOffsetMeters,
+            vr->m_MagazineInteractionMagazineHandRotationOffsetDeg);
+        return VrHandMath::Multiply(controllerWorld, local);
+    }
+
+    VrHandMatrix4 MagazineInteractionBuildRenderSnapshotLeftControllerWorld(const VR* vr)
+    {
+        if (!vr)
+            return VrHandMath::Identity();
+
+        VR* mutableVr = const_cast<VR*>(vr);
+        const Vector leftControllerPos = mutableVr->GetLeftControllerAbsPos();
+        const QAngle leftControllerAng = mutableVr->GetLeftControllerAbsAngle();
+        Vector leftForward{};
+        Vector leftRight{};
+        Vector leftUp{};
+        QAngle::AngleVectors(leftControllerAng, &leftForward, &leftRight, &leftUp);
+        return MagazineInteractionBuildViewmodelReprojectedControllerWorld(
+            vr,
+            leftControllerPos,
+            leftForward,
+            leftRight,
+            leftUp);
+    }
+
+    bool MagazineInteractionTryBuildHeldMagazineWorldFromRenderSnapshot(
+        const VR* vr,
+        bool freshMagazine,
+        VrHandMatrix4& outWorld)
+    {
+        if (!vr || !VR::t_UseRenderFrameSnapshot || !vr->m_MagazineInteractionSocketValid)
+            return false;
+
+        const VrHandMatrix4 controllerWorld = MagazineInteractionBuildRenderSnapshotLeftControllerWorld(vr);
+        if (!MagazineInteractionMatrixLooksRenderable(controllerWorld))
+            return false;
+
+        VrHandMatrix4 orientationWorld = MagazineInteractionBuildWorldFromControllerRelation(
+            controllerWorld,
+            vr->m_MagazineInteractionControllerToMagazine);
+        if (!MagazineInteractionMatrixBasisLooksValid(orientationWorld))
+            orientationWorld = MagazineInteractionBuildFreshHandMagazineWorldFromController(vr, controllerWorld);
+        if (freshMagazine && !MagazineInteractionMatrixBasisLooksValid(orientationWorld))
+            orientationWorld = controllerWorld;
+        if (!MagazineInteractionMatrixBasisLooksValid(orientationWorld))
+            return false;
+
+        const Vector desiredCenter =
+            MagazineInteractionMatrixOrigin(controllerWorld) +
+            MagazineInteractionMatrixLocalVectorToWorld(
+                controllerWorld,
+                vr->m_MagazineInteractionHeldMagazineCenterOffsetLocal);
+        outWorld = MagazineInteractionBuildWorldAtBoxCenter(
+            orientationWorld,
+            vr->m_MagazineInteractionSocketBox,
+            desiredCenter);
+        return MagazineInteractionMatrixLooksRenderable(outWorld);
+    }
+
+    bool MagazineInteractionTryGetRenderSnapshotHmdPosAbs(const VR* vr, Vector& outHmdPosAbs)
+    {
+        if (!vr || !VR::t_UseRenderFrameSnapshot)
+            return false;
+
+        Vector viewOrigin{};
+        Vector forward{};
+        Vector right{};
+        Vector up{};
+        if (!MagazineInteractionResolveViewFrame(vr, viewOrigin, forward, right, up))
+            return false;
+
+        const float eyeZ = vr->m_EyeZ * vr->m_VRScale;
+        if (!std::isfinite(eyeZ))
+            return false;
+
+        outHmdPosAbs = viewOrigin + forward * eyeZ;
+        return std::isfinite(outHmdPosAbs.x) &&
+            std::isfinite(outHmdPosAbs.y) &&
+            std::isfinite(outHmdPosAbs.z);
+    }
+
+    bool MagazineInteractionTryBuildWaitingFreshMagazineWorldFromRenderSnapshot(
+        const VR* vr,
+        VrHandMatrix4& outWorld)
+    {
+        if (!vr || !VR::t_UseRenderFrameSnapshot || !vr->m_MagazineInteractionSocketValid)
+            return false;
+
+        Vector hmdPosAbs{};
+        if (!MagazineInteractionTryGetRenderSnapshotHmdPosAbs(vr, hmdPosAbs))
+            return false;
+
+        Vector bodyForward{};
+        Vector bodyRight{};
+        if (!MagazineInteractionResolveFreshPickupBodyAxes(vr, bodyForward, bodyRight))
+            return false;
+
+        const Vector worldUp(0.0f, 0.0f, 1.0f);
+        const Vector bodyOrigin = hmdPosAbs
+            + bodyForward * (vr->m_InventoryBodyOriginOffset.x * vr->m_VRScale)
+            + bodyRight * (vr->m_InventoryBodyOriginOffset.y * vr->m_VRScale)
+            + worldUp * (vr->m_InventoryBodyOriginOffset.z * vr->m_VRScale);
+        const Vector pickup = bodyOrigin
+            + bodyForward * (vr->m_MagazineInteractionFreshMagazinePickupOffsetMeters.x * vr->m_VRScale)
+            + bodyRight * (vr->m_MagazineInteractionFreshMagazinePickupOffsetMeters.y * vr->m_VRScale)
+            + worldUp * (vr->m_MagazineInteractionFreshMagazinePickupOffsetMeters.z * vr->m_VRScale);
+
+        Vector viewmodelPickup = pickup;
+        Vector reprojectedPickup{};
+        if (MagazineInteractionReprojectScenePointToViewmodelLayer(vr, pickup, reprojectedPickup))
+            viewmodelPickup = reprojectedPickup;
+
+        outWorld = MagazineInteractionBuildSocketOrientedMagazineWorldAtCenter(vr, viewmodelPickup);
+        return MagazineInteractionMatrixLooksRenderable(outWorld);
     }
 
     bool MagazineInteractionTryReadInt(const void* entity, int offset, int& out)
@@ -2391,6 +2576,25 @@ bool VR::GetMagazineInteractionDetachedMagazineWorld(VrHandMatrix4& outWorld) co
 {
     if (!ShouldDrawMagazineInteractionDetachedMagazine())
         return false;
+
+    if (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine)
+    {
+        if (MagazineInteractionTryBuildWaitingFreshMagazineWorldFromRenderSnapshot(this, outWorld))
+            return true;
+    }
+
+    if (m_MagazineInteractionState == MagazineInteractionManualState::HoldingOldMagazine ||
+        m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine)
+    {
+        if (MagazineInteractionTryBuildHeldMagazineWorldFromRenderSnapshot(
+            this,
+            m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine,
+            outWorld))
+        {
+            return true;
+        }
+    }
+
     std::lock_guard<std::mutex> lock(m_MagazineInteractionPoseMutex);
     outWorld = m_MagazineInteractionDetachedMagazineWorld;
     return MagazineInteractionMatrixLooksRenderable(outWorld);

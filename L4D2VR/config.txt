@@ -4,6 +4,7 @@ TurnSpeed=0.3
 SnapTurning=false
 SnapTurnAngle=45.0
 LeftHanded=false
+LeftHandedSwapInputActions=false
 AutoBunnyHop=false
 AutoAirStrafe=false
 AutoAirStrafeLandingSpeedPreserve=true

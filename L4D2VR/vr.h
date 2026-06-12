@@ -1001,6 +1001,7 @@ public:
 	bool m_SnapTurning = false;
 	float m_SnapTurnAngle = 45.0f;
 	bool m_LeftHanded = false;
+	bool m_LeftHandedSwapInputActions = false;
 	// If false: movement (walk axis) follows HMD yaw ("head-oriented locomotion").
 	// If true:  movement follows the right-hand controller yaw ("hand-oriented locomotion").
 	bool m_MoveDirectionFromController = false;
@@ -2928,6 +2929,8 @@ public:
 	bool PressedDigitalAction(vr::VRActionHandle_t& actionHandle, bool checkIfActionChanged = false);
 	bool GetDigitalActionData(vr::VRActionHandle_t& actionHandle, vr::InputDigitalActionData_t& digitalDataOut);
 	bool GetAnalogActionData(vr::VRActionHandle_t& actionHandle, vr::InputAnalogActionData_t& analogDataOut);
+	vr::VRActionHandle_t ResolveLeftHandedSwapDigitalAction(vr::VRActionHandle_t actionHandle) const;
+	vr::VRActionHandle_t ResolveLeftHandedSwapAnalogAction(vr::VRActionHandle_t actionHandle) const;
 	void ResetPosition();
 	void GetPoseData(vr::TrackedDevicePose_t& poseRaw, TrackedDevicePoseData& poseOut);
 	void PoseWaiterThreadMain();

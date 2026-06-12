@@ -160,19 +160,55 @@ bool VR::PressedDigitalAction(vr::VRActionHandle_t& actionHandle, bool checkIfAc
 
 bool VR::GetDigitalActionData(vr::VRActionHandle_t& actionHandle, vr::InputDigitalActionData_t& digitalDataOut)
 {
-    vr::EVRInputError result = m_Input->GetDigitalActionData(actionHandle, &digitalDataOut, sizeof(digitalDataOut), vr::k_ulInvalidInputValueHandle);
+    const vr::VRActionHandle_t resolvedActionHandle = ResolveLeftHandedSwapDigitalAction(actionHandle);
+    vr::EVRInputError result = m_Input->GetDigitalActionData(resolvedActionHandle, &digitalDataOut, sizeof(digitalDataOut), vr::k_ulInvalidInputValueHandle);
 
     return result == vr::VRInputError_None;
 }
 
 bool VR::GetAnalogActionData(vr::VRActionHandle_t& actionHandle, vr::InputAnalogActionData_t& analogDataOut)
 {
-    vr::EVRInputError result = m_Input->GetAnalogActionData(actionHandle, &analogDataOut, sizeof(analogDataOut), vr::k_ulInvalidInputValueHandle);
+    const vr::VRActionHandle_t resolvedActionHandle = ResolveLeftHandedSwapAnalogAction(actionHandle);
+    vr::EVRInputError result = m_Input->GetAnalogActionData(resolvedActionHandle, &analogDataOut, sizeof(analogDataOut), vr::k_ulInvalidInputValueHandle);
 
     if (result == vr::VRInputError_None)
         return true;
 
     return false;
+}
+
+vr::VRActionHandle_t VR::ResolveLeftHandedSwapDigitalAction(vr::VRActionHandle_t actionHandle) const
+{
+    if (!m_LeftHanded || !m_LeftHandedSwapInputActions)
+        return actionHandle;
+
+    if (actionHandle == m_ActionPrimaryAttack)
+        return m_ActionSecondaryAttack;
+    if (actionHandle == m_ActionSecondaryAttack)
+        return m_ActionPrimaryAttack;
+    if (actionHandle == m_ActionReload)
+        return m_ActionCrouch;
+    if (actionHandle == m_ActionCrouch)
+        return m_ActionReload;
+    if (actionHandle == m_ActionResetPosition)
+        return m_ActionFlashlight;
+    if (actionHandle == m_ActionFlashlight)
+        return m_ActionResetPosition;
+
+    return actionHandle;
+}
+
+vr::VRActionHandle_t VR::ResolveLeftHandedSwapAnalogAction(vr::VRActionHandle_t actionHandle) const
+{
+    if (!m_LeftHanded || !m_LeftHandedSwapInputActions)
+        return actionHandle;
+
+    if (actionHandle == m_ActionWalk)
+        return m_ActionTurn;
+    if (actionHandle == m_ActionTurn)
+        return m_ActionWalk;
+
+    return actionHandle;
 }
 
 void VR::ProcessMenuInput()

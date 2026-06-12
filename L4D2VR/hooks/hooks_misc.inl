@@ -3646,14 +3646,6 @@ namespace
         const ModelRenderInfo_t& info,
         vr_vm_stabilize::Mat3x4& outAnchor)
     {
-        if (info.pModelToWorld &&
-            vr_vm_stabilize::SafeRead(
-                reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(info.pModelToWorld),
-                outAnchor))
-        {
-            return true;
-        }
-
         vr_vm_stabilize::BuildFromOrgAngles(info.origin, info.angles, outAnchor);
         return true;
     }
@@ -5008,7 +5000,7 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 			m_VR,
 			state,
 			modelName,
-			info,
+			*pDrawInfo,
 			pBonesToWorldFinal);
 
 		if (!m_VR || !m_VR->ShouldHideMagazineInteractionNativeClip())
