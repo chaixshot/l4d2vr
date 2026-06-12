@@ -1172,6 +1172,7 @@ public:
 	MagazineInteractionManualState m_MagazineInteractionState = MagazineInteractionManualState::Idle;
 	C_WeaponCSBase* m_MagazineInteractionWeapon = nullptr;
 	int m_MagazineInteractionWeaponId = 0;
+	int m_MagazineInteractionWeaponEntityIndex = -1;
 	std::atomic<int> m_MagazineInteractionCurrentWeaponId{ 0 };
 	int m_MagazineInteractionStartClip = -1;
 	int m_MagazineInteractionMagazineBoneIndex = -1;
@@ -3003,6 +3004,7 @@ public:
 	void PlayHitSound(const Vector* worldPos = nullptr);
 	void PlayKillSound(bool headshot, const Vector* worldPos = nullptr);
 	bool TryPlayKillSoundSpec(const std::string& spec, float baseVolume = 1.0f, const Vector* worldPos = nullptr, bool preferLoadedPathReuse = true);
+	bool TryPlayGameSoundFileLocal(const std::string& soundPath, float baseVolume = 1.0f, const Vector* worldPos = nullptr);
 	void QueueHitSoundPlayback(const Vector* worldPos = nullptr, uint32_t shotSerial = 0, std::uintptr_t entityTag = 0);
 	void FlushPendingHitSound(std::chrono::steady_clock::time_point now);
 	void ComputeFeedbackSoundStereoVolumes(const Vector* worldPos, float baseVolume, int& outLeftVolume, int& outRightVolume) const;

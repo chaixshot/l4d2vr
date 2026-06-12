@@ -24,6 +24,14 @@ VR::~VR() = default;
 namespace
 {
     std::string MagazineInteractionPrepareConsoleSoundSample(const std::string& rawSample);
+    std::string MagazineInteractionPrepareSoundSamplePath(const std::string& rawSample);
+    bool MagazineInteractionPlaySyntheticSound(
+        VR* vr,
+        const std::string& rawSample,
+        std::string& pendingSample,
+        std::chrono::steady_clock::time_point& pendingStarted,
+        const char* label);
+    int MagazineInteractionFindClientEntityIndex(Game* game, const void* entity);
 
     class ScopedVrHandsQueuedD3DLock
     {
@@ -1844,13 +1852,17 @@ namespace
             return;
         }
 
-        const std::string command = "playvol \"" + sample + "\" 1.000";
-        vr->m_MagazineInteractionSyntheticClipOutSample = sample;
-        vr->m_MagazineInteractionSyntheticClipOutStarted = std::chrono::steady_clock::now();
-        vr->m_Game->ClientCmd_Unrestricted(command.c_str());
-        Game::logMsg(
-            "[VR][MagazineInteraction][Audio] played synthetic clip-out sample=%s",
-            sample.c_str());
+        if (!MagazineInteractionPlaySyntheticSound(
+            vr,
+            sample,
+            vr->m_MagazineInteractionSyntheticClipOutSample,
+            vr->m_MagazineInteractionSyntheticClipOutStarted,
+            "clip-out"))
+        {
+            Game::logMsg(
+                "[VR][MagazineInteraction][Audio] failed to play synthetic clip-out sample=%s",
+                sample.c_str());
+        }
     }
 
     void MagazineInteractionPlayClipInSound(VR* vr)
@@ -1871,13 +1883,17 @@ namespace
             return;
         }
 
-        const std::string command = "playvol \"" + sample + "\" 1.000";
-        vr->m_MagazineInteractionSyntheticClipInSample = sample;
-        vr->m_MagazineInteractionSyntheticClipInStarted = std::chrono::steady_clock::now();
-        vr->m_Game->ClientCmd_Unrestricted(command.c_str());
-        Game::logMsg(
-            "[VR][MagazineInteraction][Audio] played synthetic clip-in sample=%s",
-            sample.c_str());
+        if (!MagazineInteractionPlaySyntheticSound(
+            vr,
+            sample,
+            vr->m_MagazineInteractionSyntheticClipInSample,
+            vr->m_MagazineInteractionSyntheticClipInStarted,
+            "clip-in"))
+        {
+            Game::logMsg(
+                "[VR][MagazineInteraction][Audio] failed to play synthetic clip-in sample=%s",
+                sample.c_str());
+        }
     }
 
     void MagazineInteractionPlayBoltSound(VR* vr, bool forward)
@@ -1902,8 +1918,7 @@ namespace
             : (!vr->m_MagazineInteractionCapturedBoltBackSample.empty()
                 ? vr->m_MagazineInteractionCapturedBoltBackSample
                 : MagazineInteractionBoltFallbackSoundSample(vr, false));
-        const std::string prepared = MagazineInteractionPrepareConsoleSoundSample(sample);
-        if (prepared.empty())
+        if (MagazineInteractionPrepareSoundSamplePath(sample).empty())
         {
             Game::logMsg(
                 "[VR][MagazineInteraction][Audio] no synthetic bolt-%s sample for model=%s weaponId=%d",
@@ -1913,26 +1928,24 @@ namespace
             return;
         }
 
-        const std::string command = "playvol \"" + prepared + "\" 1.000";
         if (forward)
         {
-            vr->m_MagazineInteractionSyntheticBoltForwardSample = prepared;
-            vr->m_MagazineInteractionSyntheticBoltForwardStarted = std::chrono::steady_clock::now();
+            MagazineInteractionPlaySyntheticSound(
+                vr,
+                sample,
+                vr->m_MagazineInteractionSyntheticBoltForwardSample,
+                vr->m_MagazineInteractionSyntheticBoltForwardStarted,
+                "bolt-forward");
         }
         else
         {
-            vr->m_MagazineInteractionSyntheticBoltBackSample = prepared;
-            vr->m_MagazineInteractionSyntheticBoltBackStarted = std::chrono::steady_clock::now();
+            MagazineInteractionPlaySyntheticSound(
+                vr,
+                sample,
+                vr->m_MagazineInteractionSyntheticBoltBackSample,
+                vr->m_MagazineInteractionSyntheticBoltBackStarted,
+                "bolt-back");
         }
-        vr->m_Game->ClientCmd_Unrestricted(command.c_str());
-        Game::logMsg(
-            "[VR][MagazineInteraction][Audio] played synthetic bolt-%s sample=%s source=%s",
-            forward ? "forward" : "back",
-            prepared.c_str(),
-            ((forward && !vr->m_MagazineInteractionCapturedBoltForwardSample.empty()) ||
-                (!forward && !vr->m_MagazineInteractionCapturedBoltBackSample.empty()))
-            ? "captured"
-            : "fallback");
     }
 
     const char* MagazineInteractionBlockedFireEmptySound(int weaponId)
@@ -2631,6 +2644,7 @@ void VR::CancelMagazineInteractionManual()
     m_MagazineInteractionShotgunLastInterruptedClip = -1;
     m_MagazineInteractionWeapon = nullptr;
     m_MagazineInteractionWeaponId = 0;
+    m_MagazineInteractionWeaponEntityIndex = -1;
     m_MagazineInteractionStartClip = -1;
     m_MagazineInteractionMagazineBoneIndex = -1;
     m_MagazineInteractionViewmodelEntityIndex = -1;
@@ -3287,6 +3301,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_MagazineInteractionShotgunStableCaptureModelLocal = {};
         m_MagazineInteractionWeapon = activeWeapon;
         m_MagazineInteractionWeaponId = static_cast<int>(activeWeaponId);
+        m_MagazineInteractionWeaponEntityIndex =
+            MagazineInteractionFindClientEntityIndex(m_Game, activeWeapon);
         m_MagazineInteractionStartClip = activeClip;
         m_MagazineInteractionMagazineBoneIndex = box.boneIndex;
         m_MagazineInteractionViewmodelEntityIndex = box.entityIndex;
@@ -4016,8 +4032,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         if (!m_MagazineInteractionReloadTriggered && (handPulled || magazinePulled))
         {
             m_MagazineInteractionOldMagazinePulled = true;
-            MagazineInteractionPlayClipOutSound(this);
             startImmediateReloadCommand("clip-out");
+            MagazineInteractionPlayClipOutSound(this);
             Game::logMsg(
                 "[VR][MagazineInteraction] old magazine pull threshold reached after clip-out handDistance=%.2f handThreshold=%.2f magazineDistance=%.2f magazineThreshold=%.2f",
                 handPullDistance,
@@ -4043,8 +4059,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             m_MagazineInteractionLeftHandHolding = false;
             m_MagazineInteractionOldMagazinePulled = true;
             m_MagazineInteractionFreshPickupBasisValid = false;
-            MagazineInteractionPlayClipOutSound(this);
             startImmediateReloadCommand("empty-clip-auto-eject");
+            MagazineInteractionPlayClipOutSound(this);
             Game::logMsg(
                 "[VR][MagazineInteraction] empty clip auto-ejected magazine; waiting for fresh magazine weaponId=%d clip=%d ent=%d bone=%d age=%.3fs cached=%d model=%s",
                 static_cast<int>(activeWeaponId),
@@ -4142,8 +4158,9 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
     }
     m_MagazineInteractionLeftHandPoseActive.store(1, std::memory_order_relaxed);
     Game::logMsg(
-        "[VR][MagazineInteraction] old magazine grabbed; froze viewmodel and hid native clip weaponId=%d clip=%d ent=%d bone=%d distance=%.2f padding=%.2f centerLocalOffset=(%.2f %.2f %.2f) model=%s",
+        "[VR][MagazineInteraction] old magazine grabbed; froze viewmodel and hid native clip weaponId=%d weaponEnt=%d clip=%d ent=%d bone=%d distance=%.2f padding=%.2f centerLocalOffset=(%.2f %.2f %.2f) model=%s",
         static_cast<int>(activeWeaponId),
+        m_MagazineInteractionWeaponEntityIndex,
         activeClip,
         box.entityIndex,
         box.boneIndex,
@@ -4524,6 +4541,49 @@ void VR::ReleaseVrHandsD3DResources()
 
 namespace
 {
+    int MagazineInteractionFindClientEntityIndex(Game* game, const void* entity)
+    {
+        if (!game || !game->m_ClientEntityList || !entity)
+            return -1;
+
+        int highestIndex = 0;
+#ifdef _MSC_VER
+        __try
+        {
+            highestIndex = game->m_ClientEntityList->GetHighestEntityIndex();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return -1;
+        }
+#else
+        highestIndex = game->m_ClientEntityList->GetHighestEntityIndex();
+#endif
+        if (highestIndex < 1)
+            return -1;
+
+        highestIndex = (std::min)(highestIndex, 4096);
+        for (int i = 1; i <= highestIndex; ++i)
+        {
+#ifdef _MSC_VER
+            __try
+            {
+                if (game->m_ClientEntityList->GetClientEntity(i) == entity)
+                    return i;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return -1;
+            }
+#else
+            if (game->m_ClientEntityList->GetClientEntity(i) == entity)
+                return i;
+#endif
+        }
+
+        return -1;
+    }
+
     bool MagazineInteractionSoundLooksWeaponRelated(const char* sample)
     {
         if (!sample || !*sample)
@@ -4718,6 +4778,79 @@ namespace
         return escaped;
     }
 
+    std::string MagazineInteractionPrepareSoundSamplePath(const std::string& rawSample)
+    {
+        size_t start = 0;
+        while (start < rawSample.size())
+        {
+            const char c = rawSample[start];
+            if (c == '*' || c == '#' || c == '@' || c == '>' || c == '<' ||
+                c == '^' || c == ')' || c == '}' || c == '$' || c == '?' || c == '!')
+            {
+                ++start;
+                continue;
+            }
+            break;
+        }
+
+        std::string sample = rawSample.substr(start);
+        if (sample.rfind("sound/", 0) == 0 || sample.rfind("sound\\", 0) == 0)
+            sample.erase(0, 6);
+
+        std::string cleaned;
+        cleaned.reserve(sample.size());
+        for (char c : sample)
+        {
+            if (c == '\r' || c == '\n' || c == ';' || c == '"')
+                continue;
+            cleaned.push_back(c);
+        }
+        return cleaned;
+    }
+
+    bool MagazineInteractionPlaySyntheticSound(
+        VR* vr,
+        const std::string& rawSample,
+        std::string& pendingSample,
+        std::chrono::steady_clock::time_point& pendingStarted,
+        const char* label)
+    {
+        if (!vr)
+            return false;
+
+        const std::string pathSample = MagazineInteractionPrepareSoundSamplePath(rawSample);
+        if (pathSample.empty())
+            return false;
+
+        if (vr->TryPlayGameSoundFileLocal(pathSample, 1.0f, nullptr))
+        {
+            pendingSample.clear();
+            pendingStarted = {};
+            Game::logMsg(
+                "[VR][MagazineInteraction][Audio] played local synthetic %s sample=%s",
+                label ? label : "sound",
+                pathSample.c_str());
+            return true;
+        }
+
+        if (!vr->m_Game)
+            return false;
+
+        const std::string prepared = MagazineInteractionPrepareConsoleSoundSample(rawSample);
+        if (prepared.empty())
+            return false;
+
+        pendingSample = prepared;
+        pendingStarted = std::chrono::steady_clock::now();
+        const std::string command = "playvol \"" + prepared + "\" 1.000";
+        vr->m_Game->ClientCmd_Unrestricted(command.c_str());
+        Game::logMsg(
+            "[VR][MagazineInteraction][Audio] played console synthetic %s sample=%s",
+            label ? label : "sound",
+            prepared.c_str());
+        return true;
+    }
+
     std::string MagazineInteractionNormalizeSoundForCompare(const std::string& rawSample)
     {
         return MagazineInteractionLowerAscii(MagazineInteractionPrepareConsoleSoundSample(rawSample));
@@ -4737,7 +4870,7 @@ namespace
 
         const float ageSeconds = std::chrono::duration<float>(
             now - pendingStarted).count();
-        if (ageSeconds < 0.0f || ageSeconds > 0.50f)
+        if (ageSeconds < 0.0f || ageSeconds > 0.12f)
         {
             pendingSample.clear();
             pendingStarted = {};
@@ -4794,9 +4927,16 @@ bool VR::CaptureMagazineInteractionSound(int entityIndex, const char* sample, fl
     const int localPlayerIndex = (m_Game->m_EngineClient != nullptr)
         ? m_Game->m_EngineClient->GetLocalPlayer()
         : -1;
+    const bool fromConsoleOrWorld = entityIndex <= 0;
     const bool fromViewmodel = m_MagazineInteractionViewmodelEntityIndex > 0 &&
         entityIndex == m_MagazineInteractionViewmodelEntityIndex;
-    const bool fromLocalWeaponPath = (entityIndex == -1 || entityIndex == localPlayerIndex) &&
+    if (m_MagazineInteractionWeaponEntityIndex <= 0 && m_MagazineInteractionWeapon)
+        m_MagazineInteractionWeaponEntityIndex =
+            MagazineInteractionFindClientEntityIndex(m_Game, m_MagazineInteractionWeapon);
+    const bool fromActiveWeapon = m_MagazineInteractionWeaponEntityIndex > 0 &&
+        entityIndex == m_MagazineInteractionWeaponEntityIndex;
+    const bool fromLocalWeaponPath =
+        (fromConsoleOrWorld || entityIndex == localPlayerIndex || fromActiveWeapon) &&
         MagazineInteractionSoundLooksWeaponRelated(sample);
     const bool fromShotgunReloadPath =
         m_MagazineInteractionShotgunShellMode &&
@@ -4805,7 +4945,7 @@ bool VR::CaptureMagazineInteractionSound(int entityIndex, const char* sample, fl
         return false;
 
     const auto now = std::chrono::steady_clock::now();
-    if (MagazineInteractionShouldLetSyntheticSoundPlay(
+    if (fromConsoleOrWorld && MagazineInteractionShouldLetSyntheticSoundPlay(
         m_MagazineInteractionSyntheticClipOutSample,
         m_MagazineInteractionSyntheticClipOutStarted,
         sample,
@@ -4816,7 +4956,7 @@ bool VR::CaptureMagazineInteractionSound(int entityIndex, const char* sample, fl
             sample);
         return false;
     }
-    if (MagazineInteractionShouldLetSyntheticSoundPlay(
+    if (fromConsoleOrWorld && MagazineInteractionShouldLetSyntheticSoundPlay(
         m_MagazineInteractionSyntheticClipInSample,
         m_MagazineInteractionSyntheticClipInStarted,
         sample,
@@ -4827,7 +4967,7 @@ bool VR::CaptureMagazineInteractionSound(int entityIndex, const char* sample, fl
             sample);
         return false;
     }
-    if (MagazineInteractionShouldLetSyntheticSoundPlay(
+    if (fromConsoleOrWorld && MagazineInteractionShouldLetSyntheticSoundPlay(
         m_MagazineInteractionSyntheticBoltBackSample,
         m_MagazineInteractionSyntheticBoltBackStarted,
         sample,
@@ -4838,7 +4978,7 @@ bool VR::CaptureMagazineInteractionSound(int entityIndex, const char* sample, fl
             sample);
         return false;
     }
-    if (MagazineInteractionShouldLetSyntheticSoundPlay(
+    if (fromConsoleOrWorld && MagazineInteractionShouldLetSyntheticSoundPlay(
         m_MagazineInteractionSyntheticBoltForwardSample,
         m_MagazineInteractionSyntheticBoltForwardStarted,
         sample,

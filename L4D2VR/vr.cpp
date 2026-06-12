@@ -6043,6 +6043,18 @@ bool VR::TryPlayKillSoundSpec(const std::string& rawSpec, float baseVolume, cons
     return ::PlaySoundA(spec.c_str(), nullptr, SND_ALIAS | SND_ASYNC | SND_NODEFAULT) != FALSE;
 }
 
+bool VR::TryPlayGameSoundFileLocal(const std::string& soundPath, float baseVolume, const Vector* worldPos)
+{
+    const std::string resolvedPath = ResolveGameSoundFilePath(soundPath);
+    if (resolvedPath.empty())
+        return false;
+
+    int leftVolume = 1000;
+    int rightVolume = 1000;
+    ComputeFeedbackSoundStereoVolumes(worldPos, baseVolume, leftVolume, rightVolume);
+    return EnqueueFeedbackSoundPlayback(resolvedPath, leftVolume, rightVolume, false);
+}
+
 void VR::EnsureFeedbackSoundWorkerThread()
 {
     bool expected = false;
