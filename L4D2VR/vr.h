@@ -1106,6 +1106,7 @@ public:
 
 	// Debug overlay: identify the current weapon viewmodel's magazine bone and draw a solid box over it.
 	bool m_MagazineBoxDebugEnabled = false;
+	bool m_ViewmodelBoneLabelsEnabled = false;
 	Vector m_MagazineBoxDebugFallbackHalfExtentsMeters = { 0.025f, 0.095f, 0.018f };
 	Vector m_MagazineBoxDebugPaddingMeters = { 0.002f, 0.002f, 0.002f };
 	// Independent magazine interaction prototype. It consumes the current weapon magazine OBB and
@@ -1167,6 +1168,9 @@ public:
 	std::chrono::steady_clock::time_point m_MagazineInteractionReloadCommandHoldUntil{};
 	bool m_MagazineInteractionSuppressLeftInputUntilRelease = false;
 	bool m_MagazineInteractionOldMagazinePulled = false;
+	bool m_MagazineInteractionOldMagazineContactActive = false;
+	bool m_MagazineInteractionFreshMagazineContactActive = false;
+	bool m_MagazineInteractionBoltContactActive = false;
 	bool m_MagazineInteractionShotgunShellMode = false;
 	bool m_MagazineInteractionShotgunServerReloadAbortPending = false;
 	bool m_MagazineInteractionShotgunDirectShellCommitPending = false;
@@ -1907,6 +1911,13 @@ public:
 		std::chrono::steady_clock::time_point stableSince{};
 	};
 
+	struct ProjectedViewmodelBoneLabel
+	{
+		Vector worldPos = { 0,0,0 };
+		std::string label;
+		bool hasName = false;
+	};
+
 	struct ProjectedSpecialInfectedArrow
 	{
 		Vector origin = { 0,0,0 };
@@ -2635,6 +2646,8 @@ public:
 	mutable std::recursive_mutex m_ItemLabelTextureCacheMutex{};
 	mutable std::mutex m_QueuedProjectedItemLabelMutex{};
 	std::array<std::vector<QueuedProjectedItemLabelDraw>, 2> m_QueuedProjectedItemLabelEyes{};
+	mutable std::mutex m_ViewmodelBoneLabelMutex{};
+	std::vector<ProjectedViewmodelBoneLabel> m_ViewmodelBoneLabels{};
 	mutable std::mutex m_ProjectedSpecialInfectedArrowMutex;
 	std::unordered_map<int, ProjectedSpecialInfectedArrow> m_ProjectedSpecialInfectedArrows{};
 	int m_AimLineWarningColorR = 255;

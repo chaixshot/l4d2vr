@@ -82,7 +82,10 @@ VS_OUTPUT main(VS_INPUT input)
     output.uv = input.uv;
     float rawLight = (gLightDirectionAmbient.w +
         max(dot(worldNormal, -gLightDirectionAmbient.xyz), 0.0) * 0.62) * gWorldNormalRows[2].w;
-    output.light = max(saturate(rawLight), 0.22);
+    float visibleLight = saturate(rawLight);
+    float sceneScale = saturate(gWorldNormalRows[2].w);
+    float rescue = 0.16 * sqrt(sceneScale) * saturate((0.18 - visibleLight) / 0.18);
+    output.light = saturate(visibleLight + rescue);
     return output;
 }
 )HLSL";

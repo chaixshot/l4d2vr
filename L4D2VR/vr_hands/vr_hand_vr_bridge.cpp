@@ -2655,6 +2655,9 @@ void VR::CancelMagazineInteractionManual()
     m_MagazineInteractionReloadCommandIssued = false;
     m_MagazineInteractionReloadCommandHoldUntil = {};
     m_MagazineInteractionOldMagazinePulled = false;
+    m_MagazineInteractionOldMagazineContactActive = false;
+    m_MagazineInteractionFreshMagazineContactActive = false;
+    m_MagazineInteractionBoltContactActive = false;
     m_MagazineInteractionShotgunShellMode = false;
     m_MagazineInteractionShotgunServerReloadAbortPending = false;
     m_MagazineInteractionShotgunShellsLoadedThisSession = 0;
@@ -2778,6 +2781,59 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_MagazineInteractionReloadCommandHoldUntil = {};
         QueueMagazineInteractionShotgunServerReloadAbort(reason);
         m_Game->ClientCmd_Unrestricted("-attack");
+    };
+
+    auto triggerMagazineInteractionHapticForHand = [&](
+        bool physicalLeftHand,
+        float durationSeconds,
+        float frequency,
+        float amplitude,
+        int priority = 2)
+    {
+        TriggerPhysicalHandHapticPulse(
+            physicalLeftHand,
+            durationSeconds,
+            frequency,
+            amplitude,
+            priority);
+    };
+
+    auto triggerMagazineInteractionHaptic = [&](float durationSeconds, float frequency, float amplitude, int priority = 2)
+    {
+        triggerMagazineInteractionHapticForHand(
+            magazineInteractionPhysicalLeftHand,
+            durationSeconds,
+            frequency,
+            amplitude,
+            priority);
+    };
+
+    auto triggerMagazineInteractionWeaponHandHaptic = [&](float durationSeconds, float frequency, float amplitude, int priority = 2)
+    {
+        triggerMagazineInteractionHapticForHand(
+            IsGameplayHandLeftPhysical(false),
+            durationSeconds,
+            frequency,
+            amplitude,
+            priority);
+    };
+
+    auto triggerMagazineInteractionBothHandsHaptic = [&](float durationSeconds, float frequency, float amplitude, int priority = 2)
+    {
+        triggerMagazineInteractionHapticForHand(true, durationSeconds, frequency, amplitude, priority);
+        triggerMagazineInteractionHapticForHand(false, durationSeconds, frequency, amplitude, priority);
+    };
+
+    auto updateMagazineInteractionContactHaptic = [&](
+        bool& contactActive,
+        bool touching,
+        float durationSeconds,
+        float frequency,
+        float amplitude)
+    {
+        if (touching && !contactActive)
+            triggerMagazineInteractionHaptic(durationSeconds, frequency, amplitude, 2);
+        contactActive = touching;
     };
 
     auto setDetachedMagazineWorld = [&](const VrHandMatrix4& world)
@@ -3094,6 +3150,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_MagazineInteractionBoltGrabRequiresGripRelease = leftGripDown;
         m_MagazineInteractionBoltReachedRear = false;
         m_MagazineInteractionBoltPullAxisSignLocked = false;
+        m_MagazineInteractionBoltContactActive = false;
         m_MagazineInteractionBoltStageBeforeBackendReloadComplete = backendReloadStillPending;
         m_MagazineInteractionBoltCompletedBeforeBackendReload = false;
         m_MagazineInteractionBoltStageStarted = now;
@@ -3136,7 +3193,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
     {
         setBoltPullDistance(0.0f);
         MagazineInteractionPlayBoltSound(this, true);
-        TriggerPhysicalHandHapticPulse(magazineInteractionPhysicalLeftHand, 0.030f, 95.0f, 0.45f, 2);
+        triggerMagazineInteractionWeaponHandHaptic(0.030f, 95.0f, 0.45f, 2);
         if (m_MagazineInteractionBoltStageBeforeBackendReloadComplete)
         {
             m_MagazineInteractionState = MagazineInteractionManualState::WaitingForBackendReload;
@@ -3293,6 +3350,9 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_MagazineInteractionReloadCommandHoldUntil = {};
         m_MagazineInteractionSuppressLeftInputUntilRelease = false;
         m_MagazineInteractionOldMagazinePulled = false;
+        m_MagazineInteractionOldMagazineContactActive = false;
+        m_MagazineInteractionFreshMagazineContactActive = false;
+        m_MagazineInteractionBoltContactActive = false;
         m_MagazineInteractionShotgunShellMode = MagazineInteractionWeaponUsesShotgunShells(activeWeaponId);
         m_MagazineInteractionShotgunServerReloadAbortPending = false;
         m_MagazineInteractionShotgunShellsLoadedThisSession = 0;
@@ -3616,6 +3676,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
 
         if (!m_MagazineInteractionBoltRestValid)
         {
+            m_MagazineInteractionBoltContactActive = false;
             const float elapsed = std::chrono::duration<float>(now - m_MagazineInteractionBoltStageStarted).count();
             if (elapsed >= 2.0f)
             {
@@ -3628,16 +3689,24 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             return false;
         }
 
+        const float grabDistance = MagazineInteractionNearestLeftHandProbeDistanceSourceUnits(
+            m_MagazineInteractionBoltRestBox,
+            m_LeftControllerPosAbs,
+            m_LeftControllerAngAbs,
+            m_VRScale,
+            this);
+        const float grabRange = std::max(0.0f, m_MagazineInteractionBoltGrabPaddingMeters) * m_VRScale;
+        const bool touchingBolt = grabDistance <= grabRange;
+        updateMagazineInteractionContactHaptic(
+            m_MagazineInteractionBoltContactActive,
+            touchingBolt,
+            0.012f,
+            150.0f,
+            0.22f);
+
         if (leftGripDown)
         {
-            const float grabDistance = MagazineInteractionNearestLeftHandProbeDistanceSourceUnits(
-                m_MagazineInteractionBoltRestBox,
-                m_LeftControllerPosAbs,
-                m_LeftControllerAngAbs,
-                m_VRScale,
-                this);
-            const float grabRange = std::max(0.0f, m_MagazineInteractionBoltGrabPaddingMeters) * m_VRScale;
-            if (grabDistance <= grabRange)
+            if (touchingBolt)
             {
                 m_MagazineInteractionState = MagazineInteractionManualState::HoldingBolt;
                 m_MagazineInteractionLeftHandHolding = true;
@@ -3679,6 +3748,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             m_MagazineInteractionState = MagazineInteractionManualState::WaitingForBoltGrab;
             m_MagazineInteractionLeftHandHolding = false;
             m_MagazineInteractionBoltGrabRequiresGripRelease = leftGripDown;
+            m_MagazineInteractionBoltContactActive = false;
             m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
             return false;
         }
@@ -3702,6 +3772,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 m_MagazineInteractionLeftHandHolding = false;
                 m_MagazineInteractionBoltGrabRequiresGripRelease = false;
                 m_MagazineInteractionBoltGrabbedAt = {};
+                m_MagazineInteractionBoltContactActive = false;
                 m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
                 Game::logMsg("[VR][MagazineInteraction] bolt released before rear threshold; bolt returned to rest");
             }
@@ -3740,7 +3811,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         {
             m_MagazineInteractionBoltReachedRear = true;
             MagazineInteractionPlayBoltSound(this, false);
-            TriggerPhysicalHandHapticPulse(magazineInteractionPhysicalLeftHand, 0.024f, 110.0f, 0.38f, 2);
+            triggerMagazineInteractionHaptic(0.024f, 110.0f, 0.38f, 2);
             Game::logMsg(
                 "[VR][MagazineInteraction] bolt rear threshold reached pull=%.2f required=%.2f handProjected=%.2f",
                 m_MagazineInteractionBoltPullDistance,
@@ -3758,6 +3829,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
 
     if (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine)
     {
+        m_MagazineInteractionOldMagazineContactActive = false;
         m_MagazineInteractionLeftHandHolding = false;
         m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
         const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, activeClip);
@@ -3810,6 +3882,29 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         {
             setDetachedMagazineWorld(pickupMagazineWorld);
         }
+        else
+        {
+            m_MagazineInteractionFreshMagazineContactActive = false;
+        }
+
+        float freshGrabDistance = 999999.0f;
+        const float freshGrabRange =
+            std::max(0.0f, m_MagazineInteractionFreshMagazineGrabRangeMeters) * m_VRScale;
+        if (hasPickupBox)
+        {
+            freshGrabDistance = MagazineInteractionNearestLeftHandProbeDistanceSourceUnits(
+                freshGrabBox,
+                m_LeftControllerPosAbs,
+                m_LeftControllerAngAbs,
+                m_VRScale,
+                this);
+            updateMagazineInteractionContactHaptic(
+                m_MagazineInteractionFreshMagazineContactActive,
+                freshGrabDistance <= freshGrabRange,
+                0.012f,
+                150.0f,
+                0.22f);
+        }
 
         if (leftGripDown && leftGripJustPressed)
         {
@@ -3818,19 +3913,12 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 return reloadCommandPending();
             }
 
-            const float grabDistance = MagazineInteractionNearestLeftHandProbeDistanceSourceUnits(
-                freshGrabBox,
-                m_LeftControllerPosAbs,
-                m_LeftControllerAngAbs,
-                m_VRScale,
-                this);
-            const float grabRange = std::max(0.0f, m_MagazineInteractionFreshMagazineGrabRangeMeters) * m_VRScale;
-            if (grabDistance > grabRange)
+            if (freshGrabDistance > freshGrabRange)
             {
                 Game::logMsg(
                     "[VR][MagazineInteraction] fresh magazine grab ignored; left hand outside fresh magazine box distance=%.2f range=%.2f",
-                    grabDistance,
-                    grabRange);
+                    freshGrabDistance,
+                    freshGrabRange);
                 return reloadCommandPending();
             }
 
@@ -3864,8 +3952,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             setDetachedMagazineWorld(buildFreshHeldMagazineWorldFromLeftHand());
             Game::logMsg(
                 "[VR][MagazineInteraction] fresh magazine grabbed from fresh magazine box distance=%.2f range=%.2f relationCaptured=%d clipOrigin=(%.2f %.2f %.2f) visibleCenter=(%.2f %.2f %.2f) centerLocalOffset=(%.2f %.2f %.2f) centerLocal=(%.2f %.2f %.2f) model=%s; move it into MagazineSocket",
-                grabDistance,
-                grabRange,
+                freshGrabDistance,
+                freshGrabRange,
                 relationCaptured ? 1 : 0,
                 freshClipOrigin.x,
                 freshClipOrigin.y,
@@ -3949,11 +4037,13 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                     return false;
                 }
 
-                MagazineInteractionPlayClipInSound(this);
                 const bool wroteClientClip =
                     MagazineInteractionTryWriteValue<int>(activeWeapon, VR::kClip1Offset, targetClip);
                 if (wroteClientClip)
                 {
+                    m_MagazineInteractionFreshMagazineContactActive = false;
+                    triggerMagazineInteractionBothHandsHaptic(0.026f, 105.0f, 0.42f, 2);
+                    MagazineInteractionPlayClipInSound(this);
                     const int targetReserve = reserveKnown ? std::max(0, reserve - 1) : -1;
                     if (reserveKnown)
                     {
@@ -4007,6 +4097,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                     return false;
                 }
             }
+            m_MagazineInteractionFreshMagazineContactActive = false;
+            triggerMagazineInteractionBothHandsHaptic(0.026f, 105.0f, 0.42f, 2);
             if (!m_MagazineInteractionShotgunShellMode)
                 MagazineInteractionPlayClipInSound(this);
             if (m_MagazineInteractionShotgunShellMode)
@@ -4076,8 +4168,10 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         if (!m_MagazineInteractionReloadTriggered && (handPulled || magazinePulled))
         {
             m_MagazineInteractionOldMagazinePulled = true;
+            m_MagazineInteractionOldMagazineContactActive = false;
             startImmediateReloadCommand("clip-out");
             MagazineInteractionPlayClipOutSound(this);
+            triggerMagazineInteractionBothHandsHaptic(0.026f, 95.0f, 0.42f, 2);
             Game::logMsg(
                 "[VR][MagazineInteraction] old magazine pull threshold reached after clip-out handDistance=%.2f handThreshold=%.2f magazineDistance=%.2f magazineThreshold=%.2f",
                 handPullDistance,
@@ -4118,15 +4212,19 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         }
     }
 
-    if (!leftGripDown)
-        return false;
+    m_MagazineInteractionFreshMagazineContactActive = false;
+    m_MagazineInteractionBoltContactActive = false;
 
     if (!MagazineInteractionWeaponUsesDetachableMagazine(activeWeaponId))
+    {
+        m_MagazineInteractionOldMagazineContactActive = false;
         return false;
+    }
 
     const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, activeClip);
     if (maxClip > 0 && activeClip >= maxClip)
     {
+        m_MagazineInteractionOldMagazineContactActive = false;
         if (leftGripJustPressed)
         {
             Game::logMsg(
@@ -4140,11 +4238,17 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
 
     MagazineInteractionBoxSnapshot box{};
     if (!GetMagazineInteractionBox(box))
+    {
+        m_MagazineInteractionOldMagazineContactActive = false;
         return false;
+    }
 
     const float ageSeconds = std::chrono::duration<float>(now - box.publishedAt).count();
     if (ageSeconds > std::max(0.02f, m_MagazineInteractionStaleSeconds))
+    {
+        m_MagazineInteractionOldMagazineContactActive = false;
         return false;
+    }
 
     const float grabPadding = std::max(0.0f, m_MagazineInteractionGrabPaddingMeters) * m_VRScale;
     const float distance = MagazineInteractionNearestLeftHandProbeDistanceSourceUnits(
@@ -4153,7 +4257,18 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_LeftControllerAngAbs,
         m_VRScale,
         this);
-    if (distance > grabPadding)
+    const bool touchingOldMagazine = distance <= grabPadding;
+    updateMagazineInteractionContactHaptic(
+        m_MagazineInteractionOldMagazineContactActive,
+        touchingOldMagazine,
+        0.012f,
+        150.0f,
+        0.22f);
+
+    if (!leftGripDown)
+        return false;
+
+    if (!touchingOldMagazine)
     {
         static std::chrono::steady_clock::time_point s_lastMissLog{};
         if (s_lastMissLog.time_since_epoch().count() == 0 ||

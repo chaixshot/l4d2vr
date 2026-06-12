@@ -9041,27 +9041,49 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
     }
 
     const auto now = std::chrono::steady_clock::now();
-    if (!m_ItemModelLabelEnabled || !m_Game || !m_Game->m_EngineClient || !m_Game->m_EngineClient->IsInGame())
+    std::vector<ProjectedViewmodelBoneLabel> viewmodelBoneLabels;
+    if (m_ViewmodelBoneLabelsEnabled)
     {
-        m_ProjectedItemLabels.clear();
+        std::lock_guard<std::mutex> lock(m_ViewmodelBoneLabelMutex);
+        viewmodelBoneLabels = m_ViewmodelBoneLabels;
+    }
+    else
+    {
+        std::lock_guard<std::mutex> lock(m_ViewmodelBoneLabelMutex);
+        m_ViewmodelBoneLabels.clear();
+    }
+
+    const bool itemLabelsActive = m_ItemModelLabelEnabled;
+    const bool viewmodelBoneLabelsActive = m_ViewmodelBoneLabelsEnabled && !viewmodelBoneLabels.empty();
+    if (!m_Game || !m_Game->m_EngineClient || !m_Game->m_EngineClient->IsInGame() ||
+        (!itemLabelsActive && !viewmodelBoneLabelsActive))
+    {
+        if (!itemLabelsActive)
+            m_ProjectedItemLabels.clear();
         ClearQueuedProjectedItemLabels();
         return;
     }
 
+    if (!itemLabelsActive)
+        m_ProjectedItemLabels.clear();
+
     if (!queued)
         ClearQueuedProjectedItemLabels();
 
-    const float holdSeconds = GetProjectedItemLabelHoldSeconds(this);
-    for (auto it = m_ProjectedItemLabels.begin(); it != m_ProjectedItemLabels.end();)
+    if (itemLabelsActive)
     {
-        const float ageSeconds = std::chrono::duration<float>(now - it->second.lastSeen).count();
-        if (ageSeconds < 0.0f || ageSeconds > holdSeconds)
-            it = m_ProjectedItemLabels.erase(it);
-        else
-            ++it;
+        const float holdSeconds = GetProjectedItemLabelHoldSeconds(this);
+        for (auto it = m_ProjectedItemLabels.begin(); it != m_ProjectedItemLabels.end();)
+        {
+            const float ageSeconds = std::chrono::duration<float>(now - it->second.lastSeen).count();
+            if (ageSeconds < 0.0f || ageSeconds > holdSeconds)
+                it = m_ProjectedItemLabels.erase(it);
+            else
+                ++it;
+        }
     }
 
-    if (m_ProjectedItemLabels.empty())
+    if (m_ProjectedItemLabels.empty() && !viewmodelBoneLabelsActive)
     {
         clearQueuedEye();
         return;
@@ -9107,70 +9129,106 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
         int screenY = 0;
         float depth = 0.0f;
         const ProjectedItemLabel* label = nullptr;
+        std::string directText;
+        Rgba directColor{ 255, 255, 255, 255 };
+        float textScale = 1.0f;
+        bool direct = false;
     };
 
     std::vector<VisibleProjectedItemLabel> visibleLabels;
-    visibleLabels.reserve(m_ProjectedItemLabels.size());
+    visibleLabels.reserve(m_ProjectedItemLabels.size() + viewmodelBoneLabels.size());
 
-    for (const auto& pair : m_ProjectedItemLabels)
+    if (itemLabelsActive)
     {
-        const ProjectedItemLabel& projected = pair.second;
-        if (ShouldSuppressProjectedItemLabelForMotion(projected, now))
-            continue;
-
-        if (ShouldSuppressProjectedItemLabelNearPlayer(this, projected.worldPos))
-            continue;
-
-        const float maxDistance = std::max(0.0f, m_ItemModelLabelMaxDistance);
-        if (maxDistance > 0.0f)
+        for (const auto& pair : m_ProjectedItemLabels)
         {
-            const Vector deltaFromView = projected.worldPos - view.origin;
-            if (deltaFromView.LengthSqr() > (maxDistance * maxDistance))
+            const ProjectedItemLabel& projected = pair.second;
+            if (ShouldSuppressProjectedItemLabelForMotion(projected, now))
                 continue;
-        }
 
-        float screenX = 0.0f;
-        float screenY = 0.0f;
-        float depth = 0.0f;
-        if (!VR_ProjectAimLinePointToView(view, forward, right, up, projected.worldPos, tanHalfFovX, tanHalfFovY, screenX, screenY, depth))
-            continue;
-        if (depth <= std::max(view.zNear, 1.0f))
-            continue;
+            if (ShouldSuppressProjectedItemLabelNearPlayer(this, projected.worldPos))
+                continue;
 
-        VisibleProjectedItemLabel candidate{
-            static_cast<int>(std::lround(screenX)),
-            static_cast<int>(std::lround(screenY)),
-            depth,
-            &projected
-        };
-
-        bool suppressedDuplicate = false;
-        if (projected.category == ItemModelLabelCategory::Firearm ||
-            projected.category == ItemModelLabelCategory::Melee)
-        {
-            for (VisibleProjectedItemLabel& existing : visibleLabels)
+            const float maxDistance = std::max(0.0f, m_ItemModelLabelMaxDistance);
+            if (maxDistance > 0.0f)
             {
-                if (!existing.label || existing.label->category != projected.category)
+                const Vector deltaFromView = projected.worldPos - view.origin;
+                if (deltaFromView.LengthSqr() > (maxDistance * maxDistance))
                     continue;
-
-                const Vector delta = existing.label->worldPos - projected.worldPos;
-                const float horizontalDistSq = delta.x * delta.x + delta.y * delta.y;
-                if (horizontalDistSq > (18.0f * 18.0f) || std::fabs(delta.z) > 28.0f)
-                    continue;
-
-                if (projected.worldPos.z > existing.label->worldPos.z + 0.25f ||
-                    (std::fabs(projected.worldPos.z - existing.label->worldPos.z) <= 0.25f && candidate.depth < existing.depth))
-                {
-                    existing = candidate;
-                }
-
-                suppressedDuplicate = true;
-                break;
             }
-        }
 
-        if (!suppressedDuplicate)
-            visibleLabels.push_back(candidate);
+            float screenX = 0.0f;
+            float screenY = 0.0f;
+            float depth = 0.0f;
+            if (!VR_ProjectAimLinePointToView(view, forward, right, up, projected.worldPos, tanHalfFovX, tanHalfFovY, screenX, screenY, depth))
+                continue;
+            if (depth <= std::max(view.zNear, 1.0f))
+                continue;
+
+            VisibleProjectedItemLabel candidate{
+                static_cast<int>(std::lround(screenX)),
+                static_cast<int>(std::lround(screenY)),
+                depth,
+                &projected
+            };
+
+            bool suppressedDuplicate = false;
+            if (projected.category == ItemModelLabelCategory::Firearm ||
+                projected.category == ItemModelLabelCategory::Melee)
+            {
+                for (VisibleProjectedItemLabel& existing : visibleLabels)
+                {
+                    if (existing.direct || !existing.label || existing.label->category != projected.category)
+                        continue;
+
+                    const Vector delta = existing.label->worldPos - projected.worldPos;
+                    const float horizontalDistSq = delta.x * delta.x + delta.y * delta.y;
+                    if (horizontalDistSq > (18.0f * 18.0f) || std::fabs(delta.z) > 28.0f)
+                        continue;
+
+                    if (projected.worldPos.z > existing.label->worldPos.z + 0.25f ||
+                        (std::fabs(projected.worldPos.z - existing.label->worldPos.z) <= 0.25f && candidate.depth < existing.depth))
+                    {
+                        existing = candidate;
+                    }
+
+                    suppressedDuplicate = true;
+                    break;
+                }
+            }
+
+            if (!suppressedDuplicate)
+                visibleLabels.push_back(candidate);
+        }
+    }
+
+    if (viewmodelBoneLabelsActive)
+    {
+        for (const ProjectedViewmodelBoneLabel& projected : viewmodelBoneLabels)
+        {
+            if (projected.label.empty())
+                continue;
+
+            float screenX = 0.0f;
+            float screenY = 0.0f;
+            float depth = 0.0f;
+            if (!VR_ProjectAimLinePointToView(view, forward, right, up, projected.worldPos, tanHalfFovX, tanHalfFovY, screenX, screenY, depth))
+                continue;
+            if (depth <= 0.25f)
+                continue;
+
+            VisibleProjectedItemLabel candidate{};
+            candidate.screenX = static_cast<int>(std::lround(screenX));
+            candidate.screenY = static_cast<int>(std::lround(screenY));
+            candidate.depth = depth;
+            candidate.directText = projected.label;
+            candidate.directColor = projected.hasName
+                ? Rgba{ 255, 216, 64, 255 }
+                : Rgba{ 80, 220, 255, 255 };
+            candidate.textScale = 0.82f;
+            candidate.direct = true;
+            visibleLabels.push_back(std::move(candidate));
+        }
     }
 
     if (visibleLabels.empty())
@@ -9187,7 +9245,9 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
             return lhs.depth < rhs.depth;
         });
 
-    const size_t maxProjectedItemLabelsPerEye = static_cast<size_t>(std::clamp(m_ItemModelLabelMaxVisiblePerEye, 1, 64));
+    const size_t maxProjectedItemLabelsPerEye = viewmodelBoneLabelsActive
+        ? static_cast<size_t>(96)
+        : static_cast<size_t>(std::clamp(m_ItemModelLabelMaxVisiblePerEye, 1, 64));
     if (visibleLabels.size() > maxProjectedItemLabelsPerEye)
         visibleLabels.resize(maxProjectedItemLabelsPerEye);
 
@@ -9205,24 +9265,30 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
         queuedDraws.reserve(visibleLabels.size());
         for (const VisibleProjectedItemLabel& visible : visibleLabels)
         {
-            if (!visible.label)
+            if (!visible.direct && !visible.label)
                 continue;
 
-            Rgba color{};
-            if (!GetProjectedItemLabelColor(visible.label->category, color))
+            const std::string& text = visible.direct ? visible.directText : visible.label->label;
+            if (text.empty())
                 continue;
 
-            const float worldTextHeight = 9.0f * std::clamp(m_ItemModelLabelTextScale, 0.25f, 4.0f);
+            Rgba color = visible.direct ? visible.directColor : Rgba{};
+            if (!visible.direct && !GetProjectedItemLabelColor(visible.label->category, color))
+                continue;
+
+            const float textScale = visible.direct
+                ? std::clamp(visible.textScale, 0.25f, 4.0f)
+                : std::clamp(m_ItemModelLabelTextScale, 0.25f, 4.0f);
+            const float worldTextHeight = (visible.direct ? 6.0f : 9.0f) * textScale;
             int fontPx = static_cast<int>(std::lround((worldTextHeight / (visible.depth * tanHalfFovY * 2.0f)) * static_cast<float>(screenHeight)));
-            const bool hasNonAscii = ContainsNonAscii(visible.label->label.c_str());
-            const float textScale = std::clamp(m_ItemModelLabelTextScale, 0.25f, 4.0f);
+            const bool hasNonAscii = ContainsNonAscii(text.c_str());
             const int minFontPx = (std::max)(6, static_cast<int>(std::lround((hasNonAscii ? 12.0f : 10.0f) * textScale)));
             const int maxFontPx = (std::max)(minFontPx, static_cast<int>(std::lround((hasNonAscii ? 28.0f : 24.0f) * textScale)));
             fontPx = std::clamp(fontPx, minFontPx, maxFontPx);
             fontPx = QuantizeProjectedItemLabelFontPx(fontPx);
 
             QueuedProjectedItemLabelDraw draw{};
-            draw.text = visible.label->label;
+            draw.text = text;
             draw.screenX = visible.screenX;
             draw.screenY = visible.screenY;
             draw.fontPx = fontPx;
@@ -9292,17 +9358,23 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
 
     for (const VisibleProjectedItemLabel& visible : visibleLabels)
     {
-        if (!visible.label)
+        if (!visible.direct && !visible.label)
             continue;
 
-        Rgba color{};
-        if (!GetProjectedItemLabelColor(visible.label->category, color))
+        const std::string& text = visible.direct ? visible.directText : visible.label->label;
+        if (text.empty())
             continue;
 
-        const float worldTextHeight = 9.0f * std::clamp(m_ItemModelLabelTextScale, 0.25f, 4.0f);
+        Rgba color = visible.direct ? visible.directColor : Rgba{};
+        if (!visible.direct && !GetProjectedItemLabelColor(visible.label->category, color))
+            continue;
+
+        const float textScale = visible.direct
+            ? std::clamp(visible.textScale, 0.25f, 4.0f)
+            : std::clamp(m_ItemModelLabelTextScale, 0.25f, 4.0f);
+        const float worldTextHeight = (visible.direct ? 6.0f : 9.0f) * textScale;
         int fontPx = static_cast<int>(std::lround((worldTextHeight / (visible.depth * tanHalfFovY * 2.0f)) * static_cast<float>(screenHeight)));
-        const bool hasNonAscii = ContainsNonAscii(visible.label->label.c_str());
-        const float textScale = std::clamp(m_ItemModelLabelTextScale, 0.25f, 4.0f);
+        const bool hasNonAscii = ContainsNonAscii(text.c_str());
         const int minFontPx = (std::max)(6, static_cast<int>(std::lround((hasNonAscii ? 12.0f : 10.0f) * textScale)));
         const int maxFontPx = (std::max)(minFontPx, static_cast<int>(std::lround((hasNonAscii ? 28.0f : 24.0f) * textScale)));
         fontPx = std::clamp(fontPx, minFontPx, maxFontPx);
@@ -9312,7 +9384,7 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
         int texH = 0;
         IDirect3DTexture9* texture = GetOrCreateProjectedItemLabelTexture(
             device,
-            visible.label->label,
+            text,
             fontPx,
             static_cast<int>(color.r),
             static_cast<int>(color.g),

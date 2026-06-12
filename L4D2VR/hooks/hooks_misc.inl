@@ -462,6 +462,7 @@ namespace
         const std::string& modelName,
         int entityIndex,
         const char* className,
+        const void* customBoneToWorld,
         bool hasCustomBones)
     {
         if (!drawState || modelName.empty())
@@ -535,6 +536,303 @@ namespace
             chunk += item;
         }
         flushChunk();
+
+        if (!customBoneToWorld)
+            return;
+
+        const auto* sourceBones = reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(customBoneToWorld);
+        std::string poseChunk;
+        int poseChunkIndex = 0;
+        auto flushPoseChunk = [&]()
+            {
+                if (poseChunk.empty())
+                    return;
+                Game::logMsg("[VR][Hands][VMProbe] bonePose[%d] model=\"%s\" %s", poseChunkIndex++, modelName.c_str(), poseChunk.c_str());
+                poseChunk.clear();
+            };
+
+        for (int i = 0; i < numBones; ++i)
+        {
+            vr_vm_stabilize::Mat3x4 boneWorld{};
+            if (!vr_vm_stabilize::SafeRead(sourceBones + i, boneWorld))
+                continue;
+
+            const Vector origin = vr_vm_stabilize::GetOrigin(boneWorld);
+            const char* boneName =
+                (i < static_cast<int>(boneNames.size()) && !boneNames[static_cast<size_t>(i)].empty())
+                ? boneNames[static_cast<size_t>(i)].c_str()
+                : "<unnamed>";
+
+            char item[320]{};
+            std::snprintf(
+                item,
+                sizeof(item),
+                "%d:p%d:%s:o(%.1f %.1f %.1f); ",
+                i,
+                (i < static_cast<int>(boneParents.size())) ? boneParents[static_cast<size_t>(i)] : -1,
+                boneName,
+                origin.x,
+                origin.y,
+                origin.z);
+
+            if (poseChunk.size() + std::strlen(item) > 850)
+                flushPoseChunk();
+            poseChunk += item;
+        }
+        flushPoseChunk();
+    }
+
+    inline bool HooksViewmodelBoneLabelIsFiniteOrigin(const Vector& value)
+    {
+        return std::isfinite(value.x) &&
+            std::isfinite(value.y) &&
+            std::isfinite(value.z) &&
+            std::fabs(value.x) < 100000.0f &&
+            std::fabs(value.y) < 100000.0f &&
+            std::fabs(value.z) < 100000.0f;
+    }
+
+    inline bool HooksViewmodelBoneLabelIsZeroOrigin(const Vector& value)
+    {
+        return std::fabs(value.x) < 0.01f &&
+            std::fabs(value.y) < 0.01f &&
+            std::fabs(value.z) < 0.01f;
+    }
+
+    inline float HooksViewmodelBoneLabelMedian(std::vector<float>& values)
+    {
+        if (values.empty())
+            return 0.0f;
+
+        std::sort(values.begin(), values.end());
+        const size_t mid = values.size() / 2u;
+        if ((values.size() & 1u) != 0u)
+            return values[mid];
+        return (values[mid - 1u] + values[mid]) * 0.5f;
+    }
+
+    inline bool HooksViewmodelBoneLabelHasWeaponToken(const std::string& lower)
+    {
+        static const char* kTokens[] =
+        {
+            "weapon",
+            "clip",
+            "mag",
+            "magazine",
+            "bolt",
+            "slide",
+            "charging",
+            "charger",
+            "handle",
+            "trigger",
+            "safety",
+            "gun",
+            "rifle",
+            "smg",
+            "pistol",
+            "shotgun",
+            "barrel",
+            "stock",
+            "receiver",
+            "foregrip"
+        };
+
+        for (const char* token : kTokens)
+        {
+            if (lower.find(token) != std::string::npos)
+                return true;
+        }
+        return false;
+    }
+
+    inline bool HooksViewmodelBoneLabelNamePassesFilter(const std::string& lower)
+    {
+        if (lower.empty())
+            return false;
+
+        if (HooksViewmodelBoneLabelHasWeaponToken(lower))
+            return true;
+
+        static const char* kRejectTokens[] =
+        {
+            "finger",
+            "thumb",
+            "upperarm",
+            "forearm",
+            "wrist",
+            "ulna",
+            "driven",
+            "valvebiped",
+            "bip01",
+            "l_hand",
+            "r_hand",
+            "helper",
+            "hlp",
+            "ik",
+            "camera",
+            "attach",
+            "attachment",
+            "muzzle",
+            "shell",
+            "eject",
+            "flash"
+        };
+
+        for (const char* token : kRejectTokens)
+        {
+            if (lower.find(token) != std::string::npos)
+                return false;
+        }
+        return true;
+    }
+
+    inline void MaybeDrawViewmodelBoneLabels(
+        VR* vr,
+        void* drawState,
+        const std::string& modelName,
+        const char* className,
+        const void* boneToWorld)
+    {
+        auto clearLabels = [&]()
+            {
+                if (!vr)
+                    return;
+                std::lock_guard<std::mutex> lock(vr->m_ViewmodelBoneLabelMutex);
+                vr->m_ViewmodelBoneLabels.clear();
+            };
+
+        if (!vr || !vr->m_ViewmodelBoneLabelsEnabled)
+        {
+            clearLabels();
+            return;
+        }
+
+        if (!drawState || !boneToWorld || modelName.empty())
+            return;
+
+        const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
+        const bool isViewmodelClass = className &&
+            (std::strcmp(className, "CBaseViewModel") == 0 || std::strcmp(className, "C_BaseViewModel") == 0);
+        if (!isViewmodelClass && !HooksModelNameIsViewmodel(lowerModel))
+            return;
+        if (HooksModelNameIsArmsOrHands(lowerModel))
+            return;
+
+
+        std::vector<std::string> boneNames;
+        std::vector<int> boneParents;
+        int numBones = 0;
+        int boneIndex = 0;
+        int stride = 0;
+        int numBonesOffset = 0;
+        if (!vr_vm_stabilize::TryCollectBoneNamesFromDrawState(
+            drawState,
+            boneNames,
+            boneParents,
+            numBones,
+            boneIndex,
+            stride,
+            numBonesOffset))
+        {
+            clearLabels();
+            return;
+        }
+        if (numBones <= 0 || numBones > 512)
+        {
+            clearLabels();
+            return;
+        }
+
+        const auto* sourceBones = reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(boneToWorld);
+        std::vector<Vector> origins(static_cast<size_t>(numBones), Vector(0.0f, 0.0f, 0.0f));
+        std::vector<bool> validOrigins(static_cast<size_t>(numBones), false);
+        std::vector<float> xs;
+        std::vector<float> ys;
+        std::vector<float> zs;
+        xs.reserve(static_cast<size_t>(numBones));
+        ys.reserve(static_cast<size_t>(numBones));
+        zs.reserve(static_cast<size_t>(numBones));
+
+        for (int bone = 0; bone < numBones; ++bone)
+        {
+            vr_vm_stabilize::Mat3x4 boneWorld{};
+            if (!vr_vm_stabilize::SafeRead(sourceBones + bone, boneWorld))
+                continue;
+
+            const Vector origin = vr_vm_stabilize::GetOrigin(boneWorld);
+            if (!HooksViewmodelBoneLabelIsFiniteOrigin(origin) || HooksViewmodelBoneLabelIsZeroOrigin(origin))
+                continue;
+
+            origins[static_cast<size_t>(bone)] = origin;
+            validOrigins[static_cast<size_t>(bone)] = true;
+            xs.push_back(origin.x);
+            ys.push_back(origin.y);
+            zs.push_back(origin.z);
+        }
+
+        if (xs.empty())
+        {
+            clearLabels();
+            return;
+        }
+
+        const Vector clusterCenter(
+            HooksViewmodelBoneLabelMedian(xs),
+            HooksViewmodelBoneLabelMedian(ys),
+            HooksViewmodelBoneLabelMedian(zs));
+        constexpr float kMaxClusterDistance = 220.0f;
+        constexpr float kMaxClusterDistanceSqr = kMaxClusterDistance * kMaxClusterDistance;
+        constexpr int kMaxLabels = 96;
+        std::vector<VR::ProjectedViewmodelBoneLabel> projectedLabels;
+        projectedLabels.reserve(kMaxLabels);
+        int labelsDrawn = 0;
+
+        for (int bone = 0; bone < numBones && labelsDrawn < kMaxLabels; ++bone)
+        {
+            if (!validOrigins[static_cast<size_t>(bone)])
+                continue;
+
+            const Vector origin = origins[static_cast<size_t>(bone)];
+            if ((origin - clusterCenter).LengthSqr() > kMaxClusterDistanceSqr)
+                continue;
+
+            const bool hasName =
+                bone < static_cast<int>(boneNames.size()) &&
+                !boneNames[static_cast<size_t>(bone)].empty();
+            if (hasName)
+            {
+                const std::string lowerName =
+                    vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(bone)]);
+                if (!HooksViewmodelBoneLabelNamePassesFilter(lowerName))
+                    continue;
+            }
+
+            const int parent =
+                (bone < static_cast<int>(boneParents.size()))
+                ? boneParents[static_cast<size_t>(bone)]
+                : -1;
+
+            char label[192]{};
+            std::snprintf(
+                label,
+                sizeof(label),
+                "#%d p%d %s",
+                bone,
+                parent,
+                hasName ? boneNames[static_cast<size_t>(bone)].c_str() : "<unnamed>");
+
+            VR::ProjectedViewmodelBoneLabel projected{};
+            projected.worldPos = Vector(origin.x, origin.y, origin.z + 2.8f);
+            projected.label = label;
+            projected.hasName = hasName;
+            projectedLabels.push_back(std::move(projected));
+            ++labelsDrawn;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(vr->m_ViewmodelBoneLabelMutex);
+            vr->m_ViewmodelBoneLabels = std::move(projectedLabels);
+        }
     }
 
     inline bool MuzzleNameEndsWithToken(const std::string& lower, const char* token)
@@ -2690,6 +2988,50 @@ namespace
             if (requestedLower.empty())
                 continue;
 
+            const char* indexText = requestedLower.c_str();
+            if (*indexText == '#')
+                ++indexText;
+            if (*indexText)
+            {
+                char* end = nullptr;
+                const long requestedIndex = std::strtol(indexText, &end, 10);
+                if (end && *end == '\0' && requestedIndex >= 0 &&
+                    requestedIndex < static_cast<long>(boneNames.size()))
+                {
+                    const int bone = static_cast<int>(requestedIndex);
+                    outConfiguredName = requestedName;
+
+                    static std::mutex s_overrideIndexLogMutex;
+                    static std::unordered_set<std::string> s_loggedIndexMatches;
+                    const std::string logKey =
+                        std::string(logTag ? logTag : "VR") + "|index|" +
+                        (role ? role : "bone") + "|" +
+                        std::to_string(weaponId) + "|" + modelName + "|" + requestedLower;
+                    bool shouldLog = false;
+                    {
+                        std::lock_guard<std::mutex> lock(s_overrideIndexLogMutex);
+                        shouldLog = s_loggedIndexMatches.insert(logKey).second;
+                    }
+                    if (shouldLog)
+                    {
+                        const char* boneName =
+                            (bone < static_cast<int>(boneNames.size()) && !boneNames[static_cast<size_t>(bone)].empty())
+                            ? boneNames[static_cast<size_t>(bone)].c_str()
+                            : "<unnamed>";
+                        Game::logMsg(
+                            "[VR][%s] configured %s bone index override matched source=%s weaponId=%d model=%s bone=%d name=%s",
+                            logTag ? logTag : "Unknown",
+                            role ? role : "viewmodel",
+                            configName ? configName : "unknown",
+                            weaponId,
+                            modelName.c_str(),
+                            bone,
+                            boneName);
+                    }
+                    return bone;
+                }
+            }
+
             for (int bone = 0; bone < static_cast<int>(boneNames.size()); ++bone)
             {
                 if (vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(bone)]) != requestedLower)
@@ -2845,7 +3187,35 @@ namespace
         if (magazineBone < 0)
             magazineBone = FindMagazineBoxOfficialProfileFallbackBone(lowerModel, boneNames);
         if (magazineBone < 0 || magazineBone >= numBones)
+        {
+            if (MagazineBoxOfficialProfileExists(lowerModel))
+            {
+                int namedBoneCount = 0;
+                for (const std::string& boneName : boneNames)
+                {
+                    if (!boneName.empty())
+                        ++namedBoneCount;
+                }
+
+                static std::mutex s_missingMagazineBoneLogMutex;
+                static std::unordered_set<std::string> s_loggedMissingMagazineBoneModels;
+                bool shouldLog = false;
+                {
+                    std::lock_guard<std::mutex> lock(s_missingMagazineBoneLogMutex);
+                    shouldLog = s_loggedMissingMagazineBoneModels.insert(lowerModel).second;
+                }
+                if (shouldLog)
+                {
+                    Game::logMsg(
+                        "[VR][MagazineBox] no magazine bone candidate model=%s weaponId=%d bones=%d namedBones=%d officialProfile=1 hint=VMProbe only exposed arm/hand bones; use ManualReloadMagazineBoneOverrides only if a clip/mag bone appears",
+                        modelName.c_str(),
+                        magazineInteractionWeaponId,
+                        numBones,
+                        namedBoneCount);
+                }
+            }
             return;
+        }
 
         const auto* sourceBones = reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pCustomBoneToWorld);
         vr_vm_stabilize::Mat3x4 magazineWorld{};
@@ -4554,6 +4924,7 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 				modelName,
 				info.entity_index,
 				className,
+				pCustomBoneToWorld,
 				pCustomBoneToWorld != nullptr);
 		}
 		// A server SetOrigin teleport can leave one queued first-person viewmodel draw
@@ -5001,6 +5372,13 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 			state,
 			modelName,
 			*pDrawInfo,
+			pBonesToWorldFinal);
+
+		MaybeDrawViewmodelBoneLabels(
+			m_VR,
+			state,
+			modelName,
+			className,
 			pBonesToWorldFinal);
 
 		if (!m_VR || !m_VR->ShouldHideMagazineInteractionNativeClip())

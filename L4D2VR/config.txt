@@ -112,6 +112,7 @@ HideArms=false
 VrHandsLeftHandedViewmodelPoseOffsetMeters=0,0,0
 VrHandsLeftHandedViewmodelPoseRotationOffsetDeg=0,0,0
 MagazineBoxDebugEnabled=true
+ViewmodelBoneLabelsEnabled=false
 MagazineInteractionEnabled=true
 MagazineInteractionSuppressEmptyClipAutoReload=false
 ManualReloadMagazineBoneOverrides=

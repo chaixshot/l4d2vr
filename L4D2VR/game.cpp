@@ -451,9 +451,7 @@ void Game::logMsg(const char* fmt, ...)
     if (fmt &&
         (std::strncmp(fmt, "[VR][UseAim]", 12) == 0 ||
             std::strncmp(fmt, "[VR][MagazineInteraction]", 25) == 0 ||
-            std::strncmp(fmt, "[VR][MagazineInteractionFresh]", 30) == 0 ||
-            std::strncmp(fmt, "[VR][MagazineBox]", 17) == 0 ||
-            std::strncmp(fmt, "[VR][MagazineBolt]", 18) == 0))
+            std::strncmp(fmt, "[VR][MagazineInteractionFresh]", 30) == 0))
     {
         return;
     }

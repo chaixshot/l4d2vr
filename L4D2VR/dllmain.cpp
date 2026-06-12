@@ -650,26 +650,6 @@ namespace
         g_Game->SetConVarFloat("mat_monitorgamma", 2.2f);
     }
 
-    DWORD WINAPI MaintainVideoCfgSettingsWorker(LPVOID)
-    {
-        // Source may load defaults, change display mode, then save video.txt again after
-        // DllMain's early pass. Keep checking briefly during startup instead of relying on
-        // one file write at DLL load time.
-        constexpr int kAttempts = 120;
-        for (int i = 0; i < kAttempts; ++i)
-        {
-            if (!IsVrRecommendedVideoSettingsEnabledInConfig())
-                return 0;
-
-            ApplyRuntimeVideoSettings();
-            EnsureVideoCfgSettings();
-
-            Sleep(i < 20 ? 500 : 1000);
-        }
-
-        return 0;
-    }
-
     std::string StripQuotes(std::string value)
     {
         if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
@@ -2638,8 +2618,8 @@ DWORD WINAPI InitL4D2VR(HMODULE hModule)
 
     const bool recommendedVideoSettingsEnabled = IsVrRecommendedVideoSettingsEnabledInConfig();
 
-    // First pass before engine interfaces are ready. A later worker repeats this because
-    // the Source material system can save video.txt again after a display-mode change.
+    // Persist once before engine interfaces are ready. Runtime ConVars are applied once
+    // after Game initializes; later reapplication only happens on config enable/menu return.
     if (recommendedVideoSettingsEnabled)
         EnsureVideoCfgSettings();
 
@@ -2649,10 +2629,7 @@ DWORD WINAPI InitL4D2VR(HMODULE hModule)
         return 0;
 
     if (recommendedVideoSettingsEnabled)
-    {
         ApplyRuntimeVideoSettings();
-        CreateThread(nullptr, 0, MaintainVideoCfgSettingsWorker, nullptr, 0, nullptr);
-    }
 
     return 0;
 }

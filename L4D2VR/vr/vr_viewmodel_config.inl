@@ -643,6 +643,14 @@ void VR::ParseConfigFile()
                 key.compare(key.size() - suffixLength, suffixLength, overrideSuffix) == 0;
         };
 
+    auto configValueAllowsHash = [&](std::string key)->bool
+        {
+            trim(key);
+            std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return std::tolower(c); });
+            return key == "manualreloadmagazineboneoverrides" ||
+                key == "magazineinteractionboltboneoverrides";
+        };
+
     auto parseConfigPath = [&](const char* path)->bool
         {
             std::ifstream configStream(path);
@@ -659,7 +667,13 @@ void VR::ParseConfigFile()
                 size_t eqBeforeComment = line.find('=');
                 size_t p3 = line.find(';');
                 if (p1 != std::string::npos) cut = p1;
-                if (p2 != std::string::npos) cut = (cut == std::string::npos) ? p2 : std::min(cut, p2);
+                if (p2 != std::string::npos &&
+                    (eqBeforeComment == std::string::npos ||
+                        p2 < eqBeforeComment ||
+                        !configValueAllowsHash(line.substr(0, eqBeforeComment))))
+                {
+                    cut = (cut == std::string::npos) ? p2 : std::min(cut, p2);
+                }
                 if (p3 != std::string::npos &&
                     (eqBeforeComment == std::string::npos ||
                         p3 < eqBeforeComment ||
@@ -1150,6 +1164,7 @@ void VR::ParseConfigFile()
     m_VrHandsModelScale = std::clamp(getFloat("VrHandsModelScale", m_VrHandsModelScale), 0.25f, 4.0f);
     m_VrHandsRightUseViewmodelPose = getBool("VrHandsRightUseViewmodelPose", m_VrHandsRightUseViewmodelPose);
     m_MagazineBoxDebugEnabled = getBool("MagazineBoxDebugEnabled", m_MagazineBoxDebugEnabled);
+    m_ViewmodelBoneLabelsEnabled = getBool("ViewmodelBoneLabelsEnabled", m_ViewmodelBoneLabelsEnabled);
     m_MagazineBoxDebugFallbackHalfExtentsMeters = getVector3("MagazineBoxDebugFallbackHalfExtentsMeters", m_MagazineBoxDebugFallbackHalfExtentsMeters);
     m_MagazineBoxDebugPaddingMeters = getVector3("MagazineBoxDebugPaddingMeters", m_MagazineBoxDebugPaddingMeters);
     m_MagazineInteractionEnabled = getBool("MagazineInteractionEnabled", m_MagazineInteractionEnabled);
