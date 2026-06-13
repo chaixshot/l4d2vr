@@ -6297,6 +6297,33 @@ namespace
         return MagazineInteractionDelayedSoundStage::Other;
     }
 
+    bool MagazineInteractionSoundLooksNativeReloadTail(const char* sample)
+    {
+        if (!sample || !*sample)
+            return false;
+
+        const MagazineInteractionDelayedSoundStage delayedStage = MagazineInteractionClassifyDelayedSound(sample);
+        if (delayedStage != MagazineInteractionDelayedSoundStage::Other ||
+            MagazineInteractionSoundStartsInsertTail(sample) ||
+            MagazineInteractionSoundLooksClipOut(sample))
+        {
+            return true;
+        }
+
+        const std::string lower = MagazineInteractionLowerSoundSample(sample);
+        return lower.find("reload") != std::string::npos ||
+            lower.find("clip") != std::string::npos ||
+            lower.find("mag_in") != std::string::npos ||
+            lower.find("mag-in") != std::string::npos ||
+            lower.find("magin") != std::string::npos ||
+            lower.find("mag_out") != std::string::npos ||
+            lower.find("mag-out") != std::string::npos ||
+            lower.find("magout") != std::string::npos ||
+            lower.find("magazine") != std::string::npos ||
+            lower.find("bolt") != std::string::npos ||
+            lower.find("slide") != std::string::npos;
+    }
+
     int MagazineInteractionSoundSpecificityScore(const std::string& sample)
     {
         const std::string lower = MagazineInteractionLowerSoundSample(sample);
@@ -6474,6 +6501,7 @@ bool VR::CaptureMagazineInteractionSound(int entityIndex, const char* sample, fl
     const bool nativeReloadSuppressed =
         m_MagazineInteractionNativeReloadSuppressUntil.time_since_epoch().count() != 0 &&
         now <= m_MagazineInteractionNativeReloadSuppressUntil;
+    const bool nativeReloadSound = MagazineInteractionSoundLooksNativeReloadTail(sample);
     const bool waitingForInsertTail =
         m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
         m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine;
@@ -6518,7 +6546,7 @@ bool VR::CaptureMagazineInteractionSound(int entityIndex, const char* sample, fl
     if (!fromViewmodel &&
         !fromLocalWeaponPath &&
         !fromShotgunReloadPath &&
-        !(nativeReloadSuppressed && MagazineInteractionSoundLooksWeaponRelated(sample)))
+        !(nativeReloadSuppressed && nativeReloadSound))
     {
         return false;
     }
@@ -6568,14 +6596,19 @@ bool VR::CaptureMagazineInteractionSound(int entityIndex, const char* sample, fl
         return false;
     }
 
-    if (!MagazineInteractionSoundLooksWeaponRelated(sample) &&
+    if (nativeReloadSuppressed)
+    {
+        if (!nativeReloadSound)
+            return false;
+    }
+    else if (!MagazineInteractionSoundLooksWeaponRelated(sample) &&
         !MagazineInteractionSoundStartsInsertTail(sample) &&
         !MagazineInteractionSoundLooksClipOut(sample))
     {
         return false;
     }
 
-    if (nativeReloadSuppressed && MagazineInteractionSoundLooksWeaponRelated(sample))
+    if (nativeReloadSuppressed && nativeReloadSound)
     {
         Game::logMsg(
             "[VR][MagazineInteraction][Audio] swallowed native reload sound during suppress window sample=%s state=%d",

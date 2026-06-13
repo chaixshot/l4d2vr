@@ -379,6 +379,11 @@ namespace
     std::mutex s_TrackedConVarTraceMutex;
     std::unordered_map<std::string, std::chrono::steady_clock::time_point> s_TrackedConVarTraceLastLog;
 
+    inline bool ShouldLogMagazineBoxDiagnostics(const VR* vr)
+    {
+        return vr && (vr->m_MagazineBoxDebugEnabled || vr->m_VrHandsDebugLog);
+    }
+
     C_BaseEntity* HooksSafeGetClientEntity(Game* game, int entityIndex)
     {
         if (!game || !game->m_ClientEntityList || entityIndex <= 0 || entityIndex > 2048)
@@ -1619,7 +1624,8 @@ namespace
 
     inline int FindMagazineInteractionShotgunShellBone(
         const std::string& modelName,
-        const std::vector<std::string>& boneNames)
+        const std::vector<std::string>& boneNames,
+        bool logDiagnostics)
     {
         int bestBone = -1;
         int bestScore = 0;
@@ -1633,7 +1639,7 @@ namespace
             }
         }
 
-        if (bestBone >= 0)
+        if (bestBone >= 0 && logDiagnostics)
         {
             static std::mutex s_logMutex;
             static std::unordered_map<std::string, int> s_loggedBoneByModel;
@@ -1953,7 +1959,8 @@ namespace
     inline int FindMagazineInteractionBoltBone(
         int weaponId,
         const std::string& modelName,
-        const std::vector<std::string>& boneNames)
+        const std::vector<std::string>& boneNames,
+        bool logDiagnostics)
     {
         int bestBone = -1;
         int bestScore = 0;
@@ -1969,7 +1976,7 @@ namespace
             }
         }
 
-        if (bestBone >= 0)
+        if (bestBone >= 0 && logDiagnostics)
         {
             static std::mutex s_logMutex;
             static std::unordered_map<std::string, int> s_loggedBoneByModel;
@@ -2085,6 +2092,9 @@ namespace
 
         auto logAxis = [&](const char* source, const Vector& axis)
         {
+            if (!ShouldLogMagazineBoxDiagnostics(vr))
+                return;
+
             static std::mutex s_axisLogMutex;
             static std::unordered_set<std::string> s_loggedAxisSources;
             char key[256];
@@ -2483,7 +2493,8 @@ namespace
 
     inline int FindMagazineBoxOfficialProfileFallbackBone(
         const std::string& lowerModel,
-        const std::vector<std::string>& boneNames)
+        const std::vector<std::string>& boneNames,
+        bool logDiagnostics)
     {
         if (!MagazineBoxOfficialProfileExists(lowerModel))
             return -1;
@@ -2567,7 +2578,7 @@ namespace
             }
         }
 
-        if (bestBone >= 0)
+        if (bestBone >= 0 && logDiagnostics)
         {
             static std::mutex s_fallbackLogMutex;
             static std::unordered_map<std::string, int> s_loggedFallbackByModel;
@@ -2972,7 +2983,8 @@ namespace
         const std::string& overrideSpec,
         const std::string& modelName,
         const std::vector<std::string>& boneNames,
-        std::string& outConfiguredName)
+        std::string& outConfiguredName,
+        bool logDiagnostics)
     {
         outConfiguredName.clear();
         if (weaponId <= 0)
@@ -3012,7 +3024,7 @@ namespace
                         std::lock_guard<std::mutex> lock(s_overrideIndexLogMutex);
                         shouldLog = s_loggedIndexMatches.insert(logKey).second;
                     }
-                    if (shouldLog)
+                    if (logDiagnostics && shouldLog)
                     {
                         const char* boneName =
                             (bone < static_cast<int>(boneNames.size()) && !boneNames[static_cast<size_t>(bone)].empty())
@@ -3050,7 +3062,7 @@ namespace
                     std::lock_guard<std::mutex> lock(s_overrideLogMutex);
                     shouldLog = s_loggedMatches.insert(logKey).second;
                 }
-                if (shouldLog)
+                if (logDiagnostics && shouldLog)
                 {
                     Game::logMsg(
                         "[VR][%s] configured %s bone override matched source=%s weaponId=%d model=%s bone=%d name=%s",
@@ -3077,7 +3089,7 @@ namespace
             std::lock_guard<std::mutex> lock(s_overrideMissLogMutex);
             shouldLogMiss = s_loggedMisses.insert(missKey).second;
         }
-        if (shouldLogMiss)
+        if (logDiagnostics && shouldLogMiss)
         {
             Game::logMsg(
                 "[VR][%s] configured %s bone override not found; falling back to automatic detection source=%s weaponId=%d model=%s spec=%s",
@@ -3108,6 +3120,7 @@ namespace
         const bool wantsMagazineBox = vr->m_MagazineInteractionEnabled || vr->m_MagazineBoxDebugEnabled;
         if (!wantsMagazineBox)
             return;
+        const bool logMagazineBoxDiagnostics = ShouldLogMagazineBoxDiagnostics(vr);
         constexpr bool drawDebugBox = false;
 
         const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
@@ -3160,7 +3173,7 @@ namespace
                 std::lock_guard<std::mutex> lock(s_weaponIdOverrideLogMutex);
                 shouldLog = s_loggedWeaponIdOverrides.insert(logKey).second;
             }
-            if (shouldLog)
+            if (logMagazineBoxDiagnostics && shouldLog)
             {
                 Game::logMsg(
                     "[VR][MagazineBox] viewmodel model weaponId overrides stale current weaponId model=%s currentWeaponId=%d modelWeaponId=%d",
@@ -3179,13 +3192,14 @@ namespace
             vr->m_MagazineInteractionMagazineBoneOverridesSpec,
             modelName,
             boneNames,
-            configuredMagazineBoneName);
+            configuredMagazineBoneName,
+            logMagazineBoxDiagnostics);
         if (magazineBone < 0 && MagazineInteractionWeaponIdIsShotgun(magazineInteractionWeaponId))
-            magazineBone = FindMagazineInteractionShotgunShellBone(lowerModel, boneNames);
+            magazineBone = FindMagazineInteractionShotgunShellBone(lowerModel, boneNames, logMagazineBoxDiagnostics);
         if (magazineBone < 0)
             magazineBone = FindMagazineBoxBone(boneNames);
         if (magazineBone < 0)
-            magazineBone = FindMagazineBoxOfficialProfileFallbackBone(lowerModel, boneNames);
+            magazineBone = FindMagazineBoxOfficialProfileFallbackBone(lowerModel, boneNames, logMagazineBoxDiagnostics);
         if (magazineBone < 0 || magazineBone >= numBones)
         {
             if (MagazineBoxOfficialProfileExists(lowerModel))
@@ -3204,7 +3218,7 @@ namespace
                     std::lock_guard<std::mutex> lock(s_missingMagazineBoneLogMutex);
                     shouldLog = s_loggedMissingMagazineBoneModels.insert(lowerModel).second;
                 }
-                if (shouldLog)
+                if (logMagazineBoxDiagnostics && shouldLog)
                 {
                     Game::logMsg(
                         "[VR][MagazineBox] no magazine bone candidate model=%s weaponId=%d bones=%d namedBones=%d officialProfile=1 hint=VMProbe only exposed arm/hand bones; use ManualReloadMagazineBoneOverrides only if a clip/mag bone appears",
@@ -3343,7 +3357,7 @@ namespace
                 static std::mutex s_clampLogMutex;
                 static std::unordered_map<std::string, bool> s_clampLoggedModels;
                 std::lock_guard<std::mutex> lock(s_clampLogMutex);
-                if (s_clampLoggedModels.emplace(lowerModel, true).second)
+                if (logMagazineBoxDiagnostics && s_clampLoggedModels.emplace(lowerModel, true).second)
                 {
                     Game::logMsg(
                         "[VR][MagazineBox] rejected oversized %s bounds model=%s span=(%.2f %.2f %.2f) allowed=(%.2f %.2f %.2f)",
@@ -3483,7 +3497,7 @@ namespace
                         std::lock_guard<std::mutex> lock(s_shotgunAnchorLogMutex);
                         shouldLog = s_loggedShotgunAnchors.insert(logKey).second;
                     }
-                    if (shouldLog)
+                    if (logMagazineBoxDiagnostics && shouldLog)
                     {
                         Game::logMsg(
                             "[VR][MagazineBox] shotgun stable socket anchor model=%s shellBone=%d shellName=%s anchorBone=%d anchorName=%s",
@@ -3524,12 +3538,14 @@ namespace
             vr->m_MagazineInteractionBoltBoneOverridesSpec,
             modelName,
             boneNames,
-            configuredBoltBoneName);
+            configuredBoltBoneName,
+            logMagazineBoxDiagnostics);
         if (boltBone < 0)
             boltBone = FindMagazineInteractionBoltBone(
                 magazineInteractionWeaponId,
                 lowerModel,
-                boneNames);
+                boneNames,
+                logMagazineBoxDiagnostics);
         if (boltBone >= 0 && boltBone < numBones)
         {
             vr_vm_stabilize::Mat3x4 boltWorld{};
@@ -3592,7 +3608,7 @@ namespace
                         std::lock_guard<std::mutex> lock(s_boltBoxLogMutex);
                         shouldLog = s_loggedBoltBoxes.insert(key).second;
                     }
-                    if (shouldLog)
+                    if (logMagazineBoxDiagnostics && shouldLog)
                     {
                         Game::logMsg(
                             "[VR][MagazineBolt] drawing bolt box model=%s bone=%d name=%s mins=(%.2f %.2f %.2f) maxs=(%.2f %.2f %.2f) pullAxis=(%.3f %.3f %.3f)",
@@ -3635,7 +3651,7 @@ namespace
                 (basisSource ? basisSource : "unknown") + "|" +
                 (boundsSource ? boundsSource : "unknown");
             auto it = s_loggedSignatureByModel.find(lowerModel);
-            if (it == s_loggedSignatureByModel.end() || it->second != logSignature)
+            if (logMagazineBoxDiagnostics && (it == s_loggedSignatureByModel.end() || it->second != logSignature))
             {
                 s_loggedSignatureByModel[lowerModel] = logSignature;
                 const char* boneName =
@@ -3729,6 +3745,7 @@ namespace
         const VrHandMatrix4& targetMagazineWorld,
         const vr_vm_stabilize::Mat3x4* cachedMagazineBones,
         uint32_t renderFrameSeq,
+        bool logDiagnostics,
         vr_vm_stabilize::Mat3x4*& outBones)
     {
         outBones = nullptr;
@@ -3795,7 +3812,7 @@ namespace
         {
             std::lock_guard<std::mutex> lock(s_detachedSourceMagazineLogMutex);
             const std::string key = std::string(logPrefix ? logPrefix : "Magazine") + "|" + modelName + "|" + std::to_string(clipBone);
-            if (s_detachedSourceMagazineLoggedModels.emplace(key).second)
+            if (logDiagnostics && s_detachedSourceMagazineLoggedModels.emplace(key).second)
             {
                 Game::logMsg(
                     "[VR][%s] drawing detached magazine through Source viewmodel shader model=%s clipBone=%d cached=%d",
@@ -3945,6 +3962,7 @@ namespace
             targetMagazineWorld,
             useCachedMagazinePose ? magazineSourceBones : nullptr,
             vr->m_RenderFrameSeq.load(std::memory_order_relaxed),
+            ShouldLogMagazineBoxDiagnostics(vr),
             outBones);
         if (!built)
             LogMagazineInteractionDetachedDrawSkip("build-source-magazine-failed", modelName);
