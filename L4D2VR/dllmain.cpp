@@ -1372,18 +1372,50 @@ namespace
         return true;
     }
 
+    bool ConfigParameterValueAllowsSemicolon(std::string key)
+    {
+        key = TrimAsciiWhitespace(key);
+        std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+            });
+
+        static constexpr char overrideSuffix[] = "overrides";
+        const size_t suffixLength = sizeof(overrideSuffix) - 1;
+        return key.size() >= suffixLength &&
+            key.compare(key.size() - suffixLength, suffixLength, overrideSuffix) == 0;
+    }
+
+    bool ConfigParameterValueAllowsHash(std::string key)
+    {
+        key = TrimAsciiWhitespace(key);
+        std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+            });
+
+        return key == "manualreloadmagazineboneoverrides" ||
+            key == "magazineinteractionboltboneoverrides";
+    }
+
     size_t FindConfigCommentStart(const std::string& line)
     {
         size_t cut = std::string::npos;
+        const size_t eq = line.find('=');
+        const std::string key = eq == std::string::npos ? std::string() : line.substr(0, eq);
         const size_t p1 = line.find("//");
         const size_t p2 = line.find('#');
         const size_t p3 = line.find(';');
         if (p1 != std::string::npos)
             cut = p1;
-        if (p2 != std::string::npos)
+        if (p2 != std::string::npos &&
+            (eq == std::string::npos || p2 < eq || !ConfigParameterValueAllowsHash(key)))
+        {
             cut = (cut == std::string::npos) ? p2 : (std::min)(cut, p2);
-        if (p3 != std::string::npos)
+        }
+        if (p3 != std::string::npos &&
+            (eq == std::string::npos || p3 < eq || !ConfigParameterValueAllowsSemicolon(key)))
+        {
             cut = (cut == std::string::npos) ? p3 : (std::min)(cut, p3);
+        }
         return cut;
     }
 

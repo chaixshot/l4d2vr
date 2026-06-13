@@ -114,6 +114,7 @@ VrHandsLeftHandedViewmodelPoseRotationOffsetDeg=0,0,0
 MagazineBoxDebugEnabled=true
 ViewmodelBoneLabelsEnabled=false
 MagazineInteractionEnabled=true
+MagazineInteractionQuickReloadMode=false
 MagazineInteractionSuppressEmptyClipAutoReload=false
 ManualReloadMagazineBoneOverrides=
 MagazineInteractionGrabPaddingMeters=0.12

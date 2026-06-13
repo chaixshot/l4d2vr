@@ -1170,6 +1170,7 @@ void VR::ParseConfigFile()
     m_MagazineInteractionEnabled = getBool("MagazineInteractionEnabled", m_MagazineInteractionEnabled);
     if (!m_VrHandsEnabled)
         m_MagazineInteractionEnabled = false;
+    m_MagazineInteractionQuickReloadMode = getBool("MagazineInteractionQuickReloadMode", m_MagazineInteractionQuickReloadMode);
     m_MagazineInteractionSuppressEmptyClipAutoReload = getBool("MagazineInteractionSuppressEmptyClipAutoReload", m_MagazineInteractionSuppressEmptyClipAutoReload);
     m_MagazineInteractionGrabPaddingMeters = std::clamp(getFloat("MagazineInteractionGrabPaddingMeters", m_MagazineInteractionGrabPaddingMeters), 0.0f, 0.25f);
     m_MagazineInteractionPullTriggerMeters = std::clamp(getFloat("MagazineInteractionPullTriggerMeters", m_MagazineInteractionPullTriggerMeters), 0.0f, 0.50f);

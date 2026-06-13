@@ -120,7 +120,8 @@ enum class MagazineInteractionManualState
 	HoldingFreshMagazine,
 	WaitingForBackendReload,
 	WaitingForBoltGrab,
-	HoldingBolt
+	HoldingBolt,
+	AutoBolting
 };
 
 struct MagazineInteractionBoxSnapshot
@@ -1117,6 +1118,7 @@ public:
 	// Independent magazine interaction prototype. It consumes the current weapon magazine OBB and
 	// lets the off hand claim the left grip before that input reaches reload/inventory logic.
 	bool m_MagazineInteractionEnabled = false;
+	bool m_MagazineInteractionQuickReloadMode = false;
 	bool m_MagazineInteractionSuppressEmptyClipAutoReload = false;
 	float m_MagazineInteractionGrabPaddingMeters = 0.12f;
 	float m_MagazineInteractionPullTriggerMeters = 0.08f;
@@ -1177,21 +1179,41 @@ public:
 	bool m_MagazineInteractionFreshMagazineContactActive = false;
 	bool m_MagazineInteractionBoltContactActive = false;
 	bool m_MagazineInteractionShotgunShellMode = false;
+	bool m_MagazineInteractionServerClipSettlementActive = false;
 	bool m_MagazineInteractionShotgunServerReloadAbortPending = false;
 	bool m_MagazineInteractionShotgunDirectShellCommitPending = false;
 	bool m_MagazineInteractionShotgunDirectShellServerClipCommitted = false;
 	bool m_MagazineInteractionShotgunDirectShellServerReserveCommitted = false;
+	bool m_MagazineInteractionServerClipCommitPending = false;
+	bool m_MagazineInteractionServerClipCommitted = false;
+	bool m_MagazineInteractionServerReserveCommitted = false;
+	bool m_MagazineInteractionServerClipReserveHoldActive = false;
 	int m_MagazineInteractionShotgunShellsLoadedThisSession = 0;
 	int m_MagazineInteractionShotgunLastInterruptedClip = -1;
 	int m_MagazineInteractionShotgunDirectShellTargetClip = -1;
 	int m_MagazineInteractionShotgunDirectShellAmmoType = -1;
 	int m_MagazineInteractionShotgunDirectShellTargetReserve = -1;
 	int m_MagazineInteractionShotgunDirectShellWeaponId = 0;
+	int m_MagazineInteractionServerClipTarget = -1;
+	int m_MagazineInteractionServerClipAmmoType = -1;
+	int m_MagazineInteractionServerClipTargetReserve = -1;
+	int m_MagazineInteractionServerClipWeaponId = 0;
+	int m_MagazineInteractionServerClipExpectedPrior = -1;
+	int m_MagazineInteractionServerClipOffset = 0;
+	int m_MagazineInteractionServerReserveExpectedPrior = -1;
+	int m_MagazineInteractionServerReserveOffset = 0;
+	int m_MagazineInteractionServerClipReserveHoldAmmoType = -1;
+	int m_MagazineInteractionServerClipReserveHoldReserve = -1;
+	int m_MagazineInteractionServerClipReserveHoldOffset = -1;
 	MagazineInteractionManualState m_MagazineInteractionState = MagazineInteractionManualState::Idle;
 	C_WeaponCSBase* m_MagazineInteractionWeapon = nullptr;
 	int m_MagazineInteractionWeaponId = 0;
 	int m_MagazineInteractionWeaponEntityIndex = -1;
 	std::atomic<int> m_MagazineInteractionCurrentWeaponId{ 0 };
+	int m_MagazineInteractionAnyServerHookWeaponId = 0;
+	std::chrono::steady_clock::time_point m_MagazineInteractionAnyServerHookLastSeen{};
+	int m_MagazineInteractionServerHookWeaponId = 0;
+	std::chrono::steady_clock::time_point m_MagazineInteractionServerHookLastSeen{};
 	int m_MagazineInteractionShotgunServerHookWeaponId = 0;
 	std::chrono::steady_clock::time_point m_MagazineInteractionShotgunServerHookLastSeen{};
 	int m_MagazineInteractionStartClip = -1;
@@ -1233,6 +1255,8 @@ public:
 	std::chrono::steady_clock::time_point m_MagazineInteractionBoltGrabbedAt{};
 	std::chrono::steady_clock::time_point m_MagazineInteractionShotgunServerReloadAbortUntil{};
 	std::chrono::steady_clock::time_point m_MagazineInteractionShotgunDirectShellCommitUntil{};
+	std::chrono::steady_clock::time_point m_MagazineInteractionServerClipCommitUntil{};
+	std::chrono::steady_clock::time_point m_MagazineInteractionNativeReloadSuppressUntil{};
 	std::string m_MagazineInteractionSyntheticClipOutSample;
 	std::chrono::steady_clock::time_point m_MagazineInteractionSyntheticClipOutStarted{};
 	std::string m_MagazineInteractionSyntheticClipInSample;
@@ -2881,9 +2905,26 @@ public:
 	bool ShouldSuppressMagazineInteractionEmptyClipAutoReload(C_BasePlayer* localPlayer) const;
 	bool IsMagazineInteractionLeftHandActive() const;
 	bool IsMagazineInteractionManualActive() const;
+	bool IsMagazineInteractionNativeReloadSuppressActive() const;
+	bool IsMagazineInteractionViewmodelOverrideActive() const;
 	bool IsMagazineInteractionBlockingFire() const;
+	void MarkMagazineInteractionServerHookSeen(int serverWeaponId);
+	bool IsMagazineInteractionAnyServerHookActive() const;
+	bool IsMagazineInteractionServerHookActive(int weaponId) const;
 	void MarkMagazineInteractionShotgunServerHookSeen(int serverWeaponId);
 	bool IsMagazineInteractionShotgunServerHookActive(int weaponId) const;
+	void QueueMagazineInteractionServerClipCommit(
+		int targetClip,
+		int ammoType,
+		int targetReserve,
+		int expectedPriorClip,
+		int expectedPriorReserve,
+		const char* reason,
+		float holdSeconds);
+	bool TryApplyMagazineInteractionServerClipCommit(
+		void* serverWeapon,
+		int serverWeaponId,
+		void* serverPlayer = nullptr);
 	void QueueMagazineInteractionShotgunServerReloadAbort(const char* reason);
 	void QueueMagazineInteractionShotgunDirectShellCommit(
 		int targetClip,

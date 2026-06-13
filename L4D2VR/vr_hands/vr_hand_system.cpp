@@ -1086,8 +1086,8 @@ void VrHandSystem::UpdatePoses(
     if (leftHandMagazineGripPose)
     {
         magazineGripOverride.enabled = true;
-        magazineGripOverride.minCurl = { 0.20f, 0.28f, 0.32f, 0.34f, 0.34f };
-        magazineGripOverride.maxCurl = { 0.48f, 0.58f, 0.62f, 0.64f, 0.64f };
+        magazineGripOverride.minCurl = { 0.34f, 0.60f, 0.66f, 0.68f, 0.68f };
+        magazineGripOverride.maxCurl = { 0.58f, 0.82f, 0.88f, 0.90f, 0.90f };
     }
 
     m_RightViewmodelPaletteValid = false;

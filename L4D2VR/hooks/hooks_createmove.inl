@@ -1421,6 +1421,12 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 	{
 		cmd->buttons &= ~kMagazineInteractionInReload; // IN_RELOAD
 	}
+	if (!localUsingMountedWeapon &&
+		m_VR->IsMagazineInteractionNativeReloadSuppressActive() &&
+		!m_VR->IsMagazineInteractionReloadCommandActive())
+	{
+		cmd->buttons &= ~kMagazineInteractionInReload; // IN_RELOAD
+	}
 	const bool suppressMagazineEmptyClipAutoReload =
 		m_VR->ShouldSuppressMagazineInteractionEmptyClipAutoReload(nullptr);
 	if (!localUsingMountedWeapon && suppressMagazineEmptyClipAutoReload)

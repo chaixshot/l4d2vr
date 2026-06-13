@@ -4180,7 +4180,7 @@ namespace
     {
         MagazineInteractionFrozenViewmodelPoseCache& frozenCache = GetMagazineInteractionFrozenViewmodelPoseCache();
 
-        const bool magazineInteractionActive = vr && vr->IsMagazineInteractionManualActive();
+        const bool magazineInteractionActive = vr && vr->IsMagazineInteractionViewmodelOverrideActive();
         if (!vr || !magazineInteractionActive)
         {
             if (!vr || frozenCache.owner == vr)
@@ -4196,9 +4196,16 @@ namespace
 
         const std::string lockedModel =
             vr_vm_stabilize::ToLowerAscii(vr->m_MagazineInteractionMagazineModelName);
+        const bool nativeReloadSuppressed =
+            vr->m_MagazineInteractionNativeReloadSuppressUntil.time_since_epoch().count() != 0 &&
+            std::chrono::steady_clock::now() <= vr->m_MagazineInteractionNativeReloadSuppressUntil;
         const bool isArmsOrHandsModel = HooksModelNameIsArmsOrHands(lowerModel);
-        if ((lockedModel.empty() || lockedModel != lowerModel) && !isArmsOrHandsModel)
+        if (!nativeReloadSuppressed &&
+            (lockedModel.empty() || lockedModel != lowerModel) &&
+            !isArmsOrHandsModel)
+        {
             return;
+        }
 
         std::vector<std::string> boneNames;
         std::vector<int> boneParents;
@@ -4279,8 +4286,16 @@ namespace
                 frozenCache.owner = vr;
             }
 
-            const int rootBone = FindMagazineInteractionTopLevelBone(boneParents, clipBone);
             MagazineInteractionFrozenViewmodelPoseEntry& frozenPose = frozenCache.models[lowerModel];
+            int rootBone = FindMagazineInteractionTopLevelBone(boneParents, clipBone);
+            if (nativeReloadSuppressed &&
+                frozenPose.valid &&
+                frozenPose.modelName == modelName &&
+                frozenPose.numBones == numBones &&
+                static_cast<int>(frozenPose.frozenLocalBones.size()) == numBones)
+            {
+                rootBone = frozenPose.rootBone;
+            }
             const bool needCapture =
                 !frozenPose.valid ||
                 frozenPose.modelName != modelName ||
@@ -4508,10 +4523,15 @@ void Hooks::dItemPostFrameServer(void* ecx, void* edx)
 	weaponId = weapon->GetWeaponID();
 #endif
 
-	if (!MagazineInteractionWeaponIdIsShotgun(weaponId))
+	void* serverPlayer = m_Game ? reinterpret_cast<void*>(m_Game->m_CurrentUsercmdPlayer) : nullptr;
+	m_VR->MarkMagazineInteractionServerHookSeen(weaponId);
+	if (MagazineInteractionWeaponIdIsShotgun(weaponId))
+	{
+		m_VR->TryApplyMagazineInteractionShotgunServerReloadAbort(ecx, weaponId, serverPlayer);
 		return;
+	}
 
-	m_VR->TryApplyMagazineInteractionShotgunServerReloadAbort(ecx, weaponId);
+	m_VR->TryApplyMagazineInteractionServerClipCommit(ecx, weaponId, serverPlayer);
 }
 
 int Hooks::dGetPrimaryAttackActivity(void* ecx, void* edx, void* meleeInfo)

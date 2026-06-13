@@ -1595,8 +1595,11 @@ float __fastcall Hooks::dProcessUsercmds(void* ecx, void* edx, edict_t* player,
 			if (curWep)
 			{
 				const int weaponId = curWep->GetWeaponID();
+				m_VR->MarkMagazineInteractionServerHookSeen(weaponId);
 				if (MagazineInteractionWeaponIdIsShotgun(weaponId))
 					m_VR->TryApplyMagazineInteractionShotgunServerReloadAbort(curWep, weaponId, pPlayer);
+				else
+					m_VR->TryApplyMagazineInteractionServerClipCommit(curWep, weaponId, pPlayer);
 			}
 		}
 	}
@@ -1757,6 +1760,12 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 		Server_WeaponCSBase* serverWeapon = nullptr;
 		int serverWeaponId = static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
 		TryGetServerCurrentWeapon(serverWeapon, serverWeaponId);
+		if (m_VR && serverWeapon)
+		{
+			m_VR->MarkMagazineInteractionServerHookSeen(serverWeaponId);
+			if (!MagazineInteractionWeaponIdIsShotgun(serverWeaponId))
+				m_VR->TryApplyMagazineInteractionServerClipCommit(serverWeapon, serverWeaponId, m_Game->m_CurrentUsercmdPlayer);
+		}
 		const uintptr_t weaponTag = reinterpret_cast<uintptr_t>(serverWeapon);
 		if (weaponTag != s_serverThrowableAimWeapon)
 		{
@@ -1871,6 +1880,11 @@ int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 			to->buttons &= ~kMagazineInteractionInAttack; // IN_ATTACK
 		}
 		if (m_VR->IsMagazineInteractionLeftHandActive() &&
+			!m_VR->IsMagazineInteractionReloadCommandActive())
+		{
+			to->buttons &= ~kMagazineInteractionInReload; // IN_RELOAD
+		}
+		if (m_VR->IsMagazineInteractionNativeReloadSuppressActive() &&
 			!m_VR->IsMagazineInteractionReloadCommandActive())
 		{
 			to->buttons &= ~kMagazineInteractionInReload; // IN_RELOAD
