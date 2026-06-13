@@ -498,6 +498,14 @@ namespace
         return true;
     }
 
+    Vector MagazineInteractionFreshMagazinePickupOffsetMeters(const VR* vr)
+    {
+        Vector offset = vr ? vr->m_MagazineInteractionFreshMagazinePickupOffsetMeters : Vector(0.0f, 0.0f, 0.0f);
+        if (vr && vr->m_LeftHanded)
+            offset.y = -offset.y;
+        return offset;
+    }
+
     bool MagazineInteractionBuildFreshMagazinePickupBox(
         VR* vr,
         MagazineInteractionBoxSnapshot& outBox,
@@ -517,10 +525,11 @@ namespace
             + bodyForward * (vr->m_InventoryBodyOriginOffset.x * vr->m_VRScale)
             + bodyRight * (vr->m_InventoryBodyOriginOffset.y * vr->m_VRScale)
             + worldUp * (vr->m_InventoryBodyOriginOffset.z * vr->m_VRScale);
+        const Vector pickupOffsetMeters = MagazineInteractionFreshMagazinePickupOffsetMeters(vr);
         const Vector pickup = bodyOrigin
-            + bodyForward * (vr->m_MagazineInteractionFreshMagazinePickupOffsetMeters.x * vr->m_VRScale)
-            + bodyRight * (vr->m_MagazineInteractionFreshMagazinePickupOffsetMeters.y * vr->m_VRScale)
-            + worldUp * (vr->m_MagazineInteractionFreshMagazinePickupOffsetMeters.z * vr->m_VRScale);
+            + bodyForward * (pickupOffsetMeters.x * vr->m_VRScale)
+            + bodyRight * (pickupOffsetMeters.y * vr->m_VRScale)
+            + worldUp * (pickupOffsetMeters.z * vr->m_VRScale);
         Vector viewmodelPickup = pickup;
         Vector reprojectedPickup{};
         if (MagazineInteractionReprojectScenePointToViewmodelLayer(vr, pickup, reprojectedPickup))
@@ -1307,10 +1316,11 @@ namespace
             + bodyForward * (vr->m_InventoryBodyOriginOffset.x * vr->m_VRScale)
             + bodyRight * (vr->m_InventoryBodyOriginOffset.y * vr->m_VRScale)
             + worldUp * (vr->m_InventoryBodyOriginOffset.z * vr->m_VRScale);
+        const Vector pickupOffsetMeters = MagazineInteractionFreshMagazinePickupOffsetMeters(vr);
         const Vector pickup = bodyOrigin
-            + bodyForward * (vr->m_MagazineInteractionFreshMagazinePickupOffsetMeters.x * vr->m_VRScale)
-            + bodyRight * (vr->m_MagazineInteractionFreshMagazinePickupOffsetMeters.y * vr->m_VRScale)
-            + worldUp * (vr->m_MagazineInteractionFreshMagazinePickupOffsetMeters.z * vr->m_VRScale);
+            + bodyForward * (pickupOffsetMeters.x * vr->m_VRScale)
+            + bodyRight * (pickupOffsetMeters.y * vr->m_VRScale)
+            + worldUp * (pickupOffsetMeters.z * vr->m_VRScale);
 
         Vector viewmodelPickup = pickup;
         Vector reprojectedPickup{};
