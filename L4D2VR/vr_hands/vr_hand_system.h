@@ -135,10 +135,12 @@ private:
         const QAngle& currentViewmodelAngles,
         VrHandMatrix4& outWorld) const;
     void ReportErrorOnce(const std::string& error);
+    void ReportWarningOnce(const std::string& warning);
 
     std::array<HandState, 2> m_Hands;
     VrHandRendererD3D9 m_Renderer;
     std::unordered_set<std::string> m_ReportedErrors;
+    std::unordered_set<std::string> m_ReportedWarnings;
     bool m_AssetLoadAttempted = false;
     bool m_AssetsLoaded = false;
     bool m_DependencyUnavailable = false;

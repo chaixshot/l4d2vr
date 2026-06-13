@@ -3687,6 +3687,26 @@ namespace
         }
     };
 
+    struct MagazineInteractionRenderSnapshotScope
+    {
+        bool previous = false;
+        bool active = false;
+
+        explicit MagazineInteractionRenderSnapshotScope(bool enabled)
+            : previous(VR::t_UseRenderFrameSnapshot)
+            , active(enabled)
+        {
+            if (active)
+                VR::t_UseRenderFrameSnapshot = true;
+        }
+
+        ~MagazineInteractionRenderSnapshotScope()
+        {
+            if (active)
+                VR::t_UseRenderFrameSnapshot = previous;
+        }
+    };
+
     inline MagazineInteractionDetachedMagazinePoseCache& GetMagazineInteractionDetachedMagazinePoseCache()
     {
         static MagazineInteractionDetachedMagazinePoseCache cache;
@@ -3989,8 +4009,6 @@ namespace
         int numBones = 0;
         int rootBone = -1;
         bool valid = false;
-        bool hardLockModelAnchorValid = false;
-        vr_vm_stabilize::Mat3x4 hardLockModelAnchor{};
         std::vector<vr_vm_stabilize::Mat3x4> frozenLocalBones;
     };
 
@@ -4074,6 +4092,8 @@ namespace
 
     inline void ApplyMagazineInteractionBoltPose(
         VR* vr,
+        const std::string& modelName,
+        const ModelRenderInfo_t& info,
         const std::vector<int>& boneParents,
         int boltBone,
         vr_vm_stabilize::Mat3x4* bones,
@@ -4086,12 +4106,43 @@ namespace
             return;
         }
 
-        VrHandMatrix4 targetBoltWorld{};
-        if (!vr->GetMagazineInteractionBoltWorld(targetBoltWorld))
+        const float maxPull = std::max(
+            0.0f,
+            std::max(
+                vr->m_MagazineInteractionBoltMaxPullDistance,
+                vr->m_MagazineInteractionBoltPullDistanceMeters * vr->m_VRScale));
+        const float pullDistance = std::clamp(
+            vr->m_MagazineInteractionBoltPullDistance,
+            0.0f,
+            maxPull);
+        if (!(pullDistance > 0.0001f))
             return;
 
-        const vr_vm_stabilize::Mat3x4 targetBolt =
-            HooksVrHandMatrixToMat3x4(HooksStripVrHandMatrixScale(targetBoltWorld));
+        Vector pullAxis = BuildMagazineInteractionBoltPullAxisWorld(
+            vr,
+            modelName,
+            bones,
+            numBones,
+            boneParents,
+            ResolveMagazineInteractionWeaponIdForConfig(vr),
+            boltBone,
+            bones[boltBone],
+            info.pModelToWorld);
+        pullAxis = HooksNormalizeVector(pullAxis, Vector(0.0f, 0.0f, 0.0f));
+        if (pullAxis.Length() <= 0.0001f)
+            return;
+
+        const Vector runtimeAxis = HooksNormalizeVector(
+            vr->m_MagazineInteractionBoltPullAxisWorld,
+            pullAxis);
+        if (runtimeAxis.Length() > 0.0001f && DotProduct(pullAxis, runtimeAxis) < 0.0f)
+            pullAxis = pullAxis * -1.0f;
+
+        vr_vm_stabilize::Mat3x4 targetBolt = bones[boltBone];
+        targetBolt.m[0][3] += pullAxis.x * pullDistance;
+        targetBolt.m[1][3] += pullAxis.y * pullDistance;
+        targetBolt.m[2][3] += pullAxis.z * pullDistance;
+
         vr_vm_stabilize::Mat3x4 inverseCurrentBolt{};
         vr_vm_stabilize::InvertTR(bones[boltBone], inverseCurrentBolt);
         vr_vm_stabilize::Mat3x4 delta{};
@@ -4198,8 +4249,6 @@ namespace
         }
 
         const bool visuallyPauseViewmodel = vr->ShouldFreezeMagazineInteractionViewmodel();
-        const bool magazineInteractionHardLockViewmodel =
-            vr->m_MagazineInteractionState == MagazineInteractionManualState::HoldingBolt;
         const bool hideNativeClip = vr->ShouldHideMagazineInteractionNativeClip() && clipBone >= 0;
         const bool moveBolt = vr->ShouldMoveMagazineInteractionBolt() && magazineInteractionBoltBone >= 0;
         if (!visuallyPauseViewmodel && !hideNativeClip && !moveBolt)
@@ -4262,29 +4311,18 @@ namespace
 
             if (frozenPose.valid)
             {
-                if (magazineInteractionHardLockViewmodel &&
-                    !frozenPose.hardLockModelAnchorValid)
-                {
-                    frozenPose.hardLockModelAnchor = modelAnchor;
-                    frozenPose.hardLockModelAnchorValid = true;
-                    Game::logMsg(
-                        "[VR][MagazineInteraction] hard-locked viewmodel anchor while bolt is held model=%s",
-                        modelName.c_str());
-                }
-                else if (!magazineInteractionHardLockViewmodel)
-                {
-                    frozenPose.hardLockModelAnchorValid = false;
-                }
-
-                const vr_vm_stabilize::Mat3x4& anchor =
-                    (magazineInteractionHardLockViewmodel && frozenPose.hardLockModelAnchorValid)
-                    ? frozenPose.hardLockModelAnchor
-                    : modelAnchor;
-                ApplyMagazineInteractionLocalPose(anchor, frozenPose.frozenLocalBones, copiedBones, numBones);
+                ApplyMagazineInteractionLocalPose(modelAnchor, frozenPose.frozenLocalBones, copiedBones, numBones);
             }
         }
 
-        ApplyMagazineInteractionBoltPose(vr, boneParents, magazineInteractionBoltBone, copiedBones, numBones);
+        ApplyMagazineInteractionBoltPose(
+            vr,
+            modelName,
+            info,
+            boneParents,
+            magazineInteractionBoltBone,
+            copiedBones,
+            numBones);
 
         if (hideNativeClip)
         {
@@ -5360,16 +5398,19 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 			}
 		}
 
-		drawMagazineInteractionDetachedMagazine = BuildMagazineInteractionDetachedMagazineBones(
-			m_VR,
-			state,
-			modelName,
-			pBonesToWorldFinal,
-			magazineInteractionDetachedMagazineBones);
+        {
+            MagazineInteractionRenderSnapshotScope detachedMagazineSnapshot(queueMode != 0);
+            drawMagazineInteractionDetachedMagazine = BuildMagazineInteractionDetachedMagazineBones(
+                m_VR,
+                state,
+                modelName,
+                pBonesToWorldFinal,
+                magazineInteractionDetachedMagazineBones);
+        }
 
-		ApplyMagazineInteractionViewmodelOverride(
-			m_VR,
-			state,
+        ApplyMagazineInteractionViewmodelOverride(
+            m_VR,
+            state,
 			modelName,
 			*pDrawInfo,
 			pBonesToWorldFinal);

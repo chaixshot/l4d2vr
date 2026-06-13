@@ -20,6 +20,13 @@
 
 namespace
 {
+    bool IsNonFatalViewmodelOcclusionError(const std::string& error)
+    {
+        return error.find("VR hand stencil clear received") != std::string::npos ||
+            error.find("VR hand viewmodel occlusion requires") != std::string::npos ||
+            error.find("D3D9 reserved stencil-bit clear failed") != std::string::npos;
+    }
+
     struct VrHandsVec3
     {
         float x = 0.0f;
@@ -408,6 +415,13 @@ void VrHandSystem::ReportErrorOnce(const std::string& error)
     if (error.empty() || !m_ReportedErrors.emplace(error).second)
         return;
     Game::errorMsg(("[VR][Hands] " + error).c_str());
+}
+
+void VrHandSystem::ReportWarningOnce(const std::string& warning)
+{
+    if (warning.empty() || !m_ReportedWarnings.emplace(warning).second)
+        return;
+    Game::logMsg("[VR][Hands] %s", warning.c_str());
 }
 
 bool VrHandSystem::ResolveSteamVrAssetPath(const char* fileName, std::string& outPath) const
@@ -1575,6 +1589,11 @@ bool VrHandSystem::ClearViewmodelOcclusionStencil(IDirect3DDevice9* device)
     std::string error;
     if (m_Renderer.ClearViewmodelOcclusionStencil(device, error))
         return true;
+    if (IsNonFatalViewmodelOcclusionError(error))
+    {
+        ReportWarningOnce(error + "; disabling VR hand viewmodel occlusion mask for this frame");
+        return false;
+    }
     ReportErrorOnce(error);
     return false;
 }

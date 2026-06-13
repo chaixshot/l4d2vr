@@ -134,6 +134,10 @@ struct MagazineInteractionBoxSnapshot
 	Vector modelAxisX = { 1.0f, 0.0f, 0.0f };
 	Vector modelAxisY = { 0.0f, 1.0f, 0.0f };
 	Vector modelAxisZ = { 0.0f, 0.0f, 1.0f };
+	Vector viewmodelAnchorOrigin = { 0.0f, 0.0f, 0.0f };
+	Vector viewmodelAnchorAxisX = { 1.0f, 0.0f, 0.0f };
+	Vector viewmodelAnchorAxisY = { 0.0f, 1.0f, 0.0f };
+	Vector viewmodelAnchorAxisZ = { 0.0f, 0.0f, 1.0f };
 	Vector mins;
 	Vector maxs;
 	uint32_t frameSeq = 0;
@@ -141,6 +145,7 @@ struct MagazineInteractionBoxSnapshot
 	int entityIndex = -1;
 	int boneIndex = -1;
 	bool modelBasisValid = false;
+	bool viewmodelAnchorBasisValid = false;
 	std::string modelName;
 	std::chrono::steady_clock::time_point publishedAt{};
 };
@@ -854,7 +859,7 @@ public:
 	float m_AutoAirStrafeDebugPrevVy = 0.0f;
 	float m_AutoAirStrafeDebugPrevYaw = 0.0f;
 	bool m_AutoAirStrafeDebugPrevGround = false;
-	bool m_LedgeGuardEnabled = true;
+	bool m_LedgeGuardEnabled = false;
 	float m_LedgeGuardProbeDistance = 36.0f;
 	float m_LedgeGuardProbeHeight = 18.0f;
 	float m_LedgeGuardDropDistance = 96.0f;
