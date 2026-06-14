@@ -4880,28 +4880,6 @@ namespace
         return HooksNativeViewmodelHandsOnlyNormalizePlane(outInfo.wristPlaneWorld);
     }
 
-    inline bool HooksNativeViewmodelHandsOnlyBuildSidePlaneWorld(
-        const HooksNativeViewmodelHandsOnlySideInfo& keepSide,
-        const HooksNativeViewmodelHandsOnlySideInfo& otherSide,
-        float outPlane[4])
-    {
-        if (!outPlane)
-            return false;
-
-        Vector normal = keepSide.handPos - otherSide.handPos;
-        const float len = normal.Length();
-        if (!std::isfinite(len) || len < 1.0f)
-            return false;
-        normal *= (1.0f / len);
-
-        const Vector midpoint = (keepSide.handPos + otherSide.handPos) * 0.5f;
-        outPlane[0] = normal.x;
-        outPlane[1] = normal.y;
-        outPlane[2] = normal.z;
-        outPlane[3] = -DotProduct(normal, midpoint);
-        return HooksNativeViewmodelHandsOnlyNormalizePlane(outPlane);
-    }
-
     inline bool HooksNativeViewmodelHandsOnlyBuildSplitClipSets(
         VR* vr,
         void* drawState,
@@ -4945,7 +4923,7 @@ namespace
         const bool hasLeft = HooksNativeViewmodelHandsOnlyBuildSideInfo(
             vr, drawState, boneNames, boneParents, numBones, boneIndex, stride, bones, -1, leftInfo);
 
-        auto appendSet = [&](const HooksNativeViewmodelHandsOnlySideInfo& keepSide, const HooksNativeViewmodelHandsOnlySideInfo* otherSide) -> bool
+        auto appendSet = [&](const HooksNativeViewmodelHandsOnlySideInfo& keepSide) -> bool
             {
                 HooksNativeViewmodelHandsOnlyClipSet set{};
                 set.side = keepSide.side;
@@ -4953,42 +4931,35 @@ namespace
                     return false;
                 ++set.planeCount;
 
-                if (otherSide)
-                {
-                    float sidePlaneWorld[4]{};
-                    if (HooksNativeViewmodelHandsOnlyBuildSidePlaneWorld(keepSide, *otherSide, sidePlaneWorld) &&
-                        HooksNativeViewmodelHandsOnlyWorldPlaneToClipPlane(vr, sidePlaneWorld, set.planes[set.planeCount]))
-                    {
-                        ++set.planeCount;
-                    }
-                }
-
                 if (set.planeCount <= 0)
                     return false;
-                HooksNativeViewmodelHandsOnlyBuildIsolatedSideBones(
+                if (!HooksNativeViewmodelHandsOnlyBuildIsolatedSideBones(
                     vr,
                     boneNames,
                     boneParents,
                     numBones,
                     bones,
                     keepSide,
-                    set.isolatedBones);
+                    set.isolatedBones))
+                {
+                    return false;
+                }
                 outClipSets.push_back(set);
                 return true;
             };
 
         if (hasRight && hasLeft)
         {
-            appendSet(rightInfo, &leftInfo);
-            appendSet(leftInfo, &rightInfo);
+            appendSet(rightInfo);
+            appendSet(leftInfo);
         }
         else if (hasRight)
         {
-            appendSet(rightInfo, nullptr);
+            appendSet(rightInfo);
         }
         else if (hasLeft)
         {
-            appendSet(leftInfo, nullptr);
+            appendSet(leftInfo);
         }
 
         return !outClipSets.empty();
@@ -6440,7 +6411,7 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 					ecx,
 					state,
 					*pDrawInfo,
-					clipSet.isolatedBones ? clipSet.isolatedBones : pBonesToWorldFinal);
+					clipSet.isolatedBones);
 				nativeHandsOnlyDrawn = true;
 			}
 		}
