@@ -4691,6 +4691,266 @@ namespace
         return out;
     }
 
+    inline bool HooksNativeViewmodelHandsOnlyMatrixFinite(const vr_vm_stabilize::Mat3x4& matrix)
+    {
+        for (int row = 0; row < 3; ++row)
+        {
+            for (int col = 0; col < 4; ++col)
+            {
+                if (!std::isfinite(matrix.m[row][col]))
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    inline float HooksNativeViewmodelHandsOnlyProjectionXScale(float horizontalFovDeg)
+    {
+        constexpr float kPi = 3.14159265358979323846f;
+        const float fov = std::clamp(horizontalFovDeg, 1.0f, 179.0f) * kPi / 180.0f;
+        return 1.0f / std::tan(fov * 0.5f);
+    }
+
+    inline float HooksNativeViewmodelHandsOnlyResolveAspect(float preferred, uint32_t width, uint32_t height)
+    {
+        if (preferred > 0.001f)
+            return preferred;
+        if (height > 0)
+            return static_cast<float>(width) / static_cast<float>(height);
+        return 1.0f;
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyResolveViewFrame(
+        VR* vr,
+        Vector& outViewOrigin,
+        Vector& outForward,
+        Vector& outRight,
+        Vector& outUp)
+    {
+        if (!vr)
+            return false;
+
+        const Vector viewAngles = vr->GetViewAngle();
+        const Vector viewLeft = vr->GetViewOriginLeft();
+        const Vector viewRight = vr->GetViewOriginRight();
+
+        QAngle eyeAngles(viewAngles.x, viewAngles.y, viewAngles.z);
+        Vector forward{};
+        Vector right{};
+        Vector up{};
+        QAngle::AngleVectors(eyeAngles, &forward, &right, &up);
+        forward = VrHandMath::Normalize(forward);
+        right = VrHandMath::Normalize(right);
+        up = VrHandMath::Normalize(up);
+        if (forward.Length() <= 0.0001f || right.Length() <= 0.0001f || up.Length() <= 0.0001f)
+            return false;
+
+        const Vector viewOrigin = (viewLeft + viewRight) * 0.5f;
+        if (!std::isfinite(viewOrigin.x) || !std::isfinite(viewOrigin.y) || !std::isfinite(viewOrigin.z))
+            return false;
+
+        outViewOrigin = viewOrigin;
+        outForward = forward;
+        outRight = right;
+        outUp = up;
+        return true;
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyReprojectScenePointToViewmodelLayer(
+        VR* vr,
+        const Vector& scenePoint,
+        Vector& outViewmodelPoint)
+    {
+        if (!vr)
+            return false;
+
+        const float sceneFov = (vr->m_Fov > 0.001f) ? vr->m_Fov : 90.0f;
+        const float viewmodelFov = sceneFov;
+        const float sceneAspect = HooksNativeViewmodelHandsOnlyResolveAspect(
+            vr->m_Aspect,
+            vr->m_RenderWidth,
+            vr->m_RenderHeight);
+        const float viewmodelAspect = (vr->m_RenderHeight > 0)
+            ? static_cast<float>(vr->m_RenderWidth) / static_cast<float>(vr->m_RenderHeight)
+            : sceneAspect;
+
+        const float sceneXScale = HooksNativeViewmodelHandsOnlyProjectionXScale(sceneFov);
+        const float viewmodelXScale = HooksNativeViewmodelHandsOnlyProjectionXScale(viewmodelFov);
+        const float sceneYScale = sceneXScale * sceneAspect;
+        const float viewmodelYScale = viewmodelXScale * viewmodelAspect;
+        if (!(viewmodelXScale > 0.0001f) || !(viewmodelYScale > 0.0001f))
+            return false;
+
+        Vector viewOrigin{};
+        Vector forward{};
+        Vector right{};
+        Vector up{};
+        if (!HooksNativeViewmodelHandsOnlyResolveViewFrame(vr, viewOrigin, forward, right, up))
+            return false;
+
+        const Vector delta = scenePoint - viewOrigin;
+        const float viewX = VrHandMath::Dot(delta, right);
+        const float viewY = VrHandMath::Dot(delta, up);
+        const float viewZ = VrHandMath::Dot(delta, forward);
+        if (!std::isfinite(viewX) || !std::isfinite(viewY) || !std::isfinite(viewZ))
+            return false;
+
+        outViewmodelPoint =
+            viewOrigin +
+            right * (viewX * (sceneXScale / viewmodelXScale)) +
+            up * (viewY * (sceneYScale / viewmodelYScale)) +
+            forward * viewZ;
+        return true;
+    }
+
+    inline VrHandMatrix4 HooksNativeViewmodelHandsOnlyBuildLocalTransform(
+        float sourceUnitsPerMeter,
+        const Vector& localPositionOffsetMeters,
+        const Vector& localRotationOffsetDeg)
+    {
+        constexpr float kDegToRad = 3.14159265358979323846f / 180.0f;
+        const float rx = localRotationOffsetDeg.x * kDegToRad;
+        const float ry = localRotationOffsetDeg.y * kDegToRad;
+        const float rz = localRotationOffsetDeg.z * kDegToRad;
+        const float sx = std::sin(rx), cx = std::cos(rx);
+        const float sy = std::sin(ry), cy = std::cos(ry);
+        const float sz = std::sin(rz), cz = std::cos(rz);
+
+        VrHandMatrix4 local = VrHandMath::Identity();
+        VrHandMath::Set(local, 0, 0, cz * cy);
+        VrHandMath::Set(local, 0, 1, cz * sy * sx - sz * cx);
+        VrHandMath::Set(local, 0, 2, cz * sy * cx + sz * sx);
+        VrHandMath::Set(local, 1, 0, sz * cy);
+        VrHandMath::Set(local, 1, 1, sz * sy * sx + cz * cx);
+        VrHandMath::Set(local, 1, 2, sz * sy * cx - cz * sx);
+        VrHandMath::Set(local, 2, 0, -sy);
+        VrHandMath::Set(local, 2, 1, cy * sx);
+        VrHandMath::Set(local, 2, 2, cy * cx);
+        VrHandMath::Set(local, 0, 3, localPositionOffsetMeters.x * sourceUnitsPerMeter);
+        VrHandMath::Set(local, 1, 3, localPositionOffsetMeters.y * sourceUnitsPerMeter);
+        VrHandMath::Set(local, 2, 3, localPositionOffsetMeters.z * sourceUnitsPerMeter);
+        return local;
+    }
+
+    inline VrHandMatrix4 HooksNativeViewmodelHandsOnlyBuildControllerWorldFromAxes(
+        const Vector& origin,
+        const Vector& forwardIn,
+        const Vector& rightIn,
+        const Vector& upIn)
+    {
+        Vector forward = VrHandMath::Normalize(forwardIn);
+        Vector right = VrHandMath::Normalize(rightIn);
+        Vector up = VrHandMath::Normalize(upIn);
+        if (forward.Length() <= 0.0001f)
+            forward = Vector(1.0f, 0.0f, 0.0f);
+        if (right.Length() <= 0.0001f)
+            right = Vector(0.0f, -1.0f, 0.0f);
+        if (up.Length() <= 0.0001f)
+            up = Vector(0.0f, 0.0f, 1.0f);
+
+        VrHandMatrix4 out = VrHandMath::Identity();
+        VrHandMath::Set(out, 0, 0, right.x);
+        VrHandMath::Set(out, 1, 0, right.y);
+        VrHandMath::Set(out, 2, 0, right.z);
+        VrHandMath::Set(out, 0, 1, up.x);
+        VrHandMath::Set(out, 1, 1, up.y);
+        VrHandMath::Set(out, 2, 1, up.z);
+        VrHandMath::Set(out, 0, 2, -forward.x);
+        VrHandMath::Set(out, 1, 2, -forward.y);
+        VrHandMath::Set(out, 2, 2, -forward.z);
+        VrHandMath::Set(out, 0, 3, origin.x);
+        VrHandMath::Set(out, 1, 3, origin.y);
+        VrHandMath::Set(out, 2, 3, origin.z);
+        return out;
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyBuildLeftControllerTargetAnchor(
+        VR* vr,
+        vr_vm_stabilize::Mat3x4& outAnchor)
+    {
+        if (!vr || !vr->m_IsVREnabled)
+            return false;
+
+        Vector origin = vr->GetLeftControllerAbsPos();
+        Vector reprojectedOrigin{};
+        if (HooksNativeViewmodelHandsOnlyReprojectScenePointToViewmodelLayer(vr, origin, reprojectedOrigin))
+            origin = reprojectedOrigin;
+
+        const QAngle angles = vr->GetLeftControllerAbsAngle();
+        Vector forward{};
+        Vector right{};
+        Vector up{};
+        QAngle::AngleVectors(angles, &forward, &right, &up);
+
+        const VrHandMatrix4 controllerWorld =
+            HooksNativeViewmodelHandsOnlyBuildControllerWorldFromAxes(origin, forward, right, up);
+        const VrHandMatrix4 localCorrection = HooksNativeViewmodelHandsOnlyBuildLocalTransform(
+            vr->m_VRScale,
+            vr->m_VrHandsLeftPoseOffsetMeters,
+            vr->m_VrHandsLeftPoseRotationOffsetDeg);
+        outAnchor = HooksVrHandMatrixToMat3x4(
+            VrHandMath::Multiply(controllerWorld, localCorrection));
+        return HooksNativeViewmodelHandsOnlyMatrixFinite(outAnchor);
+    }
+
+    inline void HooksNativeViewmodelHandsOnlyTransformPlane(
+        const vr_vm_stabilize::Mat3x4& delta,
+        float plane[4])
+    {
+        if (!plane)
+            return;
+
+        Vector normal(plane[0], plane[1], plane[2]);
+        float normalLen = normal.Length();
+        if (!std::isfinite(normalLen) || normalLen < 0.001f)
+            return;
+        normal *= (1.0f / normalLen);
+        const Vector point = normal * (-plane[3] / normalLen);
+
+        Vector movedPoint = HooksTransformPoint(delta, point);
+        Vector movedNormal = HooksTransformVector(delta, normal);
+        const float movedNormalLen = movedNormal.Length();
+        if (!std::isfinite(movedNormalLen) || movedNormalLen < 0.001f)
+            return;
+        movedNormal *= (1.0f / movedNormalLen);
+
+        plane[0] = movedNormal.x;
+        plane[1] = movedNormal.y;
+        plane[2] = movedNormal.z;
+        plane[3] = -DotProduct(movedNormal, movedPoint);
+        HooksNativeViewmodelHandsOnlyNormalizePlane(plane);
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyTryBuildSideTargetDelta(
+        VR* vr,
+        const HooksNativeViewmodelHandsOnlySideInfo& keepSide,
+        const vr_vm_stabilize::Mat3x4* sourceBones,
+        int numBones,
+        vr_vm_stabilize::Mat3x4& outDelta)
+    {
+        if (!vr || !sourceBones || keepSide.side != -1 ||
+            keepSide.hand < 0 || keepSide.hand >= numBones)
+        {
+            return false;
+        }
+
+        vr_vm_stabilize::Mat3x4 sourceAnchor{};
+        if (!vr_vm_stabilize::SafeRead(sourceBones + keepSide.hand, sourceAnchor) ||
+            !HooksNativeViewmodelHandsOnlyMatrixFinite(sourceAnchor))
+        {
+            return false;
+        }
+
+        vr_vm_stabilize::Mat3x4 targetAnchor{};
+        if (!HooksNativeViewmodelHandsOnlyBuildLeftControllerTargetAnchor(vr, targetAnchor))
+            return false;
+
+        vr_vm_stabilize::Mat3x4 inverseSourceAnchor{};
+        vr_vm_stabilize::InvertTR(sourceAnchor, inverseSourceAnchor);
+        vr_vm_stabilize::Mul(targetAnchor, inverseSourceAnchor, outDelta);
+        return HooksNativeViewmodelHandsOnlyMatrixFinite(outDelta);
+    }
+
     inline bool HooksNativeViewmodelHandsOnlyBuildIsolatedSideBones(
         VR* vr,
         const std::vector<std::string>& boneNames,
@@ -4698,7 +4958,8 @@ namespace
         int numBones,
         const vr_vm_stabilize::Mat3x4* sourceBones,
         const HooksNativeViewmodelHandsOnlySideInfo& keepSide,
-        vr_vm_stabilize::Mat3x4*& outBones)
+        vr_vm_stabilize::Mat3x4*& outBones,
+        float* inOutWristPlaneWorld)
     {
         outBones = nullptr;
         if (!vr || !sourceBones || numBones <= 0 || numBones > 512 ||
@@ -4762,13 +5023,35 @@ namespace
         const vr_vm_stabilize::Mat3x4 hiddenBone =
             HooksNativeViewmodelHandsOnlyCollapsedBoneAt(hiddenOrigin);
 
+        vr_vm_stabilize::Mat3x4 targetDelta{};
+        const bool useTargetDelta =
+            HooksNativeViewmodelHandsOnlyTryBuildSideTargetDelta(
+                vr,
+                keepSide,
+                sourceBones,
+                numBones,
+                targetDelta);
+        if (useTargetDelta && inOutWristPlaneWorld)
+            HooksNativeViewmodelHandsOnlyTransformPlane(targetDelta, inOutWristPlaneWorld);
+
         for (int bone = 0; bone < numBones; ++bone)
         {
             vr_vm_stabilize::Mat3x4 source{};
             if (!vr_vm_stabilize::SafeRead(sourceBones + bone, source))
                 return false;
 
-            isolated[bone] = keepMask[static_cast<size_t>(bone)] ? source : hiddenBone;
+            const vr_vm_stabilize::Mat3x4& selected =
+                keepMask[static_cast<size_t>(bone)] ? source : hiddenBone;
+            if (useTargetDelta)
+            {
+                vr_vm_stabilize::Mat3x4 transformed{};
+                vr_vm_stabilize::Mul(targetDelta, selected, transformed);
+                isolated[bone] = transformed;
+            }
+            else
+            {
+                isolated[bone] = selected;
+            }
         }
 
         outBones = isolated;
@@ -4927,12 +5210,12 @@ namespace
             {
                 HooksNativeViewmodelHandsOnlyClipSet set{};
                 set.side = keepSide.side;
-                if (!HooksNativeViewmodelHandsOnlyWorldPlaneToClipPlane(vr, keepSide.wristPlaneWorld, set.planes[set.planeCount]))
-                    return false;
-                ++set.planeCount;
-
-                if (set.planeCount <= 0)
-                    return false;
+                float wristPlaneWorld[4] = {
+                    keepSide.wristPlaneWorld[0],
+                    keepSide.wristPlaneWorld[1],
+                    keepSide.wristPlaneWorld[2],
+                    keepSide.wristPlaneWorld[3],
+                };
                 if (!HooksNativeViewmodelHandsOnlyBuildIsolatedSideBones(
                     vr,
                     boneNames,
@@ -4940,10 +5223,17 @@ namespace
                     numBones,
                     bones,
                     keepSide,
-                    set.isolatedBones))
+                    set.isolatedBones,
+                    wristPlaneWorld))
                 {
                     return false;
                 }
+                if (!HooksNativeViewmodelHandsOnlyWorldPlaneToClipPlane(vr, wristPlaneWorld, set.planes[set.planeCount]))
+                    return false;
+                ++set.planeCount;
+
+                if (set.planeCount <= 0)
+                    return false;
                 outClipSets.push_back(set);
                 return true;
             };
@@ -6393,6 +6683,31 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 	}
 
 	{
+		struct NativeHandsOnlyRenderSnapshotTLSGuard
+		{
+			bool active = false;
+			bool previous = false;
+
+			explicit NativeHandsOnlyRenderSnapshotTLSGuard(bool enable)
+				: active(enable)
+			{
+				if (active)
+				{
+					previous = VR::t_UseRenderFrameSnapshot;
+					VR::t_UseRenderFrameSnapshot = true;
+				}
+			}
+
+			~NativeHandsOnlyRenderSnapshotTLSGuard()
+			{
+				if (active)
+					VR::t_UseRenderFrameSnapshot = previous;
+			}
+		};
+
+		const int nativeHandsOnlyQueueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
+		NativeHandsOnlyRenderSnapshotTLSGuard nativeHandsOnlySnapshotGuard(nativeHandsOnlyQueueMode != 0);
+
 		bool nativeHandsOnlyDrawn = false;
 		std::vector<HooksNativeViewmodelHandsOnlyClipSet> nativeHandsOnlyClipSets;
 		if (HooksNativeViewmodelHandsOnlyBuildSplitClipSets(
