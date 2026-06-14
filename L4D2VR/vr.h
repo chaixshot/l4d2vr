@@ -1098,6 +1098,8 @@ public:
 	float m_ConfigOverlayDistanceMeters = 1.35f;
 	float m_ConfigOverlaySizeMeters = 2.05f;
 	bool m_HideArms = false;
+	bool m_NativeViewmodelHandsOnly = false;
+	float m_NativeViewmodelHandsOnlyWristKeepFraction = 0.0f;
 	// Independent GLB + ozz-animation VR hand renderer. In queued rendering, raw D3D9 hand
 	// draws are inserted into Source's material call queue so they run at the correct eye-RT point.
 	bool m_VrHandsEnabled = false;

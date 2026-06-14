@@ -6044,7 +6044,7 @@ void VR::BeginVrHandsEyeRender(const CViewSetup& view, int eyeIndex)
     m_VrHandsActiveEyeView = nullptr;
     m_VrHandsActiveEyeIndex = -1;
     m_VrHandsWorldMaskDrawn = false;
-    if (!m_VrHandsEnabled || !m_IsVREnabled || !m_Input || !m_Game)
+    if ((!m_VrHandsEnabled && !m_NativeViewmodelHandsOnly) || !m_IsVREnabled || !m_Input || !m_Game)
         return;
 
     m_VrHandsActiveEyeView = &view;

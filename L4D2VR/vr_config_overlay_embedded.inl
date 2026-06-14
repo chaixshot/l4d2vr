@@ -155,6 +155,8 @@ namespace
         { "RightAmmoHudZOffset", CfgOptionType::Float, "HUD\xEF\xBC\x88\xE6\x89\x8B\xE6\x9F\x84\xEF\xBC\x89", "\xE5\xBC\xB9\xE8\x8D\xAFHUD Z\xE5\x81\x8F\xE7\xA7\xBB", -0.25f, 0.25f, "-0.09" },
         { "RightAmmoHudAngleOffset", CfgOptionType::Vec3, "HUD\xEF\xBC\x88\xE6\x89\x8B\xE6\x9F\x84\xEF\xBC\x89", "\xE5\xBC\xB9\xE8\x8D\xAFHUD\xE8\xA7\x92\xE5\xBA\xA6\xE5\x81\x8F\xE7\xA7\xBB (\xE4\xBF\xAF\xE4\xBB\xB0,\xE5\x81\x8F\xE8\x88\xAA,\xE7\xBF\xBB\xE6\xBB\x9A)", -180.0f, 180.0f, "-75,0,0" },
         { "HideArms", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "\xE9\x9A\x90\xE8\x97\x8F\xE6\x89\x8B\xE8\x87\x82", 0.0f, 0.0f, "false" },
+        { "NativeViewmodelHandsOnly", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Native Hands Only", 0.0f, 0.0f, "false" },
+        { "NativeViewmodelHandsOnlyWristKeepFraction", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Native Wrist Units", 0.0f, 8.0f, "0.0" },
         { "VrHandsEnabled", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR \xE5\x8F\x8C\xE6\x89\x8B", 0.0f, 0.0f, "false" },
         { "MagazineInteractionEnabled", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "\xE6\x89\x8B\xE5\x8A\xA8\xE6\x8D\xA2\xE5\xBC\xB9", 0.0f, 0.0f, "false" },
         { "MagazineInteractionQuickReloadMode", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Quick Reload Mode", 0.0f, 0.0f, "false" },
@@ -332,6 +334,8 @@ namespace
         { "RightAmmoHudZOffset", "HUD (Hand)", "HUD\357\274\210\346\211\213\346\237\204\357\274\211", "Ammo HUD Z Offset", "\345\274\271\350\215\257HUD Z\345\201\217\347\247\273", "Overlay translation in controller local space (meters).", "\350\246\206\347\233\226\345\261\202\345\234\250\346\211\213\346\237\204\346\234\254\345\234\260\345\235\220\346\240\207\347\263\273\344\270\255\347\232\204\345\271\263\347\247\273\357\274\210\347\261\263\357\274\211\343\200\202", "Uses the same axis convention as other overlay offsets (ScopeOverlay*).", "\344\270\216\345\205\266\344\273\226\350\246\206\347\233\226\345\261\202\345\201\217\347\247\273\357\274\210ScopeOverlay*\357\274\211\344\275\277\347\224\250\347\233\270\345\220\214\345\235\220\346\240\207\347\272\246\345\256\232\343\200\202" },
         { "RightAmmoHudAngleOffset", "HUD (Hand)", "HUD\357\274\210\346\211\213\346\237\204\357\274\211", "Ammo HUD Angle Offset (pitch,yaw,roll)", "\345\274\271\350\215\257HUD\350\247\222\345\272\246\345\201\217\347\247\273 (\344\277\257\344\273\260,\345\201\217\350\210\252,\347\277\273\346\273\232)", "Additional rotation for the ammo HUD overlay (degrees).", "\345\274\271\350\215\257HUD\350\246\206\347\233\226\345\261\202\347\232\204\351\242\235\345\244\226\346\227\213\350\275\254\357\274\210\345\272\246\357\274\211\343\200\202", "Adjust so it sits like a weapon-side panel.", "\350\260\203\345\210\260\345\203\217\350\264\264\345\234\250\346\255\246\345\231\250\346\227\201\350\276\271\347\232\204\345\260\217\345\261\217\345\271\225\345\215\263\345\217\257\343\200\202" },
         { "HideArms", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Hide Arms", "\351\232\220\350\227\217\346\211\213\350\207\202", "Hides in-game arm models while keeping weapons.", "\351\232\220\350\227\217\346\270\270\346\210\217\344\270\255\347\232\204\346\211\213\350\207\202\346\250\241\345\236\213\357\274\214\344\273\205\344\277\235\347\225\231\346\255\246\345\231\250\343\200\202", "", "" },
+        { "NativeViewmodelHandsOnly", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Native Hands Only", "Native Hands Only", "Clips Source viewmodel arms at the hand so only the native palm and fingers remain.", "Clips Source viewmodel arms at the hand so only the native palm and fingers remain.", "Use this when you want the in-game hand mesh without full sleeves or forearms.", "" },
+        { "NativeViewmodelHandsOnlyWristKeepFraction", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Native Wrist Units", "Native Wrist Units", "Moves the native hand clipping plane toward the forearm in Source units. Higher values keep more wrist.", "Moves the native hand clipping plane toward the forearm in Source units. Higher values keep more wrist.", "0 is the tightest safe crop; 1 keeps a little wrist; 2 keeps more wrist.", "" },
         { "VrHandsEnabled", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR Hands", "VR \xE5\x8F\x8C\xE6\x89\x8B", "If enabled but no VR hands appear, you are using a non-SteamVR runtime. It is not supported yet; custom VR hand paths are planned for the next version.", "\xE5\xBC\x80\xE5\x90\xAF\xE5\x90\x8E\xE5\xA6\x82\xE6\x9E\x9C\xE6\xB2\xA1\xE5\x8F\x91\xE7\x8E\xB0\x20\x56\x52\x20\xE6\x89\x8B\xEF\xBC\x8C\xE8\xAF\xB4\xE6\x98\x8E\xE4\xBD\xA0\xE6\xAD\xA3\xE5\x9C\xA8\xE4\xBD\xBF\xE7\x94\xA8\xE9\x9D\x9E\x20\x53\x74\x65\x61\x6D\x56\x52\x20\xE8\xBF\x90\xE8\xA1\x8C\xE6\x97\xB6\xEF\xBC\x8C\xE6\x9A\x82\xE6\x97\xB6\xE4\xB8\x8D\xE6\x94\xAF\xE6\x8C\x81\xEF\xBC\x8C\xE9\xA2\x84\xE8\xAE\xA1\xE4\xB8\x8B\xE4\xB8\xAA\xE7\x89\x88\xE6\x9C\xAC\xE6\xB7\xBB\xE5\x8A\xA0\xE8\x87\xAA\xE5\xAE\x9A\xE4\xB9\x89\x20\x56\x52\x20\xE6\x89\x8B\xE8\xB7\xAF\xE5\xBE\x84\xE3\x80\x82", "When enabled, the plugin also hides Source arms to avoid duplicate hands.", "\xE5\x90\xAF\xE7\x94\xA8\xE5\x90\x8E\xE4\xBC\x9A\xE8\x87\xAA\xE5\x8A\xA8\xE9\x9A\x90\xE8\x97\x8F\x20\x53\x6F\x75\x72\x63\x65\x20\xE6\x89\x8B\xE8\x87\x82\xEF\xBC\x8C\xE9\x81\xBF\xE5\x85\x8D\xE5\x87\xBA\xE7\x8E\xB0\xE4\xB8\xA4\xE5\x8F\x8C\xE6\x89\x8B\xE3\x80\x82" },
         { "MagazineInteractionEnabled", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Manual Reload", "\xE6\x89\x8B\xE5\x8A\xA8\xE6\x8D\xA2\xE5\xBC\xB9", "Enables physical magazine and shell reload interactions driven by VR hands.", "", "Requires VR Hands. Detachable magazines and shotguns use different physical reload flows.", "" },
         { "MagazineInteractionQuickReloadMode", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Quick Reload Mode", "\xE5\xBF\xAB\xE9\x80\x9F\xE6\x8D\xA2\xE5\xBC\xB9\xE6\xA8\xA1\xE5\xBC\x8F", "After the old magazine is removed, touching a spare magazine auto-attaches it to the off hand. Tactical reloads auto-run the bolt or slide after insertion.", "\xE6\x8B\x94\xE4\xB8\x8B\xE6\x97\xA7\xE5\xBC\xB9\xE5\x8C\xA3\xE5\x90\x8E\xEF\xBC\x8C\xE5\x89\xAF\xE6\x89\x8B\xE7\xA2\xB0\xE5\x88\xB0\xE5\xA4\x87\xE7\x94\xA8\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBC\x9A\xE8\x87\xAA\xE5\x8A\xA8\xE5\x90\xB8\xE9\x99\x84\xEF\xBC\x9B\xE6\x88\x98\xE6\x9C\xAF\xE6\x8D\xA2\xE5\xBC\xB9\xE6\x8F\x92\xE5\x85\xA5\xE5\x90\x8E\xE4\xBC\x9A\xE8\x87\xAA\xE5\x8A\xA8\xE6\x8B\x89\xE5\x8A\xA8\xE6\x9E\xAA\xE6\xA0\x93\xE6\x88\x96\xE6\xBB\x91\xE5\xA5\x97\xE3\x80\x82", "Use it when you want fewer grip-button steps during reloads.", "" },
@@ -1066,11 +1070,16 @@ namespace
     static void CfgNormalizeVrHandsDependencies(CfgOverlayState& s)
     {
         const bool vrHandsEnabled = CfgIsEnabled(s, "VrHandsEnabled", false);
-        if (vrHandsEnabled)
+        const bool nativeHandsOnly = CfgIsEnabled(s, "NativeViewmodelHandsOnly", false);
+        if (nativeHandsOnly)
+            s.values["HideArms"] = "false";
+        else if (vrHandsEnabled)
             s.values["HideArms"] = "true";
         else
-        {
             s.values["HideArms"] = "false";
+
+        if (!vrHandsEnabled)
+        {
             s.values["MagazineInteractionEnabled"] = "false";
             s.values["MagazineInteractionQuickReloadMode"] = "false";
         }
@@ -1166,6 +1175,9 @@ namespace
 
         if (std::strcmp(key, "VrHandsLeftHandedViewmodelPoseOffsetMeters") == 0)
             return CfgIsEnabled(s, "VrHandsEnabled", false) && CfgIsEnabled(s, "LeftHanded", false);
+
+        if (std::strcmp(key, "NativeViewmodelHandsOnlyWristKeepFraction") == 0)
+            return CfgIsEnabled(s, "NativeViewmodelHandsOnly", false);
 
         if (std::strcmp(key, "MagazineInteractionQuickReloadMode") == 0)
             return CfgIsEnabled(s, "VrHandsEnabled", false) && CfgIsEnabled(s, "MagazineInteractionEnabled", false);
