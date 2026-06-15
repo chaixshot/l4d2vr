@@ -4403,6 +4403,23 @@ namespace
         return std::clamp(vr->m_NativeViewmodelHandsOnlyTrimUnits, 0.0f, 32.0f);
     }
 
+    inline float HooksNativeViewmodelHandsOnlyResolveRightAnimationKeepDistance(VR* vr)
+    {
+        if (!vr)
+            return 0.0f;
+
+        return std::clamp(vr->m_NativeViewmodelRightHandAnimationKeepUnits, 0.0f, 16.0f);
+    }
+
+    inline float HooksNativeViewmodelHandsOnlyResolveSideTrimDistance(VR* vr, float stableBoneLen, int side)
+    {
+        float trimDistance = HooksNativeViewmodelHandsOnlyResolveTrimDistance(vr, stableBoneLen);
+        if (side == 1)
+            trimDistance -= HooksNativeViewmodelHandsOnlyResolveRightAnimationKeepDistance(vr);
+
+        return std::clamp(trimDistance, -16.0f, 32.0f);
+    }
+
     inline float HooksNativeViewmodelHandsOnlyResolveViewmodelAspect(const CViewSetup& view)
     {
         if (view.width > 0 && view.height > 0)
@@ -4536,8 +4553,10 @@ namespace
             return false;
         normal *= (1.0f / len);
 
+        const int handSide =
+            HooksNativeViewmodelHandsOnlyBoneSide(vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(hand)]));
         const float trimDistance =
-            HooksNativeViewmodelHandsOnlyResolveTrimDistance(vr, len);
+            HooksNativeViewmodelHandsOnlyResolveSideTrimDistance(vr, len, handSide);
         anchorPos = handPos + (normal * trimDistance);
 
         float worldPlane[4]{};
@@ -5561,7 +5580,7 @@ namespace
         normal *= (1.0f / len);
 
         const float trimDistance =
-            HooksNativeViewmodelHandsOnlyResolveTrimDistance(vr, len);
+            HooksNativeViewmodelHandsOnlyResolveSideTrimDistance(vr, len, side);
         outInfo.anchorPos = outInfo.handPos + (normal * trimDistance);
 
         float wristKeepDistance = HooksNativeViewmodelHandsOnlyResolveWristKeepDistance(vr, len);
