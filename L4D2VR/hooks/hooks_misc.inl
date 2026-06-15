@@ -4400,7 +4400,7 @@ namespace
         if (!vr)
             return 0.0f;
 
-        return std::clamp(vr->m_NativeViewmodelHandsOnlyTrimUnits, 0.0f, 32.0f);
+        return std::clamp(vr->m_NativeViewmodelHandsOnlyTrimUnits, -32.0f, 32.0f);
     }
 
     inline float HooksNativeViewmodelHandsOnlyResolveRightAnimationKeepDistance(VR* vr)
@@ -4417,7 +4417,7 @@ namespace
         if (side == 1)
             trimDistance -= HooksNativeViewmodelHandsOnlyResolveRightAnimationKeepDistance(vr);
 
-        return std::clamp(trimDistance, -16.0f, 32.0f);
+        return std::clamp(trimDistance, -64.0f, 32.0f);
     }
 
     inline float HooksNativeViewmodelHandsOnlyResolveViewmodelAspect(const CViewSetup& view)
@@ -6127,6 +6127,279 @@ namespace
         bool m_Active = false;
     };
 
+    inline bool HooksNativeViewmodelHandsOnlySourceQueueReadableProtection(DWORD protect)
+    {
+        if (protect & PAGE_GUARD)
+            return false;
+
+        switch (protect & 0xff)
+        {
+        case PAGE_READONLY:
+        case PAGE_READWRITE:
+        case PAGE_WRITECOPY:
+        case PAGE_EXECUTE_READ:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlySourceQueueReadableMemory(const void* ptr, size_t bytes)
+    {
+        if (!ptr || bytes == 0)
+            return false;
+
+        const uint8_t* p = reinterpret_cast<const uint8_t*>(ptr);
+        size_t remaining = bytes;
+        while (remaining > 0)
+        {
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (!VirtualQuery(p, &mbi, sizeof(mbi)))
+                return false;
+            if (mbi.State != MEM_COMMIT ||
+                !HooksNativeViewmodelHandsOnlySourceQueueReadableProtection(mbi.Protect))
+            {
+                return false;
+            }
+
+            const uintptr_t current = reinterpret_cast<uintptr_t>(p);
+            const uintptr_t regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+            if (regionEnd <= current)
+                return false;
+
+            const size_t chunk = std::min<size_t>(remaining, static_cast<size_t>(regionEnd - current));
+            p += chunk;
+            remaining -= chunk;
+        }
+        return true;
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlySourceCallQueueUsable(ICallQueue* callQueue)
+    {
+        if (!HooksNativeViewmodelHandsOnlySourceQueueReadableMemory(callQueue, sizeof(void*)))
+            return false;
+
+        void* const vtable = *reinterpret_cast<void**>(callQueue);
+        return HooksNativeViewmodelHandsOnlySourceQueueReadableMemory(vtable, sizeof(void*));
+    }
+
+    inline ICallQueue* HooksNativeViewmodelHandsOnlyGetSourceRenderCallQueue(IMatRenderContext* renderContext)
+    {
+        if (!HooksNativeViewmodelHandsOnlySourceQueueReadableMemory(renderContext, sizeof(void*)))
+            return nullptr;
+
+        void** const contextVtable = *reinterpret_cast<void***>(renderContext);
+        constexpr size_t kGetCallQueueAbsoluteSlot = 142;
+        if (!HooksNativeViewmodelHandsOnlySourceQueueReadableMemory(
+            contextVtable + kGetCallQueueAbsoluteSlot,
+            sizeof(void*)))
+        {
+            return nullptr;
+        }
+
+        void* const getCallQueuePtr = contextVtable[kGetCallQueueAbsoluteSlot];
+        if (!HooksNativeViewmodelHandsOnlySourceQueueReadableMemory(getCallQueuePtr, 1))
+            return nullptr;
+
+        using GetCallQueueFn = ICallQueue*(__thiscall*)(IMatRenderContext*);
+        ICallQueue* callQueue = reinterpret_cast<GetCallQueueFn>(getCallQueuePtr)(renderContext);
+        return HooksNativeViewmodelHandsOnlySourceCallQueueUsable(callQueue) ? callQueue : nullptr;
+    }
+
+    struct HooksQueuedNativeViewmodelHandsOnlyClipState
+    {
+        std::atomic<long> refs{ 0 };
+        VR* vr = nullptr;
+        int planeCount = 0;
+        float planes[2][4]{};
+        IDirect3DDevice9* device = nullptr;
+        DWORD oldClipEnable = 0;
+        DWORD oldClipping = TRUE;
+        float oldPlanes[2][4]{};
+        bool hasOldClipping = false;
+        bool hasOldPlane[2]{};
+        bool active = false;
+
+        HooksQueuedNativeViewmodelHandsOnlyClipState(
+            VR* inVr,
+            const HooksNativeViewmodelHandsOnlyClipSet& clipSet)
+            : vr(inVr),
+            planeCount(std::clamp(clipSet.planeCount, 0, 2))
+        {
+            for (int i = 0; i < planeCount; ++i)
+                memcpy(planes[i], clipSet.planes[i], sizeof(planes[i]));
+        }
+
+        void AddRef()
+        {
+            refs.fetch_add(1, std::memory_order_acq_rel);
+        }
+
+        void Release()
+        {
+            const long remaining = refs.fetch_sub(1, std::memory_order_acq_rel) - 1;
+            if (remaining == 0)
+                delete this;
+        }
+
+        void Begin()
+        {
+            if (active || !vr || planeCount <= 0)
+                return;
+
+            device = HooksNativeViewmodelHandsOnlyGetD3DDevice(vr);
+            if (!device)
+                return;
+
+            if (FAILED(device->GetRenderState(D3DRS_CLIPPLANEENABLE, &oldClipEnable)))
+            {
+                device->Release();
+                device = nullptr;
+                return;
+            }
+            hasOldClipping = SUCCEEDED(device->GetRenderState(D3DRS_CLIPPING, &oldClipping));
+            for (int i = 0; i < 2; ++i)
+            {
+                hasOldPlane[i] = SUCCEEDED(device->GetClipPlane(static_cast<DWORD>(i), oldPlanes[i]));
+                if ((oldClipEnable & (1u << i)) && !hasOldPlane[i])
+                {
+                    device->Release();
+                    device = nullptr;
+                    return;
+                }
+            }
+
+            DWORD newClipEnable = oldClipEnable;
+            for (int i = 0; i < planeCount; ++i)
+            {
+                if (FAILED(device->SetClipPlane(static_cast<DWORD>(i), planes[i])))
+                {
+                    End();
+                    return;
+                }
+                newClipEnable |= (1u << i);
+            }
+            if (hasOldClipping)
+                device->SetRenderState(D3DRS_CLIPPING, TRUE);
+            if (FAILED(device->SetRenderState(D3DRS_CLIPPLANEENABLE, newClipEnable)))
+            {
+                End();
+                return;
+            }
+
+            active = true;
+        }
+
+        void End()
+        {
+            if (!device)
+                return;
+
+            if (active)
+            {
+                device->SetRenderState(D3DRS_CLIPPLANEENABLE, oldClipEnable);
+                if (hasOldClipping)
+                    device->SetRenderState(D3DRS_CLIPPING, oldClipping);
+                for (int i = 0; i < 2; ++i)
+                {
+                    if (hasOldPlane[i])
+                        device->SetClipPlane(static_cast<DWORD>(i), oldPlanes[i]);
+                }
+                active = false;
+            }
+
+            device->Release();
+            device = nullptr;
+        }
+
+        ~HooksQueuedNativeViewmodelHandsOnlyClipState()
+        {
+            End();
+        }
+    };
+
+    class HooksQueuedNativeViewmodelHandsOnlyClipBeginFunctor final : public CFunctor
+    {
+    public:
+        explicit HooksQueuedNativeViewmodelHandsOnlyClipBeginFunctor(HooksQueuedNativeViewmodelHandsOnlyClipState* state)
+            : m_State(state)
+        {
+            if (m_State)
+                m_State->AddRef();
+        }
+
+        ~HooksQueuedNativeViewmodelHandsOnlyClipBeginFunctor() override
+        {
+            if (m_State)
+                m_State->Release();
+        }
+
+        int AddRef() override
+        {
+            return static_cast<int>(m_RefCount.fetch_add(1, std::memory_order_acq_rel) + 1);
+        }
+
+        int Release() override
+        {
+            const long remaining = m_RefCount.fetch_sub(1, std::memory_order_acq_rel) - 1;
+            if (remaining == 0)
+                delete this;
+            return static_cast<int>(remaining);
+        }
+
+        void operator()() override
+        {
+            if (m_State)
+                m_State->Begin();
+        }
+
+    private:
+        std::atomic<long> m_RefCount{ 0 };
+        HooksQueuedNativeViewmodelHandsOnlyClipState* m_State = nullptr;
+    };
+
+    class HooksQueuedNativeViewmodelHandsOnlyClipEndFunctor final : public CFunctor
+    {
+    public:
+        explicit HooksQueuedNativeViewmodelHandsOnlyClipEndFunctor(HooksQueuedNativeViewmodelHandsOnlyClipState* state)
+            : m_State(state)
+        {
+            if (m_State)
+                m_State->AddRef();
+        }
+
+        ~HooksQueuedNativeViewmodelHandsOnlyClipEndFunctor() override
+        {
+            if (m_State)
+                m_State->Release();
+        }
+
+        int AddRef() override
+        {
+            return static_cast<int>(m_RefCount.fetch_add(1, std::memory_order_acq_rel) + 1);
+        }
+
+        int Release() override
+        {
+            const long remaining = m_RefCount.fetch_sub(1, std::memory_order_acq_rel) - 1;
+            if (remaining == 0)
+                delete this;
+            return static_cast<int>(remaining);
+        }
+
+        void operator()() override
+        {
+            if (m_State)
+                m_State->End();
+        }
+
+    private:
+        std::atomic<long> m_RefCount{ 0 };
+        HooksQueuedNativeViewmodelHandsOnlyClipState* m_State = nullptr;
+    };
+
     inline void ApplyMagazineInteractionViewmodelOverride(
         VR* vr,
         void* drawState,
@@ -7464,6 +7737,12 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 
 		bool nativeHandsOnlyDrawn = false;
 		std::vector<HooksNativeViewmodelHandsOnlyClipSet> nativeHandsOnlyClipSets;
+		ICallQueue* nativeHandsOnlyCallQueue = nullptr;
+		if (nativeHandsOnlyQueueMode != 0 && m_Game && m_Game->m_MaterialSystem)
+		{
+			IMatRenderContext* renderContext = m_Game->m_MaterialSystem->GetRenderContext();
+			nativeHandsOnlyCallQueue = HooksNativeViewmodelHandsOnlyGetSourceRenderCallQueue(renderContext);
+		}
 		if (HooksNativeViewmodelHandsOnlyBuildSplitClipSets(
 			m_VR,
 			state,
@@ -7473,15 +7752,45 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 		{
 			for (const HooksNativeViewmodelHandsOnlyClipSet& clipSet : nativeHandsOnlyClipSets)
 			{
-				ScopedNativeViewmodelHandsOnlyClipPlane nativeHandsOnlyClip(m_VR, clipSet);
-				if (!nativeHandsOnlyClip.Active())
-					continue;
-				hkDrawModelExecute.fOriginal(
-					ecx,
-					state,
-					*pDrawInfo,
-					clipSet.isolatedBones);
-				nativeHandsOnlyDrawn = true;
+				if (nativeHandsOnlyQueueMode == 0)
+				{
+					ScopedNativeViewmodelHandsOnlyClipPlane nativeHandsOnlyClip(m_VR, clipSet);
+					if (!nativeHandsOnlyClip.Active())
+						continue;
+					hkDrawModelExecute.fOriginal(
+						ecx,
+						state,
+						*pDrawInfo,
+						clipSet.isolatedBones);
+					nativeHandsOnlyDrawn = true;
+				}
+				else if (clipSet.isolatedBones && nativeHandsOnlyCallQueue)
+				{
+					HooksQueuedNativeViewmodelHandsOnlyClipState* queuedClip =
+						new HooksQueuedNativeViewmodelHandsOnlyClipState(m_VR, clipSet);
+					nativeHandsOnlyCallQueue->QueueFunctor(
+						new HooksQueuedNativeViewmodelHandsOnlyClipBeginFunctor(queuedClip));
+					hkDrawModelExecute.fOriginal(
+						ecx,
+						state,
+						*pDrawInfo,
+						clipSet.isolatedBones);
+					nativeHandsOnlyCallQueue->QueueFunctor(
+						new HooksQueuedNativeViewmodelHandsOnlyClipEndFunctor(queuedClip));
+					nativeHandsOnlyDrawn = true;
+				}
+				else
+				{
+					ScopedNativeViewmodelHandsOnlyClipPlane nativeHandsOnlyClip(m_VR, clipSet);
+					if (!nativeHandsOnlyClip.Active())
+						continue;
+					hkDrawModelExecute.fOriginal(
+						ecx,
+						state,
+						*pDrawInfo,
+						clipSet.isolatedBones);
+					nativeHandsOnlyDrawn = true;
+				}
 			}
 		}
 

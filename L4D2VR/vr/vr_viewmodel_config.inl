@@ -1163,7 +1163,7 @@ void VR::ParseConfigFile()
         8.0f);
     m_NativeViewmodelHandsOnlyTrimUnits = std::clamp(
         getFloat("NativeViewmodelHandsOnlyTrimUnits", m_NativeViewmodelHandsOnlyTrimUnits),
-        0.0f,
+        -32.0f,
         32.0f);
     m_NativeViewmodelRightHandAnimationKeepUnits = std::clamp(
         getFloat("NativeViewmodelRightHandAnimationKeepUnits", m_NativeViewmodelRightHandAnimationKeepUnits),
