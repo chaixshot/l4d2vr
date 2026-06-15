@@ -1173,6 +1173,56 @@ void VR::ParseConfigFile()
         getFloat("NativeViewmodelLeftHandFreezeAfterMapSeconds", m_NativeViewmodelLeftHandFreezeAfterMapSeconds),
         0.0f,
         600.0f);
+    auto clampNativePoseVector = [](Vector value, float minValue, float maxValue)
+    {
+        value.x = std::clamp(value.x, minValue, maxValue);
+        value.y = std::clamp(value.y, minValue, maxValue);
+        value.z = std::clamp(value.z, minValue, maxValue);
+        return value;
+    };
+    m_NativeViewmodelLeftHandPoseOffsetMeters = clampNativePoseVector(
+        getVector3("NativeViewmodelLeftHandPoseOffsetMeters", m_NativeViewmodelLeftHandPoseOffsetMeters),
+        -1.0f,
+        1.0f);
+    m_NativeViewmodelLeftHandPoseRotationOffsetDeg = clampNativePoseVector(
+        getVector3("NativeViewmodelLeftHandPoseRotationOffsetDeg", m_NativeViewmodelLeftHandPoseRotationOffsetDeg),
+        -180.0f,
+        180.0f);
+    m_NativeViewmodelLeftHandOpenVRSkeleton = getBool(
+        "NativeViewmodelLeftHandOpenVRSkeleton",
+        m_NativeViewmodelLeftHandOpenVRSkeleton);
+    m_NativeViewmodelLeftHandOpenVRCurlStrength = std::clamp(
+        getFloat("NativeViewmodelLeftHandOpenVRCurlStrength", m_NativeViewmodelLeftHandOpenVRCurlStrength),
+        0.0f,
+        2.0f);
+    m_NativeViewmodelLeftHandOpenVRCurlDirection = std::clamp(
+        getFloat("NativeViewmodelLeftHandOpenVRCurlDirection", m_NativeViewmodelLeftHandOpenVRCurlDirection),
+        -1.0f,
+        1.0f);
+    m_NativeViewmodelLeftHandOpenVRCurlAxis = std::clamp(
+        getInt("NativeViewmodelLeftHandOpenVRCurlAxis", m_NativeViewmodelLeftHandOpenVRCurlAxis),
+        0,
+        2);
+    m_NativeViewmodelLeftHandOpenVRInitialCurl[0] = std::clamp(
+        getFloat("NativeViewmodelLeftHandOpenVRThumbInitialCurl", m_NativeViewmodelLeftHandOpenVRInitialCurl[0]),
+        -1.0f,
+        1.0f);
+    m_NativeViewmodelLeftHandOpenVRInitialCurl[1] = std::clamp(
+        getFloat("NativeViewmodelLeftHandOpenVRIndexInitialCurl", m_NativeViewmodelLeftHandOpenVRInitialCurl[1]),
+        -1.0f,
+        1.0f);
+    m_NativeViewmodelLeftHandOpenVRInitialCurl[2] = std::clamp(
+        getFloat("NativeViewmodelLeftHandOpenVRMiddleInitialCurl", m_NativeViewmodelLeftHandOpenVRInitialCurl[2]),
+        -1.0f,
+        1.0f);
+    m_NativeViewmodelLeftHandOpenVRInitialCurl[3] = std::clamp(
+        getFloat("NativeViewmodelLeftHandOpenVRRingInitialCurl", m_NativeViewmodelLeftHandOpenVRInitialCurl[3]),
+        -1.0f,
+        1.0f);
+    m_NativeViewmodelLeftHandOpenVRInitialCurl[4] = std::clamp(
+        getFloat("NativeViewmodelLeftHandOpenVRPinkyInitialCurl", m_NativeViewmodelLeftHandOpenVRInitialCurl[4]),
+        -1.0f,
+        1.0f);
     m_VrHandsEnabled = getBool("VrHandsEnabled", m_VrHandsEnabled);
     if (m_NativeViewmodelHandsOnly)
         m_HideArms = false;
