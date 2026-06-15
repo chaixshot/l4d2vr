@@ -1161,6 +1161,10 @@ void VR::ParseConfigFile()
             getFloat("NativeViewmodelHandsOnlyWristKeepFraction", m_NativeViewmodelHandsOnlyWristKeepFraction)),
         0.0f,
         8.0f);
+    m_NativeViewmodelLeftHandFreezeAfterMapSeconds = std::clamp(
+        getFloat("NativeViewmodelLeftHandFreezeAfterMapSeconds", m_NativeViewmodelLeftHandFreezeAfterMapSeconds),
+        0.0f,
+        600.0f);
     m_VrHandsEnabled = getBool("VrHandsEnabled", m_VrHandsEnabled);
     if (m_NativeViewmodelHandsOnly)
         m_HideArms = false;

@@ -1473,12 +1473,26 @@ void VR::Update()
 
     {
         const bool inGame = m_Game->m_EngineClient->IsInGame();
+        auto resetNativeLeftHandFreeze = [&]()
+            {
+                const bool hadState =
+                    m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev ||
+                    m_NativeViewmodelLeftHandFreezePending ||
+                    m_NativeViewmodelLeftHandFreezeReady.load(std::memory_order_acquire) != 0u;
+                m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev = false;
+                m_NativeViewmodelLeftHandFreezePending = false;
+                m_NativeViewmodelLeftHandFreezeDueTime = {};
+                m_NativeViewmodelLeftHandFreezeReady.store(0u, std::memory_order_release);
+                if (hadState)
+                    m_NativeViewmodelLeftHandFreezeGeneration.fetch_add(1u, std::memory_order_acq_rel);
+            };
         if (!inGame)
         {
             m_AutoResetPositionPending = false;
             m_AutoResetHadLocalPlayerPrev = false;
             m_LocalVScriptConvarsMapAuditPending = false;
             m_LocalVScriptConvarsHadLocalPlayerPrev = false;
+            resetNativeLeftHandFreeze();
         }
         else
         {
@@ -1486,6 +1500,42 @@ void VR::Update()
             C_BasePlayer* localPlayer = (C_BasePlayer*)m_Game->GetClientEntity(playerIndex);
             const bool hasLocalPlayer = (localPlayer != nullptr);
             const auto now = std::chrono::steady_clock::now();
+
+            const bool nativeLeftHandFreezeEnabled =
+                m_NativeViewmodelHandsOnly &&
+                m_NativeViewmodelLeftHandFreezeAfterMapSeconds > 0.0f;
+            if (!nativeLeftHandFreezeEnabled || !hasLocalPlayer)
+            {
+                resetNativeLeftHandFreeze();
+            }
+            else
+            {
+                if (!m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev)
+                {
+                    const int freezeDelayMs =
+                        (int)(std::max)(0.0f, m_NativeViewmodelLeftHandFreezeAfterMapSeconds * 1000.0f);
+                    m_NativeViewmodelLeftHandFreezePending = true;
+                    m_NativeViewmodelLeftHandFreezeDueTime = now + std::chrono::milliseconds(freezeDelayMs);
+                    m_NativeViewmodelLeftHandFreezeReady.store(0u, std::memory_order_release);
+                    m_NativeViewmodelLeftHandFreezeGeneration.fetch_add(1u, std::memory_order_acq_rel);
+                    if (m_VrHandsDebugLog)
+                    {
+                        Game::logMsg(
+                            "[VR][NativeHandsOnly] left-hand animation freeze armed delay=%.2fs",
+                            m_NativeViewmodelLeftHandFreezeAfterMapSeconds);
+                    }
+                }
+
+                m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev = true;
+                if (m_NativeViewmodelLeftHandFreezePending &&
+                    now >= m_NativeViewmodelLeftHandFreezeDueTime)
+                {
+                    m_NativeViewmodelLeftHandFreezePending = false;
+                    m_NativeViewmodelLeftHandFreezeReady.store(1u, std::memory_order_release);
+                    if (m_VrHandsDebugLog)
+                        Game::logMsg("[VR][NativeHandsOnly] left-hand animation freeze ready");
+                }
+            }
 
             if (hasLocalPlayer && !m_AutoResetHadLocalPlayerPrev && m_AutoResetPositionAfterLoadSeconds > 0.0f)
             {

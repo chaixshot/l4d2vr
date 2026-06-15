@@ -111,6 +111,7 @@ ControllerSmoothing=0.0
 HideArms=false
 NativeViewmodelHandsOnly=true
 NativeViewmodelHandsOnlyWristKeepFraction=0.0
+NativeViewmodelLeftHandFreezeAfterMapSeconds=0.25
 VrHandsLeftHandedViewmodelPoseOffsetMeters=0,0,0
 VrHandsLeftHandedViewmodelPoseRotationOffsetDeg=0,0,0
 MagazineBoxDebugEnabled=true

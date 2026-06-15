@@ -398,19 +398,24 @@ namespace
             up);
     }
 
-    bool MagazineInteractionBuildFreshPickupBodyBasis(
-        const VR* vr,
+    float MagazineInteractionWrapDegrees(float angle)
+    {
+        if (!std::isfinite(angle))
+            return 0.0f;
+        angle -= 360.0f * std::floor((angle + 180.0f) / 360.0f);
+        return angle;
+    }
+
+    bool MagazineInteractionBuildHorizontalBasisFromYaw(
+        float yawDegrees,
         Vector& outForward,
         Vector& outRight)
     {
-        if (!vr)
-            return false;
-
         const Vector worldUp(0.0f, 0.0f, 1.0f);
         Vector bodyForward{};
         Vector unusedRight{};
         Vector unusedUp{};
-        QAngle::AngleVectors(QAngle(0.0f, vr->m_RotationOffset, 0.0f), &bodyForward, &unusedRight, &unusedUp);
+        QAngle::AngleVectors(QAngle(0.0f, yawDegrees, 0.0f), &bodyForward, &unusedRight, &unusedUp);
         bodyForward.z = 0.0f;
         bodyForward = VrHandMath::Normalize(bodyForward);
         if (bodyForward.Length() <= 0.0001f)
@@ -429,24 +434,107 @@ namespace
         return true;
     }
 
-    bool MagazineInteractionEnsureFreshPickupBodyBasis(VR* vr)
+    bool MagazineInteractionBuildFreshPickupBodyBasis(
+        const VR* vr,
+        float hmdYawOffsetDeg,
+        Vector& outForward,
+        Vector& outRight)
+    {
+        if (!vr)
+            return false;
+
+        return MagazineInteractionBuildHorizontalBasisFromYaw(
+            vr->m_RotationOffset + hmdYawOffsetDeg,
+            outForward,
+            outRight);
+    }
+
+    bool MagazineInteractionComputeFreshPickupHmdYawOffset(
+        const VR* vr,
+        float& outOffsetDeg)
     {
         if (!vr)
             return false;
 
         Vector bodyForward{};
         Vector bodyRight{};
-        if (!MagazineInteractionBuildFreshPickupBodyBasis(vr, bodyForward, bodyRight))
+        if (!MagazineInteractionBuildHorizontalBasisFromYaw(vr->m_RotationOffset, bodyForward, bodyRight))
             return false;
 
+        Vector hmdForward = vr->m_HmdForward;
+        hmdForward.z = 0.0f;
+        hmdForward = VrHandMath::Normalize(hmdForward);
+        if (hmdForward.Length() <= 0.0001f)
+            return false;
+
+        const float dot = std::clamp(DotProduct(bodyForward, hmdForward), -1.0f, 1.0f);
+        const float crossZ = bodyForward.x * hmdForward.y - bodyForward.y * hmdForward.x;
+        constexpr float kRadToDeg = 180.0f / 3.14159265358979323846f;
+        outOffsetDeg = MagazineInteractionWrapDegrees(std::atan2(crossZ, dot) * kRadToDeg);
+        return true;
+    }
+
+    bool MagazineInteractionEnsureFreshPickupBodyBasis(VR* vr)
+    {
+        if (!vr)
+            return false;
+
+        constexpr float kHmdRefreshThresholdDeg = 60.0f;
+        float currentHmdYawOffsetDeg = 0.0f;
+        const bool hasHmdYawOffset =
+            MagazineInteractionComputeFreshPickupHmdYawOffset(vr, currentHmdYawOffsetDeg);
         const bool logFirstCapture = !vr->m_MagazineInteractionFreshPickupBasisValid;
+        bool hmdYawRefreshed = false;
+        float hmdYawDeltaDeg = 0.0f;
+        if (!vr->m_MagazineInteractionFreshPickupBasisValid)
+        {
+            vr->m_MagazineInteractionFreshPickupHmdYawOffsetDeg =
+                hasHmdYawOffset ? currentHmdYawOffsetDeg : 0.0f;
+        }
+        else if (hasHmdYawOffset)
+        {
+            hmdYawDeltaDeg = MagazineInteractionWrapDegrees(
+                currentHmdYawOffsetDeg - vr->m_MagazineInteractionFreshPickupHmdYawOffsetDeg);
+            if (std::fabs(hmdYawDeltaDeg) >= kHmdRefreshThresholdDeg)
+            {
+                vr->m_MagazineInteractionFreshPickupHmdYawOffsetDeg = currentHmdYawOffsetDeg;
+                hmdYawRefreshed = true;
+            }
+        }
+
+        Vector bodyForward{};
+        Vector bodyRight{};
+        if (!MagazineInteractionBuildFreshPickupBodyBasis(
+            vr,
+            vr->m_MagazineInteractionFreshPickupHmdYawOffsetDeg,
+            bodyForward,
+            bodyRight))
+            return false;
+
         vr->m_MagazineInteractionFreshPickupForward = bodyForward;
         vr->m_MagazineInteractionFreshPickupRight = bodyRight;
+        vr->m_MagazineInteractionFreshPickupRotationOffset = vr->m_RotationOffset;
         vr->m_MagazineInteractionFreshPickupBasisValid = true;
         if (logFirstCapture)
         {
             Game::logMsg(
-                "[VR][MagazineInteraction] fresh magazine waist pickup basis initialized dynamic forward=(%.2f %.2f %.2f) right=(%.2f %.2f %.2f)",
+                "[VR][MagazineInteraction] fresh magazine waist pickup basis initialized hmdLatchOffset=%.1f threshold=%.1f forward=(%.2f %.2f %.2f) right=(%.2f %.2f %.2f)",
+                vr->m_MagazineInteractionFreshPickupHmdYawOffsetDeg,
+                kHmdRefreshThresholdDeg,
+                bodyForward.x,
+                bodyForward.y,
+                bodyForward.z,
+                bodyRight.x,
+                bodyRight.y,
+                bodyRight.z);
+        }
+        else if (hmdYawRefreshed)
+        {
+            Game::logMsg(
+                "[VR][MagazineInteraction] fresh magazine waist pickup basis refreshed by HMD yaw delta=%.1f newLatchOffset=%.1f threshold=%.1f forward=(%.2f %.2f %.2f) right=(%.2f %.2f %.2f)",
+                hmdYawDeltaDeg,
+                vr->m_MagazineInteractionFreshPickupHmdYawOffsetDeg,
+                kHmdRefreshThresholdDeg,
                 bodyForward.x,
                 bodyForward.y,
                 bodyForward.z,
@@ -473,9 +561,12 @@ namespace
             bodyForward = vr->m_MagazineInteractionFreshPickupForward;
             bodyRight = vr->m_MagazineInteractionFreshPickupRight;
         }
-        else if (!MagazineInteractionBuildFreshPickupBodyBasis(vr, bodyForward, bodyRight))
+        else
         {
-            return false;
+            float hmdYawOffsetDeg = 0.0f;
+            MagazineInteractionComputeFreshPickupHmdYawOffset(vr, hmdYawOffsetDeg);
+            if (!MagazineInteractionBuildFreshPickupBodyBasis(vr, hmdYawOffsetDeg, bodyForward, bodyRight))
+                return false;
         }
 
         bodyForward = VrHandMath::Normalize(bodyForward);
@@ -3358,6 +3449,8 @@ void VR::CancelMagazineInteractionManual()
     m_MagazineInteractionFreshPickupBasisValid = false;
     m_MagazineInteractionFreshPickupForward = {};
     m_MagazineInteractionFreshPickupRight = {};
+    m_MagazineInteractionFreshPickupHmdYawOffsetDeg = 0.0f;
+    m_MagazineInteractionFreshPickupRotationOffset = 0.0f;
     {
         std::lock_guard<std::mutex> lock(m_MagazineInteractionPoseMutex);
         m_MagazineInteractionDetachedMagazineWorld = {};
