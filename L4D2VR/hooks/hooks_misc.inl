@@ -5252,6 +5252,25 @@ namespace
                 : 0.0f;
             outCurls[static_cast<size_t>(finger)] = std::clamp(baseCurl + initialCurl, 0.0f, 1.0f);
         }
+
+        if (vr->m_MagazineInteractionLeftHandPoseActive.load(std::memory_order_relaxed) != 0)
+        {
+            static const float kMagazineGripMinCurl[5] =
+            {
+                0.34f, 0.60f, 0.66f, 0.68f, 0.68f,
+            };
+            static const float kMagazineGripMaxCurl[5] =
+            {
+                0.58f, 0.82f, 0.88f, 0.90f, 0.90f,
+            };
+            for (int finger = 0; finger < 5; ++finger)
+            {
+                outCurls[static_cast<size_t>(finger)] = std::clamp(
+                    outCurls[static_cast<size_t>(finger)],
+                    kMagazineGripMinCurl[finger],
+                    kMagazineGripMaxCurl[finger]);
+            }
+        }
         return true;
     }
 
@@ -7165,7 +7184,9 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 	if (m_Game->m_SwitchedWeapons)
 		m_Game->m_CachedArmsModel = false;
 
-	bool hideArms = m_Game->m_IsMeleeWeaponActive || m_VR->m_HideArms;
+	const bool nativeViewmodelHandsOnlyActive = m_VR && m_VR->m_NativeViewmodelHandsOnly;
+	bool hideArms = m_VR->m_HideArms ||
+		(m_Game->m_IsMeleeWeaponActive && !nativeViewmodelHandsOnlyActive);
 
 	void* pBonesToWorldFinal = pCustomBoneToWorld;
 	vr_vm_stabilize::Mat3x4* magazineInteractionDetachedMagazineBones = nullptr;

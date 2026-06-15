@@ -2657,7 +2657,7 @@ bool VR::ShouldSuppressMagazineInteractionEmptyClipAutoReload(C_BasePlayer* loca
 {
     if (!m_MagazineInteractionEnabled ||
         !m_IsVREnabled ||
-        !m_VrHandsEnabled)
+        (!m_VrHandsEnabled && !m_NativeViewmodelHandsOnly))
     {
         return false;
     }
@@ -4229,7 +4229,10 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         hasActiveWeapon ? static_cast<int>(activeWeaponId) : 0,
         std::memory_order_relaxed);
 
-    if (!m_MagazineInteractionEnabled || !m_IsVREnabled || !m_VrHandsEnabled || !hasActiveWeapon)
+    if (!m_MagazineInteractionEnabled ||
+        !m_IsVREnabled ||
+        (!m_VrHandsEnabled && !m_NativeViewmodelHandsOnly) ||
+        !hasActiveWeapon)
     {
         CancelMagazineInteractionManual();
         return false;

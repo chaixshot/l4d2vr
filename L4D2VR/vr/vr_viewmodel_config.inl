@@ -1239,7 +1239,7 @@ void VR::ParseConfigFile()
     m_MagazineBoxDebugFallbackHalfExtentsMeters = getVector3("MagazineBoxDebugFallbackHalfExtentsMeters", m_MagazineBoxDebugFallbackHalfExtentsMeters);
     m_MagazineBoxDebugPaddingMeters = getVector3("MagazineBoxDebugPaddingMeters", m_MagazineBoxDebugPaddingMeters);
     m_MagazineInteractionEnabled = getBool("MagazineInteractionEnabled", m_MagazineInteractionEnabled);
-    if (!m_VrHandsEnabled)
+    if (!m_VrHandsEnabled && !m_NativeViewmodelHandsOnly)
         m_MagazineInteractionEnabled = false;
     m_MagazineInteractionQuickReloadMode = getBool("MagazineInteractionQuickReloadMode", m_MagazineInteractionQuickReloadMode);
     m_MagazineInteractionSuppressEmptyClipAutoReload = getBool("MagazineInteractionSuppressEmptyClipAutoReload", m_MagazineInteractionSuppressEmptyClipAutoReload);
