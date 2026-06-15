@@ -4394,6 +4394,15 @@ namespace
             8.0f);
     }
 
+    inline float HooksNativeViewmodelHandsOnlyResolveTrimDistance(VR* vr, float stableBoneLen)
+    {
+        (void)stableBoneLen;
+        if (!vr)
+            return 0.0f;
+
+        return std::clamp(vr->m_NativeViewmodelHandsOnlyTrimUnits, 0.0f, 32.0f);
+    }
+
     inline float HooksNativeViewmodelHandsOnlyResolveViewmodelAspect(const CViewSetup& view)
     {
         if (view.width > 0 && view.height > 0)
@@ -4514,23 +4523,6 @@ namespace
         const Vector handPos = vr_vm_stabilize::GetOrigin(handBone);
         const Vector forearmPos = vr_vm_stabilize::GetOrigin(forearmBone);
         Vector anchorPos = handPos;
-        if (wrist >= 0 && wrist < numBones)
-        {
-            vr_vm_stabilize::Mat3x4 wristBone{};
-            if (vr_vm_stabilize::SafeRead(bones + wrist, wristBone))
-            {
-                const Vector wristPos = vr_vm_stabilize::GetOrigin(wristBone);
-                const Vector handDelta = handPos - forearmPos;
-                const Vector wristDelta = wristPos - forearmPos;
-                const float handDistSq = DotProduct(handDelta, handDelta);
-                const float wristAlongHand = DotProduct(wristDelta, handDelta);
-                if (std::isfinite(handDistSq) && std::isfinite(wristAlongHand) &&
-                    handDistSq > 0.001f && wristAlongHand > 0.0f && wristAlongHand < handDistSq)
-                {
-                    anchorPos = wristPos;
-                }
-            }
-        }
 
         Vector normal = anchorPos - forearmPos;
         float len = normal.Length();
@@ -4544,24 +4536,12 @@ namespace
             return false;
         normal *= (1.0f / len);
 
-        float stableLen = len;
-        float restLen = 0.0f;
-        if (HooksNativeViewmodelHandsOnlyResolveStableBoneLength(
-            drawState,
-            boneParents,
-            numBones,
-            boneIndex,
-            stride,
-            hand,
-            forearm,
-            len,
-            restLen))
-        {
-            stableLen = restLen;
-        }
+        const float trimDistance =
+            HooksNativeViewmodelHandsOnlyResolveTrimDistance(vr, len);
+        anchorPos = handPos + (normal * trimDistance);
 
         float worldPlane[4]{};
-        const float wristKeepDistance = HooksNativeViewmodelHandsOnlyResolveWristKeepDistance(vr, stableLen);
+        const float wristKeepDistance = HooksNativeViewmodelHandsOnlyResolveWristKeepDistance(vr, len);
         const Vector planePoint = anchorPos - (normal * wristKeepDistance);
         worldPlane[0] = normal.x;
         worldPlane[1] = normal.y;
@@ -4722,6 +4702,11 @@ namespace
             return true;
         }
 
+        if (bone == keepSide.wrist)
+        {
+            return true;
+        }
+
         if (bone == keepSide.forearm ||
             (keepSide.forearm >= 0 &&
                 HooksNativeViewmodelHandsOnlyIsAncestor(boneParents, bone, keepSide.forearm, numBones)))
@@ -4737,10 +4722,10 @@ namespace
         if (boneSide != 0 && boneSide != keepSide.side)
             return false;
 
-        (void)wristKeepDistance;
         if (boneSide == keepSide.side)
             return true;
 
+        (void)wristKeepDistance;
         if (HooksNativeViewmodelHandsOnlyBoneNameLooksHandOnly(lowerName) ||
             HooksNativeViewmodelHandsOnlyBoneNameLooksArmKeep(lowerName) ||
             HooksNativeViewmodelHandsOnlyBoneNameLooksHandAttachment(lowerName))
@@ -4876,6 +4861,9 @@ namespace
         if (HooksNativeViewmodelHandsOnlyIsAncestor(boneParents, bone, keepSide.hand, numBones))
             return true;
 
+        if (HooksNativeViewmodelHandsOnlyIsAncestor(boneParents, keepSide.hand, bone, numBones))
+            return true;
+
         if (bone == keepSide.forearm)
             return true;
 
@@ -4884,9 +4872,6 @@ namespace
         {
             return true;
         }
-
-        if (HooksNativeViewmodelHandsOnlyIsAncestor(boneParents, keepSide.hand, bone, numBones))
-            return true;
 
         if (keepSide.wrist >= 0 && keepSide.wrist < numBones)
         {
@@ -4904,6 +4889,7 @@ namespace
         const int boneSide = HooksNativeViewmodelHandsOnlyBoneSide(lowerName);
         if (boneSide == keepSide.side)
             return true;
+
         if (boneSide != 0)
             return false;
 
@@ -5561,25 +5547,6 @@ namespace
         outInfo.handPos = vr_vm_stabilize::GetOrigin(handBone);
         outInfo.anchorPos = outInfo.handPos;
         outInfo.forearmPos = vr_vm_stabilize::GetOrigin(forearmBone);
-        int anchorBone = outInfo.hand;
-        if (outInfo.wrist >= 0 && outInfo.wrist < numBones)
-        {
-            vr_vm_stabilize::Mat3x4 wristBone{};
-            if (vr_vm_stabilize::SafeRead(bones + outInfo.wrist, wristBone))
-            {
-                const Vector wristPos = vr_vm_stabilize::GetOrigin(wristBone);
-                const Vector handDelta = outInfo.handPos - outInfo.forearmPos;
-                const Vector wristDelta = wristPos - outInfo.forearmPos;
-                const float handDistSq = DotProduct(handDelta, handDelta);
-                const float wristAlongHand = DotProduct(wristDelta, handDelta);
-                if (std::isfinite(handDistSq) && std::isfinite(wristAlongHand) &&
-                    handDistSq > 0.001f && wristAlongHand > 0.0f && wristAlongHand < handDistSq)
-                {
-                    outInfo.anchorPos = wristPos;
-                    anchorBone = outInfo.wrist;
-                }
-            }
-        }
 
         Vector normal = outInfo.anchorPos - outInfo.forearmPos;
         float len = normal.Length();
@@ -5593,33 +5560,11 @@ namespace
             return false;
         normal *= (1.0f / len);
 
-        float stableLen = len;
-        float restLen = 0.0f;
-        if (HooksNativeViewmodelHandsOnlyResolveStableBoneLength(
-            drawState,
-            boneParents,
-            numBones,
-            boneIndex,
-            stride,
-            anchorBone,
-            outInfo.forearm,
-            len,
-            restLen))
-        {
-            stableLen = restLen;
-        }
-        if (std::isfinite(stableLen) && stableLen > 0.001f)
-        {
-            outInfo.anchorPos = outInfo.forearmPos + normal * stableLen;
-            len = stableLen;
-        }
+        const float trimDistance =
+            HooksNativeViewmodelHandsOnlyResolveTrimDistance(vr, len);
+        outInfo.anchorPos = outInfo.handPos + (normal * trimDistance);
 
-        float wristKeepDistance = HooksNativeViewmodelHandsOnlyResolveWristKeepDistance(vr, stableLen);
-        if (side == 1 && std::isfinite(stableLen) && stableLen > 0.001f)
-        {
-            const float rightAnimationClipPadding = std::clamp(stableLen * 0.22f, 2.0f, 7.0f);
-            wristKeepDistance = (std::max)(wristKeepDistance, rightAnimationClipPadding);
-        }
+        float wristKeepDistance = HooksNativeViewmodelHandsOnlyResolveWristKeepDistance(vr, len);
         outInfo.wristKeepDistance = wristKeepDistance;
         const Vector planePoint = outInfo.anchorPos - (normal * wristKeepDistance);
         outInfo.wristPlaneWorld[0] = normal.x;

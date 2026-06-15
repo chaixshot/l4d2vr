@@ -1161,6 +1161,10 @@ void VR::ParseConfigFile()
             getFloat("NativeViewmodelHandsOnlyWristKeepFraction", m_NativeViewmodelHandsOnlyWristKeepFraction)),
         0.0f,
         8.0f);
+    m_NativeViewmodelHandsOnlyTrimUnits = std::clamp(
+        getFloat("NativeViewmodelHandsOnlyTrimUnits", m_NativeViewmodelHandsOnlyTrimUnits),
+        0.0f,
+        32.0f);
     m_NativeViewmodelLeftHandFreezeAfterMapSeconds = std::clamp(
         getFloat("NativeViewmodelLeftHandFreezeAfterMapSeconds", m_NativeViewmodelLeftHandFreezeAfterMapSeconds),
         0.0f,

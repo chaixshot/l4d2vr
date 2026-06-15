@@ -1100,6 +1100,7 @@ public:
 	bool m_HideArms = false;
 	bool m_NativeViewmodelHandsOnly = false;
 	float m_NativeViewmodelHandsOnlyWristKeepFraction = 0.0f;
+	float m_NativeViewmodelHandsOnlyTrimUnits = 16.0f;
 	float m_NativeViewmodelLeftHandFreezeAfterMapSeconds = 0.25f;
 	bool m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev = false;
 	bool m_NativeViewmodelLeftHandFreezePending = false;
