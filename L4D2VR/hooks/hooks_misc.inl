@@ -4828,6 +4828,191 @@ namespace
             HooksNativeViewmodelHandsOnlyPlaneFinite(outPlane);
     }
 
+    inline bool HooksNativeViewmodelHandsOnlyFindBoneByLowerSuffix(
+        const std::vector<std::string>& boneNames,
+        const char* lowerSuffix,
+        int& outBone);
+
+    inline int HooksNativeViewmodelHandsOnlyBuildLeftFingerDriveMask(
+        const std::vector<std::string>& boneNames,
+        const std::vector<int>& boneParents,
+        int numBones,
+        const std::array<float, 5>* curls,
+        float strength,
+        float direction,
+        std::vector<uint8_t>& outDriveMask,
+        std::vector<uint8_t>* outHasAngle,
+        std::vector<float>* outAngleByBone)
+    {
+        const size_t maskSize = static_cast<size_t>(numBones > 0 ? numBones : 0);
+        outDriveMask.assign(maskSize, 0u);
+        if (outHasAngle)
+            outHasAngle->assign(maskSize, 0u);
+        if (outAngleByBone)
+            outAngleByBone->assign(maskSize, 0.0f);
+        if (numBones <= 0 || numBones > 512 ||
+            static_cast<int>(boneNames.size()) < numBones ||
+            static_cast<int>(boneParents.size()) < numBones)
+        {
+            return 0;
+        }
+
+        static const char* kLeftFingerBones[5][3] =
+        {
+            { "bip01_l_finger0", "bip01_l_finger01", "bip01_l_finger02" },
+            { "bip01_l_finger1", "bip01_l_finger11", "bip01_l_finger12" },
+            { "bip01_l_finger2", "bip01_l_finger21", "bip01_l_finger22" },
+            { "bip01_l_finger3", "bip01_l_finger31", "bip01_l_finger32" },
+            { "bip01_l_finger4", "bip01_l_finger41", "bip01_l_finger42" },
+        };
+        static const float kMaxCurlRadians[5][3] =
+        {
+            { 0.75f, 0.90f, 0.65f },
+            { 1.15f, 1.25f, 0.90f },
+            { 1.15f, 1.25f, 0.90f },
+            { 1.15f, 1.25f, 0.90f },
+            { 1.15f, 1.25f, 0.90f },
+        };
+
+        std::vector<uint8_t> drivenRoot(static_cast<size_t>(numBones), 0u);
+        int mappedSegments = 0;
+        for (int finger = 0; finger < 5; ++finger)
+        {
+            const float curl = curls ? (*curls)[static_cast<size_t>(finger)] : 0.0f;
+            for (int segment = 0; segment < 3; ++segment)
+            {
+                int bone = -1;
+                if (!HooksNativeViewmodelHandsOnlyFindBoneByLowerSuffix(
+                        boneNames,
+                        kLeftFingerBones[finger][segment],
+                        bone) ||
+                    bone < 0 ||
+                    bone >= numBones)
+                {
+                    continue;
+                }
+
+                drivenRoot[static_cast<size_t>(bone)] = 1u;
+                outDriveMask[static_cast<size_t>(bone)] = 1u;
+                if (outHasAngle && outAngleByBone)
+                {
+                    (*outHasAngle)[static_cast<size_t>(bone)] = 1u;
+                    (*outAngleByBone)[static_cast<size_t>(bone)] =
+                        curl * kMaxCurlRadians[finger][segment] * strength * direction;
+                }
+                ++mappedSegments;
+            }
+        }
+
+        for (int bone = 0; bone < numBones; ++bone)
+        {
+            int current = bone;
+            for (int guard = 0; guard < numBones && current >= 0 && current < numBones; ++guard)
+            {
+                if (drivenRoot[static_cast<size_t>(current)])
+                {
+                    outDriveMask[static_cast<size_t>(bone)] = 1u;
+                    break;
+                }
+                current = boneParents[static_cast<size_t>(current)];
+            }
+        }
+
+        return mappedSegments;
+    }
+
+    inline int HooksNativeViewmodelHandsOnlyNeutralizeFrozenLeftFingerRotations(
+        const std::vector<int>& boneParents,
+        int numBones,
+        const std::vector<uint8_t>& driveMask,
+        const std::vector<uint8_t>& freezeMask,
+        std::vector<vr_vm_stabilize::Mat3x4>& inOutAnchorLocalBones)
+    {
+        if (numBones <= 0 || numBones > 512 ||
+            static_cast<int>(boneParents.size()) < numBones ||
+            static_cast<int>(driveMask.size()) < numBones ||
+            static_cast<int>(freezeMask.size()) < numBones ||
+            static_cast<int>(inOutAnchorLocalBones.size()) < numBones)
+        {
+            return 0;
+        }
+
+        const std::vector<vr_vm_stabilize::Mat3x4> originalAnchorLocalBones = inOutAnchorLocalBones;
+        std::vector<uint8_t> resolved(static_cast<size_t>(numBones), 0u);
+        int applied = 0;
+        for (int pass = 0; pass < numBones && applied < numBones; ++pass)
+        {
+            bool progressed = false;
+            for (int bone = 0; bone < numBones; ++bone)
+            {
+                if (!driveMask[static_cast<size_t>(bone)] ||
+                    !freezeMask[static_cast<size_t>(bone)] ||
+                    resolved[static_cast<size_t>(bone)])
+                {
+                    continue;
+                }
+
+                const int parent = boneParents[static_cast<size_t>(bone)];
+                if (parent < 0 || parent >= numBones ||
+                    !freezeMask[static_cast<size_t>(parent)])
+                {
+                    continue;
+                }
+                if (driveMask[static_cast<size_t>(parent)] &&
+                    !resolved[static_cast<size_t>(parent)])
+                {
+                    continue;
+                }
+                if (!HooksNativeViewmodelHandsOnlyMatrixFinite(originalAnchorLocalBones[static_cast<size_t>(parent)]) ||
+                    !HooksNativeViewmodelHandsOnlyMatrixFinite(originalAnchorLocalBones[static_cast<size_t>(bone)]) ||
+                    !HooksNativeViewmodelHandsOnlyMatrixFinite(inOutAnchorLocalBones[static_cast<size_t>(parent)]))
+                {
+                    continue;
+                }
+
+                vr_vm_stabilize::Mat3x4 inverseOriginalParent{};
+                vr_vm_stabilize::InvertTR(originalAnchorLocalBones[static_cast<size_t>(parent)], inverseOriginalParent);
+                vr_vm_stabilize::Mat3x4 originalParentLocal{};
+                vr_vm_stabilize::Mul(
+                    inverseOriginalParent,
+                    originalAnchorLocalBones[static_cast<size_t>(bone)],
+                    originalParentLocal);
+                if (!HooksNativeViewmodelHandsOnlyMatrixFinite(originalParentLocal))
+                    continue;
+
+                const Vector offset = vr_vm_stabilize::GetOrigin(originalParentLocal);
+                if (!HooksNativeViewmodelHandsOnlyVectorFinite(offset))
+                    continue;
+
+                vr_vm_stabilize::Mat3x4 neutralParentLocal{};
+                neutralParentLocal.m[0][0] = 1.0f;
+                neutralParentLocal.m[1][1] = 1.0f;
+                neutralParentLocal.m[2][2] = 1.0f;
+                neutralParentLocal.m[0][3] = offset.x;
+                neutralParentLocal.m[1][3] = offset.y;
+                neutralParentLocal.m[2][3] = offset.z;
+
+                vr_vm_stabilize::Mat3x4 neutralAnchorLocal{};
+                vr_vm_stabilize::Mul(
+                    inOutAnchorLocalBones[static_cast<size_t>(parent)],
+                    neutralParentLocal,
+                    neutralAnchorLocal);
+                if (!HooksNativeViewmodelHandsOnlyMatrixFinite(neutralAnchorLocal))
+                    continue;
+
+                inOutAnchorLocalBones[static_cast<size_t>(bone)] = neutralAnchorLocal;
+                resolved[static_cast<size_t>(bone)] = 1u;
+                ++applied;
+                progressed = true;
+            }
+
+            if (!progressed)
+                break;
+        }
+
+        return applied;
+    }
+
     struct HooksNativeViewmodelLeftHandFreezeCache
     {
         VR* owner = nullptr;
@@ -4924,6 +5109,9 @@ namespace
 
     inline bool HooksNativeViewmodelHandsOnlyCaptureLeftHandFreezePose(
         VR* vr,
+        void* drawState,
+        int boneIndex,
+        int stride,
         const std::string& lowerModel,
         const std::vector<std::string>& boneNames,
         const std::vector<int>& boneParents,
@@ -4946,8 +5134,27 @@ namespace
             !HooksNativeViewmodelHandsOnlyMatrixFinite(targetDelta))
             return false;
 
+        (void)drawState;
+        (void)boneIndex;
+        (void)stride;
+
         vr_vm_stabilize::Mat3x4 inverseAnchor{};
         vr_vm_stabilize::InvertTR(targetAnchor, inverseAnchor);
+
+        std::vector<uint8_t> frozenFingerDriveMask;
+        if (vr->m_NativeViewmodelLeftHandOpenVRSkeleton)
+        {
+            HooksNativeViewmodelHandsOnlyBuildLeftFingerDriveMask(
+                boneNames,
+                boneParents,
+                numBones,
+                nullptr,
+                0.0f,
+                0.0f,
+                frozenFingerDriveMask,
+                nullptr,
+                nullptr);
+        }
 
         std::vector<uint8_t> freezeMask(static_cast<size_t>(numBones), 0u);
         std::vector<vr_vm_stabilize::Mat3x4> frozenLocalBones(static_cast<size_t>(numBones));
@@ -4990,6 +5197,17 @@ namespace
         if (frozenBones <= 0)
             return false;
 
+        int neutralFingerBones = 0;
+        if (static_cast<int>(frozenFingerDriveMask.size()) == numBones)
+        {
+            neutralFingerBones = HooksNativeViewmodelHandsOnlyNeutralizeFrozenLeftFingerRotations(
+                boneParents,
+                numBones,
+                frozenFingerDriveMask,
+                freezeMask,
+                frozenLocalBones);
+        }
+
         cache.owner = vr;
         cache.modelName = lowerModel;
         cache.generation = generation;
@@ -5020,10 +5238,11 @@ namespace
         if (vr->m_VrHandsDebugLog)
         {
             Game::logMsg(
-                "[VR][NativeHandsOnly] captured frozen left-hand animation pose model=%s bones=%d frozen=%d hand=%d plane=%d generation=%u",
+                "[VR][NativeHandsOnly] captured frozen left-hand animation pose model=%s bones=%d frozen=%d neutralFingers=%d hand=%d plane=%d generation=%u",
                 lowerModel.c_str(),
                 numBones,
                 frozenBones,
+                neutralFingerBones,
                 keepSide.hand,
                 cache.frozenWristPlaneValid ? 1 : 0,
                 generation);
@@ -5033,6 +5252,9 @@ namespace
 
     inline bool HooksNativeViewmodelHandsOnlyApplyFrozenLeftHandPose(
         VR* vr,
+        void* drawState,
+        int boneIndex,
+        int stride,
         const std::string& lowerModel,
         const std::vector<std::string>& boneNames,
         const std::vector<int>& boneParents,
@@ -5076,6 +5298,9 @@ namespace
             cache.Reset();
             if (!HooksNativeViewmodelHandsOnlyCaptureLeftHandFreezePose(
                 vr,
+                drawState,
+                boneIndex,
+                stride,
                 lowerModel,
                 boneNames,
                 boneParents,
@@ -5276,6 +5501,9 @@ namespace
 
     inline bool HooksNativeViewmodelHandsOnlyApplyOpenVRLeftFingerPose(
         VR* vr,
+        void* drawState,
+        int boneIndex,
+        int stride,
         const std::vector<std::string>& boneNames,
         const std::vector<int>& boneParents,
         int numBones,
@@ -5288,79 +5516,34 @@ namespace
         {
             return false;
         }
+        (void)drawState;
+        (void)boneIndex;
+        (void)stride;
 
         std::array<float, 5> curls{};
         if (!HooksNativeViewmodelHandsOnlyReadOpenVRLeftFingerCurls(vr, curls))
             return false;
-
-        static const char* kLeftFingerBones[5][3] =
-        {
-            { "bip01_l_finger0", "bip01_l_finger01", "bip01_l_finger02" },
-            { "bip01_l_finger1", "bip01_l_finger11", "bip01_l_finger12" },
-            { "bip01_l_finger2", "bip01_l_finger21", "bip01_l_finger22" },
-            { "bip01_l_finger3", "bip01_l_finger31", "bip01_l_finger32" },
-            { "bip01_l_finger4", "bip01_l_finger41", "bip01_l_finger42" },
-        };
-        static const float kMaxCurlRadians[5][3] =
-        {
-            { 0.75f, 0.90f, 0.65f },
-            { 1.15f, 1.25f, 0.90f },
-            { 1.15f, 1.25f, 0.90f },
-            { 1.15f, 1.25f, 0.90f },
-            { 1.15f, 1.25f, 0.90f },
-        };
 
         const float strength = std::clamp(vr->m_NativeViewmodelLeftHandOpenVRCurlStrength, 0.0f, 2.0f);
         const float direction = std::clamp(vr->m_NativeViewmodelLeftHandOpenVRCurlDirection, -1.0f, 1.0f);
         if (strength <= 0.0001f || std::fabs(direction) <= 0.0001f)
             return false;
 
-        std::vector<uint8_t> drivenRoot(static_cast<size_t>(numBones), 0u);
-        std::vector<uint8_t> driveMask(static_cast<size_t>(numBones), 0u);
-        std::vector<uint8_t> hasAngle(static_cast<size_t>(numBones), 0u);
-        std::vector<float> angleByBone(static_cast<size_t>(numBones), 0.0f);
-
-        int mappedSegments = 0;
-        for (int finger = 0; finger < 5; ++finger)
-        {
-            const float curl = curls[static_cast<size_t>(finger)];
-            for (int segment = 0; segment < 3; ++segment)
-            {
-                int bone = -1;
-                if (!HooksNativeViewmodelHandsOnlyFindBoneByLowerSuffix(
-                        boneNames,
-                        kLeftFingerBones[finger][segment],
-                        bone) ||
-                    bone < 0 ||
-                    bone >= numBones)
-                {
-                    continue;
-                }
-
-                drivenRoot[static_cast<size_t>(bone)] = 1u;
-                driveMask[static_cast<size_t>(bone)] = 1u;
-                hasAngle[static_cast<size_t>(bone)] = 1u;
-                angleByBone[static_cast<size_t>(bone)] =
-                    curl * kMaxCurlRadians[finger][segment] * strength * direction;
-                ++mappedSegments;
-            }
-        }
+        std::vector<uint8_t> driveMask;
+        std::vector<uint8_t> hasAngle;
+        std::vector<float> angleByBone;
+        const int mappedSegments = HooksNativeViewmodelHandsOnlyBuildLeftFingerDriveMask(
+            boneNames,
+            boneParents,
+            numBones,
+            &curls,
+            strength,
+            direction,
+            driveMask,
+            &hasAngle,
+            &angleByBone);
         if (mappedSegments <= 0)
             return false;
-
-        for (int bone = 0; bone < numBones; ++bone)
-        {
-            int current = bone;
-            for (int guard = 0; guard < numBones && current >= 0 && current < numBones; ++guard)
-            {
-                if (drivenRoot[static_cast<size_t>(current)])
-                {
-                    driveMask[static_cast<size_t>(bone)] = 1u;
-                    break;
-                }
-                current = boneParents[static_cast<size_t>(current)];
-            }
-        }
 
         std::vector<vr_vm_stabilize::Mat3x4> baseWorld(static_cast<size_t>(numBones));
         std::vector<vr_vm_stabilize::Mat3x4> baseLocal(static_cast<size_t>(numBones));
@@ -5726,6 +5909,9 @@ namespace
 
     inline bool HooksNativeViewmodelHandsOnlyBuildIsolatedSideBones(
         VR* vr,
+        void* drawState,
+        int boneIndex,
+        int stride,
         const std::string& lowerModel,
         const std::vector<std::string>& boneNames,
         const std::vector<int>& boneParents,
@@ -5834,6 +6020,9 @@ namespace
 
             HooksNativeViewmodelHandsOnlyApplyFrozenLeftHandPose(
                 vr,
+                drawState,
+                boneIndex,
+                stride,
                 lowerModel,
                 boneNames,
                 boneParents,
@@ -5848,6 +6037,9 @@ namespace
 
         HooksNativeViewmodelHandsOnlyApplyOpenVRLeftFingerPose(
             vr,
+            drawState,
+            boneIndex,
+            stride,
             boneNames,
             boneParents,
             numBones,
@@ -5990,6 +6182,9 @@ namespace
                 };
                 if (!HooksNativeViewmodelHandsOnlyBuildIsolatedSideBones(
                     vr,
+                    drawState,
+                    boneIndex,
+                    stride,
                     lowerModel,
                     boneNames,
                     boneParents,
