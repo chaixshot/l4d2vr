@@ -1502,8 +1502,7 @@ void VR::Update()
             const auto now = std::chrono::steady_clock::now();
 
             const bool nativeLeftHandFreezeEnabled =
-                m_NativeViewmodelHandsOnly &&
-                m_NativeViewmodelLeftHandFreezeAfterMapSeconds > 0.0f;
+                m_NativeViewmodelHandsOnly;
             if (!nativeLeftHandFreezeEnabled || !hasLocalPlayer)
             {
                 resetNativeLeftHandFreeze();
@@ -1514,15 +1513,27 @@ void VR::Update()
                 {
                     const int freezeDelayMs =
                         (int)(std::max)(0.0f, m_NativeViewmodelLeftHandFreezeAfterMapSeconds * 1000.0f);
-                    m_NativeViewmodelLeftHandFreezePending = true;
-                    m_NativeViewmodelLeftHandFreezeDueTime = now + std::chrono::milliseconds(freezeDelayMs);
                     m_NativeViewmodelLeftHandFreezeReady.store(0u, std::memory_order_release);
                     m_NativeViewmodelLeftHandFreezeGeneration.fetch_add(1u, std::memory_order_acq_rel);
-                    if (m_VrHandsDebugLog)
+
+                    if (freezeDelayMs <= 0)
                     {
-                        Game::logMsg(
-                            "[VR][NativeHandsOnly] left-hand animation freeze armed delay=%.2fs",
-                            m_NativeViewmodelLeftHandFreezeAfterMapSeconds);
+                        m_NativeViewmodelLeftHandFreezePending = false;
+                        m_NativeViewmodelLeftHandFreezeDueTime = {};
+                        m_NativeViewmodelLeftHandFreezeReady.store(1u, std::memory_order_release);
+                        if (m_VrHandsDebugLog)
+                            Game::logMsg("[VR][NativeHandsOnly] left-hand animation freeze ready immediately");
+                    }
+                    else
+                    {
+                        m_NativeViewmodelLeftHandFreezePending = true;
+                        m_NativeViewmodelLeftHandFreezeDueTime = now + std::chrono::milliseconds(freezeDelayMs);
+                        if (m_VrHandsDebugLog)
+                        {
+                            Game::logMsg(
+                                "[VR][NativeHandsOnly] left-hand animation freeze armed delay=%.2fs",
+                                m_NativeViewmodelLeftHandFreezeAfterMapSeconds);
+                        }
                     }
                 }
 

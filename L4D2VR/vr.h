@@ -1104,7 +1104,7 @@ public:
 	float m_NativeViewmodelHandsOnlyArmBendScale = 1.0f;
 	Vector m_NativeViewmodelHandsOnlyCutRotationDeg = { 0.0f, 0.0f, 0.0f };
 	float m_NativeViewmodelRightHandAnimationKeepUnits = 4.0f;
-	float m_NativeViewmodelLeftHandFreezeAfterMapSeconds = 0.25f;
+	float m_NativeViewmodelLeftHandFreezeAfterMapSeconds = 0.0f;
 	Vector m_NativeViewmodelLeftHandPoseOffsetMeters = { 0.0f, 0.0f, 0.0f };
 	Vector m_NativeViewmodelLeftHandPoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	bool m_NativeViewmodelLeftHandOpenVRSkeleton = true;
