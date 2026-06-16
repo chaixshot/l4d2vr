@@ -1165,6 +1165,15 @@ void VR::ParseConfigFile()
         getFloat("NativeViewmodelHandsOnlyTrimUnits", m_NativeViewmodelHandsOnlyTrimUnits),
         -32.0f,
         32.0f);
+    m_NativeViewmodelHandsOnlyArmBendScale = std::clamp(
+        getFloat("NativeViewmodelHandsOnlyArmBendScale", m_NativeViewmodelHandsOnlyArmBendScale),
+        0.0f,
+        1.0f);
+    m_NativeViewmodelHandsOnlyCutRotationDeg =
+        getVector3("NativeViewmodelHandsOnlyCutRotationDeg", m_NativeViewmodelHandsOnlyCutRotationDeg);
+    m_NativeViewmodelHandsOnlyCutRotationDeg.x = std::clamp(m_NativeViewmodelHandsOnlyCutRotationDeg.x, -89.0f, 89.0f);
+    m_NativeViewmodelHandsOnlyCutRotationDeg.y = std::clamp(m_NativeViewmodelHandsOnlyCutRotationDeg.y, -89.0f, 89.0f);
+    m_NativeViewmodelHandsOnlyCutRotationDeg.z = std::clamp(m_NativeViewmodelHandsOnlyCutRotationDeg.z, -89.0f, 89.0f);
     m_NativeViewmodelRightHandAnimationKeepUnits = std::clamp(
         getFloat("NativeViewmodelRightHandAnimationKeepUnits", m_NativeViewmodelRightHandAnimationKeepUnits),
         0.0f,
