@@ -1204,6 +1204,10 @@ void VR::ParseConfigFile()
         getFloat("NativeViewmodelLeftHandOpenVRCurlStrength", m_NativeViewmodelLeftHandOpenVRCurlStrength),
         0.0f,
         2.0f);
+    m_NativeViewmodelLeftHandOpenVRCurlScale = std::clamp(
+        getFloat("NativeViewmodelLeftHandOpenVRCurlScale", m_NativeViewmodelLeftHandOpenVRCurlScale),
+        0.0f,
+        2.0f);
     m_NativeViewmodelLeftHandOpenVRCurlDirection = std::clamp(
         getFloat("NativeViewmodelLeftHandOpenVRCurlDirection", m_NativeViewmodelLeftHandOpenVRCurlDirection),
         -1.0f,
@@ -1212,6 +1216,14 @@ void VR::ParseConfigFile()
         getInt("NativeViewmodelLeftHandOpenVRCurlAxis", m_NativeViewmodelLeftHandOpenVRCurlAxis),
         0,
         2);
+    m_NativeViewmodelLeftHandOpenVRThumbRootOffsetUnits = clampNativePoseVector(
+        getVector3("NativeViewmodelLeftHandOpenVRThumbRootOffsetUnits", m_NativeViewmodelLeftHandOpenVRThumbRootOffsetUnits),
+        -16.0f,
+        16.0f);
+    m_NativeViewmodelLeftHandOpenVRThumbRootRotationOffsetDeg = clampNativePoseVector(
+        getVector3("NativeViewmodelLeftHandOpenVRThumbRootRotationOffsetDeg", m_NativeViewmodelLeftHandOpenVRThumbRootRotationOffsetDeg),
+        -90.0f,
+        90.0f);
     m_NativeViewmodelLeftHandOpenVRInitialCurl[0] = std::clamp(
         getFloat("NativeViewmodelLeftHandOpenVRThumbInitialCurl", m_NativeViewmodelLeftHandOpenVRInitialCurl[0]),
         -1.0f,

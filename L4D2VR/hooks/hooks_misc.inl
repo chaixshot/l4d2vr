@@ -5602,6 +5602,43 @@ namespace
         return out;
     }
 
+    inline vr_vm_stabilize::Mat3x4 HooksNativeViewmodelHandsOnlyApplyThumbRootAdjust(
+        VR* vr,
+        const vr_vm_stabilize::Mat3x4& local)
+    {
+        if (!vr)
+            return local;
+
+        vr_vm_stabilize::Mat3x4 adjusted = local;
+        const Vector offset = vr->m_NativeViewmodelLeftHandOpenVRThumbRootOffsetUnits;
+        if (std::isfinite(offset.x) && std::isfinite(offset.y) && std::isfinite(offset.z))
+        {
+            adjusted.m[0][3] += offset.x;
+            adjusted.m[1][3] += offset.y;
+            adjusted.m[2][3] += offset.z;
+        }
+
+        const Vector rotation = vr->m_NativeViewmodelLeftHandOpenVRThumbRootRotationOffsetDeg;
+        if (std::isfinite(rotation.x) && std::isfinite(rotation.y) && std::isfinite(rotation.z))
+        {
+            constexpr float kDegToRad = 3.14159265358979323846f / 180.0f;
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                const float degrees = std::clamp(HooksVectorComponent(rotation, axis), -90.0f, 90.0f);
+                if (std::fabs(degrees) <= 0.0001f)
+                    continue;
+
+                const vr_vm_stabilize::Mat3x4 delta =
+                    HooksNativeViewmodelHandsOnlyMakeLocalAxisRotation(axis, degrees * kDegToRad);
+                vr_vm_stabilize::Mat3x4 tmp{};
+                vr_vm_stabilize::Mul(adjusted, delta, tmp);
+                adjusted = tmp;
+            }
+        }
+
+        return adjusted;
+    }
+
     inline bool HooksNativeViewmodelHandsOnlyReadOpenVRLeftFingerCurls(
         VR* vr,
         std::array<float, 5>& outCurls)
@@ -5637,13 +5674,14 @@ namespace
             return false;
         }
 
-        constexpr float kOpenVRThumbMinCurl = 0.10f;
-        constexpr float kOpenVRThumbMaxCurl = 0.30f;
+        constexpr float kOpenVRThumbMinCurl = 0.0f;
+        constexpr float kOpenVRThumbMaxCurl = 2.00f;
         constexpr float kOpenVRFingerMaxCurl = 2.00f;
+        const float curlScale = std::clamp(vr->m_NativeViewmodelLeftHandOpenVRCurlScale, 0.0f, 2.0f);
 
         for (int finger = 0; finger < 5; ++finger)
         {
-            const float baseCurl = std::clamp(summary.flFingerCurl[finger], 0.0f, 1.0f);
+            const float baseCurl = std::clamp(summary.flFingerCurl[finger], 0.0f, 1.0f) * curlScale;
             const float initialCurl =
                 (finger < static_cast<int>(vr->m_NativeViewmodelLeftHandOpenVRInitialCurl.size()))
                 ? vr->m_NativeViewmodelLeftHandOpenVRInitialCurl[static_cast<size_t>(finger)]
@@ -5724,6 +5762,12 @@ namespace
         if (mappedSegments <= 0)
             return false;
 
+        std::vector<uint8_t> thumbRootMask;
+        HooksNativeViewmodelHandsOnlyBuildLeftThumbRootMask(
+            boneNames,
+            numBones,
+            thumbRootMask);
+
         std::vector<vr_vm_stabilize::Mat3x4> baseWorld(static_cast<size_t>(numBones));
         std::vector<vr_vm_stabilize::Mat3x4> baseLocal(static_cast<size_t>(numBones));
         for (int bone = 0; bone < numBones; ++bone)
@@ -5766,6 +5810,11 @@ namespace
                 }
 
                 vr_vm_stabilize::Mat3x4 local = baseLocal[static_cast<size_t>(bone)];
+                if (bone < static_cast<int>(thumbRootMask.size()) &&
+                    thumbRootMask[static_cast<size_t>(bone)])
+                {
+                    local = HooksNativeViewmodelHandsOnlyApplyThumbRootAdjust(vr, local);
+                }
                 if (hasAngle[static_cast<size_t>(bone)])
                 {
                     const vr_vm_stabilize::Mat3x4 rotation =

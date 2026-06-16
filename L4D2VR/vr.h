@@ -1109,9 +1109,12 @@ public:
 	Vector m_NativeViewmodelLeftHandPoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	bool m_NativeViewmodelLeftHandOpenVRSkeleton = true;
 	float m_NativeViewmodelLeftHandOpenVRCurlStrength = 1.0f;
+	float m_NativeViewmodelLeftHandOpenVRCurlScale = 1.0f;
 	float m_NativeViewmodelLeftHandOpenVRCurlDirection = 1.0f;
 	int m_NativeViewmodelLeftHandOpenVRCurlAxis = 2;
 	std::array<float, 5> m_NativeViewmodelLeftHandOpenVRInitialCurl = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+	Vector m_NativeViewmodelLeftHandOpenVRThumbRootOffsetUnits = { 0.0f, 0.0f, 0.0f };
+	Vector m_NativeViewmodelLeftHandOpenVRThumbRootRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	vr::VRActionHandle_t m_NativeViewmodelLeftHandOpenVRAction = vr::k_ulInvalidActionHandle;
 	bool m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev = false;
 	bool m_NativeViewmodelLeftHandFreezePending = false;
