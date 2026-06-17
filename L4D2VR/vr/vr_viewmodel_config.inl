@@ -1174,6 +1174,16 @@ void VR::ParseConfigFile()
     m_NativeViewmodelHandsOnlyCutRotationDeg.x = std::clamp(m_NativeViewmodelHandsOnlyCutRotationDeg.x, -89.0f, 89.0f);
     m_NativeViewmodelHandsOnlyCutRotationDeg.y = std::clamp(m_NativeViewmodelHandsOnlyCutRotationDeg.y, -89.0f, 89.0f);
     m_NativeViewmodelHandsOnlyCutRotationDeg.z = std::clamp(m_NativeViewmodelHandsOnlyCutRotationDeg.z, -89.0f, 89.0f);
+    m_NativeViewmodelHandsOnlyLeftCutRotationDeg =
+        getVector3("NativeViewmodelHandsOnlyLeftCutRotationDeg", m_NativeViewmodelHandsOnlyCutRotationDeg);
+    m_NativeViewmodelHandsOnlyLeftCutRotationDeg.x = std::clamp(m_NativeViewmodelHandsOnlyLeftCutRotationDeg.x, -89.0f, 89.0f);
+    m_NativeViewmodelHandsOnlyLeftCutRotationDeg.y = std::clamp(m_NativeViewmodelHandsOnlyLeftCutRotationDeg.y, -89.0f, 89.0f);
+    m_NativeViewmodelHandsOnlyLeftCutRotationDeg.z = std::clamp(m_NativeViewmodelHandsOnlyLeftCutRotationDeg.z, -89.0f, 89.0f);
+    m_NativeViewmodelHandsOnlyRightCutRotationDeg =
+        getVector3("NativeViewmodelHandsOnlyRightCutRotationDeg", m_NativeViewmodelHandsOnlyCutRotationDeg);
+    m_NativeViewmodelHandsOnlyRightCutRotationDeg.x = std::clamp(m_NativeViewmodelHandsOnlyRightCutRotationDeg.x, -89.0f, 89.0f);
+    m_NativeViewmodelHandsOnlyRightCutRotationDeg.y = std::clamp(m_NativeViewmodelHandsOnlyRightCutRotationDeg.y, -89.0f, 89.0f);
+    m_NativeViewmodelHandsOnlyRightCutRotationDeg.z = std::clamp(m_NativeViewmodelHandsOnlyRightCutRotationDeg.z, -89.0f, 89.0f);
     m_NativeViewmodelRightHandAnimationKeepUnits = std::clamp(
         getFloat("NativeViewmodelRightHandAnimationKeepUnits", m_NativeViewmodelRightHandAnimationKeepUnits),
         0.0f,
@@ -1182,6 +1192,9 @@ void VR::ParseConfigFile()
         getFloat("NativeViewmodelLeftHandFreezeAfterMapSeconds", m_NativeViewmodelLeftHandFreezeAfterMapSeconds),
         0.0f,
         600.0f);
+    m_NativeViewmodelHandsOnlyFreezePoseLock = getBool(
+        "NativeViewmodelHandsOnlyFreezePoseLock",
+        m_NativeViewmodelHandsOnlyFreezePoseLock);
     auto clampNativePoseVector = [](Vector value, float minValue, float maxValue)
     {
         value.x = std::clamp(value.x, minValue, maxValue);
@@ -1189,6 +1202,26 @@ void VR::ParseConfigFile()
         value.z = std::clamp(value.z, minValue, maxValue);
         return value;
     };
+    m_NativeViewmodelHandsOnlyFreezePoseOffsetMeters = clampNativePoseVector(
+        getVector3("NativeViewmodelHandsOnlyFreezePoseOffsetMeters", m_NativeViewmodelHandsOnlyFreezePoseOffsetMeters),
+        -2.0f,
+        2.0f);
+    m_NativeViewmodelHandsOnlyFreezePoseRotationOffsetDeg = clampNativePoseVector(
+        getVector3("NativeViewmodelHandsOnlyFreezePoseRotationOffsetDeg", m_NativeViewmodelHandsOnlyFreezePoseRotationOffsetDeg),
+        -180.0f,
+        180.0f);
+    m_NativeViewmodelHandsOnlyLeftFreezePoseRotationOffsetDeg = clampNativePoseVector(
+        getVector3(
+            "NativeViewmodelHandsOnlyLeftFreezePoseRotationOffsetDeg",
+            m_NativeViewmodelHandsOnlyFreezePoseRotationOffsetDeg),
+        -180.0f,
+        180.0f);
+    m_NativeViewmodelHandsOnlyRightFreezePoseRotationOffsetDeg = clampNativePoseVector(
+        getVector3(
+            "NativeViewmodelHandsOnlyRightFreezePoseRotationOffsetDeg",
+            m_NativeViewmodelHandsOnlyFreezePoseRotationOffsetDeg),
+        -180.0f,
+        180.0f);
     m_NativeViewmodelLeftHandPoseOffsetMeters = clampNativePoseVector(
         getVector3("NativeViewmodelLeftHandPoseOffsetMeters", m_NativeViewmodelLeftHandPoseOffsetMeters),
         -1.0f,
