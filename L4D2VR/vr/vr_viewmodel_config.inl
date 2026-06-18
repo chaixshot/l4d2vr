@@ -1141,6 +1141,12 @@ void VR::ParseConfigFile()
     // Built-in config overlay placement. Keep this in the normal hot-reload path.
     m_ConfigOverlayDistanceMeters = std::clamp(getFloat("ConfigOverlayDistanceMeters", m_ConfigOverlayDistanceMeters), 0.6f, 3.0f);
     m_ConfigOverlaySizeMeters = std::clamp(getFloat("ConfigOverlaySizeMeters", m_ConfigOverlaySizeMeters), 0.8f, 4.0f);
+    m_AutoRecenterSmooth = getBool("AutoRecenterSmooth", m_AutoRecenterSmooth);
+    m_AutoRecenterSoftStartDistance = std::clamp(getFloat("AutoRecenterSoftStartDistance", m_AutoRecenterSoftStartDistance), 0.0f, 150.0f);
+    m_AutoRecenterMaxSpeed = std::clamp(getFloat("AutoRecenterMaxSpeed", m_AutoRecenterMaxSpeed), 0.0f, 300.0f);
+    m_AutoRecenterHardDistance = std::max(
+        m_AutoRecenterSoftStartDistance + 1.0f,
+        getFloat("AutoRecenterHardDistance", m_AutoRecenterHardDistance));
     m_ThirdPersonVRCameraOffset = std::max(0.0f, getFloat("ThirdPersonVRCameraOffset", m_ThirdPersonVRCameraOffset));
     {
         // Backward-compatible parsing:

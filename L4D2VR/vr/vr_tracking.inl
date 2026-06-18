@@ -694,7 +694,40 @@ void VR::UpdateTracking()
     }
 
     m_SetupOriginToHMD = m_HmdPosAbs - m_SetupOrigin;
-    if (!m_TeleportVisualScoutActive && !suppressTeleportCameraClip && VectorLength(m_SetupOriginToHMD) > 150)
+    if (m_AutoRecenterSmooth &&
+        !m_TeleportVisualScoutActive &&
+        !suppressTeleportCameraClip &&
+        !m_IsThirdPersonCamera &&
+        !want1to1DecoupledCamera &&
+        CanApplyResetPositionNow())
+    {
+        Vector planarDrift = m_SetupOriginToHMD;
+        planarDrift.z = 0.0f;
+
+        const float driftLen = VectorLength(planarDrift);
+        const float softStart = std::clamp(m_AutoRecenterSoftStartDistance, 0.0f, 150.0f);
+        const float maxSpeed = std::max(0.0f, m_AutoRecenterMaxSpeed);
+        if (std::isfinite(driftLen) && driftLen > softStart && maxSpeed > 0.0f)
+        {
+            float dt = m_LastFrameDuration;
+            if (!std::isfinite(dt) || dt <= 0.0f)
+                dt = 1.0f / 90.0f;
+            dt = std::clamp(dt, 1.0f / 240.0f, 1.0f / 15.0f);
+
+            const float excessLen = driftLen - softStart;
+            const float stepLen = std::min(excessLen, maxSpeed * dt);
+            if (stepLen > 0.0001f)
+            {
+                const Vector correction = planarDrift * (-(stepLen / driftLen));
+                m_CameraAnchor += correction;
+                m_HmdPosAbs += correction;
+                m_SetupOriginToHMD += correction;
+            }
+        }
+    }
+
+    const float hardRecenterDistance = std::max(m_AutoRecenterSoftStartDistance + 1.0f, m_AutoRecenterHardDistance);
+    if (!m_TeleportVisualScoutActive && !suppressTeleportCameraClip && VectorLength(m_SetupOriginToHMD) > hardRecenterDistance)
         ResetPosition();
     // Observer in-eye: when switching spectated target, re-align anchors once.
     if (m_ResetPositionAfterObserverTargetSwitchPending)

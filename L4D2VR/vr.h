@@ -249,6 +249,10 @@ public:
 	std::atomic<uint32_t> m_ResetPositionDeferredPending{ 0 };
 	bool m_ResetPositionStableEyeZValid = false;
 	float m_ResetPositionStableEyeZ = 0.0f;
+	bool m_AutoRecenterSmooth = true;
+	float m_AutoRecenterSoftStartDistance = 18.0f;
+	float m_AutoRecenterMaxSpeed = 18.0f;
+	float m_AutoRecenterHardDistance = 150.0f;
 	bool m_RoomscaleActive = false;
 	bool m_IsThirdPersonCamera = false;
 	// Death camera flicker guard: after we detect the local player has died,
