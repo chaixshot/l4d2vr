@@ -5817,6 +5817,39 @@ namespace
     }
 
     inline Vector HooksNativeViewmodelHandsOnlyResolveCutRotationDeg(VR* vr, int side);
+    inline bool HooksNativeViewmodelHandsOnlyResolveViewFrame(
+        VR* vr,
+        Vector& outViewOrigin,
+        Vector& outForward,
+        Vector& outRight,
+        Vector& outUp);
+
+    inline bool HooksNativeViewmodelHandsOnlyBuildStableCutRotationAxes(
+        VR* vr,
+        Vector outAxes[3])
+    {
+        if (!outAxes)
+            return false;
+
+        outAxes[0] = Vector(1.0f, 0.0f, 0.0f);
+        outAxes[1] = Vector(0.0f, 0.0f, 1.0f);
+        outAxes[2] = Vector(0.0f, 1.0f, 0.0f);
+
+        Vector viewOrigin{};
+        Vector viewForward{};
+        Vector viewRight{};
+        Vector viewUp{};
+        if (HooksNativeViewmodelHandsOnlyResolveViewFrame(vr, viewOrigin, viewForward, viewRight, viewUp))
+        {
+            outAxes[0] = HooksNormalizeVector(viewRight, outAxes[0]);
+            outAxes[1] = HooksNormalizeVector(viewUp, outAxes[1]);
+            outAxes[2] = HooksNormalizeVector(viewForward, outAxes[2]);
+        }
+
+        return outAxes[0].Length() > 0.0001f &&
+            outAxes[1].Length() > 0.0001f &&
+            outAxes[2].Length() > 0.0001f;
+    }
 
     inline Vector HooksNativeViewmodelHandsOnlyResolveArmBendBaseNormal(
         VR* vr,
@@ -5854,11 +5887,17 @@ namespace
         const Vector& normal,
         int side)
     {
+        (void)handBone;
+
         if (!vr)
             return normal;
 
         const Vector rotation = HooksNativeViewmodelHandsOnlyResolveCutRotationDeg(vr, side);
         if (!std::isfinite(rotation.x) || !std::isfinite(rotation.y) || !std::isfinite(rotation.z))
+            return normal;
+
+        Vector rotationAxes[3]{};
+        if (!HooksNativeViewmodelHandsOnlyBuildStableCutRotationAxes(vr, rotationAxes))
             return normal;
 
         Vector out = normal;
@@ -5872,7 +5911,7 @@ namespace
                 continue;
 
             const Vector localAxis = HooksNormalizeVector(
-                HooksMatrixAxis(handBone, axis),
+                rotationAxes[axis],
                 Vector(0.0f, 0.0f, 0.0f));
             if (localAxis.Length() <= 0.0001f)
                 continue;
