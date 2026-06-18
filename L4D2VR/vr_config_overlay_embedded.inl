@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cctype>
+#include <cfloat>
 
 namespace
 {
@@ -35,12 +36,14 @@ namespace
     constexpr int kCfgSaveX = 1100;
     constexpr int kCfgPagePrevX = 610;
     constexpr int kCfgPageNextX = 720;
+    constexpr int kCfgCalibX = 824;
     constexpr int kCfgPageButtonW = 96;
     constexpr int kCfgPageButtonH = 42;
     constexpr int kCfgCloseX = 1180;
     constexpr int kCfgTopButtonY = 24;
     constexpr int kCfgTopButtonH = 42;
     constexpr int kCfgLangW = 76;
+    constexpr int kCfgCalibW = 78;
     constexpr int kCfgReloadW = 82;
     constexpr int kCfgSaveW = 70;
     constexpr int kCfgCloseW = 76;
@@ -497,6 +500,12 @@ namespace
         std::string key;
     };
 
+    enum class CfgPanelMode
+    {
+        Config,
+        MagazineCalibration
+    };
+
     struct CfgOverlayState
     {
         std::atomic<bool> workerStarted{ false };
@@ -508,8 +517,28 @@ namespace
         bool dirty = true;
         bool needsUpload = true;
         bool useChinese = true;
+        CfgPanelMode panelMode = CfgPanelMode::Config;
         int selected = 0;
         int scroll = 0;
+        int calibrationStep = 0;
+        int calibrationSelectedBone = -1;
+        int calibrationScroll = 0;
+        uint32_t calibrationSeenPublishSeq = 0;
+        uint32_t calibrationSeenModelFingerprint = 0;
+        uint32_t calibrationSeenBoneSignature = 0;
+        int calibrationSeenEntityIndex = -1;
+        int calibrationSeenWeaponId = 0;
+        int calibrationSeenNumBones = 0;
+        int calibrationSeenSourceScore = 0;
+        int calibrationSeenStep = -1;
+        bool calibrationSeenViewmodelClass = false;
+        bool calibrationPreviewAnchorCaptured = false;
+        float calibrationPreviewForwardMeters = 0.75f;
+        float calibrationPreviewRightMeters = 0.0f;
+        float calibrationPreviewUpMeters = -0.08f;
+        float calibrationPreviewPitchDeg = 0.0f;
+        float calibrationPreviewYawDeg = 0.0f;
+        float calibrationPreviewRollDeg = 0.0f;
         std::string status; // Set by CfgLoad/CfgToggleOpen so it follows the current UI language.
         std::string configPath;
         std::vector<CfgOverlayLine> lines;
@@ -1678,6 +1707,16 @@ namespace
         CfgGdiFill(g, x + w - thickness, y, thickness, h, c);
     }
 
+    static void CfgGdiLine(CfgGdiSurface& g, int x0, int y0, int x1, int y1, CfgRgb c, int thickness = 1)
+    {
+        HPEN pen = CreatePen(PS_SOLID, std::max(1, thickness), CfgColorRef(c));
+        HGDIOBJ old = SelectObject(g.dc, pen);
+        MoveToEx(g.dc, x0, y0, nullptr);
+        LineTo(g.dc, x1, y1);
+        SelectObject(g.dc, old);
+        DeleteObject(pen);
+    }
+
     static void CfgGdiTextW(CfgGdiSurface& g, const RECT& rc, const std::wstring& text, HFONT font, CfgRgb c, UINT extraFlags = 0)
     {
         if (text.empty())
@@ -1796,6 +1835,674 @@ namespace
         CfgGdiFill(g, knobX, y - 4, 10, h + 8, { 80, 150, 240 });
     }
 
+    static std::string CfgHex32(uint32_t value)
+    {
+        char text[16] = {};
+        std::snprintf(text, sizeof(text), "%08X", value);
+        return text;
+    }
+
+    static const char* CfgCalibrationStepTitle(const CfgOverlayState& s, int step)
+    {
+        static const char* kZh[] =
+        {
+            "\xE9\x80\x89\xE6\x8B\xA9\xE5\xBC\xB9\xE5\x8C\xA3\xE9\xAA\xA8\xE9\xAA\xBC",
+            "\xE8\xB0\x83\xE6\x95\xB4\xE5\xBC\xB9\xE5\x8C\xA3\xE7\x9B\x92",
+            "\xE8\xB0\x83\xE6\x95\xB4\xE6\x8F\x92\xE5\x85\xA5\xE5\x88\xA4\xE5\xAE\x9A",
+            "\xE9\x80\x89\xE6\x8B\xA9\xE6\x9E\xAA\xE6\xA0\x93\xE9\xAA\xA8\xE9\xAA\xBC"
+        };
+        static const char* kEn[] =
+        {
+            "Select Magazine Bone",
+            "Adjust Magazine Box",
+            "Adjust Socket Capture",
+            "Select Bolt Bone"
+        };
+        const int clamped = std::clamp(step, 0, 3);
+        return s.useChinese ? kZh[clamped] : kEn[clamped];
+    }
+
+    static bool CfgCalibrationVectorFinite(const Vector& value)
+    {
+        return std::isfinite(value.x) &&
+            std::isfinite(value.y) &&
+            std::isfinite(value.z);
+    }
+
+    static bool CfgCaptureCalibrationPreviewAnchor(CfgOverlayState& s)
+    {
+        if (!g_Game || !g_Game->m_VR)
+            return false;
+
+        VR* vrState = g_Game->m_VR;
+        const Vector viewLeft = vrState->GetViewOriginLeft();
+        const Vector viewRight = vrState->GetViewOriginRight();
+        const Vector viewOrigin = (viewLeft + viewRight) * 0.5f;
+        const Vector viewAngles = vrState->GetViewAngle();
+        if (!CfgCalibrationVectorFinite(viewOrigin) || !CfgCalibrationVectorFinite(viewAngles))
+            return false;
+
+        vrState->m_MagazineInteractionCalibrationPreviewAnchorOriginX.store(viewOrigin.x, std::memory_order_relaxed);
+        vrState->m_MagazineInteractionCalibrationPreviewAnchorOriginY.store(viewOrigin.y, std::memory_order_relaxed);
+        vrState->m_MagazineInteractionCalibrationPreviewAnchorOriginZ.store(viewOrigin.z, std::memory_order_relaxed);
+        vrState->m_MagazineInteractionCalibrationPreviewAnchorPitchDeg.store(viewAngles.x, std::memory_order_relaxed);
+        vrState->m_MagazineInteractionCalibrationPreviewAnchorYawDeg.store(viewAngles.y, std::memory_order_relaxed);
+        vrState->m_MagazineInteractionCalibrationPreviewAnchorRollDeg.store(viewAngles.z, std::memory_order_relaxed);
+        vrState->m_MagazineInteractionCalibrationPreviewAnchorValid.store(true, std::memory_order_relaxed);
+        s.calibrationPreviewAnchorCaptured = true;
+        return true;
+    }
+
+    static void CfgApplyCalibrationRuntimeState(CfgOverlayState& s)
+    {
+        if (!g_Game || !g_Game->m_VR)
+            return;
+
+        const bool active = s.visible && s.panelMode == CfgPanelMode::MagazineCalibration;
+        auto clampFinite = [](float value, float fallback, float minValue, float maxValue) -> float
+            {
+                if (!std::isfinite(value))
+                    value = fallback;
+                return (std::clamp)(value, minValue, maxValue);
+            };
+        if (active)
+        {
+            if (!s.calibrationPreviewAnchorCaptured)
+                CfgCaptureCalibrationPreviewAnchor(s);
+        }
+        else
+        {
+            s.calibrationPreviewAnchorCaptured = false;
+            g_Game->m_VR->m_MagazineInteractionCalibrationPreviewAnchorValid.store(false, std::memory_order_relaxed);
+        }
+
+        g_Game->m_VR->m_MagazineInteractionCalibrationOverlayActive.store(active, std::memory_order_relaxed);
+        g_Game->m_VR->m_MagazineInteractionCalibrationSelectedBone.store(
+            active ? s.calibrationSelectedBone : -1,
+            std::memory_order_relaxed);
+        g_Game->m_VR->m_MagazineInteractionCalibrationStep.store(
+            active ? std::clamp(s.calibrationStep, 0, 3) : 0,
+            std::memory_order_relaxed);
+        g_Game->m_VR->m_MagazineInteractionCalibrationPreviewForwardMeters.store(
+            clampFinite(s.calibrationPreviewForwardMeters, 0.75f, 0.15f, 5.00f),
+            std::memory_order_relaxed);
+        g_Game->m_VR->m_MagazineInteractionCalibrationPreviewRightMeters.store(
+            clampFinite(s.calibrationPreviewRightMeters, 0.0f, -3.00f, 3.00f),
+            std::memory_order_relaxed);
+        g_Game->m_VR->m_MagazineInteractionCalibrationPreviewUpMeters.store(
+            clampFinite(s.calibrationPreviewUpMeters, -0.08f, -2.00f, 2.00f),
+            std::memory_order_relaxed);
+        g_Game->m_VR->m_MagazineInteractionCalibrationPreviewPitchDeg.store(
+            clampFinite(s.calibrationPreviewPitchDeg, 0.0f, -180.0f, 180.0f),
+            std::memory_order_relaxed);
+        g_Game->m_VR->m_MagazineInteractionCalibrationPreviewYawDeg.store(
+            clampFinite(s.calibrationPreviewYawDeg, 0.0f, -180.0f, 180.0f),
+            std::memory_order_relaxed);
+        g_Game->m_VR->m_MagazineInteractionCalibrationPreviewRollDeg.store(
+            clampFinite(s.calibrationPreviewRollDeg, 0.0f, -180.0f, 180.0f),
+            std::memory_order_relaxed);
+    }
+
+    struct CfgCalibrationBoneRow
+    {
+        int index = -1;
+        int parent = -1;
+        int magazineScore = 0;
+        int boltScore = 0;
+        std::string name;
+    };
+
+    static int CfgCalibrationRecommendedBone(const MagazineInteractionCalibrationSnapshot& snapshot, int step)
+    {
+        if (step == 3)
+            return snapshot.recommendedBoltBone;
+        return snapshot.recommendedMagazineBone;
+    }
+
+    static std::vector<CfgCalibrationBoneRow> CfgBuildCalibrationRows(
+        const MagazineInteractionCalibrationSnapshot& snapshot,
+        int step)
+    {
+        std::vector<CfgCalibrationBoneRow> rows;
+        rows.reserve(snapshot.bones.size());
+        const bool boltStep = (step == 3);
+        for (const MagazineInteractionCalibrationBone& bone : snapshot.bones)
+        {
+            const int score = boltStep ? bone.boltScore : bone.magazineScore;
+            if (score <= 0 && rows.size() >= 48)
+                continue;
+
+            CfgCalibrationBoneRow row{};
+            row.index = bone.index;
+            row.parent = bone.parent;
+            row.magazineScore = bone.magazineScore;
+            row.boltScore = bone.boltScore;
+            row.name = bone.name.empty() ? "<unnamed>" : bone.name;
+            rows.push_back(std::move(row));
+        }
+
+        std::sort(
+            rows.begin(),
+            rows.end(),
+            [boltStep](const CfgCalibrationBoneRow& lhs, const CfgCalibrationBoneRow& rhs)
+            {
+                const int lhsScore = boltStep ? lhs.boltScore : lhs.magazineScore;
+                const int rhsScore = boltStep ? rhs.boltScore : rhs.magazineScore;
+                if (lhsScore != rhsScore)
+                    return lhsScore > rhsScore;
+                return lhs.index < rhs.index;
+            });
+        if (rows.size() > 96)
+            rows.resize(96);
+        return rows;
+    }
+
+    static float CfgCalibrationBoneCoord(const Vector& value, int axis)
+    {
+        switch (std::clamp(axis, 0, 2))
+        {
+        case 0:
+            return value.x;
+        case 1:
+            return value.y;
+        default:
+            return value.z;
+        }
+    }
+
+    static void CfgDrawCalibrationBonePreview(
+        CfgOverlayState& s,
+        CfgGdiSurface& g,
+        const MagazineInteractionCalibrationSnapshot& snapshot,
+        int x,
+        int y,
+        int w,
+        int h)
+    {
+        CfgGdiFill(g, x, y, w, h, { 18, 21, 28 });
+        CfgGdiFrame(g, x, y, w, h, { 68, 86, 116 }, 1);
+        CfgGdiText(
+            g,
+            x + 14,
+            y + 8,
+            w - 28,
+            24,
+            s.useChinese ? "\xE6\xA8\xA1\xE5\x9E\x8B\xE9\xA2\x84\xE8\xA7\x88\xEF\xBC\x88\xE7\xAE\x80\xE5\x8C\x96\xEF\xBC\x89" : "Model Preview (simplified)",
+            g.boldFont,
+            { 238, 243, 248 });
+
+        const int numBones = std::max(0, snapshot.numBones);
+        if (numBones <= 0)
+            return;
+
+        std::vector<int> validIndexes;
+        validIndexes.reserve(snapshot.bones.size());
+        Vector mins(FLT_MAX, FLT_MAX, FLT_MAX);
+        Vector maxs(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+        for (const MagazineInteractionCalibrationBone& bone : snapshot.bones)
+        {
+            if (!bone.validOrigin || bone.index < 0 || bone.index >= numBones)
+                continue;
+            validIndexes.push_back(bone.index);
+            mins.x = std::min(mins.x, bone.origin.x);
+            mins.y = std::min(mins.y, bone.origin.y);
+            mins.z = std::min(mins.z, bone.origin.z);
+            maxs.x = std::max(maxs.x, bone.origin.x);
+            maxs.y = std::max(maxs.y, bone.origin.y);
+            maxs.z = std::max(maxs.z, bone.origin.z);
+        }
+        if (validIndexes.empty())
+            return;
+
+        const Vector span = maxs - mins;
+        int axisH = 0;
+        if (span.y > CfgCalibrationBoneCoord(span, axisH))
+            axisH = 1;
+        if (span.z > CfgCalibrationBoneCoord(span, axisH))
+            axisH = 2;
+        int axisV = (axisH == 0) ? 1 : 0;
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            if (axis == axisH)
+                continue;
+            if (CfgCalibrationBoneCoord(span, axis) > CfgCalibrationBoneCoord(span, axisV))
+                axisV = axis;
+        }
+
+        const float minH = CfgCalibrationBoneCoord(mins, axisH);
+        const float maxH = CfgCalibrationBoneCoord(maxs, axisH);
+        const float minV = CfgCalibrationBoneCoord(mins, axisV);
+        const float maxV = CfgCalibrationBoneCoord(maxs, axisV);
+        const float rangeH = std::max(0.001f, maxH - minH);
+        const float rangeV = std::max(0.001f, maxV - minV);
+        const int pad = 24;
+        const int plotX = x + pad;
+        const int plotY = y + 42;
+        const int plotW = std::max(1, w - pad * 2);
+        const int plotH = std::max(1, h - 78);
+
+        struct PreviewPoint
+        {
+            bool valid = false;
+            int x = 0;
+            int y = 0;
+        };
+        std::vector<PreviewPoint> points(static_cast<size_t>(numBones));
+        for (const MagazineInteractionCalibrationBone& bone : snapshot.bones)
+        {
+            if (!bone.validOrigin || bone.index < 0 || bone.index >= numBones)
+                continue;
+            const float u = (CfgCalibrationBoneCoord(bone.origin, axisH) - minH) / rangeH;
+            const float v = (CfgCalibrationBoneCoord(bone.origin, axisV) - minV) / rangeV;
+            PreviewPoint p{};
+            p.valid = true;
+            p.x = plotX + static_cast<int>(std::lround(std::clamp(u, 0.0f, 1.0f) * static_cast<float>(plotW)));
+            p.y = plotY + plotH - static_cast<int>(std::lround(std::clamp(v, 0.0f, 1.0f) * static_cast<float>(plotH)));
+            points[static_cast<size_t>(bone.index)] = p;
+        }
+
+        for (const MagazineInteractionCalibrationBone& bone : snapshot.bones)
+        {
+            if (bone.index < 0 || bone.index >= numBones || bone.parent < 0 || bone.parent >= numBones)
+                continue;
+            const PreviewPoint& p = points[static_cast<size_t>(bone.index)];
+            const PreviewPoint& parent = points[static_cast<size_t>(bone.parent)];
+            if (!p.valid || !parent.valid)
+                continue;
+            const bool selectedLink =
+                bone.index == s.calibrationSelectedBone ||
+                bone.parent == s.calibrationSelectedBone;
+            CfgGdiLine(
+                g,
+                parent.x,
+                parent.y,
+                p.x,
+                p.y,
+                selectedLink ? CfgRgb{ 90, 220, 255 } : CfgRgb{ 55, 68, 88 },
+                selectedLink ? 3 : 1);
+        }
+
+        for (const MagazineInteractionCalibrationBone& bone : snapshot.bones)
+        {
+            if (bone.index < 0 || bone.index >= numBones)
+                continue;
+            const PreviewPoint& p = points[static_cast<size_t>(bone.index)];
+            if (!p.valid)
+                continue;
+            const bool selected = bone.index == s.calibrationSelectedBone;
+            const int size = selected ? 10 : 4;
+            const CfgRgb color = selected ? CfgRgb{ 245, 250, 255 } : CfgRgb{ 98, 132, 160 };
+            CfgGdiFill(g, p.x - size / 2, p.y - size / 2, size, size, color);
+            if (selected)
+                CfgGdiFrame(g, p.x - 9, p.y - 9, 18, 18, { 80, 210, 255 }, 2);
+        }
+
+        CfgGdiText(
+            g,
+            x + 14,
+            y + h - 30,
+            w - 28,
+            22,
+            s.useChinese ? "\xE4\xBA\xAE\xE7\x82\xB9=\xE9\x80\x89\xE4\xB8\xAD\xEF\xBC\x8C\xE7\xBA\xBF=\xE7\x88\xB6\xE5\xAD\x90\xE9\xAA\xA8\xE9\xAA\xBC" : "bright point = selected, lines = bone hierarchy",
+            g.smallFont,
+            { 160, 178, 205 });
+    }
+
+    static void CfgRefreshCalibrationSelection(
+        CfgOverlayState& s,
+        const MagazineInteractionCalibrationSnapshot& snapshot)
+    {
+        const bool identityChanged =
+            s.calibrationSeenModelFingerprint != snapshot.modelFingerprint ||
+            s.calibrationSeenBoneSignature != snapshot.boneSignature ||
+            s.calibrationSeenEntityIndex != snapshot.entityIndex ||
+            s.calibrationSeenWeaponId != snapshot.weaponId ||
+            s.calibrationSeenNumBones != snapshot.numBones ||
+            s.calibrationSeenViewmodelClass != snapshot.sourceIsViewmodelClass ||
+            s.calibrationSeenStep != s.calibrationStep;
+        if (identityChanged)
+        {
+            s.calibrationSeenModelFingerprint = snapshot.modelFingerprint;
+            s.calibrationSeenBoneSignature = snapshot.boneSignature;
+            s.calibrationSeenEntityIndex = snapshot.entityIndex;
+            s.calibrationSeenWeaponId = snapshot.weaponId;
+            s.calibrationSeenNumBones = snapshot.numBones;
+            s.calibrationSeenSourceScore = snapshot.sourceScore;
+            s.calibrationSeenViewmodelClass = snapshot.sourceIsViewmodelClass;
+            s.calibrationSeenStep = s.calibrationStep;
+            const int recommended = CfgCalibrationRecommendedBone(snapshot, s.calibrationStep);
+            if (recommended >= 0)
+                s.calibrationSelectedBone = recommended;
+            else
+                s.calibrationSelectedBone = -1;
+            s.calibrationScroll = 0;
+            CfgApplyCalibrationRuntimeState(s);
+        }
+        s.calibrationSeenPublishSeq = snapshot.publishSeq;
+
+        s.calibrationStep = std::clamp(s.calibrationStep, 0, 3);
+        if (s.calibrationSelectedBone >= snapshot.numBones)
+        {
+            s.calibrationSelectedBone = -1;
+            CfgApplyCalibrationRuntimeState(s);
+        }
+    }
+
+    static bool CfgReadCalibrationSnapshot(MagazineInteractionCalibrationSnapshot& snapshot)
+    {
+        if (!g_Game || !g_Game->m_VR)
+            return false;
+        return g_Game->m_VR->GetMagazineInteractionCalibrationSnapshot(snapshot);
+    }
+
+    static bool CfgCalibrationSnapshotIdentityChanged(
+        const CfgOverlayState& s,
+        const MagazineInteractionCalibrationSnapshot& snapshot)
+    {
+        return s.calibrationSeenModelFingerprint != snapshot.modelFingerprint ||
+            s.calibrationSeenBoneSignature != snapshot.boneSignature ||
+            s.calibrationSeenEntityIndex != snapshot.entityIndex ||
+            s.calibrationSeenWeaponId != snapshot.weaponId ||
+            s.calibrationSeenNumBones != snapshot.numBones ||
+            s.calibrationSeenViewmodelClass != snapshot.sourceIsViewmodelClass ||
+            s.calibrationSeenStep != s.calibrationStep;
+    }
+
+    static void CfgMarkDirtyIfCalibrationSnapshotChanged(CfgOverlayState& s)
+    {
+        if (!s.visible || s.panelMode != CfgPanelMode::MagazineCalibration)
+            return;
+
+        MagazineInteractionCalibrationSnapshot snapshot{};
+        if (!CfgReadCalibrationSnapshot(snapshot))
+            return;
+
+        if (CfgCalibrationSnapshotIdentityChanged(s, snapshot))
+            s.dirty = true;
+    }
+
+    static float CfgWrapCalibrationPreviewDegrees(float value)
+    {
+        if (!std::isfinite(value))
+            return 0.0f;
+        value = std::fmod(value, 360.0f);
+        if (value > 180.0f)
+            value -= 360.0f;
+        if (value < -180.0f)
+            value += 360.0f;
+        return value;
+    }
+
+    static void CfgNormalizeCalibrationPreview(CfgOverlayState& s)
+    {
+        s.calibrationPreviewForwardMeters = (std::clamp)(s.calibrationPreviewForwardMeters, 0.15f, 5.00f);
+        s.calibrationPreviewRightMeters = (std::clamp)(s.calibrationPreviewRightMeters, -3.00f, 3.00f);
+        s.calibrationPreviewUpMeters = (std::clamp)(s.calibrationPreviewUpMeters, -2.00f, 2.00f);
+        s.calibrationPreviewPitchDeg = CfgWrapCalibrationPreviewDegrees(s.calibrationPreviewPitchDeg);
+        s.calibrationPreviewYawDeg = CfgWrapCalibrationPreviewDegrees(s.calibrationPreviewYawDeg);
+        s.calibrationPreviewRollDeg = CfgWrapCalibrationPreviewDegrees(s.calibrationPreviewRollDeg);
+    }
+
+    static void CfgResetCalibrationPreview(CfgOverlayState& s)
+    {
+        s.calibrationPreviewAnchorCaptured = false;
+    }
+
+    static std::string CfgCalibrationPreviewStatus(const CfgOverlayState& s)
+    {
+        return "F " + CfgFormatFloat(s.calibrationPreviewForwardMeters, 0.01f) +
+            "  R " + CfgFormatFloat(s.calibrationPreviewRightMeters, 0.01f) +
+            "  U " + CfgFormatFloat(s.calibrationPreviewUpMeters, 0.01f) +
+            "  P " + CfgFormatFloat(s.calibrationPreviewPitchDeg, 1.0f) +
+            "  Y " + CfgFormatFloat(s.calibrationPreviewYawDeg, 1.0f) +
+            "  Roll " + CfgFormatFloat(s.calibrationPreviewRollDeg, 1.0f);
+    }
+
+    static void CfgRenderCalibrationPreviewControls(CfgOverlayState& s, CfgGdiSurface& g)
+    {
+        constexpr int panelX = 26;
+        constexpr int panelY = 746;
+        constexpr int panelW = 1228;
+        constexpr int panelH = 54;
+        constexpr int labelX = panelX + 16;
+        constexpr int valueX = panelX + 136;
+        constexpr int buttonX = panelX + 340;
+        constexpr int row0Y = panelY + 6;
+        constexpr int row1Y = panelY + 30;
+        constexpr int buttonW = 54;
+        constexpr int buttonH = 22;
+        constexpr int gap = 8;
+
+        CfgGdiFill(g, panelX, panelY, panelW, panelH, { 18, 21, 28 });
+        CfgGdiFrame(g, panelX, panelY, panelW, panelH, { 68, 86, 116 }, 1);
+        CfgGdiText(g, labelX, row0Y - 1, 112, buttonH, s.useChinese ? "\xE5\x89\xAF\xE6\x9C\xAC\xE4\xBD\x8D\xE7\xBD\xAE" : "Copy Pos", g.smallFont, { 180, 214, 188 });
+        CfgGdiText(
+            g,
+            valueX,
+            row0Y - 1,
+            190,
+            buttonH,
+            "F " + CfgFormatFloat(s.calibrationPreviewForwardMeters, 0.01f) +
+            " R " + CfgFormatFloat(s.calibrationPreviewRightMeters, 0.01f) +
+            " U " + CfgFormatFloat(s.calibrationPreviewUpMeters, 0.01f),
+            g.smallFont,
+            { 226, 232, 242 });
+        CfgGdiText(g, labelX, row1Y - 1, 112, buttonH, s.useChinese ? "\xE5\x89\xAF\xE6\x9C\xAC\xE6\x97\x8B\xE8\xBD\xAC" : "Copy Rot", g.smallFont, { 180, 214, 188 });
+        CfgGdiText(
+            g,
+            valueX,
+            row1Y - 1,
+            190,
+            buttonH,
+            "P " + CfgFormatFloat(s.calibrationPreviewPitchDeg, 1.0f) +
+            " Y " + CfgFormatFloat(s.calibrationPreviewYawDeg, 1.0f) +
+            " R " + CfgFormatFloat(s.calibrationPreviewRollDeg, 1.0f),
+            g.smallFont,
+            { 226, 232, 242 });
+
+        auto drawButton = [&](int index, int y, const char* zh, const char* en) -> void
+            {
+                CfgGdiButton(g, buttonX + index * (buttonW + gap), y, buttonW, buttonH, s.useChinese ? zh : en);
+            };
+
+        drawButton(0, row0Y, "\xE5\x89\x8D\x2D", "F-");
+        drawButton(1, row0Y, "\xE5\x89\x8D\x2B", "F+");
+        drawButton(2, row0Y, "\xE5\x8F\xB3\x2D", "R-");
+        drawButton(3, row0Y, "\xE5\x8F\xB3\x2B", "R+");
+        drawButton(4, row0Y, "\xE4\xB8\x8A\x2D", "U-");
+        drawButton(5, row0Y, "\xE4\xB8\x8A\x2B", "U+");
+        drawButton(7, row0Y, "\xE9\x87\x8D\xE6\x94\xBE", "Place");
+
+        drawButton(0, row1Y, "\xE4\xBF\xAF\x2D", "P-");
+        drawButton(1, row1Y, "\xE4\xBF\xAF\x2B", "P+");
+        drawButton(2, row1Y, "\xE8\x88\xAA\x2D", "Y-");
+        drawButton(3, row1Y, "\xE8\x88\xAA\x2B", "Y+");
+        drawButton(4, row1Y, "\xE6\xBB\x9A\x2D", "Roll-");
+        drawButton(5, row1Y, "\xE6\xBB\x9A\x2B", "Roll+");
+
+        CfgGdiText(
+            g,
+            buttonX + 8 * (buttonW + gap),
+            row1Y - 1,
+            350,
+            buttonH,
+            s.useChinese ? "\xE5\x89\xAF\xE6\x9C\xAC\xE6\x8C\x89\xE5\x8F\x82\xE6\x95\xB0\xE7\x94\x9F\xE6\x88\x90\xE5\x90\x8E\xE5\x9B\xBA\xE5\xAE\x9A\xE5\x9C\xA8\xE7\xA9\xBA\xE9\x97\xB4" : "Copy is placed from HMD params, then fixed",
+            g.smallFont,
+            { 160, 196, 255 });
+    }
+
+    static bool CfgHandleCalibrationPreviewControlClick(CfgOverlayState& s, int mx, int my)
+    {
+        constexpr int panelX = 26;
+        constexpr int panelY = 746;
+        constexpr int panelW = 1228;
+        constexpr int panelH = 54;
+        constexpr int buttonX = panelX + 340;
+        constexpr int row0Y = panelY + 6;
+        constexpr int row1Y = panelY + 30;
+        constexpr int buttonW = 54;
+        constexpr int buttonH = 22;
+        constexpr int gap = 8;
+        if (mx < panelX || mx >= panelX + panelW || my < panelY || my >= panelY + panelH)
+            return false;
+
+        auto hit = [&](int index, int y) -> bool
+            {
+                const int x = buttonX + index * (buttonW + gap);
+                return mx >= x && mx < x + buttonW && my >= y && my < y + buttonH;
+            };
+
+        bool changed = false;
+        constexpr float posStep = 0.10f;
+        constexpr float rotStep = 10.0f;
+        if (hit(0, row0Y)) { s.calibrationPreviewForwardMeters -= posStep; changed = true; }
+        else if (hit(1, row0Y)) { s.calibrationPreviewForwardMeters += posStep; changed = true; }
+        else if (hit(2, row0Y)) { s.calibrationPreviewRightMeters -= posStep; changed = true; }
+        else if (hit(3, row0Y)) { s.calibrationPreviewRightMeters += posStep; changed = true; }
+        else if (hit(4, row0Y)) { s.calibrationPreviewUpMeters -= posStep; changed = true; }
+        else if (hit(5, row0Y)) { s.calibrationPreviewUpMeters += posStep; changed = true; }
+        else if (hit(7, row0Y)) { CfgResetCalibrationPreview(s); changed = true; }
+        else if (hit(0, row1Y)) { s.calibrationPreviewPitchDeg -= rotStep; changed = true; }
+        else if (hit(1, row1Y)) { s.calibrationPreviewPitchDeg += rotStep; changed = true; }
+        else if (hit(2, row1Y)) { s.calibrationPreviewYawDeg -= rotStep; changed = true; }
+        else if (hit(3, row1Y)) { s.calibrationPreviewYawDeg += rotStep; changed = true; }
+        else if (hit(4, row1Y)) { s.calibrationPreviewRollDeg -= rotStep; changed = true; }
+        else if (hit(5, row1Y)) { s.calibrationPreviewRollDeg += rotStep; changed = true; }
+
+        if (!changed)
+            return true;
+
+        CfgNormalizeCalibrationPreview(s);
+        CfgApplyCalibrationRuntimeState(s);
+        s.status = std::string("Preview copy: ") + CfgCalibrationPreviewStatus(s);
+        s.dirty = true;
+        return true;
+    }
+
+    static void CfgRenderMagazineCalibration(CfgOverlayState& s, CfgGdiSurface& g)
+    {
+        MagazineInteractionCalibrationSnapshot snapshot{};
+        const bool hasSnapshot = CfgReadCalibrationSnapshot(snapshot);
+        if (hasSnapshot)
+            CfgRefreshCalibrationSelection(s, snapshot);
+
+        CfgGdiFill(g, 0, 84, kCfgOverlayW, kCfgOverlayH - 84, { 14, 16, 22 });
+        CfgGdiText(g, 26, 84, 760, 32, s.useChinese ? "\xE5\xBD\x93\xE5\x89\x8D\xE6\xAD\xA6\xE5\x99\xA8\xE5\xBC\xB9\xE5\x8C\xA3\xE6\xA0\xA1\xE5\x87\x86" : "Current Weapon Magazine Calibration", g.headerFont, { 242, 246, 255 });
+
+        const int step = std::clamp(s.calibrationStep, 0, 3);
+        for (int i = 0; i < 4; ++i)
+        {
+            const int x = 26 + i * 300;
+            const bool active = (i == step);
+            CfgGdiFill(g, x, 126, 280, 42, active ? CfgRgb{ 42, 86, 150 } : CfgRgb{ 30, 35, 48 });
+            CfgGdiFrame(g, x, 126, 280, 42, active ? CfgRgb{ 150, 190, 255 } : CfgRgb{ 68, 86, 116 }, 2);
+            std::string title = std::to_string(i + 1) + ". " + CfgCalibrationStepTitle(s, i);
+            CfgGdiText(g, x + 10, 126, 260, 42, title, active ? g.boldFont : g.normalFont, { 238, 243, 248 }, DT_CENTER);
+        }
+
+        if (!hasSnapshot)
+        {
+            CfgGdiFill(g, 26, 198, 1228, 260, { 24, 36, 56 });
+            CfgGdiFrame(g, 26, 198, 1228, 260, { 68, 86, 116 }, 1);
+            CfgGdiTextWrap(
+                g,
+                52,
+                230,
+                1160,
+                96,
+                s.useChinese
+                ? "\xE8\xBF\x98\xE6\xB2\xA1\xE6\x9C\x89\xE6\x8D\x95\xE8\x8E\xB7\xE5\x88\xB0\xE5\xBD\x93\xE5\x89\x8D viewmodel\xE3\x80\x82\xE8\xAF\xB7\xE5\x85\x88\xE5\x9C\xA8\xE6\xB8\xB8\xE6\x88\x8F\xE4\xB8\xAD\xE6\x8B\xBF\xE5\x87\xBA\xE4\xB8\x80\xE6\x8A\x8A\xE6\x9E\xAA\xEF\xBC\x8C\xE5\xB9\xB6\xE7\xA1\xAE\xE4\xBF\x9D\xE6\xAD\xA6\xE5\x99\xA8\xE6\xA8\xA1\xE5\x9E\x8B\xE6\xAD\xA3\xE5\x9C\xA8\xE6\x98\xBE\xE7\xA4\xBA\xE3\x80\x82"
+                : "No current viewmodel snapshot has been captured yet. Equip a weapon in-game and keep the weapon viewmodel visible.",
+                g.normalFont,
+                { 226, 232, 242 });
+            CfgGdiText(g, 26, kCfgOverlayH - 43, 860, 34, s.status, g.smallFont, { 226, 232, 242 });
+            return;
+        }
+
+        const float ageSeconds = std::chrono::duration<float>(std::chrono::steady_clock::now() - snapshot.publishedAt).count();
+        CfgGdiFill(g, 26, 188, 1228, 96, { 24, 36, 56 });
+        CfgGdiFrame(g, 26, 188, 1228, 96, { 68, 86, 116 }, 1);
+        CfgGdiText(g, 44, 198, 840, 26, snapshot.modelName, g.normalFont, { 238, 243, 248 });
+        std::string className = snapshot.sourceClassName.empty()
+            ? std::string("<path>")
+            : snapshot.sourceClassName;
+        std::string ids = "wid=" + std::to_string(snapshot.weaponId) +
+            "  inferred=" + std::to_string(snapshot.inferredWeaponId) +
+            "  bones=" + std::to_string(snapshot.numBones) +
+            "  ent=" + std::to_string(snapshot.entityIndex) +
+            "  class=" + className +
+            "  vmClass=" + std::to_string(snapshot.sourceIsViewmodelClass ? 1 : 0);
+        CfgGdiText(g, 44, 228, 1000, 24, ids, g.smallFont, { 160, 178, 205 });
+        std::string sigs = "score=" + std::to_string(snapshot.sourceScore) +
+            "  fp=" + CfgHex32(snapshot.modelFingerprint) +
+            "  boneSig=" + CfgHex32(snapshot.boneSignature);
+        CfgGdiText(g, 44, 252, 1000, 24, sigs, g.smallFont, { 180, 214, 188 });
+        std::string age = "snapshot age " + CfgFormatFloat(ageSeconds, 0.01f) + "s";
+        CfgGdiText(g, 1060, 214, 170, 26, age, g.smallFont, ageSeconds < 1.0f ? CfgRgb{ 160, 230, 180 } : CfgRgb{ 255, 190, 120 }, DT_RIGHT);
+
+        const bool boneChoiceStep = (step == 0 || step == 3);
+        if (boneChoiceStep)
+        {
+            std::vector<CfgCalibrationBoneRow> rows = CfgBuildCalibrationRows(snapshot, step);
+            const int listX = 26;
+            const int listY = 310;
+            const int rowH = 36;
+            const int rowsVisible = 12;
+            const int listW = 1228;
+            if (s.calibrationScroll > static_cast<int>(rows.size()) - 1)
+                s.calibrationScroll = std::max(0, static_cast<int>(rows.size()) - 1);
+
+            CfgGdiText(g, listX, 286, 540, 24, CfgCalibrationStepTitle(s, step), g.boldFont, { 234, 238, 246 });
+            CfgGdiText(g, listX + 560, 286, listW - 560, 24, s.useChinese ? "\xE7\x82\xB9\xE9\x80\x89\xE9\xAA\xA8\xE9\xAA\xBC\xEF\xBC\x8C\xE5\x8F\xB3\xE4\xBE\xA7/\xE5\x89\x8D\xE6\x96\xB9\xE6\x98\xBE\xE7\xA4\xBA\xE7\x9C\x9F\xE5\xAE\x9E\xE6\xA8\xA1\xE5\x9E\x8B\xE5\x89\xAF\xE6\x9C\xAC" : "Click a bone; a real model copy appears to the right/front", g.smallFont, { 160, 196, 255 }, DT_RIGHT);
+
+            for (int i = 0; i < rowsVisible; ++i)
+            {
+                const int rowIndex = s.calibrationScroll + i;
+                if (rowIndex >= static_cast<int>(rows.size()))
+                    break;
+
+                const CfgCalibrationBoneRow& row = rows[static_cast<size_t>(rowIndex)];
+                const bool selected = row.index == s.calibrationSelectedBone;
+                const int y = listY + i * rowH;
+                CfgGdiFill(g, listX, y, listW, rowH - 3, selected ? CfgRgb{ 31, 72, 96 } : CfgRgb{ 18, 21, 28 });
+                if (selected)
+                    CfgGdiFrame(g, listX, y, listW, rowH - 3, { 80, 190, 235 }, 2);
+                std::string left = "#" + std::to_string(row.index) + "  p" + std::to_string(row.parent) + "  " + row.name;
+                std::string right = "mag " + std::to_string(row.magazineScore) + "    bolt " + std::to_string(row.boltScore);
+                CfgGdiText(g, listX + 16, y + 2, 780, 32, left, selected ? g.boldFont : g.normalFont, { 232, 236, 244 });
+                CfgGdiText(g, listX + 850, y + 2, 350, 32, right, g.normalFont, { 185, 210, 190 }, DT_RIGHT);
+            }
+        }
+        else
+        {
+            CfgGdiFill(g, 26, 318, 1228, 230, { 18, 21, 28 });
+            CfgGdiFrame(g, 26, 318, 1228, 230, { 68, 86, 116 }, 1);
+            std::string selected = s.calibrationSelectedBone >= 0
+                ? ("#" + std::to_string(s.calibrationSelectedBone))
+                : std::string("<none>");
+            CfgGdiText(g, 52, 340, 920, 32, std::string(CfgCalibrationStepTitle(s, step)) + "  selected bone: " + selected, g.boldFont, { 238, 243, 248 });
+            CfgGdiTextWrap(
+                g,
+                52,
+                386,
+                1120,
+                96,
+                s.useChinese
+                ? "\xE8\xBF\x99\xE4\xB8\xAA\xE6\xAD\xA5\xE9\xAA\xA4\xE7\x9A\x84\xE6\x8B\x96\xE6\x8B\xBD\xE7\x9B\x92\xE5\xAD\x90\xE7\xBC\x96\xE8\xBE\x91\xE5\x99\xA8\xE4\xBC\x9A\xE5\x9C\xA8\xE4\xB8\x8B\xE4\xB8\x80\xE6\xAD\xA5\xE6\x8E\xA5\xE4\xB8\x8A\xE3\x80\x82\xE7\x8E\xB0\xE5\x9C\xA8\xE5\x85\x88\xE5\xAE\x8C\xE6\x88\x90\xE5\xBD\x93\xE5\x89\x8D\xE6\xAD\xA6\xE5\x99\xA8\xE8\xAF\x86\xE5\x88\xAB\xE3\x80\x81\xE9\xAA\xA8\xE9\xAA\xBC\xE5\x80\x99\xE9\x80\x89\xE5\x92\x8C\xE9\xAB\x98\xE4\xBA\xAE\xE9\x93\xBE\xE8\xB7\xAF\xE3\x80\x82"
+                : "The drag-box editor for this step will be wired next. This slice establishes current-weapon capture, bone candidates, fingerprinting, and highlighted selection.",
+                g.normalFont,
+                { 194, 204, 222 });
+        }
+
+        CfgRenderCalibrationPreviewControls(s, g);
+
+        CfgGdiFill(g, 0, kCfgOverlayH - 96, kCfgOverlayW, 96, { 30, 35, 48 });
+        CfgGdiFill(g, 26, kCfgOverlayH - 84, 1228, 1, { 68, 78, 100 });
+        CfgGdiText(g, 26, kCfgOverlayH - 72, 900, 26, s.useChinese ? "\xE4\xB8\x8A\xE4\xB8\x80\xE9\xA1\xB5/\xE4\xB8\x8B\xE4\xB8\x80\xE9\xA1\xB5\xEF\xBC\x9A\xE5\x88\x87\xE6\x8D\xA2\xE6\xAD\xA5\xE9\xAA\xA4\xE3\x80\x82" "Calib" "\xEF\xBC\x9A\xE8\xBF\x94\xE5\x9B\x9E\xE9\x85\x8D\xE7\xBD\xAE\xE9\xA1\xB5\xE3\x80\x82" : "Prev/Next switch steps. Calib returns to the config list.", g.smallFont, { 226, 232, 242 });
+        CfgGdiText(g, 26, kCfgOverlayH - 43, 860, 34, s.status, g.smallFont, { 226, 232, 242 });
+        CfgGdiText(g, 1010, kCfgOverlayH - 43, 240, 34, std::to_string(step + 1) + "/4", g.normalFont, { 164, 180, 205 }, DT_RIGHT);
+    }
+
     static void CfgRender(CfgOverlayState& s)
     {
         CfgGdiSurface g;
@@ -1810,10 +2517,20 @@ namespace
         CfgGdiText(g, 26, 14, 520, 54, s.useChinese ? "L4D2VR \351\205\215\347\275\256" : "L4D2VR Config", g.titleFont, { 242, 246, 255 });
         CfgGdiButton(g, kCfgPagePrevX, kCfgTopButtonY, kCfgPageButtonW, kCfgPageButtonH, s.useChinese ? "\344\270\212\344\270\200\351\241\265" : "Prev");
         CfgGdiButton(g, kCfgPageNextX, kCfgTopButtonY, kCfgPageButtonW, kCfgPageButtonH, s.useChinese ? "\344\270\213\344\270\200\351\241\265" : "Next");
+        CfgGdiButton(g, kCfgCalibX, kCfgTopButtonY, kCfgCalibW, kCfgTopButtonH, s.panelMode == CfgPanelMode::MagazineCalibration ? (s.useChinese ? "\xE9\x85\x8D\xE7\xBD\xAE" : "Config") : (s.useChinese ? "\xE6\xA0\xA1\xE5\x87\x86" : "Calib"));
         CfgGdiButton(g, kCfgLangX, kCfgTopButtonY, kCfgLangW, kCfgTopButtonH, s.useChinese ? "\344\270\255\346\226\207" : "EN");
         CfgGdiButton(g, kCfgReloadX, kCfgTopButtonY, kCfgReloadW, kCfgTopButtonH, s.useChinese ? "\351\207\215\350\275\275" : "Reload");
         CfgGdiButton(g, kCfgSaveX, kCfgTopButtonY, kCfgSaveW, kCfgTopButtonH, s.useChinese ? "\344\277\235\345\255\230" : "Save");
         CfgGdiButton(g, kCfgCloseX, kCfgTopButtonY, kCfgCloseW, kCfgTopButtonH, s.useChinese ? "\345\205\263\351\227\255" : "Close");
+
+        if (s.panelMode == CfgPanelMode::MagazineCalibration)
+        {
+            CfgRenderMagazineCalibration(s, g);
+            CfgConvertGdiToRgba(s, g);
+            s.dirty = false;
+            s.needsUpload = true;
+            return;
+        }
 
         CfgGdiText(g, 26, 84, 1228, 24, std::string(s.useChinese ? "\351\205\215\347\275\256\346\226\207\344\273\266\357\274\232" : "Config: ") + s.configPath, g.smallFont, { 150, 162, 180 });
         CfgGdiFill(g, 26, 112, 560, 36, { 24, 36, 56 });
@@ -2915,12 +3632,48 @@ namespace
         {
             if (mx >= kCfgPagePrevX && mx <= kCfgPagePrevX + kCfgPageButtonW)
             {
-                CfgPageSelection(s, -1);
+                if (s.panelMode == CfgPanelMode::MagazineCalibration)
+                {
+                    s.calibrationStep = std::clamp(s.calibrationStep - 1, 0, 3);
+                    s.calibrationSeenPublishSeq = 0;
+                    s.status = std::string(s.useChinese ? "\xE6\xA0\xA1\xE5\x87\x86\xE6\xAD\xA5\xE9\xAA\xA4\xEF\xBC\x9A" : "Calibration step: ") + CfgCalibrationStepTitle(s, s.calibrationStep);
+                    CfgApplyCalibrationRuntimeState(s);
+                    s.dirty = true;
+                }
+                else
+                {
+                    CfgPageSelection(s, -1);
+                }
                 return;
             }
             if (mx >= kCfgPageNextX && mx <= kCfgPageNextX + kCfgPageButtonW)
             {
-                CfgPageSelection(s, +1);
+                if (s.panelMode == CfgPanelMode::MagazineCalibration)
+                {
+                    s.calibrationStep = std::clamp(s.calibrationStep + 1, 0, 3);
+                    s.calibrationSeenPublishSeq = 0;
+                    s.status = std::string(s.useChinese ? "\xE6\xA0\xA1\xE5\x87\x86\xE6\xAD\xA5\xE9\xAA\xA4\xEF\xBC\x9A" : "Calibration step: ") + CfgCalibrationStepTitle(s, s.calibrationStep);
+                    CfgApplyCalibrationRuntimeState(s);
+                    s.dirty = true;
+                }
+                else
+                {
+                    CfgPageSelection(s, +1);
+                }
+                return;
+            }
+            if (mx >= kCfgCalibX && mx <= kCfgCalibX + kCfgCalibW)
+            {
+                s.panelMode = (s.panelMode == CfgPanelMode::MagazineCalibration)
+                    ? CfgPanelMode::Config
+                    : CfgPanelMode::MagazineCalibration;
+                s.hoveredItem = -1;
+                s.calibrationSeenPublishSeq = 0;
+                s.status = (s.panelMode == CfgPanelMode::MagazineCalibration)
+                    ? (s.useChinese ? "\xE5\xB7\xB2\xE8\xBF\x9B\xE5\x85\xA5\xE5\xBD\x93\xE5\x89\x8D\xE6\xAD\xA6\xE5\x99\xA8\xE5\xBC\xB9\xE5\x8C\xA3\xE6\xA0\xA1\xE5\x87\x86\xE3\x80\x82" : "Current weapon magazine calibration opened.")
+                    : (s.useChinese ? "\xE5\xB7\xB2\xE8\xBF\x94\xE5\x9B\x9E\xE9\x85\x8D\xE7\xBD\xAE\xE5\x88\x97\xE8\xA1\xA8\xE3\x80\x82" : "Returned to the config list.");
+                CfgApplyCalibrationRuntimeState(s);
+                s.dirty = true;
                 return;
             }
             if (mx >= kCfgLangX && mx <= kCfgLangX + kCfgLangW)
@@ -2956,10 +3709,46 @@ namespace
                 s.visible = false;
                 s.hoverSelectionSuppressedUntilMs = 0;
                 s.hoveredItem = -1;
+                CfgApplyCalibrationRuntimeState(s);
                 s.status = s.useChinese ? "\345\267\262\345\205\263\351\227\255\343\200\202\346\214\211 F8 \345\217\257\351\207\215\346\226\260\346\211\223\345\274\200\343\200\202" : "Closed. Press F8 to reopen.";
                 s.dirty = true;
                 return;
             }
+        }
+
+        if (s.panelMode == CfgPanelMode::MagazineCalibration)
+        {
+            if (CfgHandleCalibrationPreviewControlClick(s, mx, my))
+                return;
+
+            MagazineInteractionCalibrationSnapshot snapshot{};
+            if (!CfgReadCalibrationSnapshot(snapshot))
+                return;
+            const int step = std::clamp(s.calibrationStep, 0, 3);
+            if (step == 0 || step == 3)
+            {
+                const int listY = 310;
+                const int listX = 26;
+                const int listW = 1228;
+                const int rowH = 36;
+                const int rowsVisible = 12;
+                if (mx >= listX && mx < listX + listW &&
+                    my >= listY && my < listY + rowsVisible * rowH)
+                {
+                    const int rowOffset = (my - listY) / rowH;
+                    std::vector<CfgCalibrationBoneRow> rows = CfgBuildCalibrationRows(snapshot, step);
+                    const int rowIndex = s.calibrationScroll + rowOffset;
+                    if (rowIndex >= 0 && rowIndex < static_cast<int>(rows.size()))
+                    {
+                        s.calibrationSelectedBone = rows[static_cast<size_t>(rowIndex)].index;
+                        CfgApplyCalibrationRuntimeState(s);
+                        s.status = std::string(s.useChinese ? "\xE5\xB7\xB2\xE9\x80\x89\xE4\xB8\xAD\xE9\xAA\xA8\xE9\xAA\xBC " : "Selected bone ") +
+                            "#" + std::to_string(s.calibrationSelectedBone) + " " + rows[static_cast<size_t>(rowIndex)].name;
+                        s.dirty = true;
+                    }
+                }
+            }
+            return;
         }
 
         const int item = CfgHitTestRowItem(s, my);
@@ -3127,7 +3916,8 @@ namespace
                 mx = (std::clamp)(mx, 0, kCfgOverlayW - 1);
                 my = (std::clamp)(my, 0, kCfgOverlayH - 1);
                 (void)mx;
-                CfgSelectHoveredRow(s, my);
+                if (s.panelMode == CfgPanelMode::Config)
+                    CfgSelectHoveredRow(s, my);
                 break;
             }
             case vr::VREvent_MouseButtonDown:
@@ -3136,7 +3926,8 @@ namespace
                 int my = kCfgOverlayH - (int)std::lround(ev.data.mouse.y);
                 mx = (std::clamp)(mx, 0, kCfgOverlayW - 1);
                 my = (std::clamp)(my, 0, kCfgOverlayH - 1);
-                CfgSelectHoveredRow(s, my);
+                if (s.panelMode == CfgPanelMode::Config)
+                    CfgSelectHoveredRow(s, my);
                 CfgHandleClick(s, mx, my);
                 break;
             }
@@ -3145,8 +3936,25 @@ namespace
                 const float ydelta = ev.data.scroll.ydelta;
                 if (std::fabs(ydelta) > 0.01f)
                 {
-                    CfgSuppressHoverSelectionAfterScroll(s);
-                    CfgMoveSelection(s, (ydelta > 0.0f) ? -3 : 3);
+                    if (s.panelMode == CfgPanelMode::MagazineCalibration)
+                    {
+                        MagazineInteractionCalibrationSnapshot snapshot{};
+                        const int dir = (ydelta > 0.0f) ? -3 : 3;
+                        int maxScroll = 0;
+                        if (CfgReadCalibrationSnapshot(snapshot))
+                        {
+                            const std::vector<CfgCalibrationBoneRow> rows =
+                                CfgBuildCalibrationRows(snapshot, std::clamp(s.calibrationStep, 0, 3));
+                            maxScroll = std::max(0, static_cast<int>(rows.size()) - 12);
+                        }
+                        s.calibrationScroll = std::clamp(s.calibrationScroll + dir, 0, maxScroll);
+                        s.dirty = true;
+                    }
+                    else
+                    {
+                        CfgSuppressHoverSelectionAfterScroll(s);
+                        CfgMoveSelection(s, (ydelta > 0.0f) ? -3 : 3);
+                    }
                 }
                 break;
             }
@@ -3199,6 +4007,7 @@ namespace
                 s.status = s.visible
                     ? (s.useChinese ? "\345\267\262\346\211\223\345\274\200\343\200\202\347\224\250 VR \346\216\247\345\210\266\345\231\250\345\260\204\347\272\277\347\202\271\345\207\273\346\214\211\351\222\256\343\200\202" : "Opened. Point and click with the VR controller laser.")
                     : (s.useChinese ? "\345\267\262\345\205\263\351\227\255\343\200\202\346\214\211 F8 \345\217\257\351\207\215\346\226\260\346\211\223\345\274\200\343\200\202" : "Closed. Press F8 to reopen.");
+                CfgApplyCalibrationRuntimeState(s);
                 s.dirty = true;
             }
             s.prevF8 = f8;
@@ -3215,6 +4024,7 @@ namespace
 
             if (!s.visible)
             {
+                CfgApplyCalibrationRuntimeState(s);
                 CfgHidePanelOverlays(s, ov);
                 CfgSetBaseOverlaysBlocked(s, false, ov);
                 continue;
@@ -3223,8 +4033,10 @@ namespace
             CfgHideMenuButton(s);
             CfgSetBaseOverlaysBlocked(s, true, ov);
             CfgReloadIfConfigFileChanged(s);
+            CfgApplyCalibrationRuntimeState(s);
             CfgApplyOverlayPlacement(s, ov);
             CfgPollOverlayEvents(s);
+            CfgMarkDirtyIfCalibrationSnapshotChanged(s);
 
             if (s.dirty)
                 CfgRender(s);

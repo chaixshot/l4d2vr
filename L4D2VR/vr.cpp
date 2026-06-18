@@ -9042,7 +9042,11 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
 
     const auto now = std::chrono::steady_clock::now();
     std::vector<ProjectedViewmodelBoneLabel> viewmodelBoneLabels;
-    if (m_ViewmodelBoneLabelsEnabled)
+    const bool calibrationOverlayActive =
+        m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed);
+    const bool viewmodelBoneLabelsRequested =
+        m_ViewmodelBoneLabelsEnabled && !calibrationOverlayActive;
+    if (viewmodelBoneLabelsRequested)
     {
         std::lock_guard<std::mutex> lock(m_ViewmodelBoneLabelMutex);
         viewmodelBoneLabels = m_ViewmodelBoneLabels;
@@ -9054,7 +9058,7 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
     }
 
     const bool itemLabelsActive = m_ItemModelLabelEnabled;
-    const bool viewmodelBoneLabelsActive = m_ViewmodelBoneLabelsEnabled && !viewmodelBoneLabels.empty();
+    const bool viewmodelBoneLabelsActive = viewmodelBoneLabelsRequested && !viewmodelBoneLabels.empty();
     if (!m_Game || !m_Game->m_EngineClient || !m_Game->m_EngineClient->IsInGame() ||
         (!itemLabelsActive && !viewmodelBoneLabelsActive))
     {
@@ -9222,10 +9226,12 @@ void VR::DrawProjectedItemLabels(IMatRenderContext* renderContext, const CViewSe
             candidate.screenY = static_cast<int>(std::lround(screenY));
             candidate.depth = depth;
             candidate.directText = projected.label;
-            candidate.directColor = projected.hasName
+            candidate.directColor = projected.highlighted
+                ? Rgba{ 120, 220, 255, 255 }
+                : projected.hasName
                 ? Rgba{ 255, 216, 64, 255 }
                 : Rgba{ 80, 220, 255, 255 };
-            candidate.textScale = 0.82f;
+            candidate.textScale = projected.highlighted ? 1.05f : 0.82f;
             candidate.direct = true;
             visibleLabels.push_back(std::move(candidate));
         }

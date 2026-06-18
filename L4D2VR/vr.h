@@ -151,6 +151,38 @@ struct MagazineInteractionBoxSnapshot
 	std::chrono::steady_clock::time_point publishedAt{};
 };
 
+struct MagazineInteractionCalibrationBone
+{
+	int index = -1;
+	int parent = -1;
+	int magazineScore = 0;
+	int boltScore = 0;
+	bool validOrigin = false;
+	Vector origin = { 0.0f, 0.0f, 0.0f };
+	std::string name;
+};
+
+struct MagazineInteractionCalibrationSnapshot
+{
+	bool valid = false;
+	std::string modelName;
+	std::string sourceClassName;
+	uint32_t modelFingerprint = 0;
+	uint32_t boneSignature = 0;
+	uint32_t renderFrameSeq = 0;
+	uint32_t publishSeq = 0;
+	int entityIndex = -1;
+	int weaponId = 0;
+	int inferredWeaponId = 0;
+	int sourceScore = 0;
+	int numBones = 0;
+	int recommendedMagazineBone = -1;
+	int recommendedBoltBone = -1;
+	bool sourceIsViewmodelClass = false;
+	std::vector<MagazineInteractionCalibrationBone> bones;
+	std::chrono::steady_clock::time_point publishedAt{};
+};
+
 struct D3DAimLineOverlayEyeState
 {
 	bool valid = false;
@@ -1324,6 +1356,25 @@ public:
 	// Same format and aliases as the magazine bone override config key.
 	std::string m_MagazineInteractionBoltBoneOverridesSpec;
 	std::unordered_map<int, std::vector<std::string>> m_MagazineInteractionBoltBoneOverrides;
+	mutable std::mutex m_MagazineInteractionCalibrationMutex;
+	MagazineInteractionCalibrationSnapshot m_MagazineInteractionCalibrationSnapshot{};
+	uint32_t m_MagazineInteractionCalibrationPublishSeq = 0;
+	std::atomic<bool> m_MagazineInteractionCalibrationOverlayActive{ false };
+	std::atomic<int> m_MagazineInteractionCalibrationSelectedBone{ -1 };
+	std::atomic<int> m_MagazineInteractionCalibrationStep{ 0 };
+	std::atomic<bool> m_MagazineInteractionCalibrationPreviewAnchorValid{ false };
+	std::atomic<float> m_MagazineInteractionCalibrationPreviewAnchorOriginX{ 0.0f };
+	std::atomic<float> m_MagazineInteractionCalibrationPreviewAnchorOriginY{ 0.0f };
+	std::atomic<float> m_MagazineInteractionCalibrationPreviewAnchorOriginZ{ 0.0f };
+	std::atomic<float> m_MagazineInteractionCalibrationPreviewAnchorPitchDeg{ 0.0f };
+	std::atomic<float> m_MagazineInteractionCalibrationPreviewAnchorYawDeg{ 0.0f };
+	std::atomic<float> m_MagazineInteractionCalibrationPreviewAnchorRollDeg{ 0.0f };
+	std::atomic<float> m_MagazineInteractionCalibrationPreviewForwardMeters{ 0.75f };
+	std::atomic<float> m_MagazineInteractionCalibrationPreviewRightMeters{ 0.0f };
+	std::atomic<float> m_MagazineInteractionCalibrationPreviewUpMeters{ -0.08f };
+	std::atomic<float> m_MagazineInteractionCalibrationPreviewPitchDeg{ 0.0f };
+	std::atomic<float> m_MagazineInteractionCalibrationPreviewYawDeg{ 0.0f };
+	std::atomic<float> m_MagazineInteractionCalibrationPreviewRollDeg{ 0.0f };
 	// Shared magazine/socket axis tuning used by MagazineInteraction.
 	Vector m_MagazineInteractionMagazineInsertionAxisLocal = { 0.0f, -1.0f, 0.0f };
 	Vector m_MagazineInteractionMagazineHandOffsetMeters = { 0.0f, 0.0f, 0.0f };
@@ -1989,6 +2040,7 @@ public:
 		Vector worldPos = { 0,0,0 };
 		std::string label;
 		bool hasName = false;
+		bool highlighted = false;
 	};
 
 	struct ProjectedSpecialInfectedArrow
@@ -2942,8 +2994,24 @@ public:
 		int entityIndex,
 		int boneIndex,
 		const char* modelName);
+	void PublishMagazineInteractionCalibrationSnapshot(
+		const char* modelName,
+		const char* sourceClassName,
+		uint32_t modelFingerprint,
+		uint32_t boneSignature,
+		uint32_t renderFrameSeq,
+		int entityIndex,
+		int weaponId,
+		int inferredWeaponId,
+		int sourceScore,
+		int numBones,
+		int recommendedMagazineBone,
+		int recommendedBoltBone,
+		bool sourceIsViewmodelClass,
+		const std::vector<MagazineInteractionCalibrationBone>& bones);
 	bool GetMagazineInteractionBox(MagazineInteractionBoxSnapshot& outSnapshot) const;
 	bool GetMagazineInteractionBoltBox(MagazineInteractionBoxSnapshot& outSnapshot) const;
+	bool GetMagazineInteractionCalibrationSnapshot(MagazineInteractionCalibrationSnapshot& outSnapshot) const;
 	bool UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown, bool leftGripJustPressed);
 	void MarkMagazineInteractionReloadCommandIssued();
 	bool IsMagazineInteractionReloadCommandActive() const;

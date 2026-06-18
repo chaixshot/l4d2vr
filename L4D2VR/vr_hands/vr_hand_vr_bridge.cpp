@@ -2571,6 +2571,54 @@ void VR::PublishMagazineInteractionBoltBox(
     m_MagazineInteractionBoltBoxValid = true;
 }
 
+void VR::PublishMagazineInteractionCalibrationSnapshot(
+    const char* modelName,
+    const char* sourceClassName,
+    uint32_t modelFingerprint,
+    uint32_t boneSignature,
+    uint32_t renderFrameSeq,
+    int entityIndex,
+    int weaponId,
+    int inferredWeaponId,
+    int sourceScore,
+    int numBones,
+    int recommendedMagazineBone,
+    int recommendedBoltBone,
+    bool sourceIsViewmodelClass,
+    const std::vector<MagazineInteractionCalibrationBone>& bones)
+{
+    if (!modelName || !*modelName || numBones <= 0)
+        return;
+
+    MagazineInteractionCalibrationSnapshot snapshot{};
+    snapshot.valid = true;
+    snapshot.modelName = modelName;
+    snapshot.sourceClassName = (sourceClassName && *sourceClassName) ? sourceClassName : "";
+    snapshot.modelFingerprint = modelFingerprint;
+    snapshot.boneSignature = boneSignature;
+    snapshot.renderFrameSeq = renderFrameSeq;
+    snapshot.entityIndex = entityIndex;
+    snapshot.weaponId = weaponId;
+    snapshot.inferredWeaponId = inferredWeaponId;
+    snapshot.sourceScore = sourceScore;
+    snapshot.numBones = numBones;
+    snapshot.recommendedMagazineBone = recommendedMagazineBone;
+    snapshot.recommendedBoltBone = recommendedBoltBone;
+    snapshot.sourceIsViewmodelClass = sourceIsViewmodelClass;
+    snapshot.bones = bones;
+    snapshot.publishedAt = std::chrono::steady_clock::now();
+
+    std::lock_guard<std::mutex> lock(m_MagazineInteractionCalibrationMutex);
+    if (m_MagazineInteractionCalibrationSnapshot.valid &&
+        m_MagazineInteractionCalibrationSnapshot.renderFrameSeq == renderFrameSeq &&
+        m_MagazineInteractionCalibrationSnapshot.sourceScore > sourceScore)
+    {
+        return;
+    }
+    snapshot.publishSeq = ++m_MagazineInteractionCalibrationPublishSeq;
+    m_MagazineInteractionCalibrationSnapshot = std::move(snapshot);
+}
+
 bool VR::GetMagazineInteractionBox(MagazineInteractionBoxSnapshot& outSnapshot) const
 {
     std::lock_guard<std::mutex> lock(m_MagazineInteractionBoxMutex);
@@ -2586,6 +2634,15 @@ bool VR::GetMagazineInteractionBoltBox(MagazineInteractionBoxSnapshot& outSnapsh
     if (!m_MagazineInteractionBoltBoxValid)
         return false;
     outSnapshot = m_MagazineInteractionBoltBox;
+    return true;
+}
+
+bool VR::GetMagazineInteractionCalibrationSnapshot(MagazineInteractionCalibrationSnapshot& outSnapshot) const
+{
+    std::lock_guard<std::mutex> lock(m_MagazineInteractionCalibrationMutex);
+    if (!m_MagazineInteractionCalibrationSnapshot.valid)
+        return false;
+    outSnapshot = m_MagazineInteractionCalibrationSnapshot;
     return true;
 }
 
@@ -5868,7 +5925,9 @@ bool VR::DrawVrHandsForEyeImmediate(
     bool allowQueuedMode)
 {
     const bool drawGloves = m_VrHandsEnabled;
-    const bool drawMagazineDebugBoxes = m_MagazineBoxDebugEnabled;
+    const bool calibrationOverlayActive =
+        m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed);
+    const bool drawMagazineDebugBoxes = m_MagazineBoxDebugEnabled && !calibrationOverlayActive;
     if ((!drawGloves && !drawMagazineDebugBoxes) ||
         !m_IsVREnabled ||
         !m_Game ||
@@ -5959,7 +6018,7 @@ bool VR::DrawVrHandsForEyeImmediate(
         Vector currentBoltBoxMins(0.0f, 0.0f, 0.0f);
         Vector currentBoltBoxMaxs(0.0f, 0.0f, 0.0f);
         const bool currentBoltBoxUseViewmodelLayer = true;
-    if (m_MagazineBoxDebugEnabled &&
+    if (drawMagazineDebugBoxes &&
         (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
             m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine) &&
         m_MagazineInteractionSocketValid &&
@@ -5975,7 +6034,7 @@ bool VR::DrawVrHandsForEyeImmediate(
             standaloneMagazineBoxMaxs,
             std::max(0.0f, m_MagazineInteractionFreshMagazineGrabRangeMeters) * m_VRScale);
     }
-    if (m_MagazineBoxDebugEnabled &&
+    if (drawMagazineDebugBoxes &&
         m_MagazineInteractionSocketValid &&
         (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
             m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine))
@@ -6020,7 +6079,7 @@ bool VR::DrawVrHandsForEyeImmediate(
         magazineSocketCaptureBoxMins = captureBox.mins;
         magazineSocketCaptureBoxMaxs = captureBox.maxs;
     }
-    if (m_MagazineBoxDebugEnabled)
+    if (drawMagazineDebugBoxes)
     {
         auto tryUseDebugBox = [&](
             const MagazineInteractionBoxSnapshot& debugBox,
