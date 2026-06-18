@@ -5842,6 +5842,25 @@ bool VR::DrawVrHandsForEye(const CViewSetup& view, int eyeIndex, VrHandDrawPass 
     return DrawVrHandsForEyeImmediate(view, eyeIndex, drawPass, false);
 }
 
+void VR::FallbackVrHandsGlovesToNative(const char* reason)
+{
+    if (!m_VrHandsEnabled && m_NativeViewmodelHandsOnly)
+        return;
+
+    m_VrHandsEnabled = false;
+    m_NativeViewmodelHandsOnly = true;
+    m_HideArms = false;
+    m_VrHandsGlovesRuntimeFallback = true;
+
+    if (!m_VrHandsGlovesFallbackLogged)
+    {
+        m_VrHandsGlovesFallbackLogged = true;
+        Game::logMsg(
+            "[VR][Hands] VR glove renderer unavailable (%s); falling back to NativeViewmodelHandsOnly",
+            (reason && reason[0] != '\0') ? reason : "unknown dependency failure");
+    }
+}
+
 bool VR::DrawVrHandsForEyeImmediate(
     const CViewSetup& view,
     int eyeIndex,
@@ -6068,6 +6087,9 @@ bool VR::DrawVrHandsForEyeImmediate(
         currentBoltBoxUseViewmodelLayer,
         m_MagazineInteractionLeftHandPoseActive.load(std::memory_order_relaxed) != 0,
         drawPass);
+
+    if (!drewAny && m_VrHands && m_VrHands->IsDependencyUnavailable())
+        FallbackVrHandsGlovesToNative(m_VrHands->DependencyFailureReason().c_str());
     }
     device->Release();
     surface->Release();
@@ -6140,7 +6162,22 @@ void VR::BeginVrHandsEyeRender(const CViewSetup& view, int eyeIndex)
     m_VrHandsActiveEyeView = nullptr;
     m_VrHandsActiveEyeIndex = -1;
     m_VrHandsWorldMaskDrawn = false;
-    if ((!m_VrHandsEnabled && !m_NativeViewmodelHandsOnly) || !m_IsVREnabled || !m_Input || !m_Game)
+    if (!m_IsVREnabled || !m_Input || !m_Game)
+        return;
+
+    if (m_VrHandsEnabled && m_VrHandsGlovesEnabled)
+    {
+        if (!m_VrHands)
+            m_VrHands = std::make_unique<VrHandSystem>();
+
+        if (!m_VrHands->EnsureAssetsAvailable(m_VrHandsDebugLog) &&
+            m_VrHands->IsDependencyUnavailable())
+        {
+            FallbackVrHandsGlovesToNative(m_VrHands->DependencyFailureReason().c_str());
+        }
+    }
+
+    if (!m_VrHandsEnabled && !m_NativeViewmodelHandsOnly)
         return;
 
     m_VrHandsActiveEyeView = &view;

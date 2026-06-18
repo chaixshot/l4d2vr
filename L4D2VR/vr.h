@@ -1140,6 +1140,9 @@ public:
 	// Independent GLB + ozz-animation VR hand renderer. In queued rendering, raw D3D9 hand
 	// draws are inserted into Source's material call queue so they run at the correct eye-RT point.
 	bool m_VrHandsEnabled = false;
+	bool m_VrHandsGlovesEnabled = false;
+	bool m_VrHandsGlovesRuntimeFallback = false;
+	bool m_VrHandsGlovesFallbackLogged = false;
 	bool m_VrHandsMotionRangeWithoutController = false;
 	bool m_VrHandsRightUseViewmodelPose = false;
 	bool m_VrHandsDebugLog = false;
@@ -2910,6 +2913,7 @@ public:
 	bool DrawVrHandsForEyeImmediate(const CViewSetup& view, int eyeIndex, VrHandDrawPass drawPass, bool allowQueuedMode);
 	bool DrawVrHandsWorldDepthMaskForEyeImmediate(const CViewSetup& view, int eyeIndex, bool allowQueuedMode);
 	bool QueueVrHandsDrawForEye(IMatRenderContext* renderContext, const CViewSetup& view, int eyeIndex, VrHandDrawPass drawPass);
+	void FallbackVrHandsGlovesToNative(const char* reason);
 	void PublishMagazineInteractionBox(
 		const Vector& origin,
 		const Vector& axisX,

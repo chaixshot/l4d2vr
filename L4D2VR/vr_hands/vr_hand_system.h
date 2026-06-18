@@ -69,6 +69,9 @@ public:
 
     bool ClearViewmodelOcclusionStencil(IDirect3DDevice9* device);
     void OnDeviceLost();
+    bool EnsureAssetsAvailable(bool debugLog);
+    bool IsDependencyUnavailable() const;
+    const std::string& DependencyFailureReason() const;
 
 private:
     struct HandState
@@ -144,6 +147,7 @@ private:
     bool m_AssetLoadAttempted = false;
     bool m_AssetsLoaded = false;
     bool m_DependencyUnavailable = false;
+    std::string m_DependencyFailureReason;
     bool m_InitializationAttempted = false;
     bool m_Initialized = false;
     bool m_DebugInitializationLogged = false;

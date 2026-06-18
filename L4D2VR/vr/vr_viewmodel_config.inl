@@ -1295,13 +1295,33 @@ void VR::ParseConfigFile()
         getFloat("NativeViewmodelLeftHandOpenVRPinkyInitialCurl", m_NativeViewmodelLeftHandOpenVRInitialCurl[4]),
         -1.0f,
         1.0f);
-    m_VrHandsEnabled = getBool("VrHandsEnabled", m_VrHandsEnabled);
-    if (m_NativeViewmodelHandsOnly)
-        m_HideArms = false;
-    else if (m_VrHandsEnabled)
+    const bool vrHandsEntryEnabled = getBool("VrHandsEnabled", false);
+    m_VrHandsGlovesEnabled = getBool("VrHandsGlovesEnabled", false);
+    m_VrHandsEnabled = vrHandsEntryEnabled && m_VrHandsGlovesEnabled;
+    if (m_VrHandsEnabled)
+    {
+        if (m_VrHandsGlovesRuntimeFallback && m_VrHands)
+            m_VrHands.reset();
+        m_VrHandsGlovesRuntimeFallback = false;
+        m_NativeViewmodelHandsOnly = false;
         m_HideArms = true;
-    else
+    }
+    else if (vrHandsEntryEnabled)
+    {
+        m_VrHandsGlovesRuntimeFallback = false;
+        m_NativeViewmodelHandsOnly = true;
         m_HideArms = false;
+    }
+    else if (m_NativeViewmodelHandsOnly)
+    {
+        m_VrHandsGlovesRuntimeFallback = false;
+        m_HideArms = false;
+    }
+    else
+    {
+        m_VrHandsGlovesRuntimeFallback = false;
+        m_HideArms = false;
+    }
     m_VrHandsMotionRangeWithoutController = getBool("VrHandsMotionRangeWithoutController", m_VrHandsMotionRangeWithoutController);
     m_VrHandsDebugLog = getBool("VrHandsDebugLog", m_VrHandsDebugLog);
     m_VrHandsModelScale = std::clamp(getFloat("VrHandsModelScale", m_VrHandsModelScale), 0.25f, 4.0f);

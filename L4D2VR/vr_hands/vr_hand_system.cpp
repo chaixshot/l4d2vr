@@ -668,6 +668,8 @@ bool VrHandSystem::EnsureAssetsLoaded(bool debugLog)
         if (!ResolveSteamVrAssetPath(hand.assetFileName, assetPath))
         {
             m_DependencyUnavailable = true;
+            m_DependencyFailureReason = std::string("missing SteamVR glove asset: ") +
+                (hand.assetFileName ? hand.assetFileName : "<unknown>");
             return false;
         }
 
@@ -675,6 +677,9 @@ bool VrHandSystem::EnsureAssetsLoaded(bool debugLog)
         if (!VrHandAssetLoader::LoadGlb(assetPath, hand.asset, error))
         {
             m_DependencyUnavailable = true;
+            m_DependencyFailureReason = "failed to load SteamVR glove asset: " + assetPath;
+            if (!error.empty())
+                m_DependencyFailureReason += " (" + error + ")";
             return false;
         }
     }
@@ -711,6 +716,8 @@ bool VrHandSystem::EnsureInitialized(vr::IVRInput* input, bool rightUseViewmodel
                 hand.action == vr::k_ulInvalidActionHandle))
         {
             m_DependencyUnavailable = true;
+            m_DependencyFailureReason = std::string("missing SteamVR skeletal action: ") +
+                (hand.actionPath ? hand.actionPath : "<unknown>");
             return false;
         }
 
@@ -735,6 +742,9 @@ bool VrHandSystem::EnsureInitialized(vr::IVRInput* input, bool rightUseViewmodel
         if (!hand.skeleton.Initialize(input, hand.action, error))
         {
             m_DependencyUnavailable = true;
+            m_DependencyFailureReason = "failed to initialize SteamVR hand skeleton";
+            if (!error.empty())
+                m_DependencyFailureReason += ": " + error;
             return false;
         }
         hand.skeletonInitialized = true;
@@ -1596,6 +1606,21 @@ bool VrHandSystem::ClearViewmodelOcclusionStencil(IDirect3DDevice9* device)
     }
     ReportErrorOnce(error);
     return false;
+}
+
+bool VrHandSystem::EnsureAssetsAvailable(bool debugLog)
+{
+    return EnsureAssetsLoaded(debugLog);
+}
+
+bool VrHandSystem::IsDependencyUnavailable() const
+{
+    return m_DependencyUnavailable;
+}
+
+const std::string& VrHandSystem::DependencyFailureReason() const
+{
+    return m_DependencyFailureReason;
 }
 
 void VrHandSystem::OnDeviceLost()

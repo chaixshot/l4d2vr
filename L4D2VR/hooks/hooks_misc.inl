@@ -4724,6 +4724,13 @@ namespace
         vr_vm_stabilize::Mat3x4* isolatedBones = nullptr;
     };
 
+    inline bool HooksNativeViewmodelHandsOnlyShouldHidePendingFreeze(VR* vr)
+    {
+        return vr &&
+            vr->m_NativeViewmodelLeftHandFreezePending &&
+            vr->m_NativeViewmodelLeftHandFreezeReady.load(std::memory_order_acquire) == 0u;
+    }
+
     inline bool HooksNativeViewmodelHandsOnlyBoneNameLooksHandOnly(
         const std::string& lowerName)
     {
@@ -7115,6 +7122,8 @@ namespace
             vr, drawState, boneNames, boneParents, numBones, boneIndex, stride, bones, 1, rightInfo);
         const bool hasLeft = HooksNativeViewmodelHandsOnlyBuildSideInfo(
             vr, drawState, boneNames, boneParents, numBones, boneIndex, stride, bones, -1, leftInfo);
+        const bool hidePendingFreeze =
+            HooksNativeViewmodelHandsOnlyShouldHidePendingFreeze(vr);
 
         auto appendSet = [&](const HooksNativeViewmodelHandsOnlySideInfo& keepSide) -> bool
             {
@@ -7152,7 +7161,63 @@ namespace
                 return true;
             };
 
-        if (hasRight && hasLeft)
+        auto appendHiddenSet = [&](const HooksNativeViewmodelHandsOnlySideInfo& hideSide) -> bool
+            {
+                HooksNativeViewmodelHandsOnlyClipSet set{};
+                set.side = hideSide.side;
+                float wristPlaneWorld[4] = {
+                    hideSide.wristPlaneWorld[0],
+                    hideSide.wristPlaneWorld[1],
+                    hideSide.wristPlaneWorld[2],
+                    hideSide.wristPlaneWorld[3],
+                };
+                if (!HooksNativeViewmodelHandsOnlyNormalizePlane(wristPlaneWorld))
+                    return false;
+
+                Vector normal(
+                    wristPlaneWorld[0],
+                    wristPlaneWorld[1],
+                    wristPlaneWorld[2]);
+                const float normalLen = normal.Length();
+                if (!std::isfinite(normalLen) || normalLen < 0.001f)
+                    return false;
+                normal *= (1.0f / normalLen);
+                const Vector planePoint = normal * (-wristPlaneWorld[3] / normalLen);
+                const Vector hiddenOrigin = planePoint - (normal * 96.0f);
+                const vr_vm_stabilize::Mat3x4 hiddenBone =
+                    HooksNativeViewmodelHandsOnlyCollapsedBoneAt(hiddenOrigin);
+
+                uint32_t seqEven = vr->m_RenderFrameSeq.load(std::memory_order_acquire);
+                seqEven &= ~1u;
+                if (seqEven == 0)
+                    seqEven = 2;
+
+                set.isolatedBones = vr_vm_stabilize::AllocStableBones(numBones, seqEven);
+                if (!set.isolatedBones)
+                    return false;
+                for (int bone = 0; bone < numBones; ++bone)
+                    set.isolatedBones[bone] = hiddenBone;
+
+                if (!HooksNativeViewmodelHandsOnlyWorldPlaneToClipPlane(
+                    vr,
+                    wristPlaneWorld,
+                    set.planes[set.planeCount]))
+                {
+                    return false;
+                }
+                ++set.planeCount;
+                outClipSets.push_back(set);
+                return true;
+            };
+
+        if (hidePendingFreeze)
+        {
+            if (hasLeft)
+                appendHiddenSet(leftInfo);
+            else if (hasRight)
+                appendHiddenSet(rightInfo);
+        }
+        else if (hasRight && hasLeft)
         {
             appendSet(rightInfo);
             appendSet(leftInfo);
