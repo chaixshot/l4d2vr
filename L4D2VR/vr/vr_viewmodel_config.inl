@@ -1204,7 +1204,7 @@ void VR::ParseConfigFile()
     m_NativeViewmodelHandsOnlyRightCutRotationDeg.z = std::clamp(m_NativeViewmodelHandsOnlyRightCutRotationDeg.z, -89.0f, 89.0f);
     m_NativeViewmodelRightHandAnimationKeepUnits = std::clamp(
         getFloat("NativeViewmodelRightHandAnimationKeepUnits", m_NativeViewmodelRightHandAnimationKeepUnits),
-        0.0f,
+        -16.0f,
         16.0f);
     m_NativeViewmodelLeftHandFreezeAfterMapSeconds = std::clamp(
         getFloat("NativeViewmodelLeftHandFreezeAfterMapSeconds", m_NativeViewmodelLeftHandFreezeAfterMapSeconds),

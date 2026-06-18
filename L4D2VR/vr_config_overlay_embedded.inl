@@ -164,7 +164,7 @@ namespace
         { "NativeViewmodelHandsOnlyArmBendScale", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Native Arm Bend Scale", 0.0f, 1.0f, "1.0" },
         { "NativeViewmodelHandsOnlyLeftCutRotationDeg", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Left Cut Rotation", -89.0f, 89.0f, "0,0,0" },
         { "NativeViewmodelHandsOnlyRightCutRotationDeg", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Right Cut Rotation", -89.0f, 89.0f, "0,0,0" },
-        { "NativeViewmodelRightHandAnimationKeepUnits", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Right Animation Keep Units", 0.0f, 16.0f, "4.0" },
+        { "NativeViewmodelRightHandAnimationKeepUnits", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Right Animation Keep Units", -16.0f, 16.0f, "4.0" },
         { "NativeViewmodelHandsOnlyFreezePoseLock", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Freeze Pose Lock", 0.0f, 0.0f, "false" },
         { "NativeViewmodelHandsOnlyFreezePoseOffsetMeters", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Freeze Pose Offset", -2.0f, 2.0f, "0.55,0.18,-0.18" },
         { "NativeViewmodelHandsOnlyLeftFreezePoseRotationOffsetDeg", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Left Freeze Pose Rotation", -180.0f, 180.0f, "0,0,0" },
@@ -368,7 +368,7 @@ namespace
         { "NativeViewmodelHandsOnlyCutRotationDeg", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Native Cut Rotation", "Native Cut Rotation", "Manual local-axis rotation for the native hand clipping plane normal.", "Manual local-axis rotation for the native hand clipping plane normal.", "Use this after Arm Bend Scale: adjust one axis at a time in 5-10 degree steps.", "" },
         { "NativeViewmodelHandsOnlyLeftCutRotationDeg", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Left Cut Rotation", "Left Cut Rotation", "Manual local-axis rotation for only the left native hand clipping plane normal.", "Manual local-axis rotation for only the left native hand clipping plane normal.", "This overrides the legacy shared Native Cut Rotation for the left hand.", "" },
         { "NativeViewmodelHandsOnlyRightCutRotationDeg", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Right Cut Rotation", "Right Cut Rotation", "Manual local-axis rotation for only the right native hand clipping plane normal.", "Manual local-axis rotation for only the right native hand clipping plane normal.", "This overrides the legacy shared Native Cut Rotation for the right hand.", "" },
-        { "NativeViewmodelRightHandAnimationKeepUnits", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Right Animation Keep Units", "Right Animation Keep Units", "Moves only the right-hand clipping plane back toward the forearm to protect right-hand weapon animations from cutting into the hand.", "Moves only the right-hand clipping plane back toward the forearm to protect right-hand weapon animations from cutting into the hand.", "Raise this if right-hand animations cut the palm or fingers; lower it if too much right wrist/arm shows.", "" },
+        { "NativeViewmodelRightHandAnimationKeepUnits", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Right Animation Keep Units", "Right Animation Keep Units", "Moves only the right-hand clipping plane back toward the forearm when positive, or toward the fingers when negative.", "Moves only the right-hand clipping plane back toward the forearm when positive, or toward the fingers when negative.", "Use positive values to protect weapon animations; use negative values to trim more of the right hand toward the fingers.", "" },
         { "NativeViewmodelHandsOnlyFreezePoseLock", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Freeze Pose Lock", "Freeze Pose Lock", "Forces both native hands to the configured HMD-relative freeze pose during the delay and captures from that pose.", "Forces both native hands to the configured HMD-relative freeze pose during the delay and captures from that pose.", "Keep this off while manually posing the controller for diagnostic logs.", "" },
         { "NativeViewmodelHandsOnlyFreezePoseOffsetMeters", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Freeze Pose Offset", "Freeze Pose Offset", "Places the temporary freeze reference pose relative to the HMD before capture.", "Places the temporary freeze reference pose relative to the HMD before capture.", "X is HMD-forward meters, Y is mirrored side offset, Z is vertical offset.", "" },
         { "NativeViewmodelHandsOnlyLeftFreezePoseRotationOffsetDeg", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Left Freeze Pose Rotation", "Left Freeze Pose Rotation", "Rotates only the left temporary freeze reference pose.", "Rotates only the left temporary freeze reference pose.", "Pitch, yaw, roll in degrees. The legacy shared FreezePoseRotation key is only a fallback.", "" },
@@ -532,6 +532,7 @@ namespace
         int calibrationSeenSourceScore = 0;
         int calibrationSeenStep = -1;
         bool calibrationSeenViewmodelClass = false;
+        bool calibrationSeenFreshSnapshot = false;
         bool calibrationPreviewAnchorCaptured = false;
         float calibrationPreviewForwardMeters = 0.75f;
         float calibrationPreviewRightMeters = 0.0f;
@@ -2179,6 +2180,7 @@ namespace
             CfgApplyCalibrationRuntimeState(s);
         }
         s.calibrationSeenPublishSeq = snapshot.publishSeq;
+        s.calibrationSeenFreshSnapshot = true;
 
         s.calibrationStep = std::clamp(s.calibrationStep, 0, 3);
         if (s.calibrationSelectedBone >= snapshot.numBones)
@@ -2193,6 +2195,22 @@ namespace
         if (!g_Game || !g_Game->m_VR)
             return false;
         return g_Game->m_VR->GetMagazineInteractionCalibrationSnapshot(snapshot);
+    }
+
+    static float CfgCalibrationSnapshotAgeSeconds(const MagazineInteractionCalibrationSnapshot& snapshot)
+    {
+        return std::chrono::duration<float>(std::chrono::steady_clock::now() - snapshot.publishedAt).count();
+    }
+
+    static bool CfgCalibrationSnapshotIsFresh(const MagazineInteractionCalibrationSnapshot& snapshot)
+    {
+        const float ageSeconds = CfgCalibrationSnapshotAgeSeconds(snapshot);
+        return ageSeconds >= 0.0f && ageSeconds <= 1.5f;
+    }
+
+    static bool CfgReadFreshCalibrationSnapshot(MagazineInteractionCalibrationSnapshot& snapshot)
+    {
+        return CfgReadCalibrationSnapshot(snapshot) && CfgCalibrationSnapshotIsFresh(snapshot);
     }
 
     static bool CfgCalibrationSnapshotIdentityChanged(
@@ -2214,7 +2232,18 @@ namespace
             return;
 
         MagazineInteractionCalibrationSnapshot snapshot{};
-        if (!CfgReadCalibrationSnapshot(snapshot))
+        const bool hasFreshSnapshot = CfgReadFreshCalibrationSnapshot(snapshot);
+        if (s.calibrationSeenFreshSnapshot != hasFreshSnapshot)
+        {
+            s.calibrationSeenFreshSnapshot = hasFreshSnapshot;
+            s.dirty = true;
+            if (!hasFreshSnapshot)
+            {
+                s.calibrationSelectedBone = -1;
+                CfgApplyCalibrationRuntimeState(s);
+            }
+        }
+        if (!hasFreshSnapshot)
             return;
 
         if (CfgCalibrationSnapshotIdentityChanged(s, snapshot))
@@ -2382,7 +2411,7 @@ namespace
     static void CfgRenderMagazineCalibration(CfgOverlayState& s, CfgGdiSurface& g)
     {
         MagazineInteractionCalibrationSnapshot snapshot{};
-        const bool hasSnapshot = CfgReadCalibrationSnapshot(snapshot);
+        const bool hasSnapshot = CfgReadFreshCalibrationSnapshot(snapshot);
         if (hasSnapshot)
             CfgRefreshCalibrationSelection(s, snapshot);
 
@@ -2419,7 +2448,7 @@ namespace
             return;
         }
 
-        const float ageSeconds = std::chrono::duration<float>(std::chrono::steady_clock::now() - snapshot.publishedAt).count();
+        const float ageSeconds = CfgCalibrationSnapshotAgeSeconds(snapshot);
         CfgGdiFill(g, 26, 188, 1228, 96, { 24, 36, 56 });
         CfgGdiFrame(g, 26, 188, 1228, 96, { 68, 86, 116 }, 1);
         CfgGdiText(g, 44, 198, 840, 26, snapshot.modelName, g.normalFont, { 238, 243, 248 });
@@ -3722,7 +3751,7 @@ namespace
                 return;
 
             MagazineInteractionCalibrationSnapshot snapshot{};
-            if (!CfgReadCalibrationSnapshot(snapshot))
+            if (!CfgReadFreshCalibrationSnapshot(snapshot))
                 return;
             const int step = std::clamp(s.calibrationStep, 0, 3);
             if (step == 0 || step == 3)
@@ -3941,7 +3970,7 @@ namespace
                         MagazineInteractionCalibrationSnapshot snapshot{};
                         const int dir = (ydelta > 0.0f) ? -3 : 3;
                         int maxScroll = 0;
-                        if (CfgReadCalibrationSnapshot(snapshot))
+                        if (CfgReadFreshCalibrationSnapshot(snapshot))
                         {
                             const std::vector<CfgCalibrationBoneRow> rows =
                                 CfgBuildCalibrationRows(snapshot, std::clamp(s.calibrationStep, 0, 3));

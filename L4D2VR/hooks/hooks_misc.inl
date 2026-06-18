@@ -471,6 +471,49 @@ namespace
             HooksModelNameIsArmsOrHands(modelName);
     }
 
+    inline bool HooksModelNameHasLooseViewmodelMarker(const std::string& modelName)
+    {
+        return
+            modelName.rfind("v_", 0) == 0 ||
+            modelName.find("/v_") != std::string::npos ||
+            modelName.find("\\v_") != std::string::npos;
+    }
+
+    inline bool HooksCalibrationBoneNamesLookLikeWeapon(const std::vector<std::string>& boneNames)
+    {
+        bool hasWeaponBone = false;
+        bool hasMagazineBone = false;
+        bool hasWeaponAttachment = false;
+
+        for (const std::string& name : boneNames)
+        {
+            const std::string lowerName = vr_vm_stabilize::ToLowerAscii(name);
+            if (lowerName.find("weapon_bone") != std::string::npos ||
+                lowerName.find("valvebiped.weapon") != std::string::npos ||
+                lowerName.find("def_weapon") != std::string::npos)
+            {
+                hasWeaponBone = true;
+            }
+            if (lowerName.find("weapon_clip") != std::string::npos ||
+                lowerName.find("magazine") != std::string::npos ||
+                lowerName.find("_mag") != std::string::npos ||
+                lowerName.find("clip") != std::string::npos ||
+                lowerName.find("def_c_mag") != std::string::npos)
+            {
+                hasMagazineBone = true;
+            }
+            if (lowerName.find("attach_muzzle") != std::string::npos ||
+                lowerName.find("attach_shell") != std::string::npos ||
+                lowerName.find("shell_eject") != std::string::npos)
+            {
+                hasWeaponAttachment = true;
+            }
+        }
+
+        return (hasWeaponBone && (hasMagazineBone || hasWeaponAttachment)) ||
+            (hasMagazineBone && hasWeaponAttachment);
+    }
+
     inline void MaybeLogVrHandsViewmodelBoneProbe(
         void* drawState,
         const std::string& modelName,
@@ -2152,11 +2195,13 @@ namespace
     {
         if (!vr || !drawState || !boneToWorld || modelName.empty())
             return;
+        if (!vr->m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed))
+            return;
 
         const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
         const bool sourceIsViewmodelPath = HooksModelNameIsViewmodel(lowerModel);
-        if ((!sourceIsViewmodelClass && !sourceIsViewmodelPath) ||
-            HooksModelNameIsArmsOrHands(lowerModel))
+        const bool sourceHasLooseViewmodelMarker = HooksModelNameHasLooseViewmodelMarker(lowerModel);
+        if (HooksModelNameIsArmsOrHands(lowerModel))
             return;
 
         std::vector<std::string> boneNames;
@@ -2179,14 +2224,17 @@ namespace
         if (numBones <= 0 || numBones > 512)
             return;
 
-        const int inferredModelWeaponId = MagazineInteractionInferWeaponIdFromViewmodelModelName(lowerModel);
-        const int currentWeaponId = vr->m_MagazineInteractionCurrentWeaponId.load(std::memory_order_relaxed);
-        if (currentWeaponId > 0 &&
-            inferredModelWeaponId > 0 &&
-            inferredModelWeaponId != currentWeaponId)
+        const bool sourceLooksLikeWeaponBones = HooksCalibrationBoneNamesLookLikeWeapon(boneNames);
+        if (!sourceIsViewmodelClass &&
+            !sourceIsViewmodelPath &&
+            !sourceHasLooseViewmodelMarker &&
+            !sourceLooksLikeWeaponBones)
         {
             return;
         }
+
+        const int inferredModelWeaponId = MagazineInteractionInferWeaponIdFromViewmodelModelName(lowerModel);
+        const int currentWeaponId = vr->m_MagazineInteractionCurrentWeaponId.load(std::memory_order_relaxed);
         const int weaponId = inferredModelWeaponId > 0
             ? inferredModelWeaponId
             : currentWeaponId > 0
@@ -2258,6 +2306,10 @@ namespace
             sourceScore += 1000;
         if (sourceIsViewmodelPath)
             sourceScore += 300;
+        if (sourceHasLooseViewmodelMarker && !sourceIsViewmodelPath)
+            sourceScore += 150;
+        if (sourceLooksLikeWeaponBones)
+            sourceScore += 150;
         if (currentWeaponId > 0 && inferredModelWeaponId > 0 && currentWeaponId == inferredModelWeaponId)
             sourceScore += 500;
         if (recommendedMagazineBone >= 0)
@@ -3967,8 +4019,7 @@ namespace
             return false;
 
         const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
-        if ((!allowViewmodelClass && !HooksModelNameIsViewmodel(lowerModel)) ||
-            HooksModelNameIsArmsOrHands(lowerModel))
+        if (HooksModelNameIsArmsOrHands(lowerModel))
         {
             return false;
         }
@@ -3996,6 +4047,17 @@ namespace
             return false;
         }
 
+        const bool sourceIsViewmodelPath = HooksModelNameIsViewmodel(lowerModel);
+        const bool sourceHasLooseViewmodelMarker = HooksModelNameHasLooseViewmodelMarker(lowerModel);
+        const bool sourceLooksLikeWeaponBones = HooksCalibrationBoneNamesLookLikeWeapon(boneNames);
+        if (!allowViewmodelClass &&
+            !sourceIsViewmodelPath &&
+            !sourceHasLooseViewmodelMarker &&
+            !sourceLooksLikeWeaponBones)
+        {
+            return false;
+        }
+
         const uint32_t sourceBoneSignature = HooksBuildViewmodelBoneSignature(
             modelName,
             boneNames,
@@ -4008,6 +4070,7 @@ namespace
             HooksBuildStudioHdrFingerprint(drawState, sourceBoneSignature);
         MagazineInteractionCalibrationSnapshot snapshot{};
         if (!vr->GetMagazineInteractionCalibrationSnapshot(snapshot) ||
+            std::chrono::duration<float>(std::chrono::steady_clock::now() - snapshot.publishedAt).count() > 1.5f ||
             snapshot.numBones != numBones ||
             snapshot.boneSignature != sourceBoneSignature ||
             snapshot.modelFingerprint != sourceModelFingerprint ||
@@ -5787,16 +5850,21 @@ namespace
         if (!vr)
             return 0.0f;
 
-        return std::clamp(vr->m_NativeViewmodelRightHandAnimationKeepUnits, 0.0f, 16.0f);
+        return std::clamp(vr->m_NativeViewmodelRightHandAnimationKeepUnits, -16.0f, 16.0f);
     }
 
     inline float HooksNativeViewmodelHandsOnlyResolveSideTrimDistance(VR* vr, float stableBoneLen, int side)
     {
-        float trimDistance = HooksNativeViewmodelHandsOnlyResolveTrimDistance(vr, stableBoneLen);
         if (side == 1)
-            trimDistance -= HooksNativeViewmodelHandsOnlyResolveRightAnimationKeepDistance(vr);
+            return std::clamp(
+                -HooksNativeViewmodelHandsOnlyResolveRightAnimationKeepDistance(vr),
+                -64.0f,
+                32.0f);
 
-        return std::clamp(trimDistance, -64.0f, 32.0f);
+        return std::clamp(
+            HooksNativeViewmodelHandsOnlyResolveTrimDistance(vr, stableBoneLen),
+            -64.0f,
+            32.0f);
     }
 
     inline Vector HooksNativeViewmodelHandsOnlyRotateVectorAroundAxis(
