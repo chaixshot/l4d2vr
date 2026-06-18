@@ -244,6 +244,11 @@ public:
 	Vector m_SetupOriginToHMD = { 0,0,0 };
 
 	float m_HeightOffset = 0.0;
+	static constexpr uint32_t kResetPositionStableFramesRequired = 3;
+	std::atomic<uint32_t> m_ResetPositionStableFrames{ 0 };
+	std::atomic<uint32_t> m_ResetPositionDeferredPending{ 0 };
+	bool m_ResetPositionStableEyeZValid = false;
+	float m_ResetPositionStableEyeZ = 0.0f;
 	bool m_RoomscaleActive = false;
 	bool m_IsThirdPersonCamera = false;
 	// Death camera flicker guard: after we detect the local player has died,
@@ -3042,6 +3047,7 @@ public:
 	Vector GetThirdPersonViewOrigin() const { return m_ThirdPersonViewOrigin; }
 	QAngle GetThirdPersonViewAngles() const { return m_ThirdPersonViewAngles; }
 	bool IsThirdPersonCameraActive() const { return m_IsThirdPersonCamera; }
+	bool CanApplyResetPositionNow() const;
 	// Death flicker guard (see m_DeathFirstPersonLockEnd).
 	void RefreshDeathFirstPersonLock(const C_BasePlayer* localPlayer);
 	bool IsDeathFirstPersonLockActive() const;

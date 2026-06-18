@@ -29,6 +29,8 @@ void VR::UpdateTracking()
         ClearTeleportServerTarget();
         ClearTeleportVisualScout();
         m_HadLocalPlayerPrev = false;
+        m_ResetPositionStableFrames.store(0u, std::memory_order_release);
+        m_ResetPositionStableEyeZValid = false;
         m_ThirdPersonMapLoadCooldownPending = true;
         m_ThirdPersonMapLoadCooldownEnd = {};
         if (m_ServerHookFallbackPending)
@@ -650,6 +652,47 @@ void VR::UpdateTracking()
 
     // Reset camera if it somehow gets too far. Detached scout view is allowed to
     // exceed the normal roomscale safety radius until the user presses teleport again.
+    {
+        auto isFiniteVector = [](const Vector& value)
+            {
+                return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+            };
+
+        const bool liveLocalPlayer = (teamNum != 1) && (lifeState == 0) && (obsMode == 0);
+        const bool stableInEyeObserver = inEyeObserver && viewPlayer && IsEntityAlive(viewPlayer);
+        const bool resetStateCandidate =
+            (liveLocalPlayer || stableInEyeObserver) &&
+            !m_TeleportVisualScoutActive &&
+            !IsThirdPersonMapLoadCooldownActive();
+        const Vector resetEyeOrigin = stableInEyeObserver ? viewPlayer->EyePosition() : localPlayer->EyePosition();
+        const bool resetCameraFinite =
+            isFiniteVector(resetEyeOrigin) &&
+            isFiniteVector(m_SetupOrigin) &&
+            isFiniteVector(m_HmdPosAbs) &&
+            isFiniteVector(m_HmdPosLocalInWorld);
+
+        uint32_t stableFrames = 0u;
+        if (resetStateCandidate && resetCameraFinite)
+        {
+            constexpr float kMaxStableEyeZStep = 24.0f;
+            const bool eyeZStable =
+                !m_ResetPositionStableEyeZValid ||
+                std::fabs(resetEyeOrigin.z - m_ResetPositionStableEyeZ) <= kMaxStableEyeZStep;
+
+            stableFrames = eyeZStable
+                ? (std::min)(m_ResetPositionStableFrames.load(std::memory_order_relaxed) + 1u, 60u)
+                : 1u;
+            m_ResetPositionStableEyeZ = resetEyeOrigin.z;
+            m_ResetPositionStableEyeZValid = true;
+        }
+        else
+        {
+            m_ResetPositionStableEyeZValid = false;
+        }
+
+        m_ResetPositionStableFrames.store(stableFrames, std::memory_order_release);
+    }
+
     m_SetupOriginToHMD = m_HmdPosAbs - m_SetupOrigin;
     if (!m_TeleportVisualScoutActive && !suppressTeleportCameraClip && VectorLength(m_SetupOriginToHMD) > 150)
         ResetPosition();
@@ -667,6 +710,8 @@ void VR::UpdateTracking()
         ResetPosition();
         m_ResetPositionAfterMountedGunExitPending = false;
     }
+    if (m_ResetPositionDeferredPending.load(std::memory_order_acquire) != 0u && CanApplyResetPositionNow())
+        ResetPosition();
     m_HmdAngAbs = hmdAngSmoothed;
 
     // Mouse aim initialization: decouple aim pitch from HMD pitch.

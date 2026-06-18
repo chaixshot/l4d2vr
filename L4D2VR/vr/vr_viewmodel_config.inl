@@ -174,6 +174,11 @@ Vector VR::GetViewOriginRight()
 
 
 
+bool VR::CanApplyResetPositionNow() const
+{
+    return m_ResetPositionStableFrames.load(std::memory_order_acquire) >= kResetPositionStableFramesRequired;
+}
+
 void VR::ResetPosition()
 {
     if (m_TeleportVisualScoutActive)
@@ -183,6 +188,13 @@ void VR::ResetPosition()
         return;
     }
 
+    if (!CanApplyResetPositionNow())
+    {
+        m_ResetPositionDeferredPending.store(1u, std::memory_order_release);
+        return;
+    }
+
+    m_ResetPositionDeferredPending.store(0u, std::memory_order_release);
     m_CameraAnchor += m_SetupOrigin - m_HmdPosAbs;
     m_HeightOffset += m_SetupOrigin.z - m_HmdPosAbs.z;
     m_Roomscale1To1PrevValid = false;
