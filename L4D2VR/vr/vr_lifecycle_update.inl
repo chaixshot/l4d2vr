@@ -1500,10 +1500,25 @@ void VR::Update()
             C_BasePlayer* localPlayer = (C_BasePlayer*)m_Game->GetClientEntity(playerIndex);
             const bool hasLocalPlayer = (localPlayer != nullptr);
             const auto now = std::chrono::steady_clock::now();
+            bool hasLiveLocalPlayerWithWeapon = false;
+            if (hasLocalPlayer)
+            {
+                const unsigned char* base = reinterpret_cast<const unsigned char*>(localPlayer);
+                const int teamNum = *reinterpret_cast<const int*>(base + kTeamNumOffset);
+                const unsigned char lifeState = *reinterpret_cast<const unsigned char*>(base + kLifeStateOffset);
+                const int obsMode = *reinterpret_cast<const int*>(base + kObserverModeOffset);
+                C_WeaponCSBase* activeWeapon = static_cast<C_WeaponCSBase*>(localPlayer->GetActiveWeapon());
+                hasLiveLocalPlayerWithWeapon =
+                    teamNum != 1 &&
+                    lifeState == 0 &&
+                    obsMode == 0 &&
+                    activeWeapon &&
+                    activeWeapon->GetWeaponID() != C_WeaponCSBase::WeaponID::NONE;
+            }
 
             const bool nativeLeftHandFreezeEnabled =
                 m_NativeViewmodelHandsOnly;
-            if (!nativeLeftHandFreezeEnabled || !hasLocalPlayer)
+            if (!nativeLeftHandFreezeEnabled || !hasLiveLocalPlayerWithWeapon)
             {
                 resetNativeLeftHandFreeze();
             }
