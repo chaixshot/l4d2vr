@@ -5867,8 +5867,15 @@ bool VR::DrawVrHandsForEyeImmediate(
     VrHandDrawPass drawPass,
     bool allowQueuedMode)
 {
-    if (!m_VrHandsEnabled || !m_IsVREnabled || !m_Input || !m_Game)
+    const bool drawGloves = m_VrHandsEnabled;
+    const bool drawMagazineDebugBoxes = m_MagazineBoxDebugEnabled;
+    if ((!drawGloves && !drawMagazineDebugBoxes) ||
+        !m_IsVREnabled ||
+        !m_Game ||
+        (drawGloves && !m_Input))
+    {
         return false;
+    }
 
     const int queueMode = m_Game->GetMatQueueMode();
     if (queueMode != 0 && !allowQueuedMode)
@@ -5973,14 +5980,43 @@ bool VR::DrawVrHandsForEyeImmediate(
         (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
             m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine))
     {
-        magazineSocketCaptureBoxWorld = MagazineInteractionMatrixLooksRenderable(m_MagazineInteractionSocketCaptureWorld)
-            ? m_MagazineInteractionSocketCaptureWorld
-            : m_MagazineInteractionSocketWorld;
+        MagazineInteractionBoxSnapshot socketBox = m_MagazineInteractionSocketBox;
+        VrHandMatrix4 socketWorld = m_MagazineInteractionSocketWorld;
+        MagazineInteractionBoxSnapshot rebasedSocketBox{};
+        VrHandMatrix4 rebasedSocketWorld{};
+        if (MagazineInteractionRebaseBoxToCurrentViewmodelModelBasis(
+                this,
+                m_MagazineInteractionSocketBox,
+                rebasedSocketBox,
+                rebasedSocketWorld))
+        {
+            socketBox = rebasedSocketBox;
+            socketWorld = rebasedSocketWorld;
+        }
+
+        MagazineInteractionBoxSnapshot captureBox = socketBox;
+        magazineSocketCaptureBoxWorld = socketWorld;
+        if (MagazineInteractionMatrixLooksRenderable(m_MagazineInteractionSocketWorld) &&
+            MagazineInteractionMatrixLooksRenderable(m_MagazineInteractionSocketCaptureWorld))
+        {
+            const VrHandMatrix4 socketToCapture = MagazineInteractionBuildControllerRelation(
+                m_MagazineInteractionSocketWorld,
+                m_MagazineInteractionSocketCaptureWorld);
+            const VrHandMatrix4 captureWorld = MagazineInteractionBuildWorldFromControllerRelation(
+                socketWorld,
+                socketToCapture);
+            if (MagazineInteractionMatrixLooksRenderable(captureWorld))
+            {
+                captureBox = m_MagazineInteractionSocketCaptureBox;
+                captureBox.origin = MagazineInteractionMatrixOrigin(captureWorld);
+                captureBox.axisX = MagazineInteractionMatrixAxis(captureWorld, 0);
+                captureBox.axisY = MagazineInteractionMatrixAxis(captureWorld, 1);
+                captureBox.axisZ = MagazineInteractionMatrixAxis(captureWorld, 2);
+                magazineSocketCaptureBoxWorld = captureWorld;
+            }
+        }
+
         magazineSocketCaptureBoxWorldPtr = &magazineSocketCaptureBoxWorld;
-        const MagazineInteractionBoxSnapshot& captureBox =
-            MagazineInteractionMatrixLooksRenderable(m_MagazineInteractionSocketCaptureWorld)
-            ? m_MagazineInteractionSocketCaptureBox
-            : m_MagazineInteractionSocketBox;
         magazineSocketCaptureBoxMins = captureBox.mins;
         magazineSocketCaptureBoxMaxs = captureBox.maxs;
     }
@@ -6046,49 +6082,76 @@ bool VR::DrawVrHandsForEyeImmediate(
         rightHandPoseRotationOffsetDeg.z += m_VrHandsLeftHandedViewmodelPoseRotationOffsetDeg.z;
     }
 
-    drewAny = m_VrHands->DrawForEye(
-        device,
-        m_Input,
-        view,
-        eyeIndex,
-        m_VRScale,
-        m_VrHandsModelScale,
-        m_VrHandsMotionRangeWithoutController,
-        m_VrHandsRightUseViewmodelPose,
-        m_LeftHanded,
-        m_MouseModeEnabled,
-        m_VrHandsDebugLog,
-        sceneLightScale,
-        leftControllerPosition,
-        leftControllerAngles,
-        rightControllerPosition,
-        rightControllerAngles,
-        currentViewmodelPosition,
-        currentViewmodelAngles,
-        m_VrHandsLeftPoseOffsetMeters,
-        m_VrHandsLeftPoseRotationOffsetDeg,
-        rightHandPoseOffsetMeters,
-        rightHandPoseRotationOffsetDeg,
-        standaloneMagazineBoxWorldPtr,
-        standaloneMagazineBoxMins,
-        standaloneMagazineBoxMaxs,
-        standaloneMagazineBoxUseViewmodelLayer,
-        magazineSocketCaptureBoxWorldPtr,
-        magazineSocketCaptureBoxMins,
-        magazineSocketCaptureBoxMaxs,
-        magazineSocketCaptureBoxUseViewmodelLayer,
-        currentMagazineBoxWorldPtr,
-        currentMagazineBoxMins,
-        currentMagazineBoxMaxs,
-        currentMagazineBoxUseViewmodelLayer,
-        currentBoltBoxWorldPtr,
-        currentBoltBoxMins,
-        currentBoltBoxMaxs,
-        currentBoltBoxUseViewmodelLayer,
-        m_MagazineInteractionLeftHandPoseActive.load(std::memory_order_relaxed) != 0,
-        drawPass);
+    if (drawGloves)
+    {
+        drewAny = m_VrHands->DrawForEye(
+            device,
+            m_Input,
+            view,
+            eyeIndex,
+            m_VRScale,
+            m_VrHandsModelScale,
+            m_VrHandsMotionRangeWithoutController,
+            m_VrHandsRightUseViewmodelPose,
+            m_LeftHanded,
+            m_MouseModeEnabled,
+            m_VrHandsDebugLog,
+            sceneLightScale,
+            leftControllerPosition,
+            leftControllerAngles,
+            rightControllerPosition,
+            rightControllerAngles,
+            currentViewmodelPosition,
+            currentViewmodelAngles,
+            m_VrHandsLeftPoseOffsetMeters,
+            m_VrHandsLeftPoseRotationOffsetDeg,
+            rightHandPoseOffsetMeters,
+            rightHandPoseRotationOffsetDeg,
+            standaloneMagazineBoxWorldPtr,
+            standaloneMagazineBoxMins,
+            standaloneMagazineBoxMaxs,
+            standaloneMagazineBoxUseViewmodelLayer,
+            magazineSocketCaptureBoxWorldPtr,
+            magazineSocketCaptureBoxMins,
+            magazineSocketCaptureBoxMaxs,
+            magazineSocketCaptureBoxUseViewmodelLayer,
+            currentMagazineBoxWorldPtr,
+            currentMagazineBoxMins,
+            currentMagazineBoxMaxs,
+            currentMagazineBoxUseViewmodelLayer,
+            currentBoltBoxWorldPtr,
+            currentBoltBoxMins,
+            currentBoltBoxMaxs,
+            currentBoltBoxUseViewmodelLayer,
+            m_MagazineInteractionLeftHandPoseActive.load(std::memory_order_relaxed) != 0,
+            drawPass);
+    }
+    else
+    {
+        drewAny = m_VrHands->DrawMagazineDebugBoxesForEye(
+            device,
+            view,
+            sceneLightScale,
+            standaloneMagazineBoxWorldPtr,
+            standaloneMagazineBoxMins,
+            standaloneMagazineBoxMaxs,
+            standaloneMagazineBoxUseViewmodelLayer,
+            magazineSocketCaptureBoxWorldPtr,
+            magazineSocketCaptureBoxMins,
+            magazineSocketCaptureBoxMaxs,
+            magazineSocketCaptureBoxUseViewmodelLayer,
+            currentMagazineBoxWorldPtr,
+            currentMagazineBoxMins,
+            currentMagazineBoxMaxs,
+            currentMagazineBoxUseViewmodelLayer,
+            currentBoltBoxWorldPtr,
+            currentBoltBoxMins,
+            currentBoltBoxMaxs,
+            currentBoltBoxUseViewmodelLayer,
+            drawPass);
+    }
 
-    if (!drewAny && m_VrHands && m_VrHands->IsDependencyUnavailable())
+    if (drawGloves && !drewAny && m_VrHands && m_VrHands->IsDependencyUnavailable())
         FallbackVrHandsGlovesToNative(m_VrHands->DependencyFailureReason().c_str());
     }
     device->Release();

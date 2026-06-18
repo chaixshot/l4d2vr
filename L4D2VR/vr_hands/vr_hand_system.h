@@ -67,6 +67,28 @@ public:
         bool leftHandMagazineGripPose,
         VrHandDrawPass drawPass);
 
+    bool DrawMagazineDebugBoxesForEye(
+        IDirect3DDevice9* device,
+        const CViewSetup& view,
+        float sceneLightScale,
+        const VrHandMatrix4* standaloneMagazineBoxWorld,
+        const Vector& standaloneMagazineBoxMins,
+        const Vector& standaloneMagazineBoxMaxs,
+        bool standaloneMagazineBoxUseViewmodelLayer,
+        const VrHandMatrix4* magazineSocketCaptureBoxWorld,
+        const Vector& magazineSocketCaptureBoxMins,
+        const Vector& magazineSocketCaptureBoxMaxs,
+        bool magazineSocketCaptureBoxUseViewmodelLayer,
+        const VrHandMatrix4* currentMagazineBoxWorld,
+        const Vector& currentMagazineBoxMins,
+        const Vector& currentMagazineBoxMaxs,
+        bool currentMagazineBoxUseViewmodelLayer,
+        const VrHandMatrix4* currentBoltBoxWorld,
+        const Vector& currentBoltBoxMins,
+        const Vector& currentBoltBoxMaxs,
+        bool currentBoltBoxUseViewmodelLayer,
+        VrHandDrawPass drawPass);
+
     bool ClearViewmodelOcclusionStencil(IDirect3DDevice9* device);
     void OnDeviceLost();
     bool EnsureAssetsAvailable(bool debugLog);

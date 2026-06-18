@@ -2086,8 +2086,17 @@ bool VR::QueueVrHandsDrawForEye(
     int eyeIndex,
     VrHandDrawPass drawPass)
 {
-    if (!renderContext || !m_VrHandsEnabled || !m_IsVREnabled || !m_Input || !m_Game)
+    const bool drawGloves = m_VrHandsEnabled;
+    const bool drawMagazineDebugBoxes =
+        m_MagazineBoxDebugEnabled && drawPass != VrHandDrawPass::WorldVisibilityMask;
+    if (!renderContext ||
+        (!drawGloves && !drawMagazineDebugBoxes) ||
+        !m_IsVREnabled ||
+        !m_Game ||
+        (drawGloves && !m_Input))
+    {
         return false;
+    }
 
     if (m_Game->GetMatQueueMode() == 0)
         return false;

@@ -652,6 +652,88 @@ bool VrHandSystem::DrawStandaloneMagazineBox(
     return true;
 }
 
+bool VrHandSystem::DrawMagazineDebugBoxesForEye(
+    IDirect3DDevice9* device,
+    const CViewSetup& view,
+    float sceneLightScale,
+    const VrHandMatrix4* standaloneMagazineBoxWorld,
+    const Vector& standaloneMagazineBoxMins,
+    const Vector& standaloneMagazineBoxMaxs,
+    bool standaloneMagazineBoxUseViewmodelLayer,
+    const VrHandMatrix4* magazineSocketCaptureBoxWorld,
+    const Vector& magazineSocketCaptureBoxMins,
+    const Vector& magazineSocketCaptureBoxMaxs,
+    bool magazineSocketCaptureBoxUseViewmodelLayer,
+    const VrHandMatrix4* currentMagazineBoxWorld,
+    const Vector& currentMagazineBoxMins,
+    const Vector& currentMagazineBoxMaxs,
+    bool currentMagazineBoxUseViewmodelLayer,
+    const VrHandMatrix4* currentBoltBoxWorld,
+    const Vector& currentBoltBoxMins,
+    const Vector& currentBoltBoxMaxs,
+    bool currentBoltBoxUseViewmodelLayer,
+    VrHandDrawPass drawPass)
+{
+    bool drewAny = false;
+    if (DrawStandaloneMagazineBox(
+            device,
+            view,
+            sceneLightScale,
+            standaloneMagazineBoxWorld,
+            standaloneMagazineBoxMins,
+            standaloneMagazineBoxMaxs,
+            kMagazineDebugFreshBoxColorArgb,
+            "fresh_magazine",
+            standaloneMagazineBoxUseViewmodelLayer,
+            drawPass))
+    {
+        drewAny = true;
+    }
+    if (DrawStandaloneMagazineBox(
+            device,
+            view,
+            sceneLightScale,
+            magazineSocketCaptureBoxWorld,
+            magazineSocketCaptureBoxMins,
+            magazineSocketCaptureBoxMaxs,
+            kMagazineDebugSocketCaptureBoxColorArgb,
+            "socket_capture",
+            magazineSocketCaptureBoxUseViewmodelLayer,
+            drawPass))
+    {
+        drewAny = true;
+    }
+    if (DrawStandaloneMagazineBox(
+            device,
+            view,
+            sceneLightScale,
+            currentMagazineBoxWorld,
+            currentMagazineBoxMins,
+            currentMagazineBoxMaxs,
+            kMagazineDebugCurrentMagazineBoxColorArgb,
+            "current_magazine",
+            currentMagazineBoxUseViewmodelLayer,
+            drawPass))
+    {
+        drewAny = true;
+    }
+    if (DrawStandaloneMagazineBox(
+            device,
+            view,
+            sceneLightScale,
+            currentBoltBoxWorld,
+            currentBoltBoxMins,
+            currentBoltBoxMaxs,
+            kMagazineDebugBoltBoxColorArgb,
+            "current_bolt",
+            currentBoltBoxUseViewmodelLayer,
+            drawPass))
+    {
+        drewAny = true;
+    }
+    return drewAny;
+}
+
 bool VrHandSystem::EnsureAssetsLoaded(bool debugLog)
 {
     if (m_DependencyUnavailable)
