@@ -2174,6 +2174,15 @@ namespace
         return hash;
     }
 
+    inline std::string HooksBuildMagazineInteractionProfileKey(uint32_t modelFingerprint, uint32_t boneSignature)
+    {
+        if (modelFingerprint == 0 || boneSignature == 0)
+            return std::string();
+        char text[32] = {};
+        std::snprintf(text, sizeof(text), "fp%08x_bs%08x", modelFingerprint, boneSignature);
+        return std::string(text);
+    }
+
     inline bool HooksCalibrationOriginIsValid(const Vector& value)
     {
         return std::isfinite(value.x) &&
@@ -2357,14 +2366,88 @@ namespace
         return vr->m_MagazineInteractionCurrentWeaponId.load(std::memory_order_relaxed);
     }
 
+    inline std::string ResolveMagazineInteractionProfileKeyForConfig(
+        const VR* vr,
+        const std::string& preferredProfileKey = std::string())
+    {
+        if (!preferredProfileKey.empty())
+            return preferredProfileKey;
+        if (!vr)
+            return std::string();
+
+        return HooksBuildMagazineInteractionProfileKey(
+            vr->m_MagazineInteractionCurrentModelFingerprint.load(std::memory_order_relaxed),
+            vr->m_MagazineInteractionCurrentBoneSignature.load(std::memory_order_relaxed));
+    }
+
+    template <typename TValue>
+    inline bool FindMagazineInteractionProfileOverride(
+        const VR* vr,
+        const std::string& preferredProfileKey,
+        const std::unordered_map<std::string, TValue>& profileOverrides,
+        TValue& outValue)
+    {
+        const std::string profileKey = ResolveMagazineInteractionProfileKeyForConfig(vr, preferredProfileKey);
+        if (profileKey.empty())
+            return false;
+
+        const auto profileIt = profileOverrides.find(profileKey);
+        if (profileIt == profileOverrides.end())
+            return false;
+
+        outValue = profileIt->second;
+        return true;
+    }
+
+    inline Vector ResolveMagazineInteractionBoltBoxHalfExtentsMeters(
+        const VR* vr,
+        int preferredWeaponId,
+        const std::string& preferredProfileKey)
+    {
+        if (!vr)
+            return Vector(0.045f, 0.035f, 0.035f);
+
+        Vector value = vr->m_MagazineInteractionBoltBoxHalfExtentsMeters;
+        const bool usedProfileOverride = FindMagazineInteractionProfileOverride(
+            vr,
+            preferredProfileKey,
+            vr->m_MagazineInteractionBoltBoxHalfExtentsMetersProfileOverrides,
+            value);
+
+        const int weaponId = ResolveMagazineInteractionWeaponIdForConfig(vr, preferredWeaponId);
+        if (!usedProfileOverride && weaponId > 0)
+        {
+            const auto halfIt = vr->m_MagazineInteractionBoltBoxHalfExtentsMetersOverrides.find(weaponId);
+            if (halfIt != vr->m_MagazineInteractionBoltBoxHalfExtentsMetersOverrides.end())
+                value = halfIt->second;
+        }
+
+        value.x = std::clamp(value.x, 0.005f, 0.25f);
+        value.y = std::clamp(value.y, 0.005f, 0.25f);
+        value.z = std::clamp(value.z, 0.005f, 0.25f);
+        return value;
+    }
+
     inline Vector ResolveMagazineInteractionBoltPullAxisLocal(
         const VR* vr,
         int preferredWeaponId,
+        const std::string& preferredProfileKey,
         bool& outUsedOverride)
     {
         outUsedOverride = false;
         if (!vr)
             return Vector(0.0f, 1.0f, 0.0f);
+
+        Vector profileAxis{};
+        if (FindMagazineInteractionProfileOverride(
+            vr,
+            preferredProfileKey,
+            vr->m_MagazineInteractionBoltPullAxisLocalProfileOverrides,
+            profileAxis))
+        {
+            outUsedOverride = true;
+            return profileAxis;
+        }
 
         const int weaponId = ResolveMagazineInteractionWeaponIdForConfig(vr, preferredWeaponId);
         if (weaponId > 0)
@@ -2380,14 +2463,23 @@ namespace
         return vr->m_MagazineInteractionBoltPullAxisLocal;
     }
 
-    inline Vector ResolveMagazineInteractionBoltBoxLocalOffsetMeters(const VR* vr, int preferredWeaponId)
+    inline Vector ResolveMagazineInteractionBoltBoxLocalOffsetMeters(
+        const VR* vr,
+        int preferredWeaponId,
+        const std::string& preferredProfileKey)
     {
         if (!vr)
             return Vector(0.0f, 0.0f, 0.0f);
 
         Vector value = vr->m_MagazineInteractionBoltBoxLocalOffsetMeters;
+        const bool usedProfileOverride = FindMagazineInteractionProfileOverride(
+            vr,
+            preferredProfileKey,
+            vr->m_MagazineInteractionBoltBoxLocalOffsetMetersProfileOverrides,
+            value);
+
         const int weaponId = ResolveMagazineInteractionWeaponIdForConfig(vr, preferredWeaponId);
-        if (weaponId > 0)
+        if (!usedProfileOverride && weaponId > 0)
         {
             const auto offsetIt = vr->m_MagazineInteractionBoltBoxLocalOffsetMetersOverrides.find(weaponId);
             if (offsetIt != vr->m_MagazineInteractionBoltBoxLocalOffsetMetersOverrides.end())
@@ -2400,6 +2492,31 @@ namespace
         return value;
     }
 
+    inline float ResolveMagazineInteractionBoltPullDistanceMeters(
+        const VR* vr,
+        int preferredWeaponId = 0,
+        const std::string& preferredProfileKey = std::string())
+    {
+        if (!vr)
+            return 0.055f;
+
+        float value = vr->m_MagazineInteractionBoltPullDistanceMeters;
+        const bool usedProfileOverride = FindMagazineInteractionProfileOverride(
+            vr,
+            preferredProfileKey,
+            vr->m_MagazineInteractionBoltPullDistanceMetersProfileOverrides,
+            value);
+
+        const int weaponId = ResolveMagazineInteractionWeaponIdForConfig(vr, preferredWeaponId);
+        if (!usedProfileOverride && weaponId > 0)
+        {
+            const auto it = vr->m_MagazineInteractionBoltPullDistanceMetersOverrides.find(weaponId);
+            if (it != vr->m_MagazineInteractionBoltPullDistanceMetersOverrides.end())
+                value = it->second;
+        }
+        return std::clamp(value, 0.0f, 0.25f);
+    }
+
     inline Vector BuildMagazineInteractionBoltPullAxisWorld(
         VR* vr,
         const std::string& modelName,
@@ -2409,11 +2526,12 @@ namespace
         int weaponId,
         int boltBone,
         const vr_vm_stabilize::Mat3x4& boltWorld,
+        const std::string& profileKey,
         const void* pModelToWorld)
     {
         const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
         bool usedAxisOverride = false;
-        Vector configuredLocalAxis = ResolveMagazineInteractionBoltPullAxisLocal(vr, weaponId, usedAxisOverride);
+        Vector configuredLocalAxis = ResolveMagazineInteractionBoltPullAxisLocal(vr, weaponId, profileKey, usedAxisOverride);
         const bool legacyM16Axis =
             !usedAxisOverride &&
             lowerModel.find("models/v_models/v_rifle.mdl") != std::string::npos &&
@@ -2779,6 +2897,32 @@ namespace
             configuredHalfMeters.z > 0.0001f ? configuredHalfMeters.z * scale : std::max(0.001f, sourceHalf.z));
         mins = Vector(-half.x, -half.y, -half.z);
         maxs = Vector(half.x, half.y, half.z);
+    }
+
+    inline void ApplyMagazineInteractionBoltBoxCalibrationAdjustments(
+        VR* vr,
+        vr_vm_stabilize::Mat3x4& boxWorld,
+        Vector& mins,
+        Vector& maxs)
+    {
+        if (!vr)
+            return;
+
+        const float scale = (std::isfinite(vr->m_VRScale) && vr->m_VRScale > 0.001f) ? vr->m_VRScale : 43.2f;
+        const Vector halfMeters(
+            std::clamp(vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.x, 0.005f, 0.25f),
+            std::clamp(vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.y, 0.005f, 0.25f),
+            std::clamp(vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.z, 0.005f, 0.25f));
+        const Vector offsetMeters(
+            std::clamp(vr->m_MagazineInteractionBoltBoxLocalOffsetMeters.x, -0.25f, 0.25f),
+            std::clamp(vr->m_MagazineInteractionBoltBoxLocalOffsetMeters.y, -0.25f, 0.25f),
+            std::clamp(vr->m_MagazineInteractionBoltBoxLocalOffsetMeters.z, -0.25f, 0.25f));
+
+        const Vector center = offsetMeters * scale;
+        const Vector half = halfMeters * scale;
+        mins = center - half;
+        maxs = center + half;
+        (void)boxWorld;
     }
 
     inline bool HooksProjectBasisReference(
@@ -4043,7 +4187,7 @@ namespace
         }
 
         const uint32_t frameSeq = vr->m_RenderFrameSeq.load(std::memory_order_relaxed);
-        const int step = std::clamp(vr->m_MagazineInteractionCalibrationStep.load(std::memory_order_relaxed), 0, 3);
+        const int step = std::clamp(vr->m_MagazineInteractionCalibrationStep.load(std::memory_order_relaxed), 0, 5);
         if (frameSeq != 0)
         {
             static std::mutex s_drawMutex;
@@ -4113,8 +4257,10 @@ namespace
             ApplyMagazineInteractionMagazineBoxCalibrationAdjustments(vr, selectedWorld, mins, maxs);
         if (step == 2)
             ApplyMagazineInteractionSocketCaptureCalibrationAdjustments(vr, selectedWorld, mins, maxs);
+        if (step == 4 || step == 5)
+            ApplyMagazineInteractionBoltBoxCalibrationAdjustments(vr, selectedWorld, mins, maxs);
 
-        const bool boltStep = (step == 3);
+        const bool boltStep = (step >= 3);
         const bool socketStep = (step == 2);
         const int r = boltStep ? 74 : (socketStep ? 40 : 40);
         const int g = boltStep ? 142 : (socketStep ? 190 : 224);
@@ -4131,6 +4277,26 @@ namespace
         overlay->AddLineOverlay(origin - HooksMatrixAxis(selectedWorld, 0) * tick, origin + HooksMatrixAxis(selectedWorld, 0) * tick, 255, 255, 255, kNoDepthTest, duration);
         overlay->AddLineOverlay(origin - HooksMatrixAxis(selectedWorld, 1) * tick, origin + HooksMatrixAxis(selectedWorld, 1) * tick, 255, 255, 255, kNoDepthTest, duration);
         overlay->AddLineOverlay(origin - HooksMatrixAxis(selectedWorld, 2) * tick, origin + HooksMatrixAxis(selectedWorld, 2) * tick, 255, 255, 255, kNoDepthTest, duration);
+        if (step == 5)
+        {
+            Vector pullAxis = BuildMagazineInteractionBoltPullAxisWorld(
+                vr,
+                modelName,
+                sourceBones,
+                numBones,
+                boneParents,
+                ResolveMagazineInteractionWeaponIdForConfig(vr),
+                selectedBone,
+                selectedWorld,
+                ResolveMagazineInteractionProfileKeyForConfig(vr),
+                nullptr);
+            pullAxis = HooksNormalizeVector(pullAxis, Vector(0.0f, 0.0f, 0.0f));
+            if (pullAxis.Length() > 0.0001f)
+            {
+                const float pullLen = std::max(0.75f, ResolveMagazineInteractionBoltPullDistanceMeters(vr) * scale);
+                overlay->AddLineOverlay(origin, origin + pullAxis * pullLen, 255, 230, 90, kNoDepthTest, duration);
+            }
+        }
     }
 
     inline bool BuildMagazineInteractionCalibrationPreviewBones(
@@ -4497,12 +4663,14 @@ namespace
         if (hasBounds && vr->m_Game && vr->m_Game->m_DebugOverlay)
         {
             CalibrationBoneHighlightEnsureMinimumSpan(mins, maxs, fallbackHalf);
-            const int step = std::clamp(vr->m_MagazineInteractionCalibrationStep.load(std::memory_order_relaxed), 0, 3);
+            const int step = std::clamp(vr->m_MagazineInteractionCalibrationStep.load(std::memory_order_relaxed), 0, 5);
             if (step == 1 || step == 2)
                 ApplyMagazineInteractionMagazineBoxCalibrationAdjustments(vr, previewSelectedWorld, mins, maxs);
             if (step == 2)
                 ApplyMagazineInteractionSocketCaptureCalibrationAdjustments(vr, previewSelectedWorld, mins, maxs);
-            const bool boltStep = (step == 3);
+            if (step == 4 || step == 5)
+                ApplyMagazineInteractionBoltBoxCalibrationAdjustments(vr, previewSelectedWorld, mins, maxs);
+            const bool boltStep = (step >= 3);
             const bool socketStep = (step == 2);
             const int r = boltStep ? 74 : (socketStep ? 40 : 40);
             const int g = boltStep ? 142 : (socketStep ? 190 : 224);
@@ -4519,6 +4687,26 @@ namespace
             overlay->AddLineOverlay(tickOrigin - HooksMatrixAxis(previewSelectedWorld, 0) * tick, tickOrigin + HooksMatrixAxis(previewSelectedWorld, 0) * tick, 255, 255, 255, kNoDepthTest, duration);
             overlay->AddLineOverlay(tickOrigin - HooksMatrixAxis(previewSelectedWorld, 1) * tick, tickOrigin + HooksMatrixAxis(previewSelectedWorld, 1) * tick, 255, 255, 255, kNoDepthTest, duration);
             overlay->AddLineOverlay(tickOrigin - HooksMatrixAxis(previewSelectedWorld, 2) * tick, tickOrigin + HooksMatrixAxis(previewSelectedWorld, 2) * tick, 255, 255, 255, kNoDepthTest, duration);
+            if (step == 5)
+            {
+                Vector pullAxis = BuildMagazineInteractionBoltPullAxisWorld(
+                    vr,
+                    modelName,
+                    previewBones,
+                    numBones,
+                    boneParents,
+                    ResolveMagazineInteractionWeaponIdForConfig(vr),
+                    selectedBone,
+                    previewSelectedWorld,
+                    ResolveMagazineInteractionProfileKeyForConfig(vr),
+                    nullptr);
+                pullAxis = HooksNormalizeVector(pullAxis, Vector(0.0f, 0.0f, 0.0f));
+                if (pullAxis.Length() > 0.0001f)
+                {
+                    const float pullLen = std::max(0.75f, ResolveMagazineInteractionBoltPullDistanceMeters(vr) * scale);
+                    overlay->AddLineOverlay(tickOrigin, tickOrigin + pullAxis * pullLen, 255, 230, 90, kNoDepthTest, duration);
+                }
+            }
         }
 
         (void)entityIndex;
@@ -4573,6 +4761,8 @@ namespace
         const char* configName,
         int weaponId,
         const std::unordered_map<int, std::vector<std::string>>& overrides,
+        const std::string& profileKey,
+        const std::unordered_map<std::string, std::vector<std::string>>& profileOverrides,
         const std::string& overrideSpec,
         const std::string& modelName,
         const std::vector<std::string>& boneNames,
@@ -4580,14 +4770,33 @@ namespace
         bool logDiagnostics)
     {
         outConfiguredName.clear();
-        if (weaponId <= 0)
+        const std::vector<std::string>* requestedNames = nullptr;
+        std::string matchedOverrideKey;
+        int matchedWeaponId = 0;
+        if (!profileKey.empty())
+        {
+            const std::string normalizedProfileKey = vr_vm_stabilize::ToLowerAscii(profileKey);
+            const auto profileIt = profileOverrides.find(normalizedProfileKey);
+            if (profileIt != profileOverrides.end() && !profileIt->second.empty())
+            {
+                requestedNames = &profileIt->second;
+                matchedOverrideKey = std::string("profile:") + normalizedProfileKey;
+            }
+        }
+        if (!requestedNames && weaponId > 0)
+        {
+            const auto overrideIt = overrides.find(weaponId);
+            if (overrideIt != overrides.end() && !overrideIt->second.empty())
+            {
+                requestedNames = &overrideIt->second;
+                matchedWeaponId = weaponId;
+                matchedOverrideKey = std::string("weapon:") + std::to_string(weaponId);
+            }
+        }
+        if (!requestedNames)
             return -1;
 
-        const auto overrideIt = overrides.find(weaponId);
-        if (overrideIt == overrides.end() || overrideIt->second.empty())
-            return -1;
-
-        for (const std::string& requestedName : overrideIt->second)
+        for (const std::string& requestedName : *requestedNames)
         {
             const std::string requestedLower = vr_vm_stabilize::ToLowerAscii(requestedName);
             if (requestedLower.empty())
@@ -4610,8 +4819,7 @@ namespace
                     static std::unordered_set<std::string> s_loggedIndexMatches;
                     const std::string logKey =
                         std::string(logTag ? logTag : "VR") + "|index|" +
-                        (role ? role : "bone") + "|" +
-                        std::to_string(weaponId) + "|" + modelName + "|" + requestedLower;
+                        (role ? role : "bone") + "|" + matchedOverrideKey + "|" + modelName + "|" + requestedLower;
                     bool shouldLog = false;
                     {
                         std::lock_guard<std::mutex> lock(s_overrideIndexLogMutex);
@@ -4628,7 +4836,7 @@ namespace
                             logTag ? logTag : "Unknown",
                             role ? role : "viewmodel",
                             configName ? configName : "unknown",
-                            weaponId,
+                            matchedWeaponId > 0 ? matchedWeaponId : weaponId,
                             modelName.c_str(),
                             bone,
                             boneName);
@@ -4648,8 +4856,7 @@ namespace
                 static std::unordered_set<std::string> s_loggedMatches;
                 const std::string logKey =
                     std::string(logTag ? logTag : "VR") + "|match|" +
-                    (role ? role : "bone") + "|" +
-                    std::to_string(weaponId) + "|" + modelName + "|" + requestedLower;
+                    (role ? role : "bone") + "|" + matchedOverrideKey + "|" + modelName + "|" + requestedLower;
                 bool shouldLog = false;
                 {
                     std::lock_guard<std::mutex> lock(s_overrideLogMutex);
@@ -4662,7 +4869,7 @@ namespace
                         logTag ? logTag : "Unknown",
                         role ? role : "viewmodel",
                         configName ? configName : "unknown",
-                        weaponId,
+                        matchedWeaponId > 0 ? matchedWeaponId : weaponId,
                         modelName.c_str(),
                         bone,
                         boneNames[static_cast<size_t>(bone)].c_str());
@@ -4675,8 +4882,7 @@ namespace
         static std::unordered_set<std::string> s_loggedMisses;
         const std::string missKey =
             std::string(logTag ? logTag : "VR") + "|miss|" +
-            (role ? role : "bone") + "|" +
-            std::to_string(weaponId) + "|" + modelName + "|" + overrideSpec;
+            (role ? role : "bone") + "|" + matchedOverrideKey + "|" + modelName + "|" + overrideSpec;
         bool shouldLogMiss = false;
         {
             std::lock_guard<std::mutex> lock(s_overrideMissLogMutex);
@@ -4689,7 +4895,7 @@ namespace
                 logTag ? logTag : "Unknown",
                 role ? role : "viewmodel",
                 configName ? configName : "unknown",
-                weaponId,
+                matchedWeaponId > 0 ? matchedWeaponId : weaponId,
                 modelName.c_str(),
                 overrideSpec.c_str());
         }
@@ -4765,6 +4971,19 @@ namespace
             : currentMagazineInteractionWeaponId > 0
                 ? currentMagazineInteractionWeaponId
                 : vr->m_MagazineInteractionWeaponId;
+        const uint32_t boneSignature = HooksBuildViewmodelBoneSignature(
+            modelName,
+            boneNames,
+            boneParents,
+            numBones,
+            boneIndex,
+            stride,
+            numBonesOffset);
+        const uint32_t modelFingerprint = HooksBuildStudioHdrFingerprint(drawState, boneSignature);
+        const std::string overrideProfileKey =
+            HooksBuildMagazineInteractionProfileKey(modelFingerprint, boneSignature);
+        vr->m_MagazineInteractionCurrentModelFingerprint.store(modelFingerprint, std::memory_order_relaxed);
+        vr->m_MagazineInteractionCurrentBoneSignature.store(boneSignature, std::memory_order_relaxed);
         if (inferredModelWeaponId > 0 &&
             currentMagazineInteractionWeaponId > 0 &&
             inferredModelWeaponId != currentMagazineInteractionWeaponId)
@@ -4796,6 +5015,8 @@ namespace
             "ManualReloadMagazineBoneOverrides",
             magazineInteractionWeaponId,
             vr->m_MagazineInteractionMagazineBoneOverrides,
+            overrideProfileKey,
+            vr->m_MagazineInteractionMagazineBoneProfileOverrides,
             vr->m_MagazineInteractionMagazineBoneOverridesSpec,
             modelName,
             boneNames,
@@ -4810,7 +5031,7 @@ namespace
         const int calibrationStep = std::clamp(
             vr->m_MagazineInteractionCalibrationStep.load(std::memory_order_relaxed),
             0,
-            3);
+            5);
         const int calibrationSelectedBone =
             vr->m_MagazineInteractionCalibrationSelectedBone.load(std::memory_order_relaxed);
         if (calibrationOverlayActive &&
@@ -5157,6 +5378,8 @@ namespace
             "MagazineInteractionBoltBoneOverrides",
             magazineInteractionWeaponId,
             vr->m_MagazineInteractionBoltBoneOverrides,
+            overrideProfileKey,
+            vr->m_MagazineInteractionBoltBoneProfileOverrides,
             vr->m_MagazineInteractionBoltBoneOverridesSpec,
             modelName,
             boneNames,
@@ -5168,16 +5391,34 @@ namespace
                 lowerModel,
                 boneNames,
                 logMagazineBoxDiagnostics);
+        if (calibrationOverlayActive)
+        {
+            const int calibrationStep = std::clamp(
+                vr->m_MagazineInteractionCalibrationStep.load(std::memory_order_relaxed),
+                0,
+                5);
+            const int calibrationSelectedBone =
+                vr->m_MagazineInteractionCalibrationSelectedBone.load(std::memory_order_relaxed);
+            if (calibrationStep >= 3 &&
+                calibrationSelectedBone >= 0 &&
+                calibrationSelectedBone < numBones)
+            {
+                boltBone = calibrationSelectedBone;
+            }
+        }
         if (boltBone >= 0 && boltBone < numBones)
         {
             vr_vm_stabilize::Mat3x4 boltWorld{};
             if (vr_vm_stabilize::SafeRead(sourceBones + boltBone, boltWorld))
             {
+                const Vector boltHalfMeters =
+                    ResolveMagazineInteractionBoltBoxHalfExtentsMeters(vr, magazineInteractionWeaponId, overrideProfileKey);
                 const Vector boltHalf(
-                    std::max(0.005f, vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.x) * vr->m_VRScale,
-                    std::max(0.005f, vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.y) * vr->m_VRScale,
-                    std::max(0.005f, vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.z) * vr->m_VRScale);
-                const Vector boltOffsetMeters = ResolveMagazineInteractionBoltBoxLocalOffsetMeters(vr, magazineInteractionWeaponId);
+                    std::max(0.005f, boltHalfMeters.x) * vr->m_VRScale,
+                    std::max(0.005f, boltHalfMeters.y) * vr->m_VRScale,
+                    std::max(0.005f, boltHalfMeters.z) * vr->m_VRScale);
+                const Vector boltOffsetMeters =
+                    ResolveMagazineInteractionBoltBoxLocalOffsetMeters(vr, magazineInteractionWeaponId, overrideProfileKey);
                 const Vector boltLocalOffset(
                     boltOffsetMeters.x * vr->m_VRScale,
                     boltOffsetMeters.y * vr->m_VRScale,
@@ -5191,6 +5432,7 @@ namespace
                     magazineInteractionWeaponId,
                     boltBone,
                     boltWorld,
+                    overrideProfileKey,
                     pModelToWorld);
                 vr->PublishMagazineInteractionBoltBox(
                     Vector(boltWorld.m[0][3], boltWorld.m[1][3], boltWorld.m[2][3]),
@@ -5219,9 +5461,9 @@ namespace
                         "%s|%d|%.3f,%.3f,%.3f|%.3f,%.3f,%.3f",
                         lowerModel.c_str(),
                         boltBone,
-                        vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.x,
-                        vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.y,
-                        vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.z,
+                        boltHalfMeters.x,
+                        boltHalfMeters.y,
+                        boltHalfMeters.z,
                         boltOffsetMeters.x,
                         boltOffsetMeters.y,
                         boltOffsetMeters.z);
@@ -5750,7 +5992,7 @@ namespace
             0.0f,
             std::max(
                 vr->m_MagazineInteractionBoltMaxPullDistance,
-                vr->m_MagazineInteractionBoltPullDistanceMeters * vr->m_VRScale));
+                ResolveMagazineInteractionBoltPullDistanceMeters(vr) * vr->m_VRScale));
         const float pullDistance = std::clamp(
             vr->m_MagazineInteractionBoltPullDistance,
             0.0f,
@@ -5767,6 +6009,7 @@ namespace
             ResolveMagazineInteractionWeaponIdForConfig(vr),
             boltBone,
             bones[boltBone],
+            ResolveMagazineInteractionProfileKeyForConfig(vr),
             info.pModelToWorld);
         pullAxis = HooksNormalizeVector(pullAxis, Vector(0.0f, 0.0f, 0.0f));
         if (pullAxis.Length() <= 0.0001f)

@@ -906,6 +906,58 @@ namespace
         return false;
     }
 
+    std::string MagazineInteractionCurrentProfileKey(const VR* vr)
+    {
+        if (!vr)
+            return std::string();
+
+        const uint32_t modelFingerprint =
+            vr->m_MagazineInteractionCurrentModelFingerprint.load(std::memory_order_relaxed);
+        const uint32_t boneSignature =
+            vr->m_MagazineInteractionCurrentBoneSignature.load(std::memory_order_relaxed);
+        if (modelFingerprint == 0 || boneSignature == 0)
+            return std::string();
+
+        char text[32] = {};
+        std::snprintf(text, sizeof(text), "fp%08x_bs%08x", modelFingerprint, boneSignature);
+        return std::string(text);
+    }
+
+    template <typename T>
+    bool MagazineInteractionFindProfileOverride(
+        const VR* vr,
+        const std::unordered_map<std::string, T>& profileOverrides,
+        T& outValue)
+    {
+        if (!vr || profileOverrides.empty())
+            return false;
+
+        const std::string profileKey = MagazineInteractionCurrentProfileKey(vr);
+        if (profileKey.empty())
+            return false;
+
+        const auto it = profileOverrides.find(profileKey);
+        if (it == profileOverrides.end())
+            return false;
+
+        outValue = it->second;
+        return true;
+    }
+
+    template <typename T>
+    bool MagazineInteractionFindProfileOrWeaponOverride(
+        const VR* vr,
+        const std::unordered_map<std::string, T>& profileOverrides,
+        const std::unordered_map<int, T>& weaponOverrides,
+        T& outValue)
+    {
+        if (MagazineInteractionFindProfileOverride(vr, profileOverrides, outValue))
+            return true;
+
+        int matchedWeaponId = 0;
+        return MagazineInteractionFindWeaponOverride(vr, weaponOverrides, outValue, matchedWeaponId);
+    }
+
     Vector MagazineInteractionResolveSocketCaptureBoxHalfExtentsMeters(const VR* vr)
     {
         if (!vr)
@@ -1028,15 +1080,56 @@ namespace
         if (!vr)
             return Vector(0.0f, 1.0f, 0.0f);
 
-        const int weaponId = MagazineInteractionResolveWeaponIdForConfig(vr);
-        if (weaponId > 0)
-        {
-            const auto axisIt = vr->m_MagazineInteractionBoltPullAxisLocalOverrides.find(weaponId);
-            if (axisIt != vr->m_MagazineInteractionBoltPullAxisLocalOverrides.end())
-                return axisIt->second;
-        }
+        Vector value = vr->m_MagazineInteractionBoltPullAxisLocal;
+        MagazineInteractionFindProfileOrWeaponOverride(
+            vr,
+            vr->m_MagazineInteractionBoltPullAxisLocalProfileOverrides,
+            vr->m_MagazineInteractionBoltPullAxisLocalOverrides,
+            value);
 
-        return vr->m_MagazineInteractionBoltPullAxisLocal;
+        return value;
+    }
+
+    float MagazineInteractionResolveBoltGrabPaddingMeters(const VR* vr)
+    {
+        if (!vr)
+            return 0.10f;
+
+        float value = vr->m_MagazineInteractionBoltGrabPaddingMeters;
+        MagazineInteractionFindProfileOrWeaponOverride(
+            vr,
+            vr->m_MagazineInteractionBoltGrabPaddingMetersProfileOverrides,
+            vr->m_MagazineInteractionBoltGrabPaddingMetersOverrides,
+            value);
+        return std::clamp(value, 0.0f, 0.25f);
+    }
+
+    float MagazineInteractionResolveBoltPullDistanceMeters(const VR* vr)
+    {
+        if (!vr)
+            return 0.055f;
+
+        float value = vr->m_MagazineInteractionBoltPullDistanceMeters;
+        MagazineInteractionFindProfileOrWeaponOverride(
+            vr,
+            vr->m_MagazineInteractionBoltPullDistanceMetersProfileOverrides,
+            vr->m_MagazineInteractionBoltPullDistanceMetersOverrides,
+            value);
+        return std::clamp(value, 0.0f, 0.25f);
+    }
+
+    float MagazineInteractionResolveBoltReturnDistanceMeters(const VR* vr)
+    {
+        if (!vr)
+            return 0.018f;
+
+        float value = vr->m_MagazineInteractionBoltReturnDistanceMeters;
+        MagazineInteractionFindProfileOrWeaponOverride(
+            vr,
+            vr->m_MagazineInteractionBoltReturnDistanceMetersProfileOverrides,
+            vr->m_MagazineInteractionBoltReturnDistanceMetersOverrides,
+            value);
+        return std::clamp(value, 0.0f, 0.10f);
     }
 
     Vector MagazineInteractionBuildBoltPullAxisWorld(
@@ -2101,108 +2194,6 @@ namespace
         return std::string();
     }
 
-    std::string MagazineInteractionBoltFallbackSoundSample(const VR* vr, bool forward)
-    {
-        if (!vr)
-            return std::string();
-
-        std::string lowerModel = vr->m_MagazineInteractionMagazineModelName;
-        std::transform(lowerModel.begin(), lowerModel.end(), lowerModel.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        const char* suffix = forward ? "forward" : "back";
-        auto slide = [&](const char* directory, const char* stem, bool numbered = true) -> std::string
-        {
-            std::string sample = std::string("weapons/") + directory + "/gunother/" + stem + "_slide" + suffix;
-            if (numbered)
-                sample += "_1";
-            sample += ".wav";
-            return sample;
-        };
-        auto bolt = [&](const char* directory, const char* stem) -> std::string
-        {
-            return std::string("weapons/") + directory + "/gunother/" + stem + "_bolt" + suffix + ".wav";
-        };
-
-        if (lowerModel.find("dual_pistol") != std::string::npos ||
-            lowerModel.find("dual_pistola") != std::string::npos)
-        {
-            return slide("dual_pistol", "dualpistol");
-        }
-        if (lowerModel.find("desert_eagle") != std::string::npos ||
-            lowerModel.find("magnum") != std::string::npos)
-        {
-            return slide("magnum", "pistol");
-        }
-        if (lowerModel.find("pistol") != std::string::npos)
-            return slide("pistol", "pistol");
-        if (lowerModel.find("rifle_ak47") != std::string::npos ||
-            lowerModel.find("ak47") != std::string::npos)
-        {
-            return slide("rifle_ak47", "rifle", false);
-        }
-        if (lowerModel.find("desert_rifle") != std::string::npos)
-            return slide("rifle_desert", "rifle");
-        if (lowerModel.find("sg552") != std::string::npos)
-        {
-            return forward
-                ? "weapons/sg552/gunother/sg552_boltpullforward.wav"
-                : "weapons/sg552/gunother/sg552_boltpull.wav";
-        }
-        if (lowerModel.find("silenced_smg") != std::string::npos ||
-            lowerModel.find("smg_silenced") != std::string::npos)
-        {
-            return slide("smg_silenced", "smg");
-        }
-        if (lowerModel.find("mp5") != std::string::npos)
-            return slide("mp5navy", "mp5", false);
-        if (lowerModel.find("smg") != std::string::npos ||
-            lowerModel.find("uzi") != std::string::npos)
-        {
-            return slide("smg", "smg");
-        }
-        if (lowerModel.find("huntingrifle") != std::string::npos ||
-            lowerModel.find("hunting_rifle") != std::string::npos)
-        {
-            return bolt("hunting_rifle", "hunting_rifle");
-        }
-        if (lowerModel.find("sniper_military") != std::string::npos)
-            return slide("sniper_military", "sniper_military");
-        if (lowerModel.find("awp") != std::string::npos)
-            return bolt("awp", "awp");
-        if (lowerModel.find("scout") != std::string::npos)
-            return bolt("scout", "scout");
-        if (lowerModel.find("m60") != std::string::npos ||
-            lowerModel.find("machinegun_m60") != std::string::npos)
-        {
-            return slide("machinegun_m60", "rifle");
-        }
-        if (lowerModel.find("shotgun_chrome") != std::string::npos ||
-            lowerModel.find("pumpshotgun") != std::string::npos ||
-            lowerModel.find("pump_shotgun") != std::string::npos)
-        {
-            return forward ? std::string() : "weapons/shotgun/gunother/shotgun_pump_1.wav";
-        }
-        if (lowerModel.find("autoshotgun") != std::string::npos ||
-            lowerModel.find("auto_shotgun") != std::string::npos)
-        {
-            return forward
-                ? "weapons/auto_shotgun/gunother/autoshotgun_boltforward.wav"
-                : "weapons/auto_shotgun/gunother/autoshotgun_boltback.wav";
-        }
-        if (lowerModel.find("shotgun_spas") != std::string::npos ||
-            lowerModel.find("spas") != std::string::npos)
-        {
-            return forward
-                ? "weapons/auto_shotgun/gunother/autoshotgun_boltforward.wav"
-                : "weapons/auto_shotgun/gunother/autoshotgun_boltback.wav";
-        }
-        if (lowerModel.find("rifle") != std::string::npos ||
-            lowerModel.find("sg552") != std::string::npos)
-        {
-            return slide("rifle", "rifle");
-        }
-        return std::string();
-    }
-
     std::string MagazineInteractionLowerAscii(std::string value)
     {
         std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -2386,16 +2377,12 @@ namespace
         }
 
         const std::string sample = forward
-            ? (!vr->m_MagazineInteractionCapturedBoltForwardSample.empty()
-                ? vr->m_MagazineInteractionCapturedBoltForwardSample
-                : MagazineInteractionBoltFallbackSoundSample(vr, true))
-            : (!vr->m_MagazineInteractionCapturedBoltBackSample.empty()
-                ? vr->m_MagazineInteractionCapturedBoltBackSample
-                : MagazineInteractionBoltFallbackSoundSample(vr, false));
+            ? vr->m_MagazineInteractionCapturedBoltForwardSample
+            : vr->m_MagazineInteractionCapturedBoltBackSample;
         if (MagazineInteractionPrepareSoundSamplePath(sample).empty())
         {
             Game::logMsg(
-                "[VR][MagazineInteraction][Audio] no synthetic bolt-%s sample for model=%s weaponId=%d",
+                "[VR][MagazineInteraction][Audio] no captured native bolt-%s sample for model=%s weaponId=%d",
                 forward ? "forward" : "back",
                 vr->m_MagazineInteractionMagazineModelName.c_str(),
                 vr->m_MagazineInteractionWeaponId);
@@ -3527,6 +3514,8 @@ void VR::CancelMagazineInteractionManual()
     m_MagazineInteractionMagazineBoneIndex = -1;
     m_MagazineInteractionViewmodelEntityIndex = -1;
     m_MagazineInteractionMagazineModelName.clear();
+    m_MagazineInteractionCurrentModelFingerprint.store(0, std::memory_order_relaxed);
+    m_MagazineInteractionCurrentBoneSignature.store(0, std::memory_order_relaxed);
     m_MagazineInteractionSocketValid = false;
     m_MagazineInteractionBoltRestValid = false;
     m_MagazineInteractionSocketWorld = {};
@@ -3972,7 +3961,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         const float maxPull = std::max(
             0.0f,
             std::max(m_MagazineInteractionBoltMaxPullDistance,
-                m_MagazineInteractionBoltPullDistanceMeters * m_VRScale));
+                MagazineInteractionResolveBoltPullDistanceMeters(this) * m_VRScale));
         m_MagazineInteractionBoltPullDistance = std::clamp(pullDistance, 0.0f, maxPull);
         if (!m_MagazineInteractionBoltRestValid ||
             !MagazineInteractionMatrixLooksRenderable(m_MagazineInteractionBoltRestWorld))
@@ -4061,7 +4050,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             return false;
         }
 
-        const float requiredPull = std::max(0.0f, m_MagazineInteractionBoltPullDistanceMeters) * m_VRScale;
+        const float requiredPull = std::max(0.0f, MagazineInteractionResolveBoltPullDistanceMeters(this)) * m_VRScale;
         if (requiredPull <= 0.001f)
         {
             Game::logMsg(
@@ -4108,7 +4097,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             boltBox.entityIndex,
             boltBox.boneIndex,
             requiredPull,
-            std::max(0.0f, m_MagazineInteractionBoltReturnDistanceMeters) * m_VRScale,
+            std::max(0.0f, MagazineInteractionResolveBoltReturnDistanceMeters(this)) * m_VRScale,
             m_MagazineInteractionBoltPullAxisWorld.x,
             m_MagazineInteractionBoltPullAxisWorld.y,
             m_MagazineInteractionBoltPullAxisWorld.z,
@@ -4593,7 +4582,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             return false;
         }
 
-        const float requiredPull = std::max(0.0f, m_MagazineInteractionBoltPullDistanceMeters) * m_VRScale;
+        const float requiredPull = std::max(0.0f, MagazineInteractionResolveBoltPullDistanceMeters(this)) * m_VRScale;
         if (requiredPull <= 0.001f)
         {
             Game::logMsg(
@@ -5156,7 +5145,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             m_LeftControllerAngAbs,
             m_VRScale,
             this);
-        const float grabRange = std::max(0.0f, m_MagazineInteractionBoltGrabPaddingMeters) * m_VRScale;
+        const float grabRange = std::max(0.0f, MagazineInteractionResolveBoltGrabPaddingMeters(this)) * m_VRScale;
         const bool touchingBolt = grabDistance <= grabRange;
         updateMagazineInteractionContactHaptic(
             m_MagazineInteractionBoltContactActive,
@@ -5206,7 +5195,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
 
         const float requiredPull = std::max(0.001f, m_MagazineInteractionBoltMaxPullDistance);
         const float returnDistance = std::clamp(
-            m_MagazineInteractionBoltReturnDistanceMeters * m_VRScale,
+            MagazineInteractionResolveBoltReturnDistanceMeters(this) * m_VRScale,
             0.0f,
             requiredPull);
 
@@ -5301,7 +5290,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                     m_LeftControllerAngAbs,
                     m_VRScale,
                     this);
-                const float grabRange = std::max(0.0f, m_MagazineInteractionBoltGrabPaddingMeters) * m_VRScale;
+                const float grabRange = std::max(0.0f, MagazineInteractionResolveBoltGrabPaddingMeters(this)) * m_VRScale;
                 if (grabDistance <= grabRange)
                 {
                     if (beginBoltStage(activeWeaponId, "shotgun-player-finished-loading"))
@@ -6152,7 +6141,7 @@ bool VR::DrawVrHandsForEyeImmediate(
             MagazineInteractionInflateLocalBox(
                 currentBoltBoxMins,
                 currentBoltBoxMaxs,
-                std::max(0.0f, m_MagazineInteractionBoltGrabPaddingMeters) * m_VRScale);
+                std::max(0.0f, MagazineInteractionResolveBoltGrabPaddingMeters(this)) * m_VRScale);
         }
     }
     const Vector leftControllerPosition = GetLeftControllerAbsPos();
@@ -6697,32 +6686,18 @@ namespace
         std::chrono::steady_clock::time_point& pendingStarted,
         const char* label)
     {
-        if (!vr)
+        if (!vr || !vr->m_Game)
             return false;
 
         const std::string pathSample = MagazineInteractionPrepareSoundSamplePath(rawSample);
         if (pathSample.empty())
             return false;
 
-        if (vr->TryPlayGameSoundFileLocal(pathSample, 1.0f, nullptr))
-        {
-            pendingSample.clear();
-            pendingStarted = {};
-            Game::logMsg(
-                "[VR][MagazineInteraction][Audio] played local synthetic %s sample=%s",
-                label ? label : "sound",
-                pathSample.c_str());
-            return true;
-        }
-
-        if (!vr->m_Game)
-            return false;
-
         const std::string prepared = MagazineInteractionPrepareConsoleSoundSample(rawSample);
         if (prepared.empty())
             return false;
 
-        pendingSample = prepared;
+        pendingSample = pathSample;
         pendingStarted = std::chrono::steady_clock::now();
         const std::string command = "playvol \"" + prepared + "\" 1.000";
         vr->m_Game->ClientCmd_Unrestricted(command.c_str());

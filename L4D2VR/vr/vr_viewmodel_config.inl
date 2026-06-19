@@ -1397,12 +1397,28 @@ void VR::ParseConfigFile()
     m_MagazineInteractionStaleSeconds = std::clamp(getFloat("MagazineInteractionStaleSeconds", m_MagazineInteractionStaleSeconds), 0.02f, 1.0f);
     m_MagazineInteractionMagazineBoneOverridesSpec = getString("ManualReloadMagazineBoneOverrides", m_MagazineInteractionMagazineBoneOverridesSpec);
     m_MagazineInteractionMagazineBoneOverrides.clear();
+    m_MagazineInteractionMagazineBoneProfileOverrides.clear();
     m_MagazineInteractionBoltBoneOverridesSpec = getString("MagazineInteractionBoltBoneOverrides", m_MagazineInteractionBoltBoneOverridesSpec);
     m_MagazineInteractionBoltBoneOverrides.clear();
+    m_MagazineInteractionBoltBoneProfileOverrides.clear();
     m_MagazineInteractionBoltPullAxisLocalOverridesSpec = getString("MagazineInteractionBoltPullAxisLocalOverrides", m_MagazineInteractionBoltPullAxisLocalOverridesSpec);
     m_MagazineInteractionBoltPullAxisLocalOverrides.clear();
+    m_MagazineInteractionBoltPullAxisLocalProfileOverrides.clear();
+    m_MagazineInteractionBoltBoxHalfExtentsMetersOverridesSpec = getString("MagazineInteractionBoltBoxHalfExtentsMetersOverrides", m_MagazineInteractionBoltBoxHalfExtentsMetersOverridesSpec);
+    m_MagazineInteractionBoltBoxHalfExtentsMetersOverrides.clear();
+    m_MagazineInteractionBoltBoxHalfExtentsMetersProfileOverrides.clear();
     m_MagazineInteractionBoltBoxLocalOffsetMetersOverridesSpec = getString("MagazineInteractionBoltBoxLocalOffsetMetersOverrides", m_MagazineInteractionBoltBoxLocalOffsetMetersOverridesSpec);
     m_MagazineInteractionBoltBoxLocalOffsetMetersOverrides.clear();
+    m_MagazineInteractionBoltBoxLocalOffsetMetersProfileOverrides.clear();
+    m_MagazineInteractionBoltGrabPaddingMetersOverridesSpec = getString("MagazineInteractionBoltGrabPaddingMetersOverrides", m_MagazineInteractionBoltGrabPaddingMetersOverridesSpec);
+    m_MagazineInteractionBoltGrabPaddingMetersOverrides.clear();
+    m_MagazineInteractionBoltGrabPaddingMetersProfileOverrides.clear();
+    m_MagazineInteractionBoltPullDistanceMetersOverridesSpec = getString("MagazineInteractionBoltPullDistanceMetersOverrides", m_MagazineInteractionBoltPullDistanceMetersOverridesSpec);
+    m_MagazineInteractionBoltPullDistanceMetersOverrides.clear();
+    m_MagazineInteractionBoltPullDistanceMetersProfileOverrides.clear();
+    m_MagazineInteractionBoltReturnDistanceMetersOverridesSpec = getString("MagazineInteractionBoltReturnDistanceMetersOverrides", m_MagazineInteractionBoltReturnDistanceMetersOverridesSpec);
+    m_MagazineInteractionBoltReturnDistanceMetersOverrides.clear();
+    m_MagazineInteractionBoltReturnDistanceMetersProfileOverrides.clear();
     m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverridesSpec = getString("MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides", m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverridesSpec);
     m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides.clear();
     m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverridesSpec = getString("MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides", m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverridesSpec);
@@ -1419,6 +1435,19 @@ void VR::ParseConfigFile()
                 std::replace(value.begin(), value.end(), '-', '_');
                 std::replace(value.begin(), value.end(), ' ', '_');
                 return value;
+            };
+
+        auto normalizeBoneOverrideProfileKey = [&](std::string value)
+            {
+                trim(value);
+                std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                std::replace(value.begin(), value.end(), ' ', '_');
+                return value;
+            };
+
+        auto boneOverrideProfileKeyLooksValid = [&](const std::string& value)
+            {
+                return value.rfind("fp", 0) == 0 && value.find("_bs") != std::string::npos;
             };
 
         const std::unordered_map<std::string, int> weaponBoneOverrideAliases =
@@ -1493,7 +1522,8 @@ void VR::ParseConfigFile()
         auto parseBoneOverrideSpec = [&](
             const char* configName,
             const std::string& spec,
-            std::unordered_map<int, std::vector<std::string>>& outOverrides)
+            std::unordered_map<int, std::vector<std::string>>& outOverrides,
+            std::unordered_map<std::string, std::vector<std::string>>& outProfileOverrides)
             {
                 std::string normalizedSpec = spec;
                 std::replace(normalizedSpec.begin(), normalizedSpec.end(), ';', ',');
@@ -1518,13 +1548,26 @@ void VR::ParseConfigFile()
                     trim(boneName);
 
                     int weaponId = 0;
-                    if (boneName.empty() || !parseBoneOverrideWeaponId(weaponKey, weaponId))
+                    if (boneName.empty())
                     {
                         Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
                         continue;
                     }
 
-                    outOverrides[weaponId].push_back(boneName);
+                    if (parseBoneOverrideWeaponId(weaponKey, weaponId))
+                    {
+                        outOverrides[weaponId].push_back(boneName);
+                        continue;
+                    }
+
+                    const std::string profileKey = normalizeBoneOverrideProfileKey(weaponKey);
+                    if (!boneOverrideProfileKeyLooksValid(profileKey))
+                    {
+                        Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
+                        continue;
+                    }
+
+                    outProfileOverrides[profileKey].push_back(boneName);
                 }
             };
 
@@ -1570,7 +1613,8 @@ void VR::ParseConfigFile()
         auto parseBoltPullAxisOverrideSpec = [&](
             const char* configName,
             const std::string& spec,
-            std::unordered_map<int, Vector>& outOverrides)
+            std::unordered_map<int, Vector>& outOverrides,
+            std::unordered_map<std::string, Vector>* outProfileOverrides)
             {
                 std::stringstream ss(spec);
                 std::string entry;
@@ -1597,14 +1641,26 @@ void VR::ParseConfigFile()
                     int weaponId = 0;
                     Vector axis{};
                     if (axisText.empty() ||
-                        !parseBoneOverrideWeaponId(weaponKey, weaponId) ||
                         !parseBoltPullAxisOverrideVector(axisText, axis))
                     {
                         Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
                         continue;
                     }
 
-                    outOverrides[weaponId] = axis;
+                    if (parseBoneOverrideWeaponId(weaponKey, weaponId))
+                    {
+                        outOverrides[weaponId] = axis;
+                        continue;
+                    }
+
+                    const std::string profileKey = normalizeBoneOverrideProfileKey(weaponKey);
+                    if (!outProfileOverrides || !boneOverrideProfileKeyLooksValid(profileKey))
+                    {
+                        Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
+                        continue;
+                    }
+
+                    (*outProfileOverrides)[profileKey] = axis;
                 }
             };
 
@@ -1647,7 +1703,8 @@ void VR::ParseConfigFile()
             const std::string& spec,
             float minValue,
             float maxValue,
-            std::unordered_map<int, Vector>& outOverrides)
+            std::unordered_map<int, Vector>& outOverrides,
+            std::unordered_map<std::string, Vector>* outProfileOverrides)
             {
                 std::stringstream ss(spec);
                 std::string entry;
@@ -1674,7 +1731,6 @@ void VR::ParseConfigFile()
                     int weaponId = 0;
                     Vector value{};
                     if (valueText.empty() ||
-                        !parseBoneOverrideWeaponId(weaponKey, weaponId) ||
                         !parseVector3OverrideValue(valueText, value))
                     {
                         Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
@@ -1684,7 +1740,20 @@ void VR::ParseConfigFile()
                     value.x = std::clamp(value.x, minValue, maxValue);
                     value.y = std::clamp(value.y, minValue, maxValue);
                     value.z = std::clamp(value.z, minValue, maxValue);
-                    outOverrides[weaponId] = value;
+                    if (parseBoneOverrideWeaponId(weaponKey, weaponId))
+                    {
+                        outOverrides[weaponId] = value;
+                        continue;
+                    }
+
+                    const std::string profileKey = normalizeBoneOverrideProfileKey(weaponKey);
+                    if (!outProfileOverrides || !boneOverrideProfileKeyLooksValid(profileKey))
+                    {
+                        Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
+                        continue;
+                    }
+
+                    (*outProfileOverrides)[profileKey] = value;
                 }
             };
 
@@ -1693,7 +1762,8 @@ void VR::ParseConfigFile()
             const std::string& spec,
             float minValue,
             float maxValue,
-            std::unordered_map<int, float>& outOverrides)
+            std::unordered_map<int, float>& outOverrides,
+            std::unordered_map<std::string, float>* outProfileOverrides)
             {
                 std::string normalizedSpec = spec;
                 std::replace(normalizedSpec.begin(), normalizedSpec.end(), ',', ';');
@@ -1725,59 +1795,108 @@ void VR::ParseConfigFile()
                     if (valueText.empty() ||
                         !end ||
                         *end != '\0' ||
-                        !std::isfinite(value) ||
-                        !parseBoneOverrideWeaponId(weaponKey, weaponId))
+                        !std::isfinite(value))
                     {
                         Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
                         continue;
                     }
 
-                    outOverrides[weaponId] = std::clamp(value, minValue, maxValue);
+                    const float clampedValue = std::clamp(value, minValue, maxValue);
+                    if (parseBoneOverrideWeaponId(weaponKey, weaponId))
+                    {
+                        outOverrides[weaponId] = clampedValue;
+                        continue;
+                    }
+
+                    const std::string profileKey = normalizeBoneOverrideProfileKey(weaponKey);
+                    if (!outProfileOverrides || !boneOverrideProfileKeyLooksValid(profileKey))
+                    {
+                        Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
+                        continue;
+                    }
+
+                    (*outProfileOverrides)[profileKey] = clampedValue;
                 }
             };
 
         parseBoneOverrideSpec(
             "ManualReloadMagazineBoneOverrides",
             m_MagazineInteractionMagazineBoneOverridesSpec,
-            m_MagazineInteractionMagazineBoneOverrides);
+            m_MagazineInteractionMagazineBoneOverrides,
+            m_MagazineInteractionMagazineBoneProfileOverrides);
         parseBoneOverrideSpec(
             "MagazineInteractionBoltBoneOverrides",
             m_MagazineInteractionBoltBoneOverridesSpec,
-            m_MagazineInteractionBoltBoneOverrides);
+            m_MagazineInteractionBoltBoneOverrides,
+            m_MagazineInteractionBoltBoneProfileOverrides);
         parseBoltPullAxisOverrideSpec(
             "MagazineInteractionBoltPullAxisLocalOverrides",
             m_MagazineInteractionBoltPullAxisLocalOverridesSpec,
-            m_MagazineInteractionBoltPullAxisLocalOverrides);
+            m_MagazineInteractionBoltPullAxisLocalOverrides,
+            &m_MagazineInteractionBoltPullAxisLocalProfileOverrides);
+        parseVector3OverrideSpec(
+            "MagazineInteractionBoltBoxHalfExtentsMetersOverrides",
+            m_MagazineInteractionBoltBoxHalfExtentsMetersOverridesSpec,
+            0.005f,
+            0.25f,
+            m_MagazineInteractionBoltBoxHalfExtentsMetersOverrides,
+            &m_MagazineInteractionBoltBoxHalfExtentsMetersProfileOverrides);
         parseVector3OverrideSpec(
             "MagazineInteractionBoltBoxLocalOffsetMetersOverrides",
             m_MagazineInteractionBoltBoxLocalOffsetMetersOverridesSpec,
             -0.25f,
             0.25f,
-            m_MagazineInteractionBoltBoxLocalOffsetMetersOverrides);
+            m_MagazineInteractionBoltBoxLocalOffsetMetersOverrides,
+            &m_MagazineInteractionBoltBoxLocalOffsetMetersProfileOverrides);
+        parseFloatOverrideSpec(
+            "MagazineInteractionBoltGrabPaddingMetersOverrides",
+            m_MagazineInteractionBoltGrabPaddingMetersOverridesSpec,
+            0.0f,
+            0.25f,
+            m_MagazineInteractionBoltGrabPaddingMetersOverrides,
+            &m_MagazineInteractionBoltGrabPaddingMetersProfileOverrides);
+        parseFloatOverrideSpec(
+            "MagazineInteractionBoltPullDistanceMetersOverrides",
+            m_MagazineInteractionBoltPullDistanceMetersOverridesSpec,
+            0.0f,
+            0.25f,
+            m_MagazineInteractionBoltPullDistanceMetersOverrides,
+            &m_MagazineInteractionBoltPullDistanceMetersProfileOverrides);
+        parseFloatOverrideSpec(
+            "MagazineInteractionBoltReturnDistanceMetersOverrides",
+            m_MagazineInteractionBoltReturnDistanceMetersOverridesSpec,
+            0.0f,
+            0.10f,
+            m_MagazineInteractionBoltReturnDistanceMetersOverrides,
+            &m_MagazineInteractionBoltReturnDistanceMetersProfileOverrides);
         parseVector3OverrideSpec(
             "MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides",
             m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverridesSpec,
             0.0f,
             0.50f,
-            m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides);
+            m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides,
+            nullptr);
         parseVector3OverrideSpec(
             "MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides",
             m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverridesSpec,
             -0.50f,
             0.50f,
-            m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides);
+            m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides,
+            nullptr);
         parseVector3OverrideSpec(
             "MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides",
             m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverridesSpec,
             -180.0f,
             180.0f,
-            m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides);
+            m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides,
+            nullptr);
         parseFloatOverrideSpec(
             "MagazineInteractionSocketCaptureAngleDegOverrides",
             m_MagazineInteractionSocketCaptureAngleDegOverridesSpec,
             0.0f,
             89.0f,
-            m_MagazineInteractionSocketCaptureAngleDegOverrides);
+            m_MagazineInteractionSocketCaptureAngleDegOverrides,
+            nullptr);
     }
     m_MagazineInteractionMagazineInsertionAxisLocal = getVector3("ManualReloadMagazineInsertionAxisLocal", m_MagazineInteractionMagazineInsertionAxisLocal);
     m_MagazineInteractionMagazineHandOffsetMeters = getVector3("ManualReloadMagazineHandOffsetMeters", m_MagazineInteractionMagazineHandOffsetMeters);

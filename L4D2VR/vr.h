@@ -1223,17 +1223,31 @@ public:
 	std::string m_MagazineInteractionSocketCaptureAngleDegOverridesSpec;
 	std::unordered_map<int, float> m_MagazineInteractionSocketCaptureAngleDegOverrides;
 	float m_MagazineInteractionBoltGrabPaddingMeters = 0.10f;
+	std::string m_MagazineInteractionBoltGrabPaddingMetersOverridesSpec;
+	std::unordered_map<int, float> m_MagazineInteractionBoltGrabPaddingMetersOverrides;
+	std::unordered_map<std::string, float> m_MagazineInteractionBoltGrabPaddingMetersProfileOverrides;
 	float m_MagazineInteractionBoltPullDistanceMeters = 0.055f;
+	std::string m_MagazineInteractionBoltPullDistanceMetersOverridesSpec;
+	std::unordered_map<int, float> m_MagazineInteractionBoltPullDistanceMetersOverrides;
+	std::unordered_map<std::string, float> m_MagazineInteractionBoltPullDistanceMetersProfileOverrides;
 	float m_MagazineInteractionBoltReturnDistanceMeters = 0.018f;
+	std::string m_MagazineInteractionBoltReturnDistanceMetersOverridesSpec;
+	std::unordered_map<int, float> m_MagazineInteractionBoltReturnDistanceMetersOverrides;
+	std::unordered_map<std::string, float> m_MagazineInteractionBoltReturnDistanceMetersProfileOverrides;
 	Vector m_MagazineInteractionBoltBoxHalfExtentsMeters = { 0.045f, 0.035f, 0.035f };
+	std::string m_MagazineInteractionBoltBoxHalfExtentsMetersOverridesSpec;
+	std::unordered_map<int, Vector> m_MagazineInteractionBoltBoxHalfExtentsMetersOverrides;
+	std::unordered_map<std::string, Vector> m_MagazineInteractionBoltBoxHalfExtentsMetersProfileOverrides;
 	Vector m_MagazineInteractionBoltBoxLocalOffsetMeters = { 0.0f, 0.0f, 0.0f };
 	std::string m_MagazineInteractionBoltBoxLocalOffsetMetersOverridesSpec;
 	std::unordered_map<int, Vector> m_MagazineInteractionBoltBoxLocalOffsetMetersOverrides;
+	std::unordered_map<std::string, Vector> m_MagazineInteractionBoltBoxLocalOffsetMetersProfileOverrides;
 	Vector m_MagazineInteractionBoltPullAxisLocal = { 0.0f, 0.0f, 1.0f };
 	// Optional exact per-weapon bolt pull axes. Config format:
 	// m16:0,0,1;scar:0,1,0;magnum:-1,0,0. Empty falls back to MagazineInteractionBoltPullAxisLocal.
 	std::string m_MagazineInteractionBoltPullAxisLocalOverridesSpec;
 	std::unordered_map<int, Vector> m_MagazineInteractionBoltPullAxisLocalOverrides;
+	std::unordered_map<std::string, Vector> m_MagazineInteractionBoltPullAxisLocalProfileOverrides;
 	float m_MagazineInteractionStaleSeconds = 0.20f;
 	mutable std::mutex m_MagazineInteractionBoxMutex;
 	mutable std::mutex m_MagazineInteractionBoltBoxMutex;
@@ -1355,10 +1369,14 @@ public:
 	// Config format: ak47:Magazine_Main,m16a1:v_weapon.M4A1_Clip,scar:j_mag1.
 	std::string m_MagazineInteractionMagazineBoneOverridesSpec;
 	std::unordered_map<int, std::vector<std::string>> m_MagazineInteractionMagazineBoneOverrides;
+	std::unordered_map<std::string, std::vector<std::string>> m_MagazineInteractionMagazineBoneProfileOverrides;
 	// Optional exact per-weapon bolt/charging-handle bone overrides for MagazineInteraction.
 	// Same format and aliases as the magazine bone override config key.
 	std::string m_MagazineInteractionBoltBoneOverridesSpec;
 	std::unordered_map<int, std::vector<std::string>> m_MagazineInteractionBoltBoneOverrides;
+	std::unordered_map<std::string, std::vector<std::string>> m_MagazineInteractionBoltBoneProfileOverrides;
+	std::atomic<uint32_t> m_MagazineInteractionCurrentModelFingerprint{ 0 };
+	std::atomic<uint32_t> m_MagazineInteractionCurrentBoneSignature{ 0 };
 	mutable std::mutex m_MagazineInteractionCalibrationMutex;
 	MagazineInteractionCalibrationSnapshot m_MagazineInteractionCalibrationSnapshot{};
 	uint32_t m_MagazineInteractionCalibrationPublishSeq = 0;

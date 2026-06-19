@@ -200,6 +200,12 @@ namespace
         { "MagazineInteractionSocketCaptureAngleDeg", CfgOptionType::Float, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x8F\x92\xE6\xA7\xBD\xE6\x8D\x95\xE8\x8E\xB7\xE8\xA7\x92\xE5\xBA\xA6", 0.0f, 89.0f, "35" },
         { "MagazineInteractionSocketRequiredDepthMeters", CfgOptionType::Float, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x8F\x92\xE5\x85\xA5\xE6\xB7\xB1\xE5\xBA\xA6", 0.0f, 0.25f, "0.04" },
         { "MagazineInteractionSocketRequiredOverlapFraction", CfgOptionType::Float, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x8F\x92\xE5\x85\xA5\xE9\x87\x8D\xE5\x8F\xA0\xE7\x8E\x87", 0.0f, 1.0f, "0.45" },
+        { "MagazineInteractionBoltGrabPaddingMeters", CfgOptionType::Float, "\xE6\x9E\xAA\xE6\xA0\x93\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x9E\xAA\xE6\xA0\x93\xE6\x8A\x93\xE5\x8F\x96\xE8\xBE\xB9\xE8\xB7\x9D", 0.0f, 0.25f, "0.10" },
+        { "MagazineInteractionBoltPullDistanceMeters", CfgOptionType::Float, "\xE6\x9E\xAA\xE6\xA0\x93\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x9E\xAA\xE6\xA0\x93\xE6\x8B\x89\xE5\x8A\xA8\xE8\xB7\x9D\xE7\xA6\xBB", 0.0f, 0.25f, "0.055" },
+        { "MagazineInteractionBoltReturnDistanceMeters", CfgOptionType::Float, "\xE6\x9E\xAA\xE6\xA0\x93\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x9E\xAA\xE6\xA0\x93\xE5\xBD\x92\xE4\xBD\x8D\xE8\xB7\x9D\xE7\xA6\xBB", 0.0f, 0.10f, "0.018" },
+        { "MagazineInteractionBoltBoxHalfExtentsMeters", CfgOptionType::Vec3, "\xE6\x9E\xAA\xE6\xA0\x93\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x9E\xAA\xE6\xA0\x93\xE7\x9B\x92\xE5\x8D\x8A\xE5\xB0\xBA\xE5\xAF\xB8", 0.005f, 0.25f, "0.045,0.035,0.035" },
+        { "MagazineInteractionBoltBoxLocalOffsetMeters", CfgOptionType::Vec3, "\xE6\x9E\xAA\xE6\xA0\x93\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x9E\xAA\xE6\xA0\x93\xE7\x9B\x92\xE4\xBD\x8D\xE7\xBD\xAE\xE5\x81\x8F\xE7\xA7\xBB", -0.25f, 0.25f, "0,0,0" },
+        { "MagazineInteractionBoltPullAxisLocal", CfgOptionType::Vec3, "\xE6\x9E\xAA\xE6\xA0\x93\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x9E\xAA\xE6\xA0\x93\xE6\x8B\x89\xE5\x8A\xA8\xE8\xBD\xB4", -1.0f, 1.0f, "0,0,1" },
         { "VrHandsMotionRangeWithoutController", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "\xE6\x89\x8B\xE6\x8C\x87\xE5\x8A\xA8\xE4\xBD\x9C\xE5\xBF\xBD\xE7\x95\xA5\xE5\xAE\x9E\xE4\xBD\x93\xE6\x89\x8B\xE6\x9F\x84\xE9\x99\x90\xE5\x88\xB6", 0.0f, 0.0f, "false" },
         { "VrHandsModelScale", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "\xE7\x8B\xAC\xE7\xAB\x8B\xE6\xB8\xB2\xE6\x9F\x93\x20\x56\x52\x20\xE6\x89\x8B\xE5\xB0\xBA\xE5\xAF\xB8\xE5\x80\x8D\xE7\x8E\x87", 0.25f, 4.0f, "1.0" },
         { "VrHandsLeftPoseOffsetMeters", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "\xE5\xB7\xA6\xE6\x89\x8B\xE5\xA7\xBF\xE6\x80\x81\xE4\xBD\x8D\xE7\xBD\xAE\xE5\x81\x8F\xE7\xA7\xBB\xEF\xBC\x88\xE7\xB1\xB3\xEF\xBC\x89", -1.0f, 1.0f, "0,0,0" },
@@ -516,6 +522,8 @@ namespace
         kCfgCalibrationBoneListX + kCfgCalibrationBoneListW - 220;
     static constexpr int kCfgCalibrationBonePageTextX =
         kCfgCalibrationBoneListX + kCfgCalibrationBoneListW - 108;
+    static constexpr int kCfgCalibrationStepCount = 6;
+    static constexpr int kCfgCalibrationStepMax = kCfgCalibrationStepCount - 1;
 
     struct CfgOverlayLine
     {
@@ -545,6 +553,8 @@ namespace
         int scroll = 0;
         int calibrationStep = 0;
         int calibrationSelectedBone = -1;
+        int calibrationMagazineSelectedBone = -1;
+        int calibrationBoltSelectedBone = -1;
         int calibrationScroll = 0;
         uint32_t calibrationSeenPublishSeq = 0;
         uint32_t calibrationSeenModelFingerprint = 0;
@@ -1520,12 +1530,473 @@ namespace
         s.dirty = true;
     }
 
+    static std::string CfgRawValueForKey(const CfgOverlayState& s, const char* key)
+    {
+        if (!key || !*key)
+            return std::string();
+
+        for (int i = static_cast<int>(s.lines.size()) - 1; i >= 0; --i)
+        {
+            if (s.lines[static_cast<size_t>(i)].key != key)
+                continue;
+
+            const std::string& raw = s.lines[static_cast<size_t>(i)].raw;
+            const size_t eq = raw.find('=');
+            if (eq == std::string::npos)
+                return std::string();
+            return CfgTrim(raw.substr(eq + 1));
+        }
+
+        const auto it = s.values.find(key);
+        return it != s.values.end() ? it->second : std::string();
+    }
+
+    static void CfgSetRawConfigValue(CfgOverlayState& s, const char* key, const std::string& value)
+    {
+        if (!key || !*key)
+            return;
+
+        bool written = false;
+        for (int i = static_cast<int>(s.lines.size()) - 1; i >= 0; --i)
+        {
+            if (s.lines[static_cast<size_t>(i)].key == key)
+            {
+                s.lines[static_cast<size_t>(i)].raw = std::string(key) + "=" + value;
+                written = true;
+                break;
+            }
+        }
+
+        if (!written)
+        {
+            CfgOverlayLine cl;
+            cl.key = key;
+            cl.raw = std::string(key) + "=" + value;
+            s.lines.push_back(cl);
+        }
+
+        if (CfgFindSpecIndex(key) >= 0)
+            s.values[key] = value;
+    }
+
+    static std::string CfgHex32Lower(uint32_t value)
+    {
+        char text[9] = {};
+        std::snprintf(text, sizeof(text), "%08x", value);
+        return std::string(text);
+    }
+
+    static std::string CfgCalibrationProfileKey(const MagazineInteractionCalibrationSnapshot& snapshot)
+    {
+        if (snapshot.modelFingerprint == 0 || snapshot.boneSignature == 0)
+            return std::string();
+        return std::string("fp") + CfgHex32Lower(snapshot.modelFingerprint) +
+            "_bs" + CfgHex32Lower(snapshot.boneSignature);
+    }
+
+    static std::string CfgCalibrationBoneToken(
+        const MagazineInteractionCalibrationSnapshot& snapshot,
+        int boneIndex)
+    {
+        if (boneIndex < 0 || boneIndex >= snapshot.numBones)
+            return std::string();
+        for (const MagazineInteractionCalibrationBone& bone : snapshot.bones)
+        {
+            if (bone.index != boneIndex)
+                continue;
+            if (!bone.name.empty())
+                return bone.name;
+            break;
+        }
+        return std::string("#") + std::to_string(boneIndex);
+    }
+
+    static std::vector<std::string> CfgSplitBoneOverrideEntries(const std::string& spec)
+    {
+        std::string normalized = spec;
+        std::replace(normalized.begin(), normalized.end(), ';', ',');
+
+        std::vector<std::string> entries;
+        std::stringstream ss(normalized);
+        std::string entry;
+        while (std::getline(ss, entry, ','))
+        {
+            entry = CfgTrim(entry);
+            if (!entry.empty())
+                entries.push_back(entry);
+        }
+        return entries;
+    }
+
+    static std::string CfgJoinBoneOverrideEntries(const std::vector<std::string>& entries)
+    {
+        std::string out;
+        for (const std::string& entry : entries)
+        {
+            if (entry.empty())
+                continue;
+            if (!out.empty())
+                out += ",";
+            out += entry;
+        }
+        return out;
+    }
+
+    static std::string CfgBoneOverrideEntryKey(const std::string& entry)
+    {
+        const size_t sep = entry.find(':');
+        if (sep == std::string::npos)
+            return std::string();
+        return CfgLower(CfgTrim(entry.substr(0, sep)));
+    }
+
+    static std::string CfgBoneOverrideEntryValue(const std::string& entry)
+    {
+        const size_t sep = entry.find(':');
+        if (sep == std::string::npos)
+            return std::string();
+        return CfgTrim(entry.substr(sep + 1));
+    }
+
+    static std::string CfgUpsertProfileBoneOverride(
+        const std::string& spec,
+        const std::string& profileKey,
+        const std::string& boneToken)
+    {
+        if (profileKey.empty() || boneToken.empty())
+            return spec;
+
+        const std::string normalizedProfileKey = CfgLower(profileKey);
+        std::vector<std::string> entries = CfgSplitBoneOverrideEntries(spec);
+        std::vector<std::string> kept;
+        kept.reserve(entries.size() + 1);
+        for (const std::string& entry : entries)
+        {
+            if (CfgBoneOverrideEntryKey(entry) == normalizedProfileKey)
+                continue;
+            kept.push_back(entry);
+        }
+        kept.push_back(normalizedProfileKey + ":" + boneToken);
+        return CfgJoinBoneOverrideEntries(kept);
+    }
+
+    static std::vector<std::string> CfgSplitSemicolonOverrideEntries(const std::string& spec)
+    {
+        std::vector<std::string> entries;
+        std::stringstream ss(spec);
+        std::string entry;
+        while (std::getline(ss, entry, ';'))
+        {
+            entry = CfgTrim(entry);
+            if (!entry.empty())
+                entries.push_back(entry);
+        }
+        return entries;
+    }
+
+    static std::string CfgJoinSemicolonOverrideEntries(const std::vector<std::string>& entries)
+    {
+        std::string out;
+        for (const std::string& entry : entries)
+        {
+            if (entry.empty())
+                continue;
+            if (!out.empty())
+                out += ";";
+            out += entry;
+        }
+        return out;
+    }
+
+    static std::string CfgGenericOverrideEntryKey(const std::string& entry)
+    {
+        size_t sep = entry.find(':');
+        if (sep == std::string::npos)
+            sep = entry.find('=');
+        if (sep == std::string::npos)
+            return std::string();
+        return CfgLower(CfgTrim(entry.substr(0, sep)));
+    }
+
+    static std::string CfgUpsertProfileSemicolonOverride(
+        const std::string& spec,
+        const std::string& profileKey,
+        const std::string& valueText)
+    {
+        if (profileKey.empty() || valueText.empty())
+            return spec;
+
+        const std::string normalizedProfileKey = CfgLower(profileKey);
+        std::vector<std::string> entries = CfgSplitSemicolonOverrideEntries(spec);
+        std::vector<std::string> kept;
+        kept.reserve(entries.size() + 1);
+        for (const std::string& entry : entries)
+        {
+            if (CfgGenericOverrideEntryKey(entry) == normalizedProfileKey)
+                continue;
+            kept.push_back(entry);
+        }
+        kept.push_back(normalizedProfileKey + ":" + valueText);
+        return CfgJoinSemicolonOverrideEntries(kept);
+    }
+
+    static std::string CfgProfileVector3ValueText(const Vector& value, float step)
+    {
+        return CfgFormatFloat(value.x, step) + "," +
+            CfgFormatFloat(value.y, step) + "," +
+            CfgFormatFloat(value.z, step);
+    }
+
+    static Vector CfgProfileVec3ValueForKey(
+        const CfgOverlayState& s,
+        const char* key,
+        const Vector& fallback,
+        float minValue,
+        float maxValue)
+    {
+        const int specIndex = CfgFindSpecIndex(key ? key : "");
+        if (specIndex < 0 || kCfgOptionSpecs[specIndex].type != CfgOptionType::Vec3)
+        {
+            return Vector(
+                std::clamp(fallback.x, minValue, maxValue),
+                std::clamp(fallback.y, minValue, maxValue),
+                std::clamp(fallback.z, minValue, maxValue));
+        }
+
+        std::vector<float> values;
+        CfgParseComponentValues(kCfgOptionSpecs[specIndex], CfgValueFor(s, kCfgOptionSpecs[specIndex]), values);
+        const float x = values.size() > 0 ? values[0] : fallback.x;
+        const float y = values.size() > 1 ? values[1] : fallback.y;
+        const float z = values.size() > 2 ? values[2] : fallback.z;
+        return Vector(
+            std::clamp(x, minValue, maxValue),
+            std::clamp(y, minValue, maxValue),
+            std::clamp(z, minValue, maxValue));
+    }
+
+    static int CfgFindCalibrationBoneByToken(
+        const MagazineInteractionCalibrationSnapshot& snapshot,
+        const std::string& token)
+    {
+        const std::string trimmed = CfgTrim(token);
+        if (trimmed.empty())
+            return -1;
+
+        const char* indexText = trimmed.c_str();
+        if (*indexText == '#')
+            ++indexText;
+        if (*indexText)
+        {
+            char* end = nullptr;
+            const long index = std::strtol(indexText, &end, 10);
+            if (end && *end == '\0' && index >= 0 && index < snapshot.numBones)
+                return static_cast<int>(index);
+        }
+
+        const std::string lowerToken = CfgLower(trimmed);
+        for (const MagazineInteractionCalibrationBone& bone : snapshot.bones)
+        {
+            if (CfgLower(bone.name) == lowerToken)
+                return bone.index;
+        }
+        return -1;
+    }
+
+    static int CfgFindSavedCalibrationBoneOverride(
+        const CfgOverlayState& s,
+        const char* configKey,
+        const MagazineInteractionCalibrationSnapshot& snapshot)
+    {
+        const std::string profileKey = CfgCalibrationProfileKey(snapshot);
+        if (profileKey.empty())
+            return -1;
+
+        const std::string spec = CfgRawValueForKey(s, configKey);
+        const std::string normalizedProfileKey = CfgLower(profileKey);
+        int foundBone = -1;
+        for (const std::string& entry : CfgSplitBoneOverrideEntries(spec))
+        {
+            if (CfgBoneOverrideEntryKey(entry) != normalizedProfileKey)
+                continue;
+            const int bone = CfgFindCalibrationBoneByToken(snapshot, CfgBoneOverrideEntryValue(entry));
+            if (bone >= 0)
+                foundBone = bone;
+        }
+        return foundBone;
+    }
+
+    static bool CfgReadFreshCalibrationSnapshotForSave(MagazineInteractionCalibrationSnapshot& snapshot)
+    {
+        if (!g_Game || !g_Game->m_VR)
+            return false;
+        if (!g_Game->m_VR->GetMagazineInteractionCalibrationSnapshot(snapshot))
+            return false;
+        const float ageSeconds =
+            std::chrono::duration<float>(std::chrono::steady_clock::now() - snapshot.publishedAt).count();
+        return ageSeconds >= 0.0f && ageSeconds <= 1.5f;
+    }
+
+    static int CfgSaveCalibrationProfileOverrides(CfgOverlayState& s)
+    {
+        if (s.panelMode != CfgPanelMode::MagazineCalibration)
+            return 0;
+
+        MagazineInteractionCalibrationSnapshot snapshot{};
+        if (!CfgReadFreshCalibrationSnapshotForSave(snapshot))
+            return 0;
+
+        const std::string profileKey = CfgCalibrationProfileKey(snapshot);
+        if (profileKey.empty())
+            return 0;
+
+        int savedCount = 0;
+        const std::string magazineToken =
+            CfgCalibrationBoneToken(snapshot, s.calibrationMagazineSelectedBone);
+        if (!magazineToken.empty())
+        {
+            const std::string key = "ManualReloadMagazineBoneOverrides";
+            const std::string nextSpec =
+                CfgUpsertProfileBoneOverride(CfgRawValueForKey(s, key.c_str()), profileKey, magazineToken);
+            CfgSetRawConfigValue(s, key.c_str(), nextSpec);
+            if (g_Game && g_Game->m_VR)
+                g_Game->m_VR->m_MagazineInteractionMagazineBoneProfileOverrides[CfgLower(profileKey)] = { magazineToken };
+            ++savedCount;
+        }
+
+        const std::string boltToken =
+            s.calibrationStep >= 3
+            ? CfgCalibrationBoneToken(snapshot, s.calibrationBoltSelectedBone)
+            : std::string();
+        if (!boltToken.empty())
+        {
+            const std::string key = "MagazineInteractionBoltBoneOverrides";
+            const std::string nextSpec =
+                CfgUpsertProfileBoneOverride(CfgRawValueForKey(s, key.c_str()), profileKey, boltToken);
+            CfgSetRawConfigValue(s, key.c_str(), nextSpec);
+            if (g_Game && g_Game->m_VR)
+            g_Game->m_VR->m_MagazineInteractionBoltBoneProfileOverrides[CfgLower(profileKey)] = { boltToken };
+            ++savedCount;
+        }
+
+        const std::string normalizedProfileKey = CfgLower(profileKey);
+        auto saveVectorProfileOverride = [&](
+            const char* key,
+            const Vector& value,
+            float step,
+            std::unordered_map<std::string, Vector>* liveProfileMap) -> void
+            {
+                const std::string valueText = CfgProfileVector3ValueText(value, step);
+                const std::string nextSpec =
+                    CfgUpsertProfileSemicolonOverride(CfgRawValueForKey(s, key), profileKey, valueText);
+                CfgSetRawConfigValue(s, key, nextSpec);
+                if (liveProfileMap)
+                    (*liveProfileMap)[normalizedProfileKey] = value;
+                ++savedCount;
+            };
+
+        auto saveFloatProfileOverride = [&](
+            const char* key,
+            float value,
+            float step,
+            std::unordered_map<std::string, float>* liveProfileMap) -> void
+            {
+                const std::string valueText = CfgFormatFloat(value, step);
+                const std::string nextSpec =
+                    CfgUpsertProfileSemicolonOverride(CfgRawValueForKey(s, key), profileKey, valueText);
+                CfgSetRawConfigValue(s, key, nextSpec);
+                if (liveProfileMap)
+                    (*liveProfileMap)[normalizedProfileKey] = value;
+                ++savedCount;
+            };
+
+        if (g_Game && g_Game->m_VR && s.calibrationStep >= 4)
+        {
+            VR* vrState = g_Game->m_VR;
+            const Vector boltHalf = CfgProfileVec3ValueForKey(
+                s,
+                "MagazineInteractionBoltBoxHalfExtentsMeters",
+                Vector(0.045f, 0.035f, 0.035f),
+                0.005f,
+                0.25f);
+            const Vector boltOffset = CfgProfileVec3ValueForKey(
+                s,
+                "MagazineInteractionBoltBoxLocalOffsetMeters",
+                Vector(0.0f, 0.0f, 0.0f),
+                -0.25f,
+                0.25f);
+            const float boltGrabPadding = std::clamp(
+                CfgFloatValue(s, "MagazineInteractionBoltGrabPaddingMeters", 0.10f),
+                0.0f,
+                0.25f);
+
+            saveVectorProfileOverride(
+                "MagazineInteractionBoltBoxHalfExtentsMetersOverrides",
+                boltHalf,
+                0.001f,
+                &vrState->m_MagazineInteractionBoltBoxHalfExtentsMetersProfileOverrides);
+            saveVectorProfileOverride(
+                "MagazineInteractionBoltBoxLocalOffsetMetersOverrides",
+                boltOffset,
+                0.001f,
+                &vrState->m_MagazineInteractionBoltBoxLocalOffsetMetersProfileOverrides);
+            saveFloatProfileOverride(
+                "MagazineInteractionBoltGrabPaddingMetersOverrides",
+                boltGrabPadding,
+                0.001f,
+                &vrState->m_MagazineInteractionBoltGrabPaddingMetersProfileOverrides);
+        }
+
+        if (g_Game && g_Game->m_VR && s.calibrationStep >= 5)
+        {
+            VR* vrState = g_Game->m_VR;
+            Vector boltAxis = CfgProfileVec3ValueForKey(
+                s,
+                "MagazineInteractionBoltPullAxisLocal",
+                Vector(0.0f, 0.0f, 1.0f),
+                -1.0f,
+                1.0f);
+            const float axisLength = boltAxis.Length();
+            if (axisLength > 0.0001f)
+                boltAxis *= (1.0f / axisLength);
+            else
+                boltAxis = Vector(0.0f, 0.0f, 1.0f);
+
+            const float boltPullDistance = std::clamp(
+                CfgFloatValue(s, "MagazineInteractionBoltPullDistanceMeters", 0.055f),
+                0.0f,
+                0.25f);
+            const float boltReturnDistance = std::clamp(
+                CfgFloatValue(s, "MagazineInteractionBoltReturnDistanceMeters", 0.018f),
+                0.0f,
+                0.10f);
+
+            saveVectorProfileOverride(
+                "MagazineInteractionBoltPullAxisLocalOverrides",
+                boltAxis,
+                0.001f,
+                &vrState->m_MagazineInteractionBoltPullAxisLocalProfileOverrides);
+            saveFloatProfileOverride(
+                "MagazineInteractionBoltPullDistanceMetersOverrides",
+                boltPullDistance,
+                0.001f,
+                &vrState->m_MagazineInteractionBoltPullDistanceMetersProfileOverrides);
+            saveFloatProfileOverride(
+                "MagazineInteractionBoltReturnDistanceMetersOverrides",
+                boltReturnDistance,
+                0.001f,
+                &vrState->m_MagazineInteractionBoltReturnDistanceMetersProfileOverrides);
+        }
+
+        return savedCount;
+    }
+
     static void CfgSave(CfgOverlayState& s)
     {
         if (s.configPath.empty())
             s.configPath = CfgDefaultConfigPath();
 
         CfgNormalizeVrHandsDependencies(s);
+        const int savedCalibrationOverrides = CfgSaveCalibrationProfileOverrides(s);
 
         try
         {
@@ -1577,6 +2048,8 @@ namespace
         CfgRefreshConfigWriteTime(s);
         s.hasUnsavedEdits = false;
         s.status = s.useChinese ? "\345\267\262\344\277\235\345\255\230 config.txt\357\274\214\347\216\260\346\234\211\347\203\255\345\212\240\350\275\275\351\200\273\350\276\221\344\274\232\350\207\252\345\212\250\347\224\237\346\225\210\343\200\202" : "Saved config.txt. Existing hot-reload logic will apply it.";
+        if (savedCalibrationOverrides > 0)
+            s.status += s.useChinese ? "\345\267\262\345\206\231\345\205\245\345\275\223\345\211\215\346\250\241\345\236\213 profile\343\200\202" : " Saved current model profile.";
         s.dirty = true;
     }
 
@@ -1873,16 +2346,20 @@ namespace
             "\xE9\x80\x89\xE6\x8B\xA9\xE5\xBC\xB9\xE5\x8C\xA3\xE9\xAA\xA8\xE9\xAA\xBC",
             "\xE8\xB0\x83\xE6\x95\xB4\xE5\xBC\xB9\xE5\x8C\xA3\xE7\x9B\x92",
             "\xE8\xB0\x83\xE6\x95\xB4\xE6\x8F\x92\xE5\x85\xA5\xE5\x88\xA4\xE5\xAE\x9A",
-            "\xE9\x80\x89\xE6\x8B\xA9\xE6\x9E\xAA\xE6\xA0\x93\xE9\xAA\xA8\xE9\xAA\xBC"
+            "\xE9\x80\x89\xE6\x8B\xA9\xE6\x9E\xAA\xE6\xA0\x93\xE9\xAA\xA8\xE9\xAA\xBC",
+            "\xE8\xB0\x83\xE6\x95\xB4\xE6\x9E\xAA\xE6\xA0\x93\xE7\x9B\x92",
+            "\xE8\xB0\x83\xE6\x95\xB4\xE6\x9E\xAA\xE6\xA0\x93\xE6\x8B\x89\xE5\x8A\xA8"
         };
         static const char* kEn[] =
         {
             "Select Magazine Bone",
             "Adjust Magazine Box",
             "Adjust Socket Capture",
-            "Select Bolt Bone"
+            "Select Bolt Bone",
+            "Adjust Bolt Box",
+            "Adjust Bolt Pull"
         };
-        const int clamped = std::clamp(step, 0, 3);
+        const int clamped = std::clamp(step, 0, kCfgCalibrationStepMax);
         return s.useChinese ? kZh[clamped] : kEn[clamped];
     }
 
@@ -2019,6 +2496,28 @@ namespace
             CfgFloatValue(s, "MagazineInteractionSocketRequiredOverlapFraction", 0.45f);
     }
 
+    static void CfgApplyBoltCalibrationRuntimeParams(CfgOverlayState& s)
+    {
+        if (!g_Game || !g_Game->m_VR)
+            return;
+
+        VR* vrState = g_Game->m_VR;
+        vrState->m_MagazineInteractionBoltBoxHalfExtentsMeters =
+            CfgVec3ValueForKey(s, "MagazineInteractionBoltBoxHalfExtentsMeters", Vector(0.045f, 0.035f, 0.035f), 0.005f, 0.25f);
+        vrState->m_MagazineInteractionBoltBoxLocalOffsetMeters =
+            CfgVec3ValueForKey(s, "MagazineInteractionBoltBoxLocalOffsetMeters", Vector(0.0f, 0.0f, 0.0f), -0.25f, 0.25f);
+        vrState->m_MagazineInteractionBoltGrabPaddingMeters =
+            CfgFloatValue(s, "MagazineInteractionBoltGrabPaddingMeters", 0.10f);
+        vrState->m_MagazineInteractionBoltPullDistanceMeters =
+            CfgFloatValue(s, "MagazineInteractionBoltPullDistanceMeters", 0.055f);
+        vrState->m_MagazineInteractionBoltReturnDistanceMeters =
+            CfgFloatValue(s, "MagazineInteractionBoltReturnDistanceMeters", 0.018f);
+        Vector axis = CfgVec3ValueForKey(s, "MagazineInteractionBoltPullAxisLocal", Vector(0.0f, 0.0f, 1.0f), -1.0f, 1.0f);
+        const float length = axis.Length();
+        vrState->m_MagazineInteractionBoltPullAxisLocal =
+            (length > 0.0001f) ? (axis * (1.0f / length)) : Vector(0.0f, 0.0f, 1.0f);
+    }
+
     static void CfgApplyCalibrationRuntimeState(CfgOverlayState& s)
     {
         if (!g_Game || !g_Game->m_VR)
@@ -2026,6 +2525,7 @@ namespace
 
         CfgApplyMagazineBoxCalibrationRuntimeParams(s);
         CfgApplySocketCaptureCalibrationRuntimeParams(s);
+        CfgApplyBoltCalibrationRuntimeParams(s);
 
         const bool active = s.visible && s.panelMode == CfgPanelMode::MagazineCalibration;
         auto clampFinite = [](float value, float fallback, float minValue, float maxValue) -> float
@@ -2050,7 +2550,7 @@ namespace
             active ? s.calibrationSelectedBone : -1,
             std::memory_order_relaxed);
         g_Game->m_VR->m_MagazineInteractionCalibrationStep.store(
-            active ? std::clamp(s.calibrationStep, 0, 3) : 0,
+            active ? std::clamp(s.calibrationStep, 0, kCfgCalibrationStepMax) : 0,
             std::memory_order_relaxed);
         g_Game->m_VR->m_MagazineInteractionCalibrationPreviewForwardMeters.store(
             clampFinite(s.calibrationPreviewForwardMeters, 0.75f, 0.15f, 5.00f),
@@ -2083,9 +2583,26 @@ namespace
 
     static int CfgCalibrationRecommendedBone(const MagazineInteractionCalibrationSnapshot& snapshot, int step)
     {
-        if (step == 3)
+        if (step >= 3)
             return snapshot.recommendedBoltBone;
         return snapshot.recommendedMagazineBone;
+    }
+
+    static bool CfgCalibrationStepUsesBoltSelection(int step)
+    {
+        return std::clamp(step, 0, kCfgCalibrationStepMax) >= 3;
+    }
+
+    static int CfgValidCalibrationBoneOrFallback(
+        int candidate,
+        const MagazineInteractionCalibrationSnapshot& snapshot,
+        int fallback)
+    {
+        if (candidate >= 0 && candidate < snapshot.numBones)
+            return candidate;
+        if (fallback >= 0 && fallback < snapshot.numBones)
+            return fallback;
+        return -1;
     }
 
     static bool CfgCalibrationBoneNameLooksWeaponRelevant(const std::string& lowerName)
@@ -2158,7 +2675,7 @@ namespace
     {
         std::vector<CfgCalibrationBoneRow> rows;
         rows.reserve(snapshot.bones.size());
-        const bool boltStep = (step == 3);
+        const bool boltStep = CfgCalibrationStepUsesBoltSelection(step);
         for (const MagazineInteractionCalibrationBone& bone : snapshot.bones)
         {
             const int score = boltStep ? bone.boltScore : bone.magazineScore;
@@ -2346,14 +2863,15 @@ namespace
         CfgOverlayState& s,
         const MagazineInteractionCalibrationSnapshot& snapshot)
     {
+        s.calibrationStep = std::clamp(s.calibrationStep, 0, kCfgCalibrationStepMax);
+        const bool stepChanged = s.calibrationSeenStep != s.calibrationStep;
         const bool identityChanged =
             s.calibrationSeenModelFingerprint != snapshot.modelFingerprint ||
             s.calibrationSeenBoneSignature != snapshot.boneSignature ||
             s.calibrationSeenEntityIndex != snapshot.entityIndex ||
             s.calibrationSeenWeaponId != snapshot.weaponId ||
             s.calibrationSeenNumBones != snapshot.numBones ||
-            s.calibrationSeenViewmodelClass != snapshot.sourceIsViewmodelClass ||
-            s.calibrationSeenStep != s.calibrationStep;
+            s.calibrationSeenViewmodelClass != snapshot.sourceIsViewmodelClass;
         if (identityChanged)
         {
             s.calibrationSeenModelFingerprint = snapshot.modelFingerprint;
@@ -2364,21 +2882,58 @@ namespace
             s.calibrationSeenSourceScore = snapshot.sourceScore;
             s.calibrationSeenViewmodelClass = snapshot.sourceIsViewmodelClass;
             s.calibrationSeenStep = s.calibrationStep;
-            const int recommended = CfgCalibrationRecommendedBone(snapshot, s.calibrationStep);
-            if (recommended >= 0)
-                s.calibrationSelectedBone = recommended;
+            const int savedMagazineBone =
+                CfgFindSavedCalibrationBoneOverride(s, "ManualReloadMagazineBoneOverrides", snapshot);
+            const int savedBoltBone =
+                CfgFindSavedCalibrationBoneOverride(s, "MagazineInteractionBoltBoneOverrides", snapshot);
+            s.calibrationMagazineSelectedBone =
+                CfgValidCalibrationBoneOrFallback(
+                    savedMagazineBone >= 0 ? savedMagazineBone : snapshot.recommendedMagazineBone,
+                    snapshot,
+                    -1);
+            s.calibrationBoltSelectedBone =
+                CfgValidCalibrationBoneOrFallback(
+                    savedBoltBone >= 0 ? savedBoltBone : snapshot.recommendedBoltBone,
+                    snapshot,
+                    -1);
+            s.calibrationSelectedBone = CfgCalibrationStepUsesBoltSelection(s.calibrationStep)
+                ? s.calibrationBoltSelectedBone
+                : s.calibrationMagazineSelectedBone;
+            s.calibrationScroll = 0;
+            CfgApplyCalibrationRuntimeState(s);
+        }
+        else if (stepChanged)
+        {
+            s.calibrationSeenStep = s.calibrationStep;
+            if (CfgCalibrationStepUsesBoltSelection(s.calibrationStep))
+            {
+                s.calibrationBoltSelectedBone = CfgValidCalibrationBoneOrFallback(
+                    s.calibrationBoltSelectedBone,
+                    snapshot,
+                    snapshot.recommendedBoltBone);
+                s.calibrationSelectedBone = s.calibrationBoltSelectedBone;
+            }
             else
-                s.calibrationSelectedBone = -1;
+            {
+                s.calibrationMagazineSelectedBone = CfgValidCalibrationBoneOrFallback(
+                    s.calibrationMagazineSelectedBone,
+                    snapshot,
+                    snapshot.recommendedMagazineBone);
+                s.calibrationSelectedBone = s.calibrationMagazineSelectedBone;
+            }
             s.calibrationScroll = 0;
             CfgApplyCalibrationRuntimeState(s);
         }
         s.calibrationSeenPublishSeq = snapshot.publishSeq;
         s.calibrationSeenFreshSnapshot = true;
 
-        s.calibrationStep = std::clamp(s.calibrationStep, 0, 3);
         if (s.calibrationSelectedBone >= snapshot.numBones)
         {
             s.calibrationSelectedBone = -1;
+            if (CfgCalibrationStepUsesBoltSelection(s.calibrationStep))
+                s.calibrationBoltSelectedBone = -1;
+            else
+                s.calibrationMagazineSelectedBone = -1;
             CfgApplyCalibrationRuntimeState(s);
         }
     }
@@ -2596,7 +3151,7 @@ namespace
 
         CfgNormalizeCalibrationPreview(s);
         CfgApplyCalibrationRuntimeState(s);
-        s.status = std::string("Preview copy: ") + CfgCalibrationPreviewStatus(s);
+        s.status = std::string(s.useChinese ? "\xE5\x89\xAF\xE6\x9C\xAC\xEF\xBC\x9A" : "Preview copy: ") + CfgCalibrationPreviewStatus(s);
         s.dirty = true;
         return true;
     }
@@ -2675,7 +3230,7 @@ namespace
 
     static bool CfgHandleCalibrationMagazineBoxControlClick(CfgOverlayState& s, int mx, int my)
     {
-        if (std::clamp(s.calibrationStep, 0, 3) != 1)
+        if (std::clamp(s.calibrationStep, 0, kCfgCalibrationStepMax) != 1)
             return false;
 
         constexpr int panelX = 26;
@@ -2827,7 +3382,7 @@ namespace
 
     static bool CfgHandleCalibrationSocketCaptureControlClick(CfgOverlayState& s, int mx, int my)
     {
-        if (std::clamp(s.calibrationStep, 0, 3) != 2)
+        if (std::clamp(s.calibrationStep, 0, kCfgCalibrationStepMax) != 2)
             return false;
 
         constexpr int panelX = 26;
@@ -2911,6 +3466,302 @@ namespace
         return true;
     }
 
+    static void CfgRenderCalibrationBoltBoxControls(CfgOverlayState& s, CfgGdiSurface& g)
+    {
+        constexpr int panelX = 26;
+        constexpr int panelY = 318;
+        constexpr int panelW = 1228;
+        constexpr int panelH = 178;
+        constexpr int labelX = panelX + 26;
+        constexpr int valueX = panelX + 190;
+        constexpr int buttonX = panelX + 420;
+        constexpr int row0Y = panelY + 44;
+        constexpr int row1Y = panelY + 82;
+        constexpr int row2Y = panelY + 120;
+        constexpr int buttonW = 54;
+        constexpr int buttonH = 28;
+        constexpr int gap = 8;
+
+        const Vector half = CfgVec3ValueForKey(s, "MagazineInteractionBoltBoxHalfExtentsMeters", Vector(0.045f, 0.035f, 0.035f), 0.005f, 0.25f);
+        const Vector offset = CfgVec3ValueForKey(s, "MagazineInteractionBoltBoxLocalOffsetMeters", Vector(0.0f, 0.0f, 0.0f), -0.25f, 0.25f);
+        const float padding = CfgFloatValue(s, "MagazineInteractionBoltGrabPaddingMeters", 0.10f);
+
+        CfgGdiFill(g, panelX, panelY, panelW, panelH, { 18, 21, 28 });
+        CfgGdiFrame(g, panelX, panelY, panelW, panelH, { 68, 86, 116 }, 1);
+        CfgGdiText(
+            g,
+            labelX,
+            panelY + 10,
+            720,
+            28,
+            s.useChinese ? "\xE8\xB0\x83\xE6\x95\xB4\xE6\x9E\xAA\xE6\xA0\x93\xE6\x8A\x93\xE5\x8F\x96\xE7\x9B\x92\xEF\xBC\x88\xE8\x93\x9D\xE8\x89\xB2\xE5\xAE\x9E\xE4\xBD\x93\xE6\xA1\x86\xEF\xBC\x89" : "Adjust bolt grab box",
+            g.boldFont,
+            { 238, 243, 248 });
+        CfgGdiText(
+            g,
+            labelX + 760,
+            panelY + 12,
+            410,
+            24,
+            s.useChinese ? "\xE4\xBF\x9D\xE5\xAD\x98\xE5\x90\x8E\xE5\x86\x99\xE5\x85\xA5\xE5\xBD\x93\xE5\x89\x8D\xE6\xA8\xA1\xE5\x9E\x8B profile" : "Save writes current model profile",
+            g.smallFont,
+            { 160, 196, 255 },
+            DT_RIGHT);
+
+        auto drawVecRow = [&](int y, const char* zhLabel, const char* enLabel, const std::string& value) -> void
+            {
+                CfgGdiText(g, labelX, y + 2, 150, buttonH, s.useChinese ? zhLabel : enLabel, g.smallFont, { 180, 214, 188 });
+                CfgGdiText(g, valueX, y + 2, 210, buttonH, value, g.smallFont, { 226, 232, 242 });
+                const char* labels[6] = { "X-", "X+", "Y-", "Y+", "Z-", "Z+" };
+                for (int i = 0; i < 6; ++i)
+                    CfgGdiButton(g, buttonX + i * (buttonW + gap), y, buttonW, buttonH, labels[i]);
+            };
+
+        drawVecRow(
+            row0Y,
+            "\xE5\x8D\x8A\xE5\xB0\xBA\xE5\xAF\xB8",
+            "Half Size",
+            "X " + CfgFormatFloat(half.x, 0.001f) + " Y " + CfgFormatFloat(half.y, 0.001f) + " Z " + CfgFormatFloat(half.z, 0.001f));
+        drawVecRow(
+            row1Y,
+            "\xE4\xB8\xAD\xE5\xBF\x83\xE5\x81\x8F\xE7\xA7\xBB",
+            "Center Offset",
+            "X " + CfgFormatFloat(offset.x, 0.001f) + " Y " + CfgFormatFloat(offset.y, 0.001f) + " Z " + CfgFormatFloat(offset.z, 0.001f));
+
+        CfgGdiText(g, labelX, row2Y + 2, 150, buttonH, s.useChinese ? "\xE6\x8A\x93\xE5\x8F\x96\xE8\xBE\xB9\xE8\xB7\x9D" : "Grab Padding", g.smallFont, { 180, 214, 188 });
+        CfgGdiText(g, valueX, row2Y + 2, 210, buttonH, CfgFormatFloat(padding, 0.001f), g.smallFont, { 226, 232, 242 });
+        CfgGdiButton(g, buttonX, row2Y, buttonW, buttonH, "G-");
+        CfgGdiButton(g, buttonX + buttonW + gap, row2Y, buttonW, buttonH, "G+");
+        CfgGdiButton(g, buttonX + 7 * (buttonW + gap), row2Y, 90, buttonH, s.useChinese ? "\xE9\x87\x8D\xE7\xBD\xAE" : "Reset");
+    }
+
+    static bool CfgHandleCalibrationBoltBoxControlClick(CfgOverlayState& s, int mx, int my)
+    {
+        if (std::clamp(s.calibrationStep, 0, kCfgCalibrationStepMax) != 4)
+            return false;
+
+        constexpr int panelX = 26;
+        constexpr int panelY = 318;
+        constexpr int panelW = 1228;
+        constexpr int panelH = 178;
+        constexpr int buttonX = panelX + 420;
+        constexpr int row0Y = panelY + 44;
+        constexpr int row1Y = panelY + 82;
+        constexpr int row2Y = panelY + 120;
+        constexpr int buttonW = 54;
+        constexpr int buttonH = 28;
+        constexpr int gap = 8;
+        if (mx < panelX || mx >= panelX + panelW || my < panelY || my >= panelY + panelH)
+            return false;
+
+        auto hit = [&](int index, int y, int width) -> bool
+            {
+                const int x = buttonX + index * (buttonW + gap);
+                return mx >= x && mx < x + width && my >= y && my < y + buttonH;
+            };
+
+        Vector half = CfgVec3ValueForKey(s, "MagazineInteractionBoltBoxHalfExtentsMeters", Vector(0.045f, 0.035f, 0.035f), 0.005f, 0.25f);
+        Vector offset = CfgVec3ValueForKey(s, "MagazineInteractionBoltBoxLocalOffsetMeters", Vector(0.0f, 0.0f, 0.0f), -0.25f, 0.25f);
+        float padding = CfgFloatValue(s, "MagazineInteractionBoltGrabPaddingMeters", 0.10f);
+
+        auto adjustVec = [&](Vector& value, int component, float delta, float minValue, float maxValue) -> void
+            {
+                float* components[3] = { &value.x, &value.y, &value.z };
+                const int clampedComponent = std::clamp(component, 0, 2);
+                *components[clampedComponent] = std::clamp(*components[clampedComponent] + delta, minValue, maxValue);
+            };
+
+        bool changed = false;
+        constexpr float sizeStep = 0.005f;
+        constexpr float offsetStep = 0.005f;
+        for (int i = 0; i < 6; ++i)
+        {
+            const int component = i / 2;
+            const float sign = (i % 2) == 0 ? -1.0f : 1.0f;
+            if (hit(i, row0Y, buttonW)) { adjustVec(half, component, sign * sizeStep, 0.005f, 0.25f); changed = true; break; }
+            if (hit(i, row1Y, buttonW)) { adjustVec(offset, component, sign * offsetStep, -0.25f, 0.25f); changed = true; break; }
+        }
+        if (!changed)
+        {
+            if (hit(0, row2Y, buttonW)) { padding = std::clamp(padding - 0.005f, 0.0f, 0.25f); changed = true; }
+            else if (hit(1, row2Y, buttonW)) { padding = std::clamp(padding + 0.005f, 0.0f, 0.25f); changed = true; }
+            else if (hit(7, row2Y, 90))
+            {
+                half = Vector(0.045f, 0.035f, 0.035f);
+                offset = Vector(0.0f, 0.0f, 0.0f);
+                padding = 0.10f;
+                changed = true;
+            }
+        }
+        if (!changed)
+            return true;
+
+        CfgSetVec3ValueForKey(s, "MagazineInteractionBoltBoxHalfExtentsMeters", half, 0.001f);
+        CfgSetVec3ValueForKey(s, "MagazineInteractionBoltBoxLocalOffsetMeters", offset, 0.001f);
+        CfgSetFloatValueForKey(s, "MagazineInteractionBoltGrabPaddingMeters", padding, 0.001f);
+        CfgApplyCalibrationRuntimeState(s);
+        s.status = s.useChinese ? "\xE5\xB7\xB2\xE6\x9B\xB4\xE6\x96\xB0\xE6\x9E\xAA\xE6\xA0\x93\xE7\x9B\x92\xEF\xBC\x8C\xE6\x8C\x89\xE4\xBF\x9D\xE5\xAD\x98\xE5\x86\x99\xE5\x85\xA5\xE5\xBD\x93\xE5\x89\x8D\xE6\xA8\xA1\xE5\x9E\x8B profile\xE3\x80\x82" : "Bolt box updated; press Save to persist current model profile.";
+        CfgMarkEdited(s);
+        return true;
+    }
+
+    static void CfgRenderCalibrationBoltPullControls(CfgOverlayState& s, CfgGdiSurface& g)
+    {
+        constexpr int panelX = 26;
+        constexpr int panelY = 318;
+        constexpr int panelW = 1228;
+        constexpr int panelH = 178;
+        constexpr int labelX = panelX + 26;
+        constexpr int valueX = panelX + 190;
+        constexpr int buttonX = panelX + 420;
+        constexpr int row0Y = panelY + 44;
+        constexpr int row1Y = panelY + 86;
+        constexpr int row2Y = panelY + 128;
+        constexpr int buttonW = 54;
+        constexpr int buttonH = 28;
+        constexpr int gap = 8;
+
+        const Vector axis = CfgVec3ValueForKey(s, "MagazineInteractionBoltPullAxisLocal", Vector(0.0f, 0.0f, 1.0f), -1.0f, 1.0f);
+        const float pull = CfgFloatValue(s, "MagazineInteractionBoltPullDistanceMeters", 0.055f);
+        const float ret = CfgFloatValue(s, "MagazineInteractionBoltReturnDistanceMeters", 0.018f);
+
+        CfgGdiFill(g, panelX, panelY, panelW, panelH, { 18, 21, 28 });
+        CfgGdiFrame(g, panelX, panelY, panelW, panelH, { 68, 86, 116 }, 1);
+        CfgGdiText(
+            g,
+            labelX,
+            panelY + 10,
+            760,
+            28,
+            s.useChinese ? "\xE8\xB0\x83\xE6\x95\xB4\xE6\x9E\xAA\xE6\xA0\x93\xE6\x8B\x89\xE5\x8A\xA8\xE6\x96\xB9\xE5\x90\x91\xE5\x92\x8C\xE8\xB7\x9D\xE7\xA6\xBB" : "Adjust bolt pull direction and distance",
+            g.boldFont,
+            { 238, 243, 248 });
+        CfgGdiText(
+            g,
+            labelX + 760,
+            panelY + 12,
+            410,
+            24,
+            s.useChinese ? "X/Y/Z = \xE6\x9E\xAA\xE6\xA0\x93\xE7\x88\xB6\xE9\xAA\xA8\xE9\xAA\xBC\xE5\xB1\x80\xE9\x83\xA8\xE6\x96\xB9\xE5\x90\x91" : "X/Y/Z = bolt parent local axis",
+            g.smallFont,
+            { 160, 196, 255 },
+            DT_RIGHT);
+
+        CfgGdiText(g, labelX, row0Y + 2, 150, buttonH, s.useChinese ? "\xE6\x8B\x89\xE5\x8A\xA8\xE8\xBD\xB4" : "Pull Axis", g.smallFont, { 180, 214, 188 });
+        CfgGdiText(
+            g,
+            valueX,
+            row0Y + 2,
+            210,
+            buttonH,
+            "X " + CfgFormatFloat(axis.x, 0.001f) + " Y " + CfgFormatFloat(axis.y, 0.001f) + " Z " + CfgFormatFloat(axis.z, 0.001f),
+            g.smallFont,
+            { 226, 232, 242 });
+        const char* axisLabels[6] = { "X-", "X+", "Y-", "Y+", "Z-", "Z+" };
+        for (int i = 0; i < 6; ++i)
+            CfgGdiButton(g, buttonX + i * (buttonW + gap), row0Y, buttonW, buttonH, axisLabels[i]);
+
+        CfgGdiText(g, labelX, row1Y + 2, 150, buttonH, s.useChinese ? "\xE6\x8B\x89\xE5\x8A\xA8/\xE5\xBD\x92\xE4\xBD\x8D" : "Pull/Return", g.smallFont, { 180, 214, 188 });
+        CfgGdiText(
+            g,
+            valueX,
+            row1Y + 2,
+            260,
+            buttonH,
+            "P " + CfgFormatFloat(pull, 0.001f) + " R " + CfgFormatFloat(ret, 0.001f),
+            g.smallFont,
+            { 226, 232, 242 });
+        const char* distLabels[4] = { "P-", "P+", "R-", "R+" };
+        for (int i = 0; i < 4; ++i)
+            CfgGdiButton(g, buttonX + i * (buttonW + gap), row1Y, buttonW, buttonH, distLabels[i]);
+        CfgGdiButton(g, buttonX + 7 * (buttonW + gap), row1Y, 90, buttonH, s.useChinese ? "\xE9\x87\x8D\xE7\xBD\xAE" : "Reset");
+
+        CfgGdiText(
+            g,
+            labelX,
+            row2Y,
+            1130,
+            26,
+            s.useChinese ? "\xE6\x8B\x89\xE5\x88\xB0 P \xE8\xB7\x9D\xE7\xA6\xBB\xE7\xAE\x97\xE5\x88\xB0\xE5\xBA\x95\xEF\xBC\x8C\xE5\x9B\x9E\xE5\x88\xB0 R \xE8\xB7\x9D\xE7\xA6\xBB\xE5\x86\x85\xE7\xAE\x97\xE5\xBD\x92\xE4\xBD\x8D\xE3\x80\x82" : "Pull to P to reach rear; return within R to complete.",
+            g.smallFont,
+            { 160, 196, 255 });
+    }
+
+    static bool CfgHandleCalibrationBoltPullControlClick(CfgOverlayState& s, int mx, int my)
+    {
+        if (std::clamp(s.calibrationStep, 0, kCfgCalibrationStepMax) != 5)
+            return false;
+
+        constexpr int panelX = 26;
+        constexpr int panelY = 318;
+        constexpr int panelW = 1228;
+        constexpr int panelH = 178;
+        constexpr int buttonX = panelX + 420;
+        constexpr int row0Y = panelY + 44;
+        constexpr int row1Y = panelY + 86;
+        constexpr int buttonW = 54;
+        constexpr int buttonH = 28;
+        constexpr int gap = 8;
+        if (mx < panelX || mx >= panelX + panelW || my < panelY || my >= panelY + panelH)
+            return false;
+
+        auto hit = [&](int index, int y, int width) -> bool
+            {
+                const int x = buttonX + index * (buttonW + gap);
+                return mx >= x && mx < x + width && my >= y && my < y + buttonH;
+            };
+
+        Vector axis = CfgVec3ValueForKey(s, "MagazineInteractionBoltPullAxisLocal", Vector(0.0f, 0.0f, 1.0f), -1.0f, 1.0f);
+        float pull = CfgFloatValue(s, "MagazineInteractionBoltPullDistanceMeters", 0.055f);
+        float ret = CfgFloatValue(s, "MagazineInteractionBoltReturnDistanceMeters", 0.018f);
+
+        auto normalizeAxis = [&]() -> void
+            {
+                const float length = axis.Length();
+                axis = (length > 0.0001f) ? (axis * (1.0f / length)) : Vector(0.0f, 0.0f, 1.0f);
+            };
+
+        bool changed = false;
+        for (int i = 0; i < 6; ++i)
+        {
+            if (!hit(i, row0Y, buttonW))
+                continue;
+            float* components[3] = { &axis.x, &axis.y, &axis.z };
+            const int component = std::clamp(i / 2, 0, 2);
+            const float sign = (i % 2) == 0 ? -1.0f : 1.0f;
+            *components[component] = std::clamp(*components[component] + sign * 0.10f, -1.0f, 1.0f);
+            normalizeAxis();
+            changed = true;
+            break;
+        }
+        if (!changed)
+        {
+            if (hit(0, row1Y, buttonW)) { pull = std::clamp(pull - 0.005f, 0.0f, 0.25f); changed = true; }
+            else if (hit(1, row1Y, buttonW)) { pull = std::clamp(pull + 0.005f, 0.0f, 0.25f); changed = true; }
+            else if (hit(2, row1Y, buttonW)) { ret = std::clamp(ret - 0.005f, 0.0f, 0.10f); changed = true; }
+            else if (hit(3, row1Y, buttonW)) { ret = std::clamp(ret + 0.005f, 0.0f, 0.10f); changed = true; }
+            else if (hit(7, row1Y, 90))
+            {
+                axis = Vector(0.0f, 0.0f, 1.0f);
+                pull = 0.055f;
+                ret = 0.018f;
+                changed = true;
+            }
+        }
+        if (!changed)
+            return true;
+
+        if (pull > 0.0001f)
+            ret = std::min(ret, pull);
+        CfgSetVec3ValueForKey(s, "MagazineInteractionBoltPullAxisLocal", axis, 0.001f);
+        CfgSetFloatValueForKey(s, "MagazineInteractionBoltPullDistanceMeters", pull, 0.001f);
+        CfgSetFloatValueForKey(s, "MagazineInteractionBoltReturnDistanceMeters", ret, 0.001f);
+        CfgApplyCalibrationRuntimeState(s);
+        s.status = s.useChinese ? "\xE5\xB7\xB2\xE6\x9B\xB4\xE6\x96\xB0\xE6\x9E\xAA\xE6\xA0\x93\xE6\x8B\x89\xE5\x8A\xA8\xEF\xBC\x8C\xE6\x8C\x89\xE4\xBF\x9D\xE5\xAD\x98\xE5\x86\x99\xE5\x85\xA5\xE5\xBD\x93\xE5\x89\x8D\xE6\xA8\xA1\xE5\x9E\x8B profile\xE3\x80\x82" : "Bolt pull updated; press Save to persist current model profile.";
+        CfgMarkEdited(s);
+        return true;
+    }
+
     static void CfgRenderMagazineCalibration(CfgOverlayState& s, CfgGdiSurface& g)
     {
         MagazineInteractionCalibrationSnapshot snapshot{};
@@ -2921,15 +3772,17 @@ namespace
         CfgGdiFill(g, 0, 84, kCfgOverlayW, kCfgOverlayH - 84, { 14, 16, 22 });
         CfgGdiText(g, 26, 84, 760, 32, s.useChinese ? "\xE5\xBD\x93\xE5\x89\x8D\xE6\xAD\xA6\xE5\x99\xA8\xE5\xBC\xB9\xE5\x8C\xA3\xE6\xA0\xA1\xE5\x87\x86" : "Current Weapon Magazine Calibration", g.headerFont, { 242, 246, 255 });
 
-        const int step = std::clamp(s.calibrationStep, 0, 3);
-        for (int i = 0; i < 4; ++i)
+        const int step = std::clamp(s.calibrationStep, 0, kCfgCalibrationStepMax);
+        constexpr int tabW = 190;
+        constexpr int tabGap = 14;
+        for (int i = 0; i < kCfgCalibrationStepCount; ++i)
         {
-            const int x = 26 + i * 300;
+            const int x = 26 + i * (tabW + tabGap);
             const bool active = (i == step);
-            CfgGdiFill(g, x, 126, 280, 42, active ? CfgRgb{ 42, 86, 150 } : CfgRgb{ 30, 35, 48 });
-            CfgGdiFrame(g, x, 126, 280, 42, active ? CfgRgb{ 150, 190, 255 } : CfgRgb{ 68, 86, 116 }, 2);
+            CfgGdiFill(g, x, 126, tabW, 42, active ? CfgRgb{ 42, 86, 150 } : CfgRgb{ 30, 35, 48 });
+            CfgGdiFrame(g, x, 126, tabW, 42, active ? CfgRgb{ 150, 190, 255 } : CfgRgb{ 68, 86, 116 }, 2);
             std::string title = std::to_string(i + 1) + ". " + CfgCalibrationStepTitle(s, i);
-            CfgGdiText(g, x + 10, 126, 260, 42, title, active ? g.boldFont : g.normalFont, { 238, 243, 248 }, DT_CENTER);
+            CfgGdiText(g, x + 6, 126, tabW - 12, 42, title, active ? g.boldFont : g.smallFont, { 238, 243, 248 }, DT_CENTER);
         }
 
         if (!hasSnapshot)
@@ -2969,7 +3822,9 @@ namespace
             "  fp=" + CfgHex32(snapshot.modelFingerprint) +
             "  boneSig=" + CfgHex32(snapshot.boneSignature);
         CfgGdiText(g, 44, 252, 1000, 24, sigs, g.smallFont, { 180, 214, 188 });
-        std::string age = "snapshot age " + CfgFormatFloat(ageSeconds, 0.01f) + "s";
+        std::string age = s.useChinese
+            ? ("\xE5\xBF\xAB\xE7\x85\xA7 " + CfgFormatFloat(ageSeconds, 0.01f) + "\xE7\xA7\x92")
+            : ("snapshot age " + CfgFormatFloat(ageSeconds, 0.01f) + "s");
         CfgGdiText(g, 1060, 214, 170, 26, age, g.smallFont, ageSeconds < 1.0f ? CfgRgb{ 160, 230, 180 } : CfgRgb{ 255, 190, 120 }, DT_RIGHT);
 
         const bool boneChoiceStep = (step == 0 || step == 3);
@@ -3025,7 +3880,9 @@ namespace
                 if (selected)
                     CfgGdiFrame(g, kCfgCalibrationBoneListX, y, kCfgCalibrationBoneListW, kCfgCalibrationBoneRowH - 3, { 80, 190, 235 }, 2);
                 std::string left = "#" + std::to_string(row.index) + "  p" + std::to_string(row.parent) + "  " + row.name;
-                std::string right = "mag " + std::to_string(row.magazineScore) + "    bolt " + std::to_string(row.boltScore);
+                std::string right = s.useChinese
+                    ? ("\xE5\xBC\xB9\xE5\x8C\xA3 " + std::to_string(row.magazineScore) + "    \xE6\x9E\xAA\xE6\xA0\x93 " + std::to_string(row.boltScore))
+                    : ("mag " + std::to_string(row.magazineScore) + "    bolt " + std::to_string(row.boltScore));
                 CfgGdiText(g, kCfgCalibrationBoneListX + 16, y + 2, 780, 32, left, selected ? g.boldFont : g.normalFont, { 232, 236, 244 });
                 CfgGdiText(g, kCfgCalibrationBoneListX + 850, y + 2, 350, 32, right, g.normalFont, { 185, 210, 190 }, DT_RIGHT);
             }
@@ -3034,22 +3891,36 @@ namespace
         {
             std::string selected = s.calibrationSelectedBone >= 0
                 ? ("#" + std::to_string(s.calibrationSelectedBone))
-                : std::string("<none>");
+                : (s.useChinese ? std::string("<\xE6\x9C\xAA\xE9\x80\x89\xE6\x8B\xA9>") : std::string("<none>"));
+            const std::string selectedTitle =
+                std::string(CfgCalibrationStepTitle(s, step)) +
+                (s.useChinese ? "  \xE5\xB7\xB2\xE9\x80\x89\xE9\xAA\xA8\xE9\xAA\xBC\xEF\xBC\x9A" : "  selected bone: ") +
+                selected;
             if (step == 1)
             {
-                CfgGdiText(g, 26, 286, 900, 24, std::string(CfgCalibrationStepTitle(s, step)) + "  selected bone: " + selected, g.boldFont, { 234, 238, 246 });
+                CfgGdiText(g, 26, 286, 900, 24, selectedTitle, g.boldFont, { 234, 238, 246 });
                 CfgRenderCalibrationMagazineBoxControls(s, g);
             }
             else if (step == 2)
             {
-                CfgGdiText(g, 26, 286, 900, 24, std::string(CfgCalibrationStepTitle(s, step)) + "  selected bone: " + selected, g.boldFont, { 234, 238, 246 });
+                CfgGdiText(g, 26, 286, 900, 24, selectedTitle, g.boldFont, { 234, 238, 246 });
                 CfgRenderCalibrationSocketCaptureControls(s, g);
+            }
+            else if (step == 4)
+            {
+                CfgGdiText(g, 26, 286, 900, 24, selectedTitle, g.boldFont, { 234, 238, 246 });
+                CfgRenderCalibrationBoltBoxControls(s, g);
+            }
+            else if (step == 5)
+            {
+                CfgGdiText(g, 26, 286, 900, 24, selectedTitle, g.boldFont, { 234, 238, 246 });
+                CfgRenderCalibrationBoltPullControls(s, g);
             }
             else
             {
                 CfgGdiFill(g, 26, 318, 1228, 230, { 18, 21, 28 });
                 CfgGdiFrame(g, 26, 318, 1228, 230, { 68, 86, 116 }, 1);
-                CfgGdiText(g, 52, 340, 920, 32, std::string(CfgCalibrationStepTitle(s, step)) + "  selected bone: " + selected, g.boldFont, { 238, 243, 248 });
+                CfgGdiText(g, 52, 340, 920, 32, selectedTitle, g.boldFont, { 238, 243, 248 });
                 CfgGdiTextWrap(
                     g,
                     52,
@@ -3070,7 +3941,7 @@ namespace
         CfgGdiFill(g, 26, kCfgOverlayH - 84, 1228, 1, { 68, 78, 100 });
         CfgGdiText(g, 26, kCfgOverlayH - 72, 900, 26, s.useChinese ? "\xE4\xB8\x8A\xE4\xB8\x80\xE9\xA1\xB5/\xE4\xB8\x8B\xE4\xB8\x80\xE9\xA1\xB5\xEF\xBC\x9A\xE5\x88\x87\xE6\x8D\xA2\xE6\xAD\xA5\xE9\xAA\xA4\xE3\x80\x82" "Calib" "\xEF\xBC\x9A\xE8\xBF\x94\xE5\x9B\x9E\xE9\x85\x8D\xE7\xBD\xAE\xE9\xA1\xB5\xE3\x80\x82" : "Prev/Next switch steps. Calib returns to the config list.", g.smallFont, { 226, 232, 242 });
         CfgGdiText(g, 26, kCfgOverlayH - 43, 860, 34, s.status, g.smallFont, { 226, 232, 242 });
-        CfgGdiText(g, 1010, kCfgOverlayH - 43, 240, 34, std::to_string(step + 1) + "/4", g.normalFont, { 164, 180, 205 }, DT_RIGHT);
+        CfgGdiText(g, 1010, kCfgOverlayH - 43, 240, 34, std::to_string(step + 1) + "/" + std::to_string(kCfgCalibrationStepCount), g.normalFont, { 164, 180, 205 }, DT_RIGHT);
     }
 
     static void CfgRender(CfgOverlayState& s)
@@ -4204,7 +5075,7 @@ namespace
             {
                 if (s.panelMode == CfgPanelMode::MagazineCalibration)
                 {
-                    s.calibrationStep = std::clamp(s.calibrationStep - 1, 0, 3);
+                    s.calibrationStep = std::clamp(s.calibrationStep - 1, 0, kCfgCalibrationStepMax);
                     s.calibrationSeenPublishSeq = 0;
                     s.status = std::string(s.useChinese ? "\xE6\xA0\xA1\xE5\x87\x86\xE6\xAD\xA5\xE9\xAA\xA4\xEF\xBC\x9A" : "Calibration step: ") + CfgCalibrationStepTitle(s, s.calibrationStep);
                     CfgApplyCalibrationRuntimeState(s);
@@ -4220,7 +5091,7 @@ namespace
             {
                 if (s.panelMode == CfgPanelMode::MagazineCalibration)
                 {
-                    s.calibrationStep = std::clamp(s.calibrationStep + 1, 0, 3);
+                    s.calibrationStep = std::clamp(s.calibrationStep + 1, 0, kCfgCalibrationStepMax);
                     s.calibrationSeenPublishSeq = 0;
                     s.status = std::string(s.useChinese ? "\xE6\xA0\xA1\xE5\x87\x86\xE6\xAD\xA5\xE9\xAA\xA4\xEF\xBC\x9A" : "Calibration step: ") + CfgCalibrationStepTitle(s, s.calibrationStep);
                     CfgApplyCalibrationRuntimeState(s);
@@ -4292,13 +5163,17 @@ namespace
                 return;
             if (CfgHandleCalibrationSocketCaptureControlClick(s, mx, my))
                 return;
+            if (CfgHandleCalibrationBoltBoxControlClick(s, mx, my))
+                return;
+            if (CfgHandleCalibrationBoltPullControlClick(s, mx, my))
+                return;
             if (CfgHandleCalibrationPreviewControlClick(s, mx, my))
                 return;
 
             MagazineInteractionCalibrationSnapshot snapshot{};
             if (!CfgReadFreshCalibrationSnapshot(snapshot))
                 return;
-            const int step = std::clamp(s.calibrationStep, 0, 3);
+            const int step = std::clamp(s.calibrationStep, 0, kCfgCalibrationStepMax);
             if (step == 0 || step == 3)
             {
                 std::vector<CfgCalibrationBoneRow> rows = CfgBuildCalibrationRows(snapshot, step);
@@ -4337,6 +5212,10 @@ namespace
                     if (rowIndex >= 0 && rowIndex < static_cast<int>(rows.size()))
                     {
                         s.calibrationSelectedBone = rows[static_cast<size_t>(rowIndex)].index;
+                        if (CfgCalibrationStepUsesBoltSelection(step))
+                            s.calibrationBoltSelectedBone = s.calibrationSelectedBone;
+                        else
+                            s.calibrationMagazineSelectedBone = s.calibrationSelectedBone;
                         CfgApplyCalibrationRuntimeState(s);
                         s.status = std::string(s.useChinese ? "\xE5\xB7\xB2\xE9\x80\x89\xE4\xB8\xAD\xE9\xAA\xA8\xE9\xAA\xBC " : "Selected bone ") +
                             "#" + std::to_string(s.calibrationSelectedBone) + " " + rows[static_cast<size_t>(rowIndex)].name;
@@ -4540,7 +5419,7 @@ namespace
                         if (CfgReadFreshCalibrationSnapshot(snapshot))
                         {
                             const std::vector<CfgCalibrationBoneRow> rows =
-                                CfgBuildCalibrationRows(snapshot, std::clamp(s.calibrationStep, 0, 3));
+                                CfgBuildCalibrationRows(snapshot, std::clamp(s.calibrationStep, 0, kCfgCalibrationStepMax));
                             maxScroll = std::max(0, static_cast<int>(rows.size()) - kCfgCalibrationBoneRowsVisible);
                         }
                         s.calibrationScroll = std::clamp(s.calibrationScroll + dir, 0, maxScroll);
