@@ -4260,6 +4260,10 @@ namespace
         if (step == 4 || step == 5)
             ApplyMagazineInteractionBoltBoxCalibrationAdjustments(vr, selectedWorld, mins, maxs);
 
+        constexpr bool kUseSourceDebugOverlayForCalibration = false;
+        if (!kUseSourceDebugOverlayForCalibration)
+            return;
+
         const bool boltStep = (step >= 3);
         const bool socketStep = (step == 2);
         const int r = boltStep ? 74 : (socketStep ? 40 : 40);
@@ -4614,7 +4618,8 @@ namespace
             std::max(0.10f, 0.006f * scale),
             std::max(0.10f, 0.006f * scale));
 
-        if (vr->m_Game && vr->m_Game->m_DebugOverlay)
+        constexpr bool kUseSourceDebugOverlayForCalibration = false;
+        if (kUseSourceDebugOverlayForCalibration && vr->m_Game && vr->m_Game->m_DebugOverlay)
         {
             if (hasSourceModelBounds)
             {
@@ -4660,7 +4665,7 @@ namespace
                 maxs,
                 sampleCount);
         }
-        if (hasBounds && vr->m_Game && vr->m_Game->m_DebugOverlay)
+        if (hasBounds)
         {
             CalibrationBoneHighlightEnsureMinimumSpan(mins, maxs, fallbackHalf);
             const int step = std::clamp(vr->m_MagazineInteractionCalibrationStep.load(std::memory_order_relaxed), 0, 5);
@@ -4670,24 +4675,60 @@ namespace
                 ApplyMagazineInteractionSocketCaptureCalibrationAdjustments(vr, previewSelectedWorld, mins, maxs);
             if (step == 4 || step == 5)
                 ApplyMagazineInteractionBoltBoxCalibrationAdjustments(vr, previewSelectedWorld, mins, maxs);
-            const bool boltStep = (step >= 3);
-            const bool socketStep = (step == 2);
-            const int r = boltStep ? 74 : (socketStep ? 40 : 40);
-            const int g = boltStep ? 142 : (socketStep ? 190 : 224);
-            const int b = boltStep ? 255 : (socketStep ? 255 : 174);
-            const float duration = std::max(0.02f, vr->m_LastFrameDuration * 2.5f);
-            constexpr bool kNoDepthTest = true;
-            IVDebugOverlay* overlay = vr->m_Game->m_DebugOverlay;
-            DrawMagazineBoxSolidObb(overlay, previewSelectedWorld, mins, maxs, r, g, b, 92, kNoDepthTest, duration);
-            DrawMagazineBoxWireObb(overlay, previewSelectedWorld, mins, maxs, std::min(255, r + 50), std::min(255, g + 35), 255, kNoDepthTest, duration);
-            DrawCalibrationBoneLinkLines(overlay, boneParents, previewBones, numBones, selectedBone, previewSelectedWorld, r, g, b, kNoDepthTest, duration);
 
-            const Vector tickOrigin = vr_vm_stabilize::GetOrigin(previewSelectedWorld);
-            const float tick = std::max(0.25f, 0.007f * scale);
-            overlay->AddLineOverlay(tickOrigin - HooksMatrixAxis(previewSelectedWorld, 0) * tick, tickOrigin + HooksMatrixAxis(previewSelectedWorld, 0) * tick, 255, 255, 255, kNoDepthTest, duration);
-            overlay->AddLineOverlay(tickOrigin - HooksMatrixAxis(previewSelectedWorld, 1) * tick, tickOrigin + HooksMatrixAxis(previewSelectedWorld, 1) * tick, 255, 255, 255, kNoDepthTest, duration);
-            overlay->AddLineOverlay(tickOrigin - HooksMatrixAxis(previewSelectedWorld, 2) * tick, tickOrigin + HooksMatrixAxis(previewSelectedWorld, 2) * tick, 255, 255, 255, kNoDepthTest, duration);
-            if (step == 5)
+            const Vector boxOrigin(
+                previewSelectedWorld.m[0][3],
+                previewSelectedWorld.m[1][3],
+                previewSelectedWorld.m[2][3]);
+            const Vector boxAxisX(
+                previewSelectedWorld.m[0][0],
+                previewSelectedWorld.m[1][0],
+                previewSelectedWorld.m[2][0]);
+            const Vector boxAxisY(
+                previewSelectedWorld.m[0][1],
+                previewSelectedWorld.m[1][1],
+                previewSelectedWorld.m[2][1]);
+            const Vector boxAxisZ(
+                previewSelectedWorld.m[0][2],
+                previewSelectedWorld.m[1][2],
+                previewSelectedWorld.m[2][2]);
+            const Vector modelOrigin(
+                targetModelWorld.m[0][3],
+                targetModelWorld.m[1][3],
+                targetModelWorld.m[2][3]);
+            const Vector modelAxisX(
+                targetModelWorld.m[0][0],
+                targetModelWorld.m[1][0],
+                targetModelWorld.m[2][0]);
+            const Vector modelAxisY(
+                targetModelWorld.m[0][1],
+                targetModelWorld.m[1][1],
+                targetModelWorld.m[2][1]);
+            const Vector modelAxisZ(
+                targetModelWorld.m[0][2],
+                targetModelWorld.m[1][2],
+                targetModelWorld.m[2][2]);
+            const uint32_t publishSeq = (seqEven != 0) ? seqEven : vr->m_RenderFrameSeq.load(std::memory_order_relaxed);
+            if (step <= 2)
+            {
+                vr->PublishMagazineInteractionBox(
+                    boxOrigin,
+                    boxAxisX,
+                    boxAxisY,
+                    boxAxisZ,
+                    mins,
+                    maxs,
+                    publishSeq,
+                    entityIndex,
+                    selectedBone,
+                    modelName.c_str(),
+                    true,
+                    modelOrigin,
+                    modelAxisX,
+                    modelAxisY,
+                    modelAxisZ);
+            }
+            else
             {
                 Vector pullAxis = BuildMagazineInteractionBoltPullAxisWorld(
                     vr,
@@ -4699,12 +4740,60 @@ namespace
                     selectedBone,
                     previewSelectedWorld,
                     ResolveMagazineInteractionProfileKeyForConfig(vr),
-                    nullptr);
+                    &targetModelWorld);
                 pullAxis = HooksNormalizeVector(pullAxis, Vector(0.0f, 0.0f, 0.0f));
-                if (pullAxis.Length() > 0.0001f)
+                vr->PublishMagazineInteractionBoltBox(
+                    boxOrigin,
+                    boxAxisX,
+                    boxAxisY,
+                    boxAxisZ,
+                    mins,
+                    maxs,
+                    pullAxis,
+                    publishSeq,
+                    entityIndex,
+                    selectedBone,
+                    modelName.c_str());
+            }
+
+            if (kUseSourceDebugOverlayForCalibration && vr->m_Game && vr->m_Game->m_DebugOverlay)
+            {
+                const bool boltStep = (step >= 3);
+                const bool socketStep = (step == 2);
+                const int r = boltStep ? 74 : (socketStep ? 40 : 40);
+                const int g = boltStep ? 142 : (socketStep ? 190 : 224);
+                const int b = boltStep ? 255 : (socketStep ? 255 : 174);
+                const float duration = std::max(0.02f, vr->m_LastFrameDuration * 2.5f);
+                constexpr bool kNoDepthTest = true;
+                IVDebugOverlay* overlay = vr->m_Game->m_DebugOverlay;
+                DrawMagazineBoxSolidObb(overlay, previewSelectedWorld, mins, maxs, r, g, b, 92, kNoDepthTest, duration);
+                DrawMagazineBoxWireObb(overlay, previewSelectedWorld, mins, maxs, std::min(255, r + 50), std::min(255, g + 35), 255, kNoDepthTest, duration);
+                DrawCalibrationBoneLinkLines(overlay, boneParents, previewBones, numBones, selectedBone, previewSelectedWorld, r, g, b, kNoDepthTest, duration);
+
+                const Vector tickOrigin = vr_vm_stabilize::GetOrigin(previewSelectedWorld);
+                const float tick = std::max(0.25f, 0.007f * scale);
+                overlay->AddLineOverlay(tickOrigin - HooksMatrixAxis(previewSelectedWorld, 0) * tick, tickOrigin + HooksMatrixAxis(previewSelectedWorld, 0) * tick, 255, 255, 255, kNoDepthTest, duration);
+                overlay->AddLineOverlay(tickOrigin - HooksMatrixAxis(previewSelectedWorld, 1) * tick, tickOrigin + HooksMatrixAxis(previewSelectedWorld, 1) * tick, 255, 255, 255, kNoDepthTest, duration);
+                overlay->AddLineOverlay(tickOrigin - HooksMatrixAxis(previewSelectedWorld, 2) * tick, tickOrigin + HooksMatrixAxis(previewSelectedWorld, 2) * tick, 255, 255, 255, kNoDepthTest, duration);
+                if (step == 5)
                 {
-                    const float pullLen = std::max(0.75f, ResolveMagazineInteractionBoltPullDistanceMeters(vr) * scale);
-                    overlay->AddLineOverlay(tickOrigin, tickOrigin + pullAxis * pullLen, 255, 230, 90, kNoDepthTest, duration);
+                    Vector pullAxis = BuildMagazineInteractionBoltPullAxisWorld(
+                        vr,
+                        modelName,
+                        previewBones,
+                        numBones,
+                        boneParents,
+                        ResolveMagazineInteractionWeaponIdForConfig(vr),
+                        selectedBone,
+                        previewSelectedWorld,
+                        ResolveMagazineInteractionProfileKeyForConfig(vr),
+                        nullptr);
+                    pullAxis = HooksNormalizeVector(pullAxis, Vector(0.0f, 0.0f, 0.0f));
+                    if (pullAxis.Length() > 0.0001f)
+                    {
+                        const float pullLen = std::max(0.75f, ResolveMagazineInteractionBoltPullDistanceMeters(vr) * scale);
+                        overlay->AddLineOverlay(tickOrigin, tickOrigin + pullAxis * pullLen, 255, 230, 90, kNoDepthTest, duration);
+                    }
                 }
             }
         }
@@ -5035,7 +5124,7 @@ namespace
         const int calibrationSelectedBone =
             vr->m_MagazineInteractionCalibrationSelectedBone.load(std::memory_order_relaxed);
         if (calibrationOverlayActive &&
-            (calibrationStep == 1 || calibrationStep == 2) &&
+            calibrationStep <= 2 &&
             calibrationSelectedBone >= 0 &&
             calibrationSelectedBone < numBones)
         {
@@ -10883,8 +10972,8 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 			m_VR &&
 			m_VR->m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed);
 		if (!m_VR ||
-			magazineInteractionCalibrationOverlayActive ||
-			!m_VR->ShouldHideMagazineInteractionNativeClip())
+			(!magazineInteractionCalibrationOverlayActive &&
+				!m_VR->ShouldHideMagazineInteractionNativeClip()))
 		{
 			DrawCurrentWeaponMagazineBox(
 				m_VR,

@@ -2086,18 +2086,16 @@ bool VR::QueueVrHandsDrawForEye(
     int eyeIndex,
     VrHandDrawPass drawPass)
 {
-    const bool drawGloves = m_VrHandsEnabled;
+    const bool drawGloves = m_VrHandsEnabled && m_Input;
     const bool calibrationOverlayActive =
         m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed);
     const bool drawMagazineDebugBoxes =
-        m_MagazineBoxDebugEnabled &&
-        !calibrationOverlayActive &&
+        (m_MagazineBoxDebugEnabled || calibrationOverlayActive) &&
         drawPass != VrHandDrawPass::WorldVisibilityMask;
     if (!renderContext ||
         (!drawGloves && !drawMagazineDebugBoxes) ||
         !m_IsVREnabled ||
-        !m_Game ||
-        (drawGloves && !m_Input))
+        !m_Game)
     {
         return false;
     }

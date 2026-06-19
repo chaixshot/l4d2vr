@@ -450,6 +450,8 @@ bool VrHandRendererD3D9::Draw(
         handIndex == 2 &&
         asset.sourcePath.rfind("generated:magazine_box:", 0) == 0;
     const bool opaqueStandaloneMagazine = handIndex == 2 && !standaloneGeneratedBox;
+    const bool opaqueStandaloneDebugBox = handIndex == 2 && standaloneGeneratedBox;
+    const bool opaqueStandaloneMesh = opaqueStandaloneMagazine || opaqueStandaloneDebugBox;
 
     // VR gloves use a lightweight directional-light approximation. Reusing that
     // approximation for a replacement magazine made the same exported texture
@@ -457,12 +459,12 @@ bool VrHandRendererD3D9::Draw(
     // standalone magazine opaque and sample its base-color texture at full
     // intensity. Exact Source-material parity still depends on exporting the same
     // skin texture used by the active weapon replacement.
-    worldNormalRows.v[11] = opaqueStandaloneMagazine
+    worldNormalRows.v[11] = opaqueStandaloneMesh
         ? 1.0f
         : std::clamp(sceneLightScale, 0.06f, 1.25f);
     const float gloveLight[4] = { 0.35f, -0.45f, -0.82f, 0.14f };
     const float magazineUnlit[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-    const float* light = opaqueStandaloneMagazine ? magazineUnlit : gloveLight;
+    const float* light = opaqueStandaloneMesh ? magazineUnlit : gloveLight;
     device->SetRenderState(D3DRS_ZENABLE, TRUE);
     // The final color pass must write depth as well. Otherwise every triangle of the
     // same glove blends through the others, so folded fingers remain visible through
@@ -473,11 +475,11 @@ bool VrHandRendererD3D9::Draw(
     device->SetRenderState(D3DRS_ZWRITEENABLE, writeDepth ? TRUE : FALSE);
     device->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
     device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
-    device->SetRenderState(D3DRS_FILLMODE, standaloneGeneratedBox ? D3DFILL_WIREFRAME : D3DFILL_SOLID);
-    // The detached magazine is a solid test asset. Some exported materials keep
-    // an unused zero alpha channel, which made a successfully loaded GLB invisible.
-    // Hands retain normal alpha blending; the magazine is rendered opaque.
-    device->SetRenderState(D3DRS_ALPHABLENDENABLE, opaqueStandaloneMagazine ? FALSE : TRUE);
+    device->SetRenderState(D3DRS_FILLMODE, D3DFILL_SOLID);
+    // The detached magazine and generated calibration/debug boxes are solid test assets.
+    // Some exported materials keep an unused zero alpha channel, which made a successfully
+    // loaded GLB invisible. Hands retain normal alpha blending; standalone helpers render opaque.
+    device->SetRenderState(D3DRS_ALPHABLENDENABLE, opaqueStandaloneMesh ? FALSE : TRUE);
     device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
     device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
     device->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);

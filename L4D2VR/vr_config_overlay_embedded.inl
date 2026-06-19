@@ -573,6 +573,8 @@ namespace
         float calibrationPreviewPitchDeg = 0.0f;
         float calibrationPreviewYawDeg = 0.0f;
         float calibrationPreviewRollDeg = 0.0f;
+        int calibrationBoltDesiredDirection = 5;
+        int calibrationBoltActualDirection = 5;
         std::string status; // Set by CfgLoad/CfgToggleOpen so it follows the current UI language.
         std::string configPath;
         std::vector<CfgOverlayLine> lines;
@@ -1774,6 +1776,83 @@ namespace
             std::clamp(z, minValue, maxValue));
     }
 
+    static Vector CfgNormalizeVec3(const Vector& value, const Vector& fallback)
+    {
+        const float length = value.Length();
+        if (length > 0.0001f)
+            return value * (1.0f / length);
+        return fallback;
+    }
+
+    static Vector CfgBoltPullDirectionVector(int direction)
+    {
+        switch (std::clamp(direction, 0, 5))
+        {
+        case 0: return Vector(-1.0f, 0.0f, 0.0f);
+        case 1: return Vector(1.0f, 0.0f, 0.0f);
+        case 2: return Vector(0.0f, -1.0f, 0.0f);
+        case 3: return Vector(0.0f, 1.0f, 0.0f);
+        case 4: return Vector(0.0f, 0.0f, 1.0f);
+        default: return Vector(0.0f, 0.0f, -1.0f);
+        }
+    }
+
+    static const char* CfgBoltPullDirectionLabel(const CfgOverlayState& s, int direction)
+    {
+        static const char* kZh[] =
+        {
+            "\xE5\xB7\xA6",
+            "\xE5\x8F\xB3",
+            "\xE4\xB8\x8B",
+            "\xE4\xB8\x8A",
+            "\xE5\x89\x8D",
+            "\xE5\x90\x8E"
+        };
+        static const char* kEn[] = { "Left", "Right", "Down", "Up", "Forward", "Back" };
+        const int index = std::clamp(direction, 0, 5);
+        return s.useChinese ? kZh[index] : kEn[index];
+    }
+
+    static Vector CfgCorrectBoltPullAxisFromObservedDirection(
+        const Vector& currentAxis,
+        int actualDirection,
+        int desiredDirection)
+    {
+        Vector correctedAxis = CfgNormalizeVec3(currentAxis, Vector(0.0f, 0.0f, 1.0f));
+        const Vector actual = CfgNormalizeVec3(
+            CfgBoltPullDirectionVector(actualDirection),
+            Vector(0.0f, 0.0f, -1.0f));
+        const Vector desired = CfgNormalizeVec3(
+            CfgBoltPullDirectionVector(desiredDirection),
+            Vector(0.0f, 0.0f, -1.0f));
+
+        const float dot = std::clamp(DotProduct(actual, desired), -1.0f, 1.0f);
+        if (dot > 0.999f)
+            return correctedAxis;
+
+        Vector rotationAxis(0.0f, 0.0f, 0.0f);
+        float angleDeg = 0.0f;
+        if (dot < -0.999f)
+        {
+            rotationAxis = CrossProduct(actual, Vector(0.0f, 0.0f, 1.0f));
+            if (rotationAxis.Length() <= 0.0001f)
+                rotationAxis = CrossProduct(actual, Vector(1.0f, 0.0f, 0.0f));
+            rotationAxis = CfgNormalizeVec3(rotationAxis, Vector(1.0f, 0.0f, 0.0f));
+            angleDeg = 180.0f;
+        }
+        else
+        {
+            rotationAxis = CfgNormalizeVec3(CrossProduct(actual, desired), Vector(1.0f, 0.0f, 0.0f));
+            angleDeg = RAD2DEG(std::acos(dot));
+        }
+
+        correctedAxis = VectorRotate(correctedAxis, rotationAxis, angleDeg);
+        correctedAxis.x = std::clamp(correctedAxis.x, -1.0f, 1.0f);
+        correctedAxis.y = std::clamp(correctedAxis.y, -1.0f, 1.0f);
+        correctedAxis.z = std::clamp(correctedAxis.z, -1.0f, 1.0f);
+        return CfgNormalizeVec3(correctedAxis, Vector(0.0f, 0.0f, 1.0f));
+    }
+
     static int CfgFindCalibrationBoneByToken(
         const MagazineInteractionCalibrationSnapshot& snapshot,
         const std::string& token)
@@ -2516,6 +2595,36 @@ namespace
         const float length = axis.Length();
         vrState->m_MagazineInteractionBoltPullAxisLocal =
             (length > 0.0001f) ? (axis * (1.0f / length)) : Vector(0.0f, 0.0f, 1.0f);
+
+        if (s.panelMode != CfgPanelMode::MagazineCalibration)
+            return;
+
+        MagazineInteractionCalibrationSnapshot snapshot{};
+        if (!CfgReadFreshCalibrationSnapshotForSave(snapshot))
+            return;
+        const std::string profileKey = CfgLower(CfgCalibrationProfileKey(snapshot));
+        if (profileKey.empty())
+            return;
+
+        const int step = std::clamp(s.calibrationStep, 0, kCfgCalibrationStepMax);
+        if (step >= 4)
+        {
+            vrState->m_MagazineInteractionBoltBoxHalfExtentsMetersProfileOverrides[profileKey] =
+                vrState->m_MagazineInteractionBoltBoxHalfExtentsMeters;
+            vrState->m_MagazineInteractionBoltBoxLocalOffsetMetersProfileOverrides[profileKey] =
+                vrState->m_MagazineInteractionBoltBoxLocalOffsetMeters;
+            vrState->m_MagazineInteractionBoltGrabPaddingMetersProfileOverrides[profileKey] =
+                std::clamp(vrState->m_MagazineInteractionBoltGrabPaddingMeters, 0.0f, 0.25f);
+        }
+        if (step >= 5)
+        {
+            vrState->m_MagazineInteractionBoltPullAxisLocalProfileOverrides[profileKey] =
+                vrState->m_MagazineInteractionBoltPullAxisLocal;
+            vrState->m_MagazineInteractionBoltPullDistanceMetersProfileOverrides[profileKey] =
+                std::clamp(vrState->m_MagazineInteractionBoltPullDistanceMeters, 0.0f, 0.25f);
+            vrState->m_MagazineInteractionBoltReturnDistanceMetersProfileOverrides[profileKey] =
+                std::clamp(vrState->m_MagazineInteractionBoltReturnDistanceMeters, 0.0f, 0.10f);
+        }
     }
 
     static void CfgApplyCalibrationRuntimeState(CfgOverlayState& s)
@@ -3615,15 +3724,17 @@ namespace
         constexpr int valueX = panelX + 190;
         constexpr int buttonX = panelX + 420;
         constexpr int row0Y = panelY + 44;
-        constexpr int row1Y = panelY + 86;
-        constexpr int row2Y = panelY + 128;
-        constexpr int buttonW = 54;
+        constexpr int row1Y = panelY + 82;
+        constexpr int row2Y = panelY + 120;
+        constexpr int buttonW = 64;
         constexpr int buttonH = 28;
         constexpr int gap = 8;
 
         const Vector axis = CfgVec3ValueForKey(s, "MagazineInteractionBoltPullAxisLocal", Vector(0.0f, 0.0f, 1.0f), -1.0f, 1.0f);
         const float pull = CfgFloatValue(s, "MagazineInteractionBoltPullDistanceMeters", 0.055f);
         const float ret = CfgFloatValue(s, "MagazineInteractionBoltReturnDistanceMeters", 0.018f);
+        s.calibrationBoltDesiredDirection = std::clamp(s.calibrationBoltDesiredDirection, 0, 5);
+        s.calibrationBoltActualDirection = std::clamp(s.calibrationBoltActualDirection, 0, 5);
 
         CfgGdiFill(g, panelX, panelY, panelW, panelH, { 18, 21, 28 });
         CfgGdiFrame(g, panelX, panelY, panelW, panelH, { 68, 86, 116 }, 1);
@@ -3633,7 +3744,7 @@ namespace
             panelY + 10,
             760,
             28,
-            s.useChinese ? "\xE8\xB0\x83\xE6\x95\xB4\xE6\x9E\xAA\xE6\xA0\x93\xE6\x8B\x89\xE5\x8A\xA8\xE6\x96\xB9\xE5\x90\x91\xE5\x92\x8C\xE8\xB7\x9D\xE7\xA6\xBB" : "Adjust bolt pull direction and distance",
+            s.useChinese ? "\xE6\x8C\x89\xE8\xA7\x82\xE5\xAF\x9F\xE7\xBB\x93\xE6\x9E\x9C\xE4\xBF\xAE\xE6\xAD\xA3\xE6\x9E\xAA\xE6\xA0\x93\xE6\x8B\x89\xE5\x8A\xA8\xE6\x96\xB9\xE5\x90\x91" : "Correct bolt pull direction from observed movement",
             g.boldFont,
             { 238, 243, 248 });
         CfgGdiText(
@@ -3642,49 +3753,61 @@ namespace
             panelY + 12,
             410,
             24,
-            s.useChinese ? "X/Y/Z = \xE6\x9E\xAA\xE6\xA0\x93\xE7\x88\xB6\xE9\xAA\xA8\xE9\xAA\xBC\xE5\xB1\x80\xE9\x83\xA8\xE6\x96\xB9\xE5\x90\x91" : "X/Y/Z = bolt parent local axis",
+            s.useChinese ? "\xE5\xBA\x94\xE7\x94\xA8\xE5\x90\x8E\xE6\x8C\x89\xE4\xBF\x9D\xE5\xAD\x98\xE5\x86\x99\xE5\x85\xA5\xE5\xBD\x93\xE5\x89\x8D profile" : "Apply, then Save to persist this profile",
             g.smallFont,
             { 160, 196, 255 },
             DT_RIGHT);
 
-        CfgGdiText(g, labelX, row0Y + 2, 150, buttonH, s.useChinese ? "\xE6\x8B\x89\xE5\x8A\xA8\xE8\xBD\xB4" : "Pull Axis", g.smallFont, { 180, 214, 188 });
+        CfgGdiText(g, labelX, row0Y + 2, 150, buttonH, s.useChinese ? "\xE5\xB8\x8C\xE6\x9C\x9B\xE6\x96\xB9\xE5\x90\x91" : "Desired", g.smallFont, { 180, 214, 188 });
         CfgGdiText(
             g,
             valueX,
             row0Y + 2,
             210,
             buttonH,
-            "X " + CfgFormatFloat(axis.x, 0.001f) + " Y " + CfgFormatFloat(axis.y, 0.001f) + " Z " + CfgFormatFloat(axis.z, 0.001f),
+            CfgBoltPullDirectionLabel(s, s.calibrationBoltDesiredDirection),
             g.smallFont,
             { 226, 232, 242 });
-        const char* axisLabels[6] = { "X-", "X+", "Y-", "Y+", "Z-", "Z+" };
-        for (int i = 0; i < 6; ++i)
-            CfgGdiButton(g, buttonX + i * (buttonW + gap), row0Y, buttonW, buttonH, axisLabels[i]);
+        auto drawDirectionButtons = [&](int y, int selected)
+            {
+                for (int i = 0; i < 6; ++i)
+                {
+                    const int x = buttonX + i * (buttonW + gap);
+                    CfgGdiButton(g, x, y, buttonW, buttonH, CfgBoltPullDirectionLabel(s, i));
+                    if (i == selected)
+                        CfgGdiFrame(g, x + 2, y + 2, buttonW - 4, buttonH - 4, { 80, 210, 255 }, 2);
+                }
+            };
+        drawDirectionButtons(row0Y, s.calibrationBoltDesiredDirection);
 
-        CfgGdiText(g, labelX, row1Y + 2, 150, buttonH, s.useChinese ? "\xE6\x8B\x89\xE5\x8A\xA8/\xE5\xBD\x92\xE4\xBD\x8D" : "Pull/Return", g.smallFont, { 180, 214, 188 });
+        CfgGdiText(g, labelX, row1Y + 2, 150, buttonH, s.useChinese ? "\xE5\xAE\x9E\xE9\x99\x85\xE6\x96\xB9\xE5\x90\x91" : "Observed", g.smallFont, { 180, 214, 188 });
         CfgGdiText(
             g,
             valueX,
             row1Y + 2,
-            260,
+            210,
+            buttonH,
+            CfgBoltPullDirectionLabel(s, s.calibrationBoltActualDirection),
+            g.smallFont,
+            { 226, 232, 242 });
+        drawDirectionButtons(row1Y, s.calibrationBoltActualDirection);
+
+        CfgGdiText(g, labelX, row2Y + 2, 150, buttonH, s.useChinese ? "\xE8\xB7\x9D\xE7\xA6\xBB/\xE5\xBD\x92\xE4\xBD\x8D" : "Pull/Return", g.smallFont, { 180, 214, 188 });
+        CfgGdiText(
+            g,
+            valueX,
+            row2Y + 2,
+            210,
             buttonH,
             "P " + CfgFormatFloat(pull, 0.001f) + " R " + CfgFormatFloat(ret, 0.001f),
             g.smallFont,
             { 226, 232, 242 });
         const char* distLabels[4] = { "P-", "P+", "R-", "R+" };
         for (int i = 0; i < 4; ++i)
-            CfgGdiButton(g, buttonX + i * (buttonW + gap), row1Y, buttonW, buttonH, distLabels[i]);
-        CfgGdiButton(g, buttonX + 7 * (buttonW + gap), row1Y, 90, buttonH, s.useChinese ? "\xE9\x87\x8D\xE7\xBD\xAE" : "Reset");
-
-        CfgGdiText(
-            g,
-            labelX,
-            row2Y,
-            1130,
-            26,
-            s.useChinese ? "\xE6\x8B\x89\xE5\x88\xB0 P \xE8\xB7\x9D\xE7\xA6\xBB\xE7\xAE\x97\xE5\x88\xB0\xE5\xBA\x95\xEF\xBC\x8C\xE5\x9B\x9E\xE5\x88\xB0 R \xE8\xB7\x9D\xE7\xA6\xBB\xE5\x86\x85\xE7\xAE\x97\xE5\xBD\x92\xE4\xBD\x8D\xE3\x80\x82" : "Pull to P to reach rear; return within R to complete.",
-            g.smallFont,
-            { 160, 196, 255 });
+            CfgGdiButton(g, buttonX + i * (buttonW + gap), row2Y, buttonW, buttonH, distLabels[i]);
+        CfgGdiButton(g, buttonX + 5 * (buttonW + gap), row2Y, 122, buttonH, s.useChinese ? "\xE5\xBA\x94\xE7\x94\xA8\xE4\xBF\xAE\xE6\xAD\xA3" : "Apply");
+        CfgGdiButton(g, buttonX + 7 * (buttonW + gap), row2Y, 90, buttonH, s.useChinese ? "\xE9\x87\x8D\xE7\xBD\xAE" : "Reset");
+        (void)axis;
     }
 
     static bool CfgHandleCalibrationBoltPullControlClick(CfgOverlayState& s, int mx, int my)
@@ -3698,8 +3821,9 @@ namespace
         constexpr int panelH = 178;
         constexpr int buttonX = panelX + 420;
         constexpr int row0Y = panelY + 44;
-        constexpr int row1Y = panelY + 86;
-        constexpr int buttonW = 54;
+        constexpr int row1Y = panelY + 82;
+        constexpr int row2Y = panelY + 120;
+        constexpr int buttonW = 64;
         constexpr int buttonH = 28;
         constexpr int gap = 8;
         if (mx < panelX || mx >= panelX + panelW || my < panelY || my >= panelY + panelH)
@@ -3715,34 +3839,41 @@ namespace
         float pull = CfgFloatValue(s, "MagazineInteractionBoltPullDistanceMeters", 0.055f);
         float ret = CfgFloatValue(s, "MagazineInteractionBoltReturnDistanceMeters", 0.018f);
 
-        auto normalizeAxis = [&]() -> void
-            {
-                const float length = axis.Length();
-                axis = (length > 0.0001f) ? (axis * (1.0f / length)) : Vector(0.0f, 0.0f, 1.0f);
-            };
-
         bool changed = false;
         for (int i = 0; i < 6; ++i)
         {
-            if (!hit(i, row0Y, buttonW))
-                continue;
-            float* components[3] = { &axis.x, &axis.y, &axis.z };
-            const int component = std::clamp(i / 2, 0, 2);
-            const float sign = (i % 2) == 0 ? -1.0f : 1.0f;
-            *components[component] = std::clamp(*components[component] + sign * 0.10f, -1.0f, 1.0f);
-            normalizeAxis();
-            changed = true;
-            break;
+            if (hit(i, row0Y, buttonW))
+            {
+                s.calibrationBoltDesiredDirection = i;
+                s.dirty = true;
+                return true;
+            }
+            if (hit(i, row1Y, buttonW))
+            {
+                s.calibrationBoltActualDirection = i;
+                s.dirty = true;
+                return true;
+            }
         }
         if (!changed)
         {
-            if (hit(0, row1Y, buttonW)) { pull = std::clamp(pull - 0.005f, 0.0f, 0.25f); changed = true; }
-            else if (hit(1, row1Y, buttonW)) { pull = std::clamp(pull + 0.005f, 0.0f, 0.25f); changed = true; }
-            else if (hit(2, row1Y, buttonW)) { ret = std::clamp(ret - 0.005f, 0.0f, 0.10f); changed = true; }
-            else if (hit(3, row1Y, buttonW)) { ret = std::clamp(ret + 0.005f, 0.0f, 0.10f); changed = true; }
-            else if (hit(7, row1Y, 90))
+            if (hit(0, row2Y, buttonW)) { pull = std::clamp(pull - 0.005f, 0.0f, 0.25f); changed = true; }
+            else if (hit(1, row2Y, buttonW)) { pull = std::clamp(pull + 0.005f, 0.0f, 0.25f); changed = true; }
+            else if (hit(2, row2Y, buttonW)) { ret = std::clamp(ret - 0.005f, 0.0f, 0.10f); changed = true; }
+            else if (hit(3, row2Y, buttonW)) { ret = std::clamp(ret + 0.005f, 0.0f, 0.10f); changed = true; }
+            else if (hit(5, row2Y, 122))
+            {
+                axis = CfgCorrectBoltPullAxisFromObservedDirection(
+                    axis,
+                    s.calibrationBoltActualDirection,
+                    s.calibrationBoltDesiredDirection);
+                changed = true;
+            }
+            else if (hit(7, row2Y, 90))
             {
                 axis = Vector(0.0f, 0.0f, 1.0f);
+                s.calibrationBoltDesiredDirection = 5;
+                s.calibrationBoltActualDirection = 5;
                 pull = 0.055f;
                 ret = 0.018f;
                 changed = true;

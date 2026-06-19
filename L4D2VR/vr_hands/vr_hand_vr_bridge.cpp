@@ -2539,8 +2539,12 @@ void VR::PublishMagazineInteractionBoltBox(
     int boneIndex,
     const char* modelName)
 {
-    if (!m_MagazineInteractionEnabled && !m_MagazineBoxDebugEnabled)
+    if (!m_MagazineInteractionEnabled &&
+        !m_MagazineBoxDebugEnabled &&
+        !m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed))
+    {
         return;
+    }
 
     MagazineInteractionBoxSnapshot snapshot{};
     snapshot.origin = origin;
@@ -5945,14 +5949,13 @@ bool VR::DrawVrHandsForEyeImmediate(
     VrHandDrawPass drawPass,
     bool allowQueuedMode)
 {
-    const bool drawGloves = m_VrHandsEnabled;
+    const bool drawGloves = m_VrHandsEnabled && m_Input;
     const bool calibrationOverlayActive =
         m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed);
-    const bool drawMagazineDebugBoxes = m_MagazineBoxDebugEnabled && !calibrationOverlayActive;
+    const bool drawMagazineDebugBoxes = m_MagazineBoxDebugEnabled || calibrationOverlayActive;
     if ((!drawGloves && !drawMagazineDebugBoxes) ||
         !m_IsVREnabled ||
-        !m_Game ||
-        (drawGloves && !m_Input))
+        !m_Game)
     {
         return false;
     }
@@ -6305,10 +6308,13 @@ void VR::BeginVrHandsEyeRender(const CViewSetup& view, int eyeIndex)
     m_VrHandsActiveEyeView = nullptr;
     m_VrHandsActiveEyeIndex = -1;
     m_VrHandsWorldMaskDrawn = false;
-    if (!m_IsVREnabled || !m_Input || !m_Game)
+    const bool calibrationOverlayActive =
+        m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed);
+    const bool drawMagazineDebugBoxes = m_MagazineBoxDebugEnabled || calibrationOverlayActive;
+    if (!m_IsVREnabled || !m_Game)
         return;
 
-    if (m_VrHandsEnabled && m_VrHandsGlovesEnabled)
+    if (m_VrHandsEnabled && m_Input && m_VrHandsGlovesEnabled)
     {
         if (!m_VrHands)
             m_VrHands = std::make_unique<VrHandSystem>();
@@ -6320,7 +6326,7 @@ void VR::BeginVrHandsEyeRender(const CViewSetup& view, int eyeIndex)
         }
     }
 
-    if (!m_VrHandsEnabled && !m_NativeViewmodelHandsOnly)
+    if (!m_VrHandsEnabled && !m_NativeViewmodelHandsOnly && !drawMagazineDebugBoxes)
         return;
 
     m_VrHandsActiveEyeView = &view;
