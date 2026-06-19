@@ -194,7 +194,12 @@ namespace
         { "MagazineInteractionMagazineBoxHalfExtentsMeters", CfgOptionType::Vec3, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE5\xBC\xB9\xE5\x8C\xA3\xE7\x9B\x92\xE5\x8D\x8A\xE5\xB0\xBA\xE5\xAF\xB8", 0.0f, 0.5f, "0,0,0" },
         { "MagazineInteractionMagazineBoxLocalOffsetMeters", CfgOptionType::Vec3, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE5\xBC\xB9\xE5\x8C\xA3\xE7\x9B\x92\xE4\xBD\x8D\xE7\xBD\xAE\xE5\x81\x8F\xE7\xA7\xBB", -0.5f, 0.5f, "0,0,0" },
         { "MagazineInteractionMagazineBoxLocalRotationOffsetDeg", CfgOptionType::Vec3, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE5\xBC\xB9\xE5\x8C\xA3\xE7\x9B\x92\xE6\x97\x8B\xE8\xBD\xAC", -180.0f, 180.0f, "0,0,0" },
-        { "MagazineInteractionSocketCaptureAngleDeg", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "\xE6\x8F\x92\xE6\xA7\xBD\xE6\x8D\x95\xE8\x8E\xB7\xE8\xA7\x92\xE5\xBA\xA6", 0.0f, 89.0f, "35" },
+        { "MagazineInteractionSocketCaptureBoxHalfExtentsMeters", CfgOptionType::Vec3, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x8F\x92\xE5\x85\xA5\xE5\x88\xA4\xE5\xAE\x9A\xE7\x9B\x92\xE5\x8D\x8A\xE5\xB0\xBA\xE5\xAF\xB8", 0.0f, 0.5f, "0,0,0" },
+        { "MagazineInteractionSocketCaptureBoxLocalOffsetMeters", CfgOptionType::Vec3, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x8F\x92\xE5\x85\xA5\xE5\x88\xA4\xE5\xAE\x9A\xE7\x9B\x92\xE4\xBD\x8D\xE7\xBD\xAE\xE5\x81\x8F\xE7\xA7\xBB", -0.5f, 0.5f, "0,0,0" },
+        { "MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg", CfgOptionType::Vec3, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x8F\x92\xE5\x85\xA5\xE5\x88\xA4\xE5\xAE\x9A\xE7\x9B\x92\xE6\x97\x8B\xE8\xBD\xAC", -180.0f, 180.0f, "0,0,0" },
+        { "MagazineInteractionSocketCaptureAngleDeg", CfgOptionType::Float, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x8F\x92\xE6\xA7\xBD\xE6\x8D\x95\xE8\x8E\xB7\xE8\xA7\x92\xE5\xBA\xA6", 0.0f, 89.0f, "35" },
+        { "MagazineInteractionSocketRequiredDepthMeters", CfgOptionType::Float, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x8F\x92\xE5\x85\xA5\xE6\xB7\xB1\xE5\xBA\xA6", 0.0f, 0.25f, "0.04" },
+        { "MagazineInteractionSocketRequiredOverlapFraction", CfgOptionType::Float, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x8F\x92\xE5\x85\xA5\xE9\x87\x8D\xE5\x8F\xA0\xE7\x8E\x87", 0.0f, 1.0f, "0.45" },
         { "VrHandsMotionRangeWithoutController", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "\xE6\x89\x8B\xE6\x8C\x87\xE5\x8A\xA8\xE4\xBD\x9C\xE5\xBF\xBD\xE7\x95\xA5\xE5\xAE\x9E\xE4\xBD\x93\xE6\x89\x8B\xE6\x9F\x84\xE9\x99\x90\xE5\x88\xB6", 0.0f, 0.0f, "false" },
         { "VrHandsModelScale", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "\xE7\x8B\xAC\xE7\xAB\x8B\xE6\xB8\xB2\xE6\x9F\x93\x20\x56\x52\x20\xE6\x89\x8B\xE5\xB0\xBA\xE5\xAF\xB8\xE5\x80\x8D\xE7\x8E\x87", 0.25f, 4.0f, "1.0" },
         { "VrHandsLeftPoseOffsetMeters", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "\xE5\xB7\xA6\xE6\x89\x8B\xE5\xA7\xBF\xE6\x80\x81\xE4\xBD\x8D\xE7\xBD\xAE\xE5\x81\x8F\xE7\xA7\xBB\xEF\xBC\x88\xE7\xB1\xB3\xEF\xBC\x89", -1.0f, 1.0f, "0,0,0" },
@@ -1967,6 +1972,19 @@ namespace
         s.values[key] = CfgFormatVector3Value(clamped, step);
     }
 
+    static void CfgSetFloatValueForKey(CfgOverlayState& s, const char* key, float value, float step)
+    {
+        if (!key || !*key)
+            return;
+
+        const int specIndex = CfgFindSpecIndex(key);
+        float clamped = std::isfinite(value) ? value : 0.0f;
+        if (specIndex >= 0)
+            clamped = CfgClampFloatToSpec(kCfgOptionSpecs[specIndex], clamped);
+
+        s.values[key] = CfgFormatFloat(clamped, step);
+    }
+
     static void CfgApplyMagazineBoxCalibrationRuntimeParams(CfgOverlayState& s)
     {
         if (!g_Game || !g_Game->m_VR)
@@ -1981,12 +1999,33 @@ namespace
             CfgVec3ValueForKey(s, "MagazineInteractionMagazineBoxLocalRotationOffsetDeg", Vector(0.0f, 0.0f, 0.0f), -180.0f, 180.0f);
     }
 
+    static void CfgApplySocketCaptureCalibrationRuntimeParams(CfgOverlayState& s)
+    {
+        if (!g_Game || !g_Game->m_VR)
+            return;
+
+        VR* vrState = g_Game->m_VR;
+        vrState->m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters =
+            CfgVec3ValueForKey(s, "MagazineInteractionSocketCaptureBoxHalfExtentsMeters", Vector(0.0f, 0.0f, 0.0f), 0.0f, 0.50f);
+        vrState->m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters =
+            CfgVec3ValueForKey(s, "MagazineInteractionSocketCaptureBoxLocalOffsetMeters", Vector(0.0f, 0.0f, 0.0f), -0.50f, 0.50f);
+        vrState->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg =
+            CfgVec3ValueForKey(s, "MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg", Vector(0.0f, 0.0f, 0.0f), -180.0f, 180.0f);
+        vrState->m_MagazineInteractionSocketCaptureAngleDeg =
+            CfgFloatValue(s, "MagazineInteractionSocketCaptureAngleDeg", 35.0f);
+        vrState->m_MagazineInteractionSocketRequiredDepthMeters =
+            CfgFloatValue(s, "MagazineInteractionSocketRequiredDepthMeters", 0.04f);
+        vrState->m_MagazineInteractionSocketRequiredOverlapFraction =
+            CfgFloatValue(s, "MagazineInteractionSocketRequiredOverlapFraction", 0.45f);
+    }
+
     static void CfgApplyCalibrationRuntimeState(CfgOverlayState& s)
     {
         if (!g_Game || !g_Game->m_VR)
             return;
 
         CfgApplyMagazineBoxCalibrationRuntimeParams(s);
+        CfgApplySocketCaptureCalibrationRuntimeParams(s);
 
         const bool active = s.visible && s.panelMode == CfgPanelMode::MagazineCalibration;
         auto clampFinite = [](float value, float fallback, float minValue, float maxValue) -> float
@@ -2700,6 +2739,178 @@ namespace
         return true;
     }
 
+    static void CfgRenderCalibrationSocketCaptureControls(CfgOverlayState& s, CfgGdiSurface& g)
+    {
+        constexpr int panelX = 26;
+        constexpr int panelY = 318;
+        constexpr int panelW = 1228;
+        constexpr int panelH = 216;
+        constexpr int labelX = panelX + 26;
+        constexpr int valueX = panelX + 190;
+        constexpr int buttonX = panelX + 470;
+        constexpr int row0Y = panelY + 42;
+        constexpr int row1Y = panelY + 78;
+        constexpr int row2Y = panelY + 114;
+        constexpr int row3Y = panelY + 154;
+        constexpr int buttonW = 54;
+        constexpr int buttonH = 26;
+        constexpr int gap = 8;
+
+        const Vector half = CfgVec3ValueForKey(s, "MagazineInteractionSocketCaptureBoxHalfExtentsMeters", Vector(0.0f, 0.0f, 0.0f), 0.0f, 0.50f);
+        const Vector offset = CfgVec3ValueForKey(s, "MagazineInteractionSocketCaptureBoxLocalOffsetMeters", Vector(0.0f, 0.0f, 0.0f), -0.50f, 0.50f);
+        const Vector rot = CfgVec3ValueForKey(s, "MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg", Vector(0.0f, 0.0f, 0.0f), -180.0f, 180.0f);
+        const float angle = CfgFloatValue(s, "MagazineInteractionSocketCaptureAngleDeg", 35.0f);
+        const float depth = CfgFloatValue(s, "MagazineInteractionSocketRequiredDepthMeters", 0.04f);
+        const float overlap = CfgFloatValue(s, "MagazineInteractionSocketRequiredOverlapFraction", 0.45f);
+
+        CfgGdiFill(g, panelX, panelY, panelW, panelH, { 18, 21, 28 });
+        CfgGdiFrame(g, panelX, panelY, panelW, panelH, { 68, 86, 116 }, 1);
+        CfgGdiText(
+            g,
+            labelX,
+            panelY + 10,
+            720,
+            26,
+            s.useChinese ? "\xE8\xB0\x83\xE6\x95\xB4\xE6\x8F\x92\xE5\x85\xA5\xE5\x88\xA4\xE5\xAE\x9A\xE7\x9B\x92\xEF\xBC\x88\xE9\x9D\x92\xE8\x89\xB2\xE5\xAE\x9E\xE4\xBD\x93\xE6\xA1\x86\xEF\xBC\x89" : "Adjust insertion capture box",
+            g.boldFont,
+            { 238, 243, 248 });
+        CfgGdiText(
+            g,
+            labelX + 760,
+            panelY + 12,
+            410,
+            22,
+            s.useChinese ? "\xE5\x8D\x8A\xE5\xB0\xBA\xE5\xAF\xB8\x20\x30\x20\x3D\x20\xE6\xB2\xBF\xE7\x94\xA8\xE5\xBC\xB9\xE5\x8C\xA3\xE7\x9B\x92\xE5\xA4\xA7\xE5\xB0\x8F" : "Half size 0 = use magazine box size",
+            g.smallFont,
+            { 160, 196, 255 },
+            DT_RIGHT);
+
+        auto drawVecRow = [&](int y, const char* zhLabel, const char* enLabel, const std::string& value, const char* a, const char* b, const char* c, const char* d, const char* e, const char* f) -> void
+            {
+                CfgGdiText(g, labelX, y + 2, 150, buttonH, s.useChinese ? zhLabel : enLabel, g.smallFont, { 180, 214, 188 });
+                CfgGdiText(g, valueX, y + 2, 250, buttonH, value, g.smallFont, { 226, 232, 242 });
+                const char* labels[6] = { a, b, c, d, e, f };
+                for (int i = 0; i < 6; ++i)
+                    CfgGdiButton(g, buttonX + i * (buttonW + gap), y, buttonW, buttonH, labels[i]);
+            };
+
+        drawVecRow(
+            row0Y,
+            "\xE5\x88\xA4\xE5\xAE\x9A\xE7\x9B\x92\xE5\xA4\xA7\xE5\xB0\x8F",
+            "Box Size",
+            "X " + CfgFormatFloat(half.x, 0.01f) + " Y " + CfgFormatFloat(half.y, 0.01f) + " Z " + CfgFormatFloat(half.z, 0.01f),
+            "X-", "X+", "Y-", "Y+", "Z-", "Z+");
+        drawVecRow(
+            row1Y,
+            "\xE5\x88\xA4\xE5\xAE\x9A\xE7\x9B\x92\xE5\x81\x8F\xE7\xA7\xBB",
+            "Box Offset",
+            "X " + CfgFormatFloat(offset.x, 0.01f) + " Y " + CfgFormatFloat(offset.y, 0.01f) + " Z " + CfgFormatFloat(offset.z, 0.01f),
+            "X-", "X+", "Y-", "Y+", "Z-", "Z+");
+        drawVecRow(
+            row2Y,
+            "\xE5\x88\xA4\xE5\xAE\x9A\xE7\x9B\x92\xE6\x97\x8B\xE8\xBD\xAC",
+            "Box Rotation",
+            "P " + CfgFormatFloat(rot.x, 1.0f) + " Y " + CfgFormatFloat(rot.y, 1.0f) + " R " + CfgFormatFloat(rot.z, 1.0f),
+            "P-", "P+", "Y-", "Y+", "R-", "R+");
+
+        const std::string ruleText =
+            std::string(s.useChinese ? "\xE8\xA7\x92\xE5\xBA\xA6 " : "Angle ") + CfgFormatFloat(angle, 1.0f) +
+            std::string(s.useChinese ? "  \xE6\xB7\xB1\xE5\xBA\xA6 " : "  Depth ") + CfgFormatFloat(depth, 0.01f) +
+            std::string(s.useChinese ? "  \xE9\x87\x8D\xE5\x8F\xA0 " : "  Overlap ") + CfgFormatFloat(overlap, 0.05f);
+        CfgGdiText(g, labelX, row3Y + 2, 150, buttonH, s.useChinese ? "\xE5\x88\xA4\xE5\xAE\x9A\xE8\xA7\x84\xE5\x88\x99" : "Rules", g.smallFont, { 180, 214, 188 });
+        CfgGdiText(g, valueX, row3Y + 2, 250, buttonH, ruleText, g.smallFont, { 226, 232, 242 });
+        const char* ruleLabels[6] = { "A-", "A+", "D-", "D+", "O-", "O+" };
+        for (int i = 0; i < 6; ++i)
+            CfgGdiButton(g, buttonX + i * (buttonW + gap), row3Y, buttonW, buttonH, ruleLabels[i]);
+        CfgGdiButton(g, buttonX + 7 * (buttonW + gap), row3Y, 90, buttonH, s.useChinese ? "\xE9\x87\x8D\xE7\xBD\xAE" : "Reset");
+    }
+
+    static bool CfgHandleCalibrationSocketCaptureControlClick(CfgOverlayState& s, int mx, int my)
+    {
+        if (std::clamp(s.calibrationStep, 0, 3) != 2)
+            return false;
+
+        constexpr int panelX = 26;
+        constexpr int panelY = 318;
+        constexpr int panelW = 1228;
+        constexpr int panelH = 216;
+        constexpr int buttonX = panelX + 470;
+        constexpr int row0Y = panelY + 42;
+        constexpr int row1Y = panelY + 78;
+        constexpr int row2Y = panelY + 114;
+        constexpr int row3Y = panelY + 154;
+        constexpr int buttonW = 54;
+        constexpr int buttonH = 26;
+        constexpr int gap = 8;
+        if (mx < panelX || mx >= panelX + panelW || my < panelY || my >= panelY + panelH)
+            return false;
+
+        auto hit = [&](int index, int y, int width) -> bool
+            {
+                const int x = buttonX + index * (buttonW + gap);
+                return mx >= x && mx < x + width && my >= y && my < y + buttonH;
+            };
+
+        Vector half = CfgVec3ValueForKey(s, "MagazineInteractionSocketCaptureBoxHalfExtentsMeters", Vector(0.0f, 0.0f, 0.0f), 0.0f, 0.50f);
+        Vector offset = CfgVec3ValueForKey(s, "MagazineInteractionSocketCaptureBoxLocalOffsetMeters", Vector(0.0f, 0.0f, 0.0f), -0.50f, 0.50f);
+        Vector rot = CfgVec3ValueForKey(s, "MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg", Vector(0.0f, 0.0f, 0.0f), -180.0f, 180.0f);
+        float angle = CfgFloatValue(s, "MagazineInteractionSocketCaptureAngleDeg", 35.0f);
+        float depth = CfgFloatValue(s, "MagazineInteractionSocketRequiredDepthMeters", 0.04f);
+        float overlap = CfgFloatValue(s, "MagazineInteractionSocketRequiredOverlapFraction", 0.45f);
+
+        auto adjustVec = [&](Vector& value, int component, float delta, float minValue, float maxValue) -> void
+            {
+                float* components[3] = { &value.x, &value.y, &value.z };
+                const int clampedComponent = std::clamp(component, 0, 2);
+                *components[clampedComponent] = std::clamp(*components[clampedComponent] + delta, minValue, maxValue);
+            };
+
+        bool changed = false;
+        constexpr float sizeStep = 0.01f;
+        constexpr float offsetStep = 0.01f;
+        constexpr float rotStep = 5.0f;
+        for (int i = 0; i < 6; ++i)
+        {
+            const int component = i / 2;
+            const float sign = (i % 2) == 0 ? -1.0f : 1.0f;
+            if (hit(i, row0Y, buttonW)) { adjustVec(half, component, sign * sizeStep, 0.0f, 0.50f); changed = true; break; }
+            if (hit(i, row1Y, buttonW)) { adjustVec(offset, component, sign * offsetStep, -0.50f, 0.50f); changed = true; break; }
+            if (hit(i, row2Y, buttonW)) { adjustVec(rot, component, sign * rotStep, -180.0f, 180.0f); changed = true; break; }
+        }
+        if (!changed)
+        {
+            if (hit(0, row3Y, buttonW)) { angle = std::clamp(angle - 5.0f, 0.0f, 89.0f); changed = true; }
+            else if (hit(1, row3Y, buttonW)) { angle = std::clamp(angle + 5.0f, 0.0f, 89.0f); changed = true; }
+            else if (hit(2, row3Y, buttonW)) { depth = std::clamp(depth - 0.01f, 0.0f, 0.25f); changed = true; }
+            else if (hit(3, row3Y, buttonW)) { depth = std::clamp(depth + 0.01f, 0.0f, 0.25f); changed = true; }
+            else if (hit(4, row3Y, buttonW)) { overlap = std::clamp(overlap - 0.05f, 0.0f, 1.0f); changed = true; }
+            else if (hit(5, row3Y, buttonW)) { overlap = std::clamp(overlap + 0.05f, 0.0f, 1.0f); changed = true; }
+            else if (hit(7, row3Y, 90))
+            {
+                half = Vector(0.0f, 0.0f, 0.0f);
+                offset = Vector(0.0f, 0.0f, 0.0f);
+                rot = Vector(0.0f, 0.0f, 0.0f);
+                angle = 35.0f;
+                depth = 0.04f;
+                overlap = 0.45f;
+                changed = true;
+            }
+        }
+        if (!changed)
+            return true;
+
+        CfgSetVec3ValueForKey(s, "MagazineInteractionSocketCaptureBoxHalfExtentsMeters", half, 0.01f);
+        CfgSetVec3ValueForKey(s, "MagazineInteractionSocketCaptureBoxLocalOffsetMeters", offset, 0.01f);
+        CfgSetVec3ValueForKey(s, "MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg", rot, 1.0f);
+        CfgSetFloatValueForKey(s, "MagazineInteractionSocketCaptureAngleDeg", angle, 1.0f);
+        CfgSetFloatValueForKey(s, "MagazineInteractionSocketRequiredDepthMeters", depth, 0.01f);
+        CfgSetFloatValueForKey(s, "MagazineInteractionSocketRequiredOverlapFraction", overlap, 0.05f);
+        CfgApplyCalibrationRuntimeState(s);
+        s.status = s.useChinese ? "\xE5\xB7\xB2\xE6\x9B\xB4\xE6\x96\xB0\xE6\x8F\x92\xE5\x85\xA5\xE5\x88\xA4\xE5\xAE\x9A\xE7\x9B\x92\xEF\xBC\x8C\xE6\x8C\x89\xE4\xBF\x9D\xE5\xAD\x98\xE5\x86\x99\xE5\x85\xA5\xE9\x85\x8D\xE7\xBD\xAE\xE3\x80\x82" : "Insertion capture box updated; press Save to persist.";
+        CfgMarkEdited(s);
+        return true;
+    }
+
     static void CfgRenderMagazineCalibration(CfgOverlayState& s, CfgGdiSurface& g)
     {
         MagazineInteractionCalibrationSnapshot snapshot{};
@@ -2828,6 +3039,11 @@ namespace
             {
                 CfgGdiText(g, 26, 286, 900, 24, std::string(CfgCalibrationStepTitle(s, step)) + "  selected bone: " + selected, g.boldFont, { 234, 238, 246 });
                 CfgRenderCalibrationMagazineBoxControls(s, g);
+            }
+            else if (step == 2)
+            {
+                CfgGdiText(g, 26, 286, 900, 24, std::string(CfgCalibrationStepTitle(s, step)) + "  selected bone: " + selected, g.boldFont, { 234, 238, 246 });
+                CfgRenderCalibrationSocketCaptureControls(s, g);
             }
             else
             {
@@ -4073,6 +4289,8 @@ namespace
         if (s.panelMode == CfgPanelMode::MagazineCalibration)
         {
             if (CfgHandleCalibrationMagazineBoxControlClick(s, mx, my))
+                return;
+            if (CfgHandleCalibrationSocketCaptureControlClick(s, mx, my))
                 return;
             if (CfgHandleCalibrationPreviewControlClick(s, mx, my))
                 return;

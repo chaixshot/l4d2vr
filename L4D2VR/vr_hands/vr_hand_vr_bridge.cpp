@@ -2615,7 +2615,6 @@ void VR::PublishMagazineInteractionCalibrationSnapshot(
 
     std::lock_guard<std::mutex> lock(m_MagazineInteractionCalibrationMutex);
     bool sameSelectionWindow = false;
-    bool zeroFrameFallbackWindow = false;
     float existingAgeSeconds = 9999.0f;
     if (m_MagazineInteractionCalibrationSnapshot.valid)
     {
@@ -2632,7 +2631,6 @@ void VR::PublishMagazineInteractionCalibrationSnapshot(
             existingAgeSeconds < 0.10f)
         {
             sameSelectionWindow = true;
-            zeroFrameFallbackWindow = true;
         }
     }
 
@@ -2647,75 +2645,10 @@ void VR::PublishMagazineInteractionCalibrationSnapshot(
         m_MagazineInteractionCalibrationSnapshot.sourceScore > sourceScore &&
         (sameSelectionWindow || (currentSnapshotIsStrongViewmodel && candidateIsWeakNonViewmodel));
     if (shouldKeepCurrent)
-    {
-        static std::chrono::steady_clock::time_point s_lastSuppressedLog{};
-        if (s_lastSuppressedLog.time_since_epoch().count() == 0 ||
-            std::chrono::duration<float>(now - s_lastSuppressedLog).count() >= 1.0f)
-        {
-            s_lastSuppressedLog = now;
-            Game::logMsg(
-                "[VR][MagCalib][publish-skip] reason=keep-higher-score frame=%u sameWindow=%d zeroFrameWindow=%d currentStrong=%d candidateWeak=%d currentAge=%.3f candidateModel=\"%s\" candidateEnt=%d candidateClass=%s candidateScore=%d candidateWid=%d candidateInferredWid=%d candidateBones=%d currentModel=\"%s\" currentEnt=%d currentClass=%s currentScore=%d currentWid=%d currentInferredWid=%d currentBones=%d",
-                renderFrameSeq,
-                sameSelectionWindow ? 1 : 0,
-                zeroFrameFallbackWindow ? 1 : 0,
-                currentSnapshotIsStrongViewmodel ? 1 : 0,
-                candidateIsWeakNonViewmodel ? 1 : 0,
-                existingAgeSeconds,
-                modelName,
-                entityIndex,
-                (sourceClassName && *sourceClassName) ? sourceClassName : "<null>",
-                sourceScore,
-                weaponId,
-                inferredWeaponId,
-                numBones,
-                m_MagazineInteractionCalibrationSnapshot.modelName.c_str(),
-                m_MagazineInteractionCalibrationSnapshot.entityIndex,
-                m_MagazineInteractionCalibrationSnapshot.sourceClassName.empty() ? "<null>" : m_MagazineInteractionCalibrationSnapshot.sourceClassName.c_str(),
-                m_MagazineInteractionCalibrationSnapshot.sourceScore,
-                m_MagazineInteractionCalibrationSnapshot.weaponId,
-                m_MagazineInteractionCalibrationSnapshot.inferredWeaponId,
-                m_MagazineInteractionCalibrationSnapshot.numBones);
-        }
         return;
-    }
+
     snapshot.publishSeq = ++m_MagazineInteractionCalibrationPublishSeq;
     m_MagazineInteractionCalibrationSnapshot = std::move(snapshot);
-    {
-        static std::string s_lastAcceptedModel;
-        static uint32_t s_lastAcceptedFingerprint = 0;
-        static uint32_t s_lastAcceptedBoneSignature = 0;
-        static std::chrono::steady_clock::time_point s_lastAcceptedLog{};
-        const auto now = std::chrono::steady_clock::now();
-        const bool identityChanged =
-            s_lastAcceptedModel != m_MagazineInteractionCalibrationSnapshot.modelName ||
-            s_lastAcceptedFingerprint != m_MagazineInteractionCalibrationSnapshot.modelFingerprint ||
-            s_lastAcceptedBoneSignature != m_MagazineInteractionCalibrationSnapshot.boneSignature;
-        const bool timeElapsed =
-            s_lastAcceptedLog.time_since_epoch().count() == 0 ||
-            std::chrono::duration<float>(now - s_lastAcceptedLog).count() >= 1.0f;
-        if (identityChanged || timeElapsed)
-        {
-            s_lastAcceptedModel = m_MagazineInteractionCalibrationSnapshot.modelName;
-            s_lastAcceptedFingerprint = m_MagazineInteractionCalibrationSnapshot.modelFingerprint;
-            s_lastAcceptedBoneSignature = m_MagazineInteractionCalibrationSnapshot.boneSignature;
-            s_lastAcceptedLog = now;
-            Game::logMsg(
-                "[VR][MagCalib][publish-accepted] seq=%u frame=%u ent=%d class=%s model=\"%s\" wid=%d inferredWid=%d score=%d bones=%d fp=%08X boneSig=%08X recMag=%d recBolt=%d",
-                m_MagazineInteractionCalibrationSnapshot.publishSeq,
-                m_MagazineInteractionCalibrationSnapshot.renderFrameSeq,
-                m_MagazineInteractionCalibrationSnapshot.entityIndex,
-                m_MagazineInteractionCalibrationSnapshot.sourceClassName.empty() ? "<null>" : m_MagazineInteractionCalibrationSnapshot.sourceClassName.c_str(),
-                m_MagazineInteractionCalibrationSnapshot.modelName.c_str(),
-                m_MagazineInteractionCalibrationSnapshot.weaponId,
-                m_MagazineInteractionCalibrationSnapshot.inferredWeaponId,
-                m_MagazineInteractionCalibrationSnapshot.sourceScore,
-                m_MagazineInteractionCalibrationSnapshot.numBones,
-                m_MagazineInteractionCalibrationSnapshot.modelFingerprint,
-                m_MagazineInteractionCalibrationSnapshot.boneSignature,
-                m_MagazineInteractionCalibrationSnapshot.recommendedMagazineBone,
-                m_MagazineInteractionCalibrationSnapshot.recommendedBoltBone);
-        }
-    }
 }
 
 bool VR::GetMagazineInteractionBox(MagazineInteractionBoxSnapshot& outSnapshot) const
