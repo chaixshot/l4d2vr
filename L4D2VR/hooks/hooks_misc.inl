@@ -4995,6 +4995,7 @@ namespace
         VR* vr,
         void* drawState,
         const std::string& modelName,
+        bool sourceIsViewmodelClass,
         int entityIndex,
         int hitboxSet,
         const void* pModelToWorld,
@@ -5019,6 +5020,18 @@ namespace
         const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
         if (HooksModelNameIsArmsOrHands(lowerModel))
             return;
+        const bool sourceIsViewmodelPath = HooksModelNameIsViewmodel(lowerModel);
+        const bool sourceHasLooseViewmodelMarker = HooksModelNameHasLooseViewmodelMarker(lowerModel);
+        const bool allowSlowBoneNameProbe =
+            calibrationOverlayActive ||
+            vr->m_MagazineBoxDebugEnabled;
+        if (!sourceIsViewmodelClass &&
+            !sourceIsViewmodelPath &&
+            !sourceHasLooseViewmodelMarker &&
+            !allowSlowBoneNameProbe)
+        {
+            return;
+        }
 
         std::vector<std::string> boneNames;
         std::vector<int> boneParents;
@@ -5042,11 +5055,15 @@ namespace
         {
             return;
         }
-        const bool sourceIsViewmodelPath = HooksModelNameIsViewmodel(lowerModel);
-        const bool sourceHasLooseViewmodelMarker = HooksModelNameHasLooseViewmodelMarker(lowerModel);
-        const bool sourceLooksLikeWeaponBones = HooksCalibrationBoneNamesLookLikeWeapon(boneNames);
+        const bool sourceLooksLikeWeaponBones =
+            (!sourceIsViewmodelClass &&
+                !sourceIsViewmodelPath &&
+                !sourceHasLooseViewmodelMarker)
+            ? HooksCalibrationBoneNamesLookLikeWeapon(boneNames)
+            : true;
         if (!sourceIsViewmodelPath &&
             !sourceHasLooseViewmodelMarker &&
+            !sourceIsViewmodelClass &&
             !sourceLooksLikeWeaponBones)
         {
             return;
@@ -9835,6 +9852,7 @@ namespace
                 vr,
                 drawState,
                 modelName,
+                HooksModelNameIsViewmodel(lowerModel),
                 info.entity_index,
                 info.hitboxset,
                 info.pModelToWorld,
@@ -10979,6 +10997,7 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 				m_VR,
 				state,
 				modelName,
+				drawEntityIsViewmodelClass,
 				info.entity_index,
 				info.hitboxset,
 				info.pModelToWorld,

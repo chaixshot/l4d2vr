@@ -3032,6 +3032,7 @@ public:
 		const std::vector<MagazineInteractionCalibrationBone>& bones);
 	bool GetMagazineInteractionBox(MagazineInteractionBoxSnapshot& outSnapshot) const;
 	bool GetMagazineInteractionBoltBox(MagazineInteractionBoxSnapshot& outSnapshot) const;
+	bool HasFreshMagazineInteractionDebugBoxWork() const;
 	bool GetMagazineInteractionCalibrationSnapshot(MagazineInteractionCalibrationSnapshot& outSnapshot) const;
 	bool UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown, bool leftGripJustPressed);
 	void MarkMagazineInteractionReloadCommandIssued();

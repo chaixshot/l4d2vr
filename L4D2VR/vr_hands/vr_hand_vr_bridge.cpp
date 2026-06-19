@@ -2660,6 +2660,37 @@ bool VR::GetMagazineInteractionBoltBox(MagazineInteractionBoxSnapshot& outSnapsh
     return true;
 }
 
+bool VR::HasFreshMagazineInteractionDebugBoxWork() const
+{
+    if (!m_MagazineBoxDebugEnabled &&
+        !m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed))
+    {
+        return false;
+    }
+
+    if (m_MagazineInteractionSocketValid &&
+        (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
+            m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine))
+    {
+        return true;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    const float staleSeconds = std::max(0.02f, m_MagazineInteractionStaleSeconds);
+    auto fresh = [&](const MagazineInteractionBoxSnapshot& snapshot) -> bool
+    {
+        return snapshot.publishedAt.time_since_epoch().count() != 0 &&
+            std::chrono::duration<float>(now - snapshot.publishedAt).count() <= staleSeconds;
+    };
+
+    MagazineInteractionBoxSnapshot box{};
+    if (GetMagazineInteractionBox(box) && fresh(box))
+        return true;
+
+    MagazineInteractionBoxSnapshot boltBox{};
+    return GetMagazineInteractionBoltBox(boltBox) && fresh(boltBox);
+}
+
 bool VR::GetMagazineInteractionCalibrationSnapshot(MagazineInteractionCalibrationSnapshot& outSnapshot) const
 {
     std::lock_guard<std::mutex> lock(m_MagazineInteractionCalibrationMutex);
@@ -5952,7 +5983,10 @@ bool VR::DrawVrHandsForEyeImmediate(
     const bool drawGloves = m_VrHandsEnabled && m_Input;
     const bool calibrationOverlayActive =
         m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed);
-    const bool drawMagazineDebugBoxes = m_MagazineBoxDebugEnabled || calibrationOverlayActive;
+    const bool drawMagazineDebugBoxes =
+        (m_MagazineBoxDebugEnabled || calibrationOverlayActive) &&
+        drawPass != VrHandDrawPass::WorldVisibilityMask &&
+        HasFreshMagazineInteractionDebugBoxWork();
     if ((!drawGloves && !drawMagazineDebugBoxes) ||
         !m_IsVREnabled ||
         !m_Game)
@@ -6310,7 +6344,9 @@ void VR::BeginVrHandsEyeRender(const CViewSetup& view, int eyeIndex)
     m_VrHandsWorldMaskDrawn = false;
     const bool calibrationOverlayActive =
         m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed);
-    const bool drawMagazineDebugBoxes = m_MagazineBoxDebugEnabled || calibrationOverlayActive;
+    const bool drawMagazineDebugBoxes =
+        (m_MagazineBoxDebugEnabled || calibrationOverlayActive) &&
+        HasFreshMagazineInteractionDebugBoxWork();
     if (!m_IsVREnabled || !m_Game)
         return;
 

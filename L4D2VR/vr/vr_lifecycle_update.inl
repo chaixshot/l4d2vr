@@ -2091,7 +2091,8 @@ bool VR::QueueVrHandsDrawForEye(
         m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed);
     const bool drawMagazineDebugBoxes =
         (m_MagazineBoxDebugEnabled || calibrationOverlayActive) &&
-        drawPass != VrHandDrawPass::WorldVisibilityMask;
+        drawPass != VrHandDrawPass::WorldVisibilityMask &&
+        HasFreshMagazineInteractionDebugBoxWork();
     if (!renderContext ||
         (!drawGloves && !drawMagazineDebugBoxes) ||
         !m_IsVREnabled ||
