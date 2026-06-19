@@ -464,7 +464,7 @@ bool VrHandSystem::EnsureStandaloneMagazineBoxLoaded(
         std::max(mins.y, maxs.y),
         std::max(mins.z, maxs.z));
 
-    const float minExtent = 0.50f;
+    const float minExtent = 0.01f;
     if ((boxMaxs.x - boxMins.x) < minExtent)
     {
         const float center = (boxMaxs.x + boxMins.x) * 0.5f;

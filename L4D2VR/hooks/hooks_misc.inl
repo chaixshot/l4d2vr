@@ -2399,6 +2399,144 @@ namespace
         return true;
     }
 
+    template <typename TValue>
+    inline bool FindMagazineInteractionProfileOrWeaponOverride(
+        const VR* vr,
+        int preferredWeaponId,
+        const std::string& preferredProfileKey,
+        const std::unordered_map<std::string, TValue>& profileOverrides,
+        const std::unordered_map<int, TValue>& weaponOverrides,
+        TValue& outValue)
+    {
+        if (FindMagazineInteractionProfileOverride(vr, preferredProfileKey, profileOverrides, outValue))
+            return true;
+
+        const int weaponId = ResolveMagazineInteractionWeaponIdForConfig(vr, preferredWeaponId);
+        if (weaponId <= 0)
+            return false;
+
+        const auto weaponIt = weaponOverrides.find(weaponId);
+        if (weaponIt == weaponOverrides.end())
+            return false;
+
+        outValue = weaponIt->second;
+        return true;
+    }
+
+    inline Vector ResolveMagazineInteractionMagazineBoxHalfExtentsMeters(const VR* vr)
+    {
+        if (!vr)
+            return Vector(0.0f, 0.0f, 0.0f);
+
+        Vector value = vr->m_MagazineInteractionMagazineBoxHalfExtentsMeters;
+        FindMagazineInteractionProfileOrWeaponOverride(
+            vr,
+            0,
+            std::string(),
+            vr->m_MagazineInteractionMagazineBoxHalfExtentsMetersProfileOverrides,
+            vr->m_MagazineInteractionMagazineBoxHalfExtentsMetersOverrides,
+            value);
+        value.x = std::clamp(value.x, 0.0f, 0.50f);
+        value.y = std::clamp(value.y, 0.0f, 0.50f);
+        value.z = std::clamp(value.z, 0.0f, 0.50f);
+        return value;
+    }
+
+    inline Vector ResolveMagazineInteractionMagazineBoxLocalOffsetMeters(const VR* vr)
+    {
+        if (!vr)
+            return Vector(0.0f, 0.0f, 0.0f);
+
+        Vector value = vr->m_MagazineInteractionMagazineBoxLocalOffsetMeters;
+        FindMagazineInteractionProfileOrWeaponOverride(
+            vr,
+            0,
+            std::string(),
+            vr->m_MagazineInteractionMagazineBoxLocalOffsetMetersProfileOverrides,
+            vr->m_MagazineInteractionMagazineBoxLocalOffsetMetersOverrides,
+            value);
+        value.x = std::clamp(value.x, -0.50f, 0.50f);
+        value.y = std::clamp(value.y, -0.50f, 0.50f);
+        value.z = std::clamp(value.z, -0.50f, 0.50f);
+        return value;
+    }
+
+    inline Vector ResolveMagazineInteractionMagazineBoxLocalRotationOffsetDeg(const VR* vr)
+    {
+        if (!vr)
+            return Vector(0.0f, 0.0f, 0.0f);
+
+        Vector value = vr->m_MagazineInteractionMagazineBoxLocalRotationOffsetDeg;
+        FindMagazineInteractionProfileOrWeaponOverride(
+            vr,
+            0,
+            std::string(),
+            vr->m_MagazineInteractionMagazineBoxLocalRotationOffsetDegProfileOverrides,
+            vr->m_MagazineInteractionMagazineBoxLocalRotationOffsetDegOverrides,
+            value);
+        value.x = std::clamp(value.x, -180.0f, 180.0f);
+        value.y = std::clamp(value.y, -180.0f, 180.0f);
+        value.z = std::clamp(value.z, -180.0f, 180.0f);
+        return value;
+    }
+
+    inline Vector ResolveMagazineInteractionSocketCaptureBoxHalfExtentsMeters(const VR* vr)
+    {
+        if (!vr)
+            return Vector(0.0f, 0.0f, 0.0f);
+
+        Vector value = vr->m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters;
+        FindMagazineInteractionProfileOrWeaponOverride(
+            vr,
+            0,
+            std::string(),
+            vr->m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersProfileOverrides,
+            vr->m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides,
+            value);
+        value.x = std::clamp(value.x, 0.0f, 0.50f);
+        value.y = std::clamp(value.y, 0.0f, 0.50f);
+        value.z = std::clamp(value.z, 0.0f, 0.50f);
+        return value;
+    }
+
+    inline Vector ResolveMagazineInteractionSocketCaptureBoxLocalOffsetMeters(const VR* vr)
+    {
+        if (!vr)
+            return Vector(0.0f, 0.0f, 0.0f);
+
+        Vector value = vr->m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters;
+        FindMagazineInteractionProfileOrWeaponOverride(
+            vr,
+            0,
+            std::string(),
+            vr->m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersProfileOverrides,
+            vr->m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides,
+            value);
+        value.x = std::clamp(value.x, -0.50f, 0.50f);
+        value.y = std::clamp(value.y, -0.50f, 0.50f);
+        value.z = std::clamp(value.z, -0.50f, 0.50f);
+        return value;
+    }
+
+    inline Vector ResolveMagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg(const VR* vr)
+    {
+        if (!vr)
+            return Vector(0.0f, 0.0f, 0.0f);
+
+        Vector value = vr->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg;
+        FindMagazineInteractionProfileOrWeaponOverride(
+            vr,
+            0,
+            std::string(),
+            vr->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegProfileOverrides,
+            vr->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides,
+            value);
+        value.x = std::clamp(value.x, -180.0f, 180.0f);
+        value.y = std::clamp(value.y, -180.0f, 180.0f);
+        value.z = std::clamp(value.z, -180.0f, 180.0f);
+        return value;
+    }
+
     inline Vector ResolveMagazineInteractionBoltBoxHalfExtentsMeters(
         const VR* vr,
         int preferredWeaponId,
@@ -2767,18 +2905,9 @@ namespace
             return;
 
         const float scale = (std::isfinite(vr->m_VRScale) && vr->m_VRScale > 0.001f) ? vr->m_VRScale : 43.2f;
-        const Vector configuredHalfMeters(
-            std::clamp(vr->m_MagazineInteractionMagazineBoxHalfExtentsMeters.x, 0.0f, 0.50f),
-            std::clamp(vr->m_MagazineInteractionMagazineBoxHalfExtentsMeters.y, 0.0f, 0.50f),
-            std::clamp(vr->m_MagazineInteractionMagazineBoxHalfExtentsMeters.z, 0.0f, 0.50f));
-        const Vector localOffsetMeters(
-            std::clamp(vr->m_MagazineInteractionMagazineBoxLocalOffsetMeters.x, -0.50f, 0.50f),
-            std::clamp(vr->m_MagazineInteractionMagazineBoxLocalOffsetMeters.y, -0.50f, 0.50f),
-            std::clamp(vr->m_MagazineInteractionMagazineBoxLocalOffsetMeters.z, -0.50f, 0.50f));
-        const Vector rotationDeg(
-            std::clamp(vr->m_MagazineInteractionMagazineBoxLocalRotationOffsetDeg.x, -180.0f, 180.0f),
-            std::clamp(vr->m_MagazineInteractionMagazineBoxLocalRotationOffsetDeg.y, -180.0f, 180.0f),
-            std::clamp(vr->m_MagazineInteractionMagazineBoxLocalRotationOffsetDeg.z, -180.0f, 180.0f));
+        const Vector configuredHalfMeters = ResolveMagazineInteractionMagazineBoxHalfExtentsMeters(vr);
+        const Vector localOffsetMeters = ResolveMagazineInteractionMagazineBoxLocalOffsetMeters(vr);
+        const Vector rotationDeg = ResolveMagazineInteractionMagazineBoxLocalRotationOffsetDeg(vr);
 
         const Vector sourceHalf = (maxs - mins) * 0.5f;
         Vector center = (mins + maxs) * 0.5f;
@@ -2866,18 +2995,9 @@ namespace
             return;
 
         const float scale = (std::isfinite(vr->m_VRScale) && vr->m_VRScale > 0.001f) ? vr->m_VRScale : 43.2f;
-        const Vector configuredHalfMeters(
-            std::clamp(vr->m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters.x, 0.0f, 0.50f),
-            std::clamp(vr->m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters.y, 0.0f, 0.50f),
-            std::clamp(vr->m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters.z, 0.0f, 0.50f));
-        const Vector localOffsetMeters(
-            std::clamp(vr->m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters.x, -0.50f, 0.50f),
-            std::clamp(vr->m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters.y, -0.50f, 0.50f),
-            std::clamp(vr->m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters.z, -0.50f, 0.50f));
-        const Vector rotationDeg(
-            std::clamp(vr->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg.x, -180.0f, 180.0f),
-            std::clamp(vr->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg.y, -180.0f, 180.0f),
-            std::clamp(vr->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg.z, -180.0f, 180.0f));
+        const Vector configuredHalfMeters = ResolveMagazineInteractionSocketCaptureBoxHalfExtentsMeters(vr);
+        const Vector localOffsetMeters = ResolveMagazineInteractionSocketCaptureBoxLocalOffsetMeters(vr);
+        const Vector rotationDeg = ResolveMagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg(vr);
 
         const Vector sourceHalf = (maxs - mins) * 0.5f;
         const Vector centerWorld = HooksTransformPoint(boxWorld, (mins + maxs) * 0.5f);
@@ -2909,14 +3029,8 @@ namespace
             return;
 
         const float scale = (std::isfinite(vr->m_VRScale) && vr->m_VRScale > 0.001f) ? vr->m_VRScale : 43.2f;
-        const Vector halfMeters(
-            std::clamp(vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.x, 0.005f, 0.25f),
-            std::clamp(vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.y, 0.005f, 0.25f),
-            std::clamp(vr->m_MagazineInteractionBoltBoxHalfExtentsMeters.z, 0.005f, 0.25f));
-        const Vector offsetMeters(
-            std::clamp(vr->m_MagazineInteractionBoltBoxLocalOffsetMeters.x, -0.25f, 0.25f),
-            std::clamp(vr->m_MagazineInteractionBoltBoxLocalOffsetMeters.y, -0.25f, 0.25f),
-            std::clamp(vr->m_MagazineInteractionBoltBoxLocalOffsetMeters.z, -0.25f, 0.25f));
+        const Vector halfMeters = ResolveMagazineInteractionBoltBoxHalfExtentsMeters(vr, 0, std::string());
+        const Vector offsetMeters = ResolveMagazineInteractionBoltBoxLocalOffsetMeters(vr, 0, std::string());
 
         const Vector center = offsetMeters * scale;
         const Vector half = halfMeters * scale;

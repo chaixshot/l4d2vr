@@ -964,12 +964,11 @@ namespace
             return Vector(0.0f, 0.0f, 0.0f);
 
         Vector value = vr->m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters;
-        int matchedWeaponId = 0;
-        MagazineInteractionFindWeaponOverride(
+        MagazineInteractionFindProfileOrWeaponOverride(
             vr,
+            vr->m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersProfileOverrides,
             vr->m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides,
-            value,
-            matchedWeaponId);
+            value);
 
         value.x = std::clamp(value.x, 0.0f, 0.50f);
         value.y = std::clamp(value.y, 0.0f, 0.50f);
@@ -983,12 +982,11 @@ namespace
             return Vector(0.0f, 0.0f, 0.0f);
 
         Vector value = vr->m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters;
-        int matchedWeaponId = 0;
-        MagazineInteractionFindWeaponOverride(
+        MagazineInteractionFindProfileOrWeaponOverride(
             vr,
+            vr->m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersProfileOverrides,
             vr->m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides,
-            value,
-            matchedWeaponId);
+            value);
 
         value.x = std::clamp(value.x, -0.50f, 0.50f);
         value.y = std::clamp(value.y, -0.50f, 0.50f);
@@ -1002,12 +1000,11 @@ namespace
             return Vector(0.0f, 0.0f, 0.0f);
 
         Vector value = vr->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg;
-        int matchedWeaponId = 0;
-        MagazineInteractionFindWeaponOverride(
+        MagazineInteractionFindProfileOrWeaponOverride(
             vr,
+            vr->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegProfileOverrides,
             vr->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides,
-            value,
-            matchedWeaponId);
+            value);
 
         value.x = std::clamp(value.x, -180.0f, 180.0f);
         value.y = std::clamp(value.y, -180.0f, 180.0f);
@@ -1021,13 +1018,40 @@ namespace
             return 35.0f;
 
         float value = vr->m_MagazineInteractionSocketCaptureAngleDeg;
-        int matchedWeaponId = 0;
-        MagazineInteractionFindWeaponOverride(
+        MagazineInteractionFindProfileOrWeaponOverride(
             vr,
+            vr->m_MagazineInteractionSocketCaptureAngleDegProfileOverrides,
             vr->m_MagazineInteractionSocketCaptureAngleDegOverrides,
-            value,
-            matchedWeaponId);
+            value);
         return std::clamp(value, 0.0f, 89.0f);
+    }
+
+    float MagazineInteractionResolveSocketRequiredDepthMeters(const VR* vr)
+    {
+        if (!vr)
+            return 0.04f;
+
+        float value = vr->m_MagazineInteractionSocketRequiredDepthMeters;
+        MagazineInteractionFindProfileOrWeaponOverride(
+            vr,
+            vr->m_MagazineInteractionSocketRequiredDepthMetersProfileOverrides,
+            vr->m_MagazineInteractionSocketRequiredDepthMetersOverrides,
+            value);
+        return std::clamp(value, 0.0f, 0.25f);
+    }
+
+    float MagazineInteractionResolveSocketRequiredOverlapFraction(const VR* vr)
+    {
+        if (!vr)
+            return 0.45f;
+
+        float value = vr->m_MagazineInteractionSocketRequiredOverlapFraction;
+        MagazineInteractionFindProfileOrWeaponOverride(
+            vr,
+            vr->m_MagazineInteractionSocketRequiredOverlapFractionProfileOverrides,
+            vr->m_MagazineInteractionSocketRequiredOverlapFractionOverrides,
+            value);
+        return std::clamp(value, 0.0f, 1.0f);
     }
 
     bool MagazineInteractionBuildSocketCaptureBox(
@@ -4288,13 +4312,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             MagazineInteractionDominantAxis(m_MagazineInteractionMagazineInsertionAxisLocal),
             0,
             2);
-        const float overlapFraction = std::clamp(
-            m_MagazineInteractionSocketRequiredOverlapFraction,
-            0.0f,
-            1.0f);
-        const float requiredDepth = std::max(
-            0.0f,
-            m_MagazineInteractionSocketRequiredDepthMeters) * m_VRScale;
+        const float overlapFraction = MagazineInteractionResolveSocketRequiredOverlapFraction(this);
+        const float requiredDepth = MagazineInteractionResolveSocketRequiredDepthMeters(this) * m_VRScale;
         for (int axis = 0; axis < 3; ++axis)
         {
             float socketMin = 0.0f;

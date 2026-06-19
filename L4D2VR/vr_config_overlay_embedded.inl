@@ -575,6 +575,8 @@ namespace
         float calibrationPreviewRollDeg = 0.0f;
         int calibrationBoltDesiredDirection = 5;
         int calibrationBoltActualDirection = 5;
+        Vector calibrationBoltPullAxisLocal = { 0.0f, 0.0f, 1.0f };
+        bool calibrationBoltPullAxisLocalValid = false;
         std::string status; // Set by CfgLoad/CfgToggleOpen so it follows the current UI language.
         std::string configPath;
         std::vector<CfgOverlayLine> lines;
@@ -1006,6 +1008,12 @@ namespace
 
     static void CfgMarkEdited(CfgOverlayState& s);
     static std::string CfgValueFor(const CfgOverlayState& s, const CfgOptionSpec& spec);
+    static Vector CfgVec3ValueForKey(
+        const CfgOverlayState& s,
+        const char* key,
+        const Vector& fallback,
+        float minValue,
+        float maxValue);
     static bool CfgIsComponentEditable(const CfgOptionSpec& spec);
     static void CfgRebuildVisibleIndexes(CfgOverlayState& s);
 
@@ -1525,6 +1533,7 @@ namespace
         CfgNormalizeVrHandsDependencies(s);
         CfgRebuildVisibleIndexes(s);
         CfgRefreshConfigWriteTime(s);
+        s.calibrationBoltPullAxisLocalValid = false;
         s.hasUnsavedEdits = false;
         s.status = s.useChinese
             ? "\345\267\262\346\211\223\345\274\200\343\200\202\347\224\250 VR \346\216\247\345\210\266\345\231\250\345\260\204\347\272\277\347\202\271\345\207\273\346\214\211\351\222\256\343\200\202"
@@ -1776,6 +1785,28 @@ namespace
             std::clamp(z, minValue, maxValue));
     }
 
+    static bool CfgIsCalibrationProfileValueKey(const char* key)
+    {
+        if (!key || !*key)
+            return false;
+
+        return std::strcmp(key, "MagazineInteractionMagazineBoxHalfExtentsMeters") == 0 ||
+            std::strcmp(key, "MagazineInteractionMagazineBoxLocalOffsetMeters") == 0 ||
+            std::strcmp(key, "MagazineInteractionMagazineBoxLocalRotationOffsetDeg") == 0 ||
+            std::strcmp(key, "MagazineInteractionSocketCaptureBoxHalfExtentsMeters") == 0 ||
+            std::strcmp(key, "MagazineInteractionSocketCaptureBoxLocalOffsetMeters") == 0 ||
+            std::strcmp(key, "MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg") == 0 ||
+            std::strcmp(key, "MagazineInteractionSocketCaptureAngleDeg") == 0 ||
+            std::strcmp(key, "MagazineInteractionSocketRequiredDepthMeters") == 0 ||
+            std::strcmp(key, "MagazineInteractionSocketRequiredOverlapFraction") == 0 ||
+            std::strcmp(key, "MagazineInteractionBoltGrabPaddingMeters") == 0 ||
+            std::strcmp(key, "MagazineInteractionBoltPullDistanceMeters") == 0 ||
+            std::strcmp(key, "MagazineInteractionBoltReturnDistanceMeters") == 0 ||
+            std::strcmp(key, "MagazineInteractionBoltBoxHalfExtentsMeters") == 0 ||
+            std::strcmp(key, "MagazineInteractionBoltBoxLocalOffsetMeters") == 0 ||
+            std::strcmp(key, "MagazineInteractionBoltPullAxisLocal") == 0;
+    }
+
     static Vector CfgNormalizeVec3(const Vector& value, const Vector& fallback)
     {
         const float length = value.Length();
@@ -1788,12 +1819,12 @@ namespace
     {
         switch (std::clamp(direction, 0, 5))
         {
-        case 0: return Vector(-1.0f, 0.0f, 0.0f);
-        case 1: return Vector(1.0f, 0.0f, 0.0f);
-        case 2: return Vector(0.0f, -1.0f, 0.0f);
-        case 3: return Vector(0.0f, 1.0f, 0.0f);
-        case 4: return Vector(0.0f, 0.0f, 1.0f);
-        default: return Vector(0.0f, 0.0f, -1.0f);
+        case 0: return Vector(0.0f, 1.0f, 0.0f);
+        case 1: return Vector(0.0f, -1.0f, 0.0f);
+        case 2: return Vector(0.0f, 0.0f, -1.0f);
+        case 3: return Vector(0.0f, 0.0f, 1.0f);
+        case 4: return Vector(-1.0f, 0.0f, 0.0f);
+        default: return Vector(1.0f, 0.0f, 0.0f);
         }
     }
 
@@ -1915,6 +1946,68 @@ namespace
         return ageSeconds >= 0.0f && ageSeconds <= 1.5f;
     }
 
+    static Vector CfgClampBoltPullAxisLocal(const Vector& value)
+    {
+        Vector axis(
+            std::clamp(value.x, -1.0f, 1.0f),
+            std::clamp(value.y, -1.0f, 1.0f),
+            std::clamp(value.z, -1.0f, 1.0f));
+        return CfgNormalizeVec3(axis, Vector(0.0f, 0.0f, 1.0f));
+    }
+
+    static Vector CfgLoadCalibrationBoltPullAxisLocal(CfgOverlayState& s)
+    {
+        Vector axis = CfgVec3ValueForKey(
+            s,
+            "MagazineInteractionBoltPullAxisLocal",
+            Vector(0.0f, 0.0f, 1.0f),
+            -1.0f,
+            1.0f);
+
+        MagazineInteractionCalibrationSnapshot snapshot{};
+        if (g_Game && g_Game->m_VR && CfgReadFreshCalibrationSnapshotForSave(snapshot))
+        {
+            VR* vrState = g_Game->m_VR;
+            bool usedProfileAxis = false;
+            const std::string profileKey = CfgLower(CfgCalibrationProfileKey(snapshot));
+            if (!profileKey.empty())
+            {
+                const auto profileIt =
+                    vrState->m_MagazineInteractionBoltPullAxisLocalProfileOverrides.find(profileKey);
+                if (profileIt != vrState->m_MagazineInteractionBoltPullAxisLocalProfileOverrides.end())
+                {
+                    axis = profileIt->second;
+                    usedProfileAxis = true;
+                }
+            }
+            if (!usedProfileAxis && snapshot.weaponId > 0)
+            {
+                const auto weaponIt =
+                    vrState->m_MagazineInteractionBoltPullAxisLocalOverrides.find(snapshot.weaponId);
+                if (weaponIt != vrState->m_MagazineInteractionBoltPullAxisLocalOverrides.end())
+                    axis = weaponIt->second;
+            }
+        }
+
+        return CfgClampBoltPullAxisLocal(axis);
+    }
+
+    static Vector CfgCalibrationBoltPullAxisLocal(CfgOverlayState& s)
+    {
+        if (!s.calibrationBoltPullAxisLocalValid)
+        {
+            s.calibrationBoltPullAxisLocal = CfgLoadCalibrationBoltPullAxisLocal(s);
+            s.calibrationBoltPullAxisLocalValid = true;
+        }
+        return s.calibrationBoltPullAxisLocal;
+    }
+
+    static void CfgSetCalibrationBoltPullAxisLocal(CfgOverlayState& s, const Vector& axis)
+    {
+        s.calibrationBoltPullAxisLocal = CfgClampBoltPullAxisLocal(axis);
+        s.calibrationBoltPullAxisLocalValid = true;
+    }
+
     static int CfgSaveCalibrationProfileOverrides(CfgOverlayState& s)
     {
         if (s.panelMode != CfgPanelMode::MagazineCalibration)
@@ -1953,7 +2046,7 @@ namespace
                 CfgUpsertProfileBoneOverride(CfgRawValueForKey(s, key.c_str()), profileKey, boltToken);
             CfgSetRawConfigValue(s, key.c_str(), nextSpec);
             if (g_Game && g_Game->m_VR)
-            g_Game->m_VR->m_MagazineInteractionBoltBoneProfileOverrides[CfgLower(profileKey)] = { boltToken };
+                g_Game->m_VR->m_MagazineInteractionBoltBoneProfileOverrides[CfgLower(profileKey)] = { boltToken };
             ++savedCount;
         }
 
@@ -1987,6 +2080,111 @@ namespace
                     (*liveProfileMap)[normalizedProfileKey] = value;
                 ++savedCount;
             };
+
+        if (g_Game && g_Game->m_VR && s.calibrationStep >= 1)
+        {
+            VR* vrState = g_Game->m_VR;
+            const Vector magazineHalf = CfgProfileVec3ValueForKey(
+                s,
+                "MagazineInteractionMagazineBoxHalfExtentsMeters",
+                Vector(0.0f, 0.0f, 0.0f),
+                0.0f,
+                0.50f);
+            const Vector magazineOffset = CfgProfileVec3ValueForKey(
+                s,
+                "MagazineInteractionMagazineBoxLocalOffsetMeters",
+                Vector(0.0f, 0.0f, 0.0f),
+                -0.50f,
+                0.50f);
+            const Vector magazineRotation = CfgProfileVec3ValueForKey(
+                s,
+                "MagazineInteractionMagazineBoxLocalRotationOffsetDeg",
+                Vector(0.0f, 0.0f, 0.0f),
+                -180.0f,
+                180.0f);
+
+            saveVectorProfileOverride(
+                "MagazineInteractionMagazineBoxHalfExtentsMetersOverrides",
+                magazineHalf,
+                0.001f,
+                &vrState->m_MagazineInteractionMagazineBoxHalfExtentsMetersProfileOverrides);
+            saveVectorProfileOverride(
+                "MagazineInteractionMagazineBoxLocalOffsetMetersOverrides",
+                magazineOffset,
+                0.001f,
+                &vrState->m_MagazineInteractionMagazineBoxLocalOffsetMetersProfileOverrides);
+            saveVectorProfileOverride(
+                "MagazineInteractionMagazineBoxLocalRotationOffsetDegOverrides",
+                magazineRotation,
+                0.001f,
+                &vrState->m_MagazineInteractionMagazineBoxLocalRotationOffsetDegProfileOverrides);
+        }
+
+        if (g_Game && g_Game->m_VR && s.calibrationStep >= 2)
+        {
+            VR* vrState = g_Game->m_VR;
+            const Vector socketHalf = CfgProfileVec3ValueForKey(
+                s,
+                "MagazineInteractionSocketCaptureBoxHalfExtentsMeters",
+                Vector(0.0f, 0.0f, 0.0f),
+                0.0f,
+                0.50f);
+            const Vector socketOffset = CfgProfileVec3ValueForKey(
+                s,
+                "MagazineInteractionSocketCaptureBoxLocalOffsetMeters",
+                Vector(0.0f, 0.0f, 0.0f),
+                -0.50f,
+                0.50f);
+            const Vector socketRotation = CfgProfileVec3ValueForKey(
+                s,
+                "MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg",
+                Vector(0.0f, 0.0f, 0.0f),
+                -180.0f,
+                180.0f);
+            const float socketAngle = std::clamp(
+                CfgFloatValue(s, "MagazineInteractionSocketCaptureAngleDeg", 35.0f),
+                0.0f,
+                89.0f);
+            const float socketDepth = std::clamp(
+                CfgFloatValue(s, "MagazineInteractionSocketRequiredDepthMeters", 0.04f),
+                0.0f,
+                0.25f);
+            const float socketOverlap = std::clamp(
+                CfgFloatValue(s, "MagazineInteractionSocketRequiredOverlapFraction", 0.45f),
+                0.0f,
+                1.0f);
+
+            saveVectorProfileOverride(
+                "MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides",
+                socketHalf,
+                0.001f,
+                &vrState->m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersProfileOverrides);
+            saveVectorProfileOverride(
+                "MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides",
+                socketOffset,
+                0.001f,
+                &vrState->m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersProfileOverrides);
+            saveVectorProfileOverride(
+                "MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides",
+                socketRotation,
+                0.001f,
+                &vrState->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegProfileOverrides);
+            saveFloatProfileOverride(
+                "MagazineInteractionSocketCaptureAngleDegOverrides",
+                socketAngle,
+                0.001f,
+                &vrState->m_MagazineInteractionSocketCaptureAngleDegProfileOverrides);
+            saveFloatProfileOverride(
+                "MagazineInteractionSocketRequiredDepthMetersOverrides",
+                socketDepth,
+                0.001f,
+                &vrState->m_MagazineInteractionSocketRequiredDepthMetersProfileOverrides);
+            saveFloatProfileOverride(
+                "MagazineInteractionSocketRequiredOverlapFractionOverrides",
+                socketOverlap,
+                0.001f,
+                &vrState->m_MagazineInteractionSocketRequiredOverlapFractionProfileOverrides);
+        }
 
         if (g_Game && g_Game->m_VR && s.calibrationStep >= 4)
         {
@@ -2028,17 +2226,7 @@ namespace
         if (g_Game && g_Game->m_VR && s.calibrationStep >= 5)
         {
             VR* vrState = g_Game->m_VR;
-            Vector boltAxis = CfgProfileVec3ValueForKey(
-                s,
-                "MagazineInteractionBoltPullAxisLocal",
-                Vector(0.0f, 0.0f, 1.0f),
-                -1.0f,
-                1.0f);
-            const float axisLength = boltAxis.Length();
-            if (axisLength > 0.0001f)
-                boltAxis *= (1.0f / axisLength);
-            else
-                boltAxis = Vector(0.0f, 0.0f, 1.0f);
+            Vector boltAxis = CfgCalibrationBoltPullAxisLocal(s);
 
             const float boltPullDistance = std::clamp(
                 CfgFloatValue(s, "MagazineInteractionBoltPullDistanceMeters", 0.055f),
@@ -2091,6 +2279,11 @@ namespace
         for (int specIndex = 0; specIndex < kCfgOptionSpecCount; ++specIndex)
         {
             const CfgOptionSpec& spec = kCfgOptionSpecs[specIndex];
+            if (s.panelMode == CfgPanelMode::MagazineCalibration &&
+                CfgIsCalibrationProfileValueKey(spec.key))
+            {
+                continue;
+            }
             const std::string val = CfgValueFor(s, spec);
             bool written = false;
 
@@ -2541,18 +2734,215 @@ namespace
         s.values[key] = CfgFormatFloat(clamped, step);
     }
 
+    template <typename TValue>
+    static bool CfgFindLiveCalibrationProfileOrWeaponOverride(
+        const MagazineInteractionCalibrationSnapshot& snapshot,
+        const std::unordered_map<std::string, TValue>& profileOverrides,
+        const std::unordered_map<int, TValue>& weaponOverrides,
+        TValue& outValue)
+    {
+        const std::string profileKey = CfgLower(CfgCalibrationProfileKey(snapshot));
+        if (!profileKey.empty())
+        {
+            const auto profileIt = profileOverrides.find(profileKey);
+            if (profileIt != profileOverrides.end())
+            {
+                outValue = profileIt->second;
+                return true;
+            }
+        }
+
+        if (snapshot.weaponId > 0)
+        {
+            const auto weaponIt = weaponOverrides.find(snapshot.weaponId);
+            if (weaponIt != weaponOverrides.end())
+            {
+                outValue = weaponIt->second;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    static bool CfgFreshCalibrationProfileKeyForRuntime(
+        const CfgOverlayState& s,
+        std::string& outProfileKey)
+    {
+        outProfileKey.clear();
+        if (!s.visible || s.panelMode != CfgPanelMode::MagazineCalibration)
+            return false;
+
+        MagazineInteractionCalibrationSnapshot snapshot{};
+        if (!CfgReadFreshCalibrationSnapshotForSave(snapshot))
+            return false;
+
+        outProfileKey = CfgLower(CfgCalibrationProfileKey(snapshot));
+        return !outProfileKey.empty();
+    }
+
+    static void CfgLoadCalibrationProfileValues(
+        CfgOverlayState& s,
+        const MagazineInteractionCalibrationSnapshot& snapshot)
+    {
+        if (!g_Game || !g_Game->m_VR)
+            return;
+
+        VR* vrState = g_Game->m_VR;
+        auto loadVector = [&](
+            const char* key,
+            Vector value,
+            float step,
+            const std::unordered_map<std::string, Vector>& profileOverrides,
+            const std::unordered_map<int, Vector>& weaponOverrides) -> void
+            {
+                CfgFindLiveCalibrationProfileOrWeaponOverride(
+                    snapshot,
+                    profileOverrides,
+                    weaponOverrides,
+                    value);
+                CfgSetVec3ValueForKey(s, key, value, step);
+            };
+
+        auto loadFloat = [&](
+            const char* key,
+            float value,
+            float step,
+            const std::unordered_map<std::string, float>& profileOverrides,
+            const std::unordered_map<int, float>& weaponOverrides) -> void
+            {
+                CfgFindLiveCalibrationProfileOrWeaponOverride(
+                    snapshot,
+                    profileOverrides,
+                    weaponOverrides,
+                    value);
+                CfgSetFloatValueForKey(s, key, value, step);
+            };
+
+        loadVector(
+            "MagazineInteractionMagazineBoxHalfExtentsMeters",
+            vrState->m_MagazineInteractionMagazineBoxHalfExtentsMeters,
+            0.001f,
+            vrState->m_MagazineInteractionMagazineBoxHalfExtentsMetersProfileOverrides,
+            vrState->m_MagazineInteractionMagazineBoxHalfExtentsMetersOverrides);
+        loadVector(
+            "MagazineInteractionMagazineBoxLocalOffsetMeters",
+            vrState->m_MagazineInteractionMagazineBoxLocalOffsetMeters,
+            0.001f,
+            vrState->m_MagazineInteractionMagazineBoxLocalOffsetMetersProfileOverrides,
+            vrState->m_MagazineInteractionMagazineBoxLocalOffsetMetersOverrides);
+        loadVector(
+            "MagazineInteractionMagazineBoxLocalRotationOffsetDeg",
+            vrState->m_MagazineInteractionMagazineBoxLocalRotationOffsetDeg,
+            0.001f,
+            vrState->m_MagazineInteractionMagazineBoxLocalRotationOffsetDegProfileOverrides,
+            vrState->m_MagazineInteractionMagazineBoxLocalRotationOffsetDegOverrides);
+
+        loadVector(
+            "MagazineInteractionSocketCaptureBoxHalfExtentsMeters",
+            vrState->m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters,
+            0.001f,
+            vrState->m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersProfileOverrides,
+            vrState->m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides);
+        loadVector(
+            "MagazineInteractionSocketCaptureBoxLocalOffsetMeters",
+            vrState->m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters,
+            0.001f,
+            vrState->m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersProfileOverrides,
+            vrState->m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides);
+        loadVector(
+            "MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg",
+            vrState->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg,
+            0.001f,
+            vrState->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegProfileOverrides,
+            vrState->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides);
+        loadFloat(
+            "MagazineInteractionSocketCaptureAngleDeg",
+            vrState->m_MagazineInteractionSocketCaptureAngleDeg,
+            0.001f,
+            vrState->m_MagazineInteractionSocketCaptureAngleDegProfileOverrides,
+            vrState->m_MagazineInteractionSocketCaptureAngleDegOverrides);
+        loadFloat(
+            "MagazineInteractionSocketRequiredDepthMeters",
+            vrState->m_MagazineInteractionSocketRequiredDepthMeters,
+            0.001f,
+            vrState->m_MagazineInteractionSocketRequiredDepthMetersProfileOverrides,
+            vrState->m_MagazineInteractionSocketRequiredDepthMetersOverrides);
+        loadFloat(
+            "MagazineInteractionSocketRequiredOverlapFraction",
+            vrState->m_MagazineInteractionSocketRequiredOverlapFraction,
+            0.001f,
+            vrState->m_MagazineInteractionSocketRequiredOverlapFractionProfileOverrides,
+            vrState->m_MagazineInteractionSocketRequiredOverlapFractionOverrides);
+
+        loadVector(
+            "MagazineInteractionBoltBoxHalfExtentsMeters",
+            vrState->m_MagazineInteractionBoltBoxHalfExtentsMeters,
+            0.001f,
+            vrState->m_MagazineInteractionBoltBoxHalfExtentsMetersProfileOverrides,
+            vrState->m_MagazineInteractionBoltBoxHalfExtentsMetersOverrides);
+        loadVector(
+            "MagazineInteractionBoltBoxLocalOffsetMeters",
+            vrState->m_MagazineInteractionBoltBoxLocalOffsetMeters,
+            0.001f,
+            vrState->m_MagazineInteractionBoltBoxLocalOffsetMetersProfileOverrides,
+            vrState->m_MagazineInteractionBoltBoxLocalOffsetMetersOverrides);
+        loadFloat(
+            "MagazineInteractionBoltGrabPaddingMeters",
+            vrState->m_MagazineInteractionBoltGrabPaddingMeters,
+            0.001f,
+            vrState->m_MagazineInteractionBoltGrabPaddingMetersProfileOverrides,
+            vrState->m_MagazineInteractionBoltGrabPaddingMetersOverrides);
+        loadFloat(
+            "MagazineInteractionBoltPullDistanceMeters",
+            vrState->m_MagazineInteractionBoltPullDistanceMeters,
+            0.001f,
+            vrState->m_MagazineInteractionBoltPullDistanceMetersProfileOverrides,
+            vrState->m_MagazineInteractionBoltPullDistanceMetersOverrides);
+        loadFloat(
+            "MagazineInteractionBoltReturnDistanceMeters",
+            vrState->m_MagazineInteractionBoltReturnDistanceMeters,
+            0.001f,
+            vrState->m_MagazineInteractionBoltReturnDistanceMetersProfileOverrides,
+            vrState->m_MagazineInteractionBoltReturnDistanceMetersOverrides);
+
+        Vector boltAxis = vrState->m_MagazineInteractionBoltPullAxisLocal;
+        CfgFindLiveCalibrationProfileOrWeaponOverride(
+            snapshot,
+            vrState->m_MagazineInteractionBoltPullAxisLocalProfileOverrides,
+            vrState->m_MagazineInteractionBoltPullAxisLocalOverrides,
+            boltAxis);
+        CfgSetCalibrationBoltPullAxisLocal(s, boltAxis);
+    }
+
     static void CfgApplyMagazineBoxCalibrationRuntimeParams(CfgOverlayState& s)
     {
         if (!g_Game || !g_Game->m_VR)
             return;
 
         VR* vrState = g_Game->m_VR;
-        vrState->m_MagazineInteractionMagazineBoxHalfExtentsMeters =
+        const Vector half =
             CfgVec3ValueForKey(s, "MagazineInteractionMagazineBoxHalfExtentsMeters", Vector(0.0f, 0.0f, 0.0f), 0.0f, 0.50f);
-        vrState->m_MagazineInteractionMagazineBoxLocalOffsetMeters =
+        const Vector offset =
             CfgVec3ValueForKey(s, "MagazineInteractionMagazineBoxLocalOffsetMeters", Vector(0.0f, 0.0f, 0.0f), -0.50f, 0.50f);
-        vrState->m_MagazineInteractionMagazineBoxLocalRotationOffsetDeg =
+        const Vector rotation =
             CfgVec3ValueForKey(s, "MagazineInteractionMagazineBoxLocalRotationOffsetDeg", Vector(0.0f, 0.0f, 0.0f), -180.0f, 180.0f);
+
+        std::string profileKey;
+        const bool hasCalibrationProfile = CfgFreshCalibrationProfileKeyForRuntime(s, profileKey);
+        if (!hasCalibrationProfile)
+        {
+            vrState->m_MagazineInteractionMagazineBoxHalfExtentsMeters = half;
+            vrState->m_MagazineInteractionMagazineBoxLocalOffsetMeters = offset;
+            vrState->m_MagazineInteractionMagazineBoxLocalRotationOffsetDeg = rotation;
+        }
+        if (hasCalibrationProfile &&
+            std::clamp(s.calibrationStep, 0, kCfgCalibrationStepMax) >= 1)
+        {
+            vrState->m_MagazineInteractionMagazineBoxHalfExtentsMetersProfileOverrides[profileKey] = half;
+            vrState->m_MagazineInteractionMagazineBoxLocalOffsetMetersProfileOverrides[profileKey] = offset;
+            vrState->m_MagazineInteractionMagazineBoxLocalRotationOffsetDegProfileOverrides[profileKey] = rotation;
+        }
     }
 
     static void CfgApplySocketCaptureCalibrationRuntimeParams(CfgOverlayState& s)
@@ -2561,18 +2951,40 @@ namespace
             return;
 
         VR* vrState = g_Game->m_VR;
-        vrState->m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters =
+        const Vector half =
             CfgVec3ValueForKey(s, "MagazineInteractionSocketCaptureBoxHalfExtentsMeters", Vector(0.0f, 0.0f, 0.0f), 0.0f, 0.50f);
-        vrState->m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters =
+        const Vector offset =
             CfgVec3ValueForKey(s, "MagazineInteractionSocketCaptureBoxLocalOffsetMeters", Vector(0.0f, 0.0f, 0.0f), -0.50f, 0.50f);
-        vrState->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg =
+        const Vector rotation =
             CfgVec3ValueForKey(s, "MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg", Vector(0.0f, 0.0f, 0.0f), -180.0f, 180.0f);
-        vrState->m_MagazineInteractionSocketCaptureAngleDeg =
-            CfgFloatValue(s, "MagazineInteractionSocketCaptureAngleDeg", 35.0f);
-        vrState->m_MagazineInteractionSocketRequiredDepthMeters =
-            CfgFloatValue(s, "MagazineInteractionSocketRequiredDepthMeters", 0.04f);
-        vrState->m_MagazineInteractionSocketRequiredOverlapFraction =
-            CfgFloatValue(s, "MagazineInteractionSocketRequiredOverlapFraction", 0.45f);
+        const float angle = CfgFloatValue(s, "MagazineInteractionSocketCaptureAngleDeg", 35.0f);
+        const float depth = CfgFloatValue(s, "MagazineInteractionSocketRequiredDepthMeters", 0.04f);
+        const float overlap = CfgFloatValue(s, "MagazineInteractionSocketRequiredOverlapFraction", 0.45f);
+
+        std::string profileKey;
+        const bool hasCalibrationProfile = CfgFreshCalibrationProfileKeyForRuntime(s, profileKey);
+        if (!hasCalibrationProfile)
+        {
+            vrState->m_MagazineInteractionSocketCaptureBoxHalfExtentsMeters = half;
+            vrState->m_MagazineInteractionSocketCaptureBoxLocalOffsetMeters = offset;
+            vrState->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg = rotation;
+            vrState->m_MagazineInteractionSocketCaptureAngleDeg = angle;
+            vrState->m_MagazineInteractionSocketRequiredDepthMeters = depth;
+            vrState->m_MagazineInteractionSocketRequiredOverlapFraction = overlap;
+        }
+        if (hasCalibrationProfile &&
+            std::clamp(s.calibrationStep, 0, kCfgCalibrationStepMax) >= 2)
+        {
+            vrState->m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersProfileOverrides[profileKey] = half;
+            vrState->m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersProfileOverrides[profileKey] = offset;
+            vrState->m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegProfileOverrides[profileKey] = rotation;
+            vrState->m_MagazineInteractionSocketCaptureAngleDegProfileOverrides[profileKey] =
+                std::clamp(angle, 0.0f, 89.0f);
+            vrState->m_MagazineInteractionSocketRequiredDepthMetersProfileOverrides[profileKey] =
+                std::clamp(depth, 0.0f, 0.25f);
+            vrState->m_MagazineInteractionSocketRequiredOverlapFractionProfileOverrides[profileKey] =
+                std::clamp(overlap, 0.0f, 1.0f);
+        }
     }
 
     static void CfgApplyBoltCalibrationRuntimeParams(CfgOverlayState& s)
@@ -2581,49 +2993,45 @@ namespace
             return;
 
         VR* vrState = g_Game->m_VR;
-        vrState->m_MagazineInteractionBoltBoxHalfExtentsMeters =
+        const Vector half =
             CfgVec3ValueForKey(s, "MagazineInteractionBoltBoxHalfExtentsMeters", Vector(0.045f, 0.035f, 0.035f), 0.005f, 0.25f);
-        vrState->m_MagazineInteractionBoltBoxLocalOffsetMeters =
+        const Vector offset =
             CfgVec3ValueForKey(s, "MagazineInteractionBoltBoxLocalOffsetMeters", Vector(0.0f, 0.0f, 0.0f), -0.25f, 0.25f);
-        vrState->m_MagazineInteractionBoltGrabPaddingMeters =
-            CfgFloatValue(s, "MagazineInteractionBoltGrabPaddingMeters", 0.10f);
-        vrState->m_MagazineInteractionBoltPullDistanceMeters =
-            CfgFloatValue(s, "MagazineInteractionBoltPullDistanceMeters", 0.055f);
-        vrState->m_MagazineInteractionBoltReturnDistanceMeters =
-            CfgFloatValue(s, "MagazineInteractionBoltReturnDistanceMeters", 0.018f);
-        Vector axis = CfgVec3ValueForKey(s, "MagazineInteractionBoltPullAxisLocal", Vector(0.0f, 0.0f, 1.0f), -1.0f, 1.0f);
-        const float length = axis.Length();
-        vrState->m_MagazineInteractionBoltPullAxisLocal =
-            (length > 0.0001f) ? (axis * (1.0f / length)) : Vector(0.0f, 0.0f, 1.0f);
+        const float grabPadding = CfgFloatValue(s, "MagazineInteractionBoltGrabPaddingMeters", 0.10f);
+        const float pullDistance = CfgFloatValue(s, "MagazineInteractionBoltPullDistanceMeters", 0.055f);
+        const float returnDistance = CfgFloatValue(s, "MagazineInteractionBoltReturnDistanceMeters", 0.018f);
 
-        if (s.panelMode != CfgPanelMode::MagazineCalibration)
-            return;
-
-        MagazineInteractionCalibrationSnapshot snapshot{};
-        if (!CfgReadFreshCalibrationSnapshotForSave(snapshot))
-            return;
-        const std::string profileKey = CfgLower(CfgCalibrationProfileKey(snapshot));
-        if (profileKey.empty())
+        std::string profileKey;
+        const bool hasCalibrationProfile = CfgFreshCalibrationProfileKeyForRuntime(s, profileKey);
+        if (!hasCalibrationProfile)
+        {
+            vrState->m_MagazineInteractionBoltBoxHalfExtentsMeters = half;
+            vrState->m_MagazineInteractionBoltBoxLocalOffsetMeters = offset;
+            vrState->m_MagazineInteractionBoltGrabPaddingMeters = grabPadding;
+            vrState->m_MagazineInteractionBoltPullDistanceMeters = pullDistance;
+            vrState->m_MagazineInteractionBoltReturnDistanceMeters = returnDistance;
+        }
+        if (!hasCalibrationProfile)
             return;
 
         const int step = std::clamp(s.calibrationStep, 0, kCfgCalibrationStepMax);
         if (step >= 4)
         {
             vrState->m_MagazineInteractionBoltBoxHalfExtentsMetersProfileOverrides[profileKey] =
-                vrState->m_MagazineInteractionBoltBoxHalfExtentsMeters;
+                half;
             vrState->m_MagazineInteractionBoltBoxLocalOffsetMetersProfileOverrides[profileKey] =
-                vrState->m_MagazineInteractionBoltBoxLocalOffsetMeters;
+                offset;
             vrState->m_MagazineInteractionBoltGrabPaddingMetersProfileOverrides[profileKey] =
-                std::clamp(vrState->m_MagazineInteractionBoltGrabPaddingMeters, 0.0f, 0.25f);
+                std::clamp(grabPadding, 0.0f, 0.25f);
         }
         if (step >= 5)
         {
             vrState->m_MagazineInteractionBoltPullAxisLocalProfileOverrides[profileKey] =
-                vrState->m_MagazineInteractionBoltPullAxisLocal;
+                CfgCalibrationBoltPullAxisLocal(s);
             vrState->m_MagazineInteractionBoltPullDistanceMetersProfileOverrides[profileKey] =
-                std::clamp(vrState->m_MagazineInteractionBoltPullDistanceMeters, 0.0f, 0.25f);
+                std::clamp(pullDistance, 0.0f, 0.25f);
             vrState->m_MagazineInteractionBoltReturnDistanceMetersProfileOverrides[profileKey] =
-                std::clamp(vrState->m_MagazineInteractionBoltReturnDistanceMeters, 0.0f, 0.10f);
+                std::clamp(returnDistance, 0.0f, 0.10f);
         }
     }
 
@@ -2983,6 +3391,7 @@ namespace
             s.calibrationSeenViewmodelClass != snapshot.sourceIsViewmodelClass;
         if (identityChanged)
         {
+            s.calibrationBoltPullAxisLocalValid = false;
             s.calibrationSeenModelFingerprint = snapshot.modelFingerprint;
             s.calibrationSeenBoneSignature = snapshot.boneSignature;
             s.calibrationSeenEntityIndex = snapshot.entityIndex;
@@ -3009,6 +3418,7 @@ namespace
                 ? s.calibrationBoltSelectedBone
                 : s.calibrationMagazineSelectedBone;
             s.calibrationScroll = 0;
+            CfgLoadCalibrationProfileValues(s, snapshot);
             CfgApplyCalibrationRuntimeState(s);
         }
         else if (stepChanged)
@@ -3097,6 +3507,7 @@ namespace
             if (!hasFreshSnapshot)
             {
                 s.calibrationSelectedBone = -1;
+                s.calibrationBoltPullAxisLocalValid = false;
                 CfgApplyCalibrationRuntimeState(s);
             }
         }
@@ -3730,7 +4141,6 @@ namespace
         constexpr int buttonH = 28;
         constexpr int gap = 8;
 
-        const Vector axis = CfgVec3ValueForKey(s, "MagazineInteractionBoltPullAxisLocal", Vector(0.0f, 0.0f, 1.0f), -1.0f, 1.0f);
         const float pull = CfgFloatValue(s, "MagazineInteractionBoltPullDistanceMeters", 0.055f);
         const float ret = CfgFloatValue(s, "MagazineInteractionBoltReturnDistanceMeters", 0.018f);
         s.calibrationBoltDesiredDirection = std::clamp(s.calibrationBoltDesiredDirection, 0, 5);
@@ -3807,7 +4217,6 @@ namespace
             CfgGdiButton(g, buttonX + i * (buttonW + gap), row2Y, buttonW, buttonH, distLabels[i]);
         CfgGdiButton(g, buttonX + 5 * (buttonW + gap), row2Y, 122, buttonH, s.useChinese ? "\xE5\xBA\x94\xE7\x94\xA8\xE4\xBF\xAE\xE6\xAD\xA3" : "Apply");
         CfgGdiButton(g, buttonX + 7 * (buttonW + gap), row2Y, 90, buttonH, s.useChinese ? "\xE9\x87\x8D\xE7\xBD\xAE" : "Reset");
-        (void)axis;
     }
 
     static bool CfgHandleCalibrationBoltPullControlClick(CfgOverlayState& s, int mx, int my)
@@ -3835,7 +4244,7 @@ namespace
                 return mx >= x && mx < x + width && my >= y && my < y + buttonH;
             };
 
-        Vector axis = CfgVec3ValueForKey(s, "MagazineInteractionBoltPullAxisLocal", Vector(0.0f, 0.0f, 1.0f), -1.0f, 1.0f);
+        Vector axis = CfgCalibrationBoltPullAxisLocal(s);
         float pull = CfgFloatValue(s, "MagazineInteractionBoltPullDistanceMeters", 0.055f);
         float ret = CfgFloatValue(s, "MagazineInteractionBoltReturnDistanceMeters", 0.018f);
 
@@ -3884,7 +4293,7 @@ namespace
 
         if (pull > 0.0001f)
             ret = std::min(ret, pull);
-        CfgSetVec3ValueForKey(s, "MagazineInteractionBoltPullAxisLocal", axis, 0.001f);
+        CfgSetCalibrationBoltPullAxisLocal(s, axis);
         CfgSetFloatValueForKey(s, "MagazineInteractionBoltPullDistanceMeters", pull, 0.001f);
         CfgSetFloatValueForKey(s, "MagazineInteractionBoltReturnDistanceMeters", ret, 0.001f);
         CfgApplyCalibrationRuntimeState(s);
@@ -4335,6 +4744,47 @@ namespace
         const bool paused = g_Game->m_EngineClient->IsPaused();
         return paused || cursorVisible;
 #endif
+    }
+
+    static bool CfgSourceGameUiLooksOpen()
+    {
+        if (!g_Game || !g_Game->m_EngineClient)
+            return false;
+
+#ifdef _MSC_VER
+        __try
+        {
+            if (!g_Game->m_EngineClient->IsInGame())
+                return false;
+
+            const bool paused = g_Game->m_EngineClient->IsPaused();
+            const bool cursorVisible =
+                g_Game->m_VguiSurface && g_Game->m_VguiSurface->IsCursorVisible();
+            return paused || cursorVisible;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+#else
+        if (!g_Game->m_EngineClient->IsInGame())
+            return false;
+
+        const bool paused = g_Game->m_EngineClient->IsPaused();
+        const bool cursorVisible =
+            g_Game->m_VguiSurface && g_Game->m_VguiSurface->IsCursorVisible();
+        return paused || cursorVisible;
+#endif
+    }
+
+    static bool CfgCloseSourceGameUiForCalibration()
+    {
+        if (!CfgSourceGameUiLooksOpen() || !g_Game)
+            return false;
+
+        g_Game->ClientCmd_Unrestricted("gameui_hide\n");
+        g_Game->ClientCmd("gameui_hide\n");
+        return true;
     }
 
     static bool CfgIsValidOverlayHandle(vr::VROverlayHandle_t h)
@@ -5236,6 +5686,10 @@ namespace
             }
             if (mx >= kCfgCalibX && mx <= kCfgCalibX + kCfgCalibW)
             {
+                const bool enteringCalibration = s.panelMode != CfgPanelMode::MagazineCalibration;
+                const bool closedSourceGameUi =
+                    enteringCalibration && CfgCloseSourceGameUiForCalibration();
+
                 s.panelMode = (s.panelMode == CfgPanelMode::MagazineCalibration)
                     ? CfgPanelMode::Config
                     : CfgPanelMode::MagazineCalibration;
@@ -5244,6 +5698,8 @@ namespace
                 s.status = (s.panelMode == CfgPanelMode::MagazineCalibration)
                     ? (s.useChinese ? "\xE5\xB7\xB2\xE8\xBF\x9B\xE5\x85\xA5\xE5\xBD\x93\xE5\x89\x8D\xE6\xAD\xA6\xE5\x99\xA8\xE5\xBC\xB9\xE5\x8C\xA3\xE6\xA0\xA1\xE5\x87\x86\xE3\x80\x82" : "Current weapon magazine calibration opened.")
                     : (s.useChinese ? "\xE5\xB7\xB2\xE8\xBF\x94\xE5\x9B\x9E\xE9\x85\x8D\xE7\xBD\xAE\xE5\x88\x97\xE8\xA1\xA8\xE3\x80\x82" : "Returned to the config list.");
+                if (closedSourceGameUi)
+                    s.status += s.useChinese ? "\xE5\xB7\xB2\xE5\x85\xB3\xE9\x97\xAD\xE6\xB8\xB8\xE6\x88\x8F\xE6\x9A\x82\xE5\x81\x9C\xE8\x8F\x9C\xE5\x8D\x95\xE3\x80\x82" : " Game pause menu closed.";
                 CfgApplyCalibrationRuntimeState(s);
                 s.dirty = true;
                 return;

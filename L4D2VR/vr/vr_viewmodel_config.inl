@@ -1401,6 +1401,15 @@ void VR::ParseConfigFile()
     m_MagazineInteractionBoltBoneOverridesSpec = getString("MagazineInteractionBoltBoneOverrides", m_MagazineInteractionBoltBoneOverridesSpec);
     m_MagazineInteractionBoltBoneOverrides.clear();
     m_MagazineInteractionBoltBoneProfileOverrides.clear();
+    m_MagazineInteractionMagazineBoxHalfExtentsMetersOverridesSpec = getString("MagazineInteractionMagazineBoxHalfExtentsMetersOverrides", m_MagazineInteractionMagazineBoxHalfExtentsMetersOverridesSpec);
+    m_MagazineInteractionMagazineBoxHalfExtentsMetersOverrides.clear();
+    m_MagazineInteractionMagazineBoxHalfExtentsMetersProfileOverrides.clear();
+    m_MagazineInteractionMagazineBoxLocalOffsetMetersOverridesSpec = getString("MagazineInteractionMagazineBoxLocalOffsetMetersOverrides", m_MagazineInteractionMagazineBoxLocalOffsetMetersOverridesSpec);
+    m_MagazineInteractionMagazineBoxLocalOffsetMetersOverrides.clear();
+    m_MagazineInteractionMagazineBoxLocalOffsetMetersProfileOverrides.clear();
+    m_MagazineInteractionMagazineBoxLocalRotationOffsetDegOverridesSpec = getString("MagazineInteractionMagazineBoxLocalRotationOffsetDegOverrides", m_MagazineInteractionMagazineBoxLocalRotationOffsetDegOverridesSpec);
+    m_MagazineInteractionMagazineBoxLocalRotationOffsetDegOverrides.clear();
+    m_MagazineInteractionMagazineBoxLocalRotationOffsetDegProfileOverrides.clear();
     m_MagazineInteractionBoltPullAxisLocalOverridesSpec = getString("MagazineInteractionBoltPullAxisLocalOverrides", m_MagazineInteractionBoltPullAxisLocalOverridesSpec);
     m_MagazineInteractionBoltPullAxisLocalOverrides.clear();
     m_MagazineInteractionBoltPullAxisLocalProfileOverrides.clear();
@@ -1421,12 +1430,22 @@ void VR::ParseConfigFile()
     m_MagazineInteractionBoltReturnDistanceMetersProfileOverrides.clear();
     m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverridesSpec = getString("MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides", m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverridesSpec);
     m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides.clear();
+    m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersProfileOverrides.clear();
     m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverridesSpec = getString("MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides", m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverridesSpec);
     m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides.clear();
+    m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersProfileOverrides.clear();
     m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverridesSpec = getString("MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides", m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverridesSpec);
     m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides.clear();
+    m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegProfileOverrides.clear();
     m_MagazineInteractionSocketCaptureAngleDegOverridesSpec = getString("MagazineInteractionSocketCaptureAngleDegOverrides", m_MagazineInteractionSocketCaptureAngleDegOverridesSpec);
     m_MagazineInteractionSocketCaptureAngleDegOverrides.clear();
+    m_MagazineInteractionSocketCaptureAngleDegProfileOverrides.clear();
+    m_MagazineInteractionSocketRequiredDepthMetersOverridesSpec = getString("MagazineInteractionSocketRequiredDepthMetersOverrides", m_MagazineInteractionSocketRequiredDepthMetersOverridesSpec);
+    m_MagazineInteractionSocketRequiredDepthMetersOverrides.clear();
+    m_MagazineInteractionSocketRequiredDepthMetersProfileOverrides.clear();
+    m_MagazineInteractionSocketRequiredOverlapFractionOverridesSpec = getString("MagazineInteractionSocketRequiredOverlapFractionOverrides", m_MagazineInteractionSocketRequiredOverlapFractionOverridesSpec);
+    m_MagazineInteractionSocketRequiredOverlapFractionOverrides.clear();
+    m_MagazineInteractionSocketRequiredOverlapFractionProfileOverrides.clear();
     {
         auto normalizeBoneOverrideWeaponKey = [&](std::string value)
             {
@@ -1829,6 +1848,27 @@ void VR::ParseConfigFile()
             m_MagazineInteractionBoltBoneOverridesSpec,
             m_MagazineInteractionBoltBoneOverrides,
             m_MagazineInteractionBoltBoneProfileOverrides);
+        parseVector3OverrideSpec(
+            "MagazineInteractionMagazineBoxHalfExtentsMetersOverrides",
+            m_MagazineInteractionMagazineBoxHalfExtentsMetersOverridesSpec,
+            0.0f,
+            0.50f,
+            m_MagazineInteractionMagazineBoxHalfExtentsMetersOverrides,
+            &m_MagazineInteractionMagazineBoxHalfExtentsMetersProfileOverrides);
+        parseVector3OverrideSpec(
+            "MagazineInteractionMagazineBoxLocalOffsetMetersOverrides",
+            m_MagazineInteractionMagazineBoxLocalOffsetMetersOverridesSpec,
+            -0.50f,
+            0.50f,
+            m_MagazineInteractionMagazineBoxLocalOffsetMetersOverrides,
+            &m_MagazineInteractionMagazineBoxLocalOffsetMetersProfileOverrides);
+        parseVector3OverrideSpec(
+            "MagazineInteractionMagazineBoxLocalRotationOffsetDegOverrides",
+            m_MagazineInteractionMagazineBoxLocalRotationOffsetDegOverridesSpec,
+            -180.0f,
+            180.0f,
+            m_MagazineInteractionMagazineBoxLocalRotationOffsetDegOverrides,
+            &m_MagazineInteractionMagazineBoxLocalRotationOffsetDegProfileOverrides);
         parseBoltPullAxisOverrideSpec(
             "MagazineInteractionBoltPullAxisLocalOverrides",
             m_MagazineInteractionBoltPullAxisLocalOverridesSpec,
@@ -1875,28 +1915,42 @@ void VR::ParseConfigFile()
             0.0f,
             0.50f,
             m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides,
-            nullptr);
+            &m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersProfileOverrides);
         parseVector3OverrideSpec(
             "MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides",
             m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverridesSpec,
             -0.50f,
             0.50f,
             m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides,
-            nullptr);
+            &m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersProfileOverrides);
         parseVector3OverrideSpec(
             "MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides",
             m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverridesSpec,
             -180.0f,
             180.0f,
             m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides,
-            nullptr);
+            &m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegProfileOverrides);
         parseFloatOverrideSpec(
             "MagazineInteractionSocketCaptureAngleDegOverrides",
             m_MagazineInteractionSocketCaptureAngleDegOverridesSpec,
             0.0f,
             89.0f,
             m_MagazineInteractionSocketCaptureAngleDegOverrides,
-            nullptr);
+            &m_MagazineInteractionSocketCaptureAngleDegProfileOverrides);
+        parseFloatOverrideSpec(
+            "MagazineInteractionSocketRequiredDepthMetersOverrides",
+            m_MagazineInteractionSocketRequiredDepthMetersOverridesSpec,
+            0.0f,
+            0.25f,
+            m_MagazineInteractionSocketRequiredDepthMetersOverrides,
+            &m_MagazineInteractionSocketRequiredDepthMetersProfileOverrides);
+        parseFloatOverrideSpec(
+            "MagazineInteractionSocketRequiredOverlapFractionOverrides",
+            m_MagazineInteractionSocketRequiredOverlapFractionOverridesSpec,
+            0.0f,
+            1.0f,
+            m_MagazineInteractionSocketRequiredOverlapFractionOverrides,
+            &m_MagazineInteractionSocketRequiredOverlapFractionProfileOverrides);
     }
     m_MagazineInteractionMagazineInsertionAxisLocal = getVector3("ManualReloadMagazineInsertionAxisLocal", m_MagazineInteractionMagazineInsertionAxisLocal);
     m_MagazineInteractionMagazineHandOffsetMeters = getVector3("ManualReloadMagazineHandOffsetMeters", m_MagazineInteractionMagazineHandOffsetMeters);

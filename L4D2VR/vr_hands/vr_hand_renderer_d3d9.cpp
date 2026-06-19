@@ -475,8 +475,10 @@ bool VrHandRendererD3D9::Draw(
     device->SetRenderState(D3DRS_ZWRITEENABLE, writeDepth ? TRUE : FALSE);
     device->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
     device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
-    device->SetRenderState(D3DRS_FILLMODE, D3DFILL_SOLID);
-    // The detached magazine and generated calibration/debug boxes are solid test assets.
+    device->SetRenderState(D3DRS_FILLMODE, standaloneGeneratedBox ? D3DFILL_WIREFRAME : D3DFILL_SOLID);
+    // Detached magazine meshes need opaque rendering because exported materials may
+    // carry an unused zero alpha channel. Generated debug boxes render as wireframe
+    // so they do not hide the weapon while calibrating.
     // Some exported materials keep an unused zero alpha channel, which made a successfully
     // loaded GLB invisible. Hands retain normal alpha blending; standalone helpers render opaque.
     device->SetRenderState(D3DRS_ALPHABLENDENABLE, opaqueStandaloneMesh ? FALSE : TRUE);
@@ -520,13 +522,80 @@ bool VrHandRendererD3D9::Draw(
         device->SetViewport(&handViewport);
     }
 
-    const HRESULT drawResult = device->DrawIndexedPrimitive(
+    HRESULT drawResult = device->DrawIndexedPrimitive(
         D3DPT_TRIANGLELIST,
         0,
         0,
         mesh.vertexCount,
         0,
         mesh.indexCount / 3u);
+
+    if (SUCCEEDED(drawResult) && standaloneGeneratedBox && !asset.vertices.empty())
+    {
+        Vector mins(
+            asset.vertices.front().position[0],
+            asset.vertices.front().position[1],
+            asset.vertices.front().position[2]);
+        Vector maxs = mins;
+        for (const VrHandVertex& vertex : asset.vertices)
+        {
+            mins.x = std::min(mins.x, vertex.position[0]);
+            mins.y = std::min(mins.y, vertex.position[1]);
+            mins.z = std::min(mins.z, vertex.position[2]);
+            maxs.x = std::max(maxs.x, vertex.position[0]);
+            maxs.y = std::max(maxs.y, vertex.position[1]);
+            maxs.z = std::max(maxs.z, vertex.position[2]);
+        }
+
+        const Vector center = (mins + maxs) * 0.5f;
+        const Vector span = maxs - mins;
+        const float markerX = std::max(0.025f, span.x * 0.12f);
+        const float markerY = std::max(0.025f, span.y * 0.12f);
+        const float markerZ = std::max(0.025f, span.z * 0.12f);
+        VrHandVertex marker[12]{};
+        int markerVertexCount = 0;
+        auto addMarkerVertex = [&](const Vector& position)
+        {
+            VrHandVertex& vertex = marker[markerVertexCount++];
+            vertex.position[0] = position.x;
+            vertex.position[1] = position.y;
+            vertex.position[2] = position.z;
+            vertex.normal[2] = 1.0f;
+            vertex.weights[0] = 1.0f;
+            vertex.joints[0] = 0;
+        };
+        auto addMarkerLine = [&](const Vector& a, const Vector& b)
+        {
+            addMarkerVertex(a);
+            addMarkerVertex(b);
+        };
+        addMarkerLine(
+            center + Vector(-markerX, -markerY, 0.0f),
+            center + Vector(markerX, markerY, 0.0f));
+        addMarkerLine(
+            center + Vector(-markerX, markerY, 0.0f),
+            center + Vector(markerX, -markerY, 0.0f));
+        addMarkerLine(
+            center + Vector(-markerX, 0.0f, -markerZ),
+            center + Vector(markerX, 0.0f, markerZ));
+        addMarkerLine(
+            center + Vector(-markerX, 0.0f, markerZ),
+            center + Vector(markerX, 0.0f, -markerZ));
+        addMarkerLine(
+            center + Vector(0.0f, -markerY, -markerZ),
+            center + Vector(0.0f, markerY, markerZ));
+        addMarkerLine(
+            center + Vector(0.0f, -markerY, markerZ),
+            center + Vector(0.0f, markerY, -markerZ));
+
+        const HRESULT markerResult = device->DrawPrimitiveUP(
+            D3DPT_LINELIST,
+            static_cast<UINT>(markerVertexCount / 2),
+            marker,
+            sizeof(VrHandVertex));
+        if (FAILED(markerResult))
+            drawResult = markerResult;
+    }
 
     if (haveOldViewport)
         device->SetViewport(&oldViewport);
