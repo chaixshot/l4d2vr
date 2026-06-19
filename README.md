@@ -37,6 +37,14 @@ If you use a desktop client resolution of 2k or higher, add -bigfonts to the lau
 If the game isn't loading in VR:
 * Disable SteamVR theater in [Steam settings](https://external-preview.redd.it/1WdLExouo_YKhTGT6C5GGrOjeWO7qNdIdDRvIRBhw-0.png?auto=webp&s=0d4447a9d954e1ec15b2c010cf50eeabd51f4197)
 
+If the game shows "Failed to create D3D device!":
+* L4D2VR uses a custom `d3d9.dll` based on DXVK. Even though the error says D3D, the failure is often the Vulkan backend failing to initialize.
+* Update the GPU driver from NVIDIA, AMD, or Intel. Windows Update drivers are often too old for DXVK 2.x.
+* Make sure the GPU and driver support Vulkan 1.3. Very old GPUs and some virtual/remote desktop display adapters will not work.
+* Do not launch the Steam "Vulkan" launch option and do not add `-vulkan`. Launch the normal DirectX 9 game with the L4D2VR files installed.
+* Remove forced display launch options such as `-w`, `-h`, `-fullscreen`, or unusual refresh-rate settings, then try windowed/default video settings.
+* Check `left4dead2_d3d9.log` next to `left4dead2.exe`; lines such as "No adapters found" or "A Vulkan 1.3 capable driver is required" indicate a driver/GPU support problem.
+
 If the game is stuttering, try: 
 * Steam Settings -> Shader Pre-Caching -> Allow background processing of Vulkan shaders
 

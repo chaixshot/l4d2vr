@@ -393,6 +393,80 @@ namespace
         return vr && (vr->m_MagazineBoxDebugEnabled || vr->m_VrHandsDebugLog);
     }
 
+    std::mutex s_MagazineCalibrationDiagLogMutex;
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point> s_MagazineCalibrationDiagLastLog;
+
+    inline bool ShouldLogMagazineCalibrationDiagnostics(const VR* vr, const std::string& key, float maxHz = 1.0f)
+    {
+        if (!vr || !vr->m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed))
+            return false;
+        if (key.empty())
+            return false;
+
+        std::lock_guard<std::mutex> lock(s_MagazineCalibrationDiagLogMutex);
+        if (s_MagazineCalibrationDiagLastLog.size() > 512)
+            s_MagazineCalibrationDiagLastLog.clear();
+
+        auto& last = s_MagazineCalibrationDiagLastLog[key];
+        return !ShouldThrottleLog(last, maxHz);
+    }
+
+    inline const char* HooksClassNameForLog(const char* className)
+    {
+        return (className && *className) ? className : "<null>";
+    }
+
+    inline std::string HooksTruncateForLog(const std::string& value, size_t maxLen = 120)
+    {
+        if (value.size() <= maxLen)
+            return value;
+        if (maxLen <= 3)
+            return value.substr(0, maxLen);
+        return value.substr(0, maxLen - 3) + "...";
+    }
+
+    inline std::string HooksBoneSampleForLog(const std::vector<std::string>& boneNames, int maxBones = 10)
+    {
+        std::string sample;
+        int emitted = 0;
+        for (size_t i = 0; i < boneNames.size() && emitted < maxBones; ++i)
+        {
+            if (boneNames[i].empty())
+                continue;
+            if (!sample.empty())
+                sample += "|";
+            sample += std::to_string(i) + ":" + HooksTruncateForLog(boneNames[i], 48);
+            ++emitted;
+        }
+        return sample.empty() ? std::string("<none>") : sample;
+    }
+
+    inline void HooksDiagnoseBoneCollection(
+        void* drawState,
+        bool& outHasStudioHdr,
+        bool& outLayoutOk,
+        int& outLayoutBones,
+        int& outLayoutBoneIndex,
+        int& outLayoutNumBonesOffset)
+    {
+        outHasStudioHdr = false;
+        outLayoutOk = false;
+        outLayoutBones = 0;
+        outLayoutBoneIndex = 0;
+        outLayoutNumBonesOffset = 0;
+
+        const uint8_t* studioHdr = nullptr;
+        outHasStudioHdr = vr_vm_stabilize::TryGetStudioHdrFromDrawState(drawState, studioHdr) && studioHdr;
+        if (!outHasStudioHdr)
+            return;
+
+        outLayoutOk = vr_vm_stabilize::TryGetBoneTableLayout(
+            drawState,
+            outLayoutBones,
+            outLayoutBoneIndex,
+            outLayoutNumBonesOffset);
+    }
+
     C_BaseEntity* HooksSafeGetClientEntity(Game* game, int entityIndex)
     {
         if (!game || !game->m_ClientEntityList || entityIndex <= 0 || entityIndex > 2048)
@@ -2193,16 +2267,71 @@ namespace
         int entityIndex,
         const void* boneToWorld)
     {
-        if (!vr || !drawState || !boneToWorld || modelName.empty())
+        if (!vr)
             return;
         if (!vr->m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed))
             return;
+        if (!drawState || !boneToWorld || modelName.empty())
+        {
+            if (ShouldLogMagazineCalibrationDiagnostics(
+                vr,
+                "missing-input:" + modelName + ":" + std::to_string(entityIndex),
+                1.0f))
+            {
+                Game::logMsg(
+                    "[VR][MagCalib][reject] reason=missing-input ent=%d class=%s model=\"%s\" drawState=%p boneToWorld=%p",
+                    entityIndex,
+                    HooksClassNameForLog(className),
+                    modelName.empty() ? "<empty>" : modelName.c_str(),
+                    drawState,
+                    boneToWorld);
+            }
+            return;
+        }
 
         const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
         const bool sourceIsViewmodelPath = HooksModelNameIsViewmodel(lowerModel);
         const bool sourceHasLooseViewmodelMarker = HooksModelNameHasLooseViewmodelMarker(lowerModel);
-        if (HooksModelNameIsArmsOrHands(lowerModel))
+        const bool sourceIsArmsOrHands = HooksModelNameIsArmsOrHands(lowerModel);
+        const int inferredModelWeaponId = MagazineInteractionInferWeaponIdFromViewmodelModelName(lowerModel);
+        const int currentWeaponId = vr->m_MagazineInteractionCurrentWeaponId.load(std::memory_order_relaxed);
+        const uint32_t renderFrameSeq = vr->m_RenderFrameSeq.load(std::memory_order_relaxed);
+        if (ShouldLogMagazineCalibrationDiagnostics(
+            vr,
+            "candidate:" + modelName + ":" + std::to_string(entityIndex),
+            1.0f))
+        {
+            Game::logMsg(
+                "[VR][MagCalib][candidate] frame=%u ent=%d class=%s vmClass=%d model=\"%s\" drawState=%p boneToWorld=%p path=%d looseV=%d arms=%d curWid=%d inferredWid=%d step=%d",
+                renderFrameSeq,
+                entityIndex,
+                HooksClassNameForLog(className),
+                sourceIsViewmodelClass ? 1 : 0,
+                modelName.c_str(),
+                drawState,
+                boneToWorld,
+                sourceIsViewmodelPath ? 1 : 0,
+                sourceHasLooseViewmodelMarker ? 1 : 0,
+                sourceIsArmsOrHands ? 1 : 0,
+                currentWeaponId,
+                inferredModelWeaponId,
+                std::clamp(vr->m_MagazineInteractionCalibrationStep.load(std::memory_order_relaxed), 0, 3));
+        }
+        if (sourceIsArmsOrHands)
+        {
+            if (ShouldLogMagazineCalibrationDiagnostics(
+                vr,
+                "reject-arms:" + modelName + ":" + std::to_string(entityIndex),
+                1.0f))
+            {
+                Game::logMsg(
+                    "[VR][MagCalib][reject] reason=arms-or-hands ent=%d class=%s model=\"%s\"",
+                    entityIndex,
+                    HooksClassNameForLog(className),
+                    modelName.c_str());
+            }
             return;
+        }
 
         std::vector<std::string> boneNames;
         std::vector<int> boneParents;
@@ -2219,22 +2348,105 @@ namespace
             stride,
             numBonesOffset))
         {
+            if (ShouldLogMagazineCalibrationDiagnostics(
+                vr,
+                "bone-collect-failed:" + modelName + ":" + std::to_string(entityIndex),
+                1.0f))
+            {
+                bool hasStudioHdr = false;
+                bool layoutOk = false;
+                int layoutBones = 0;
+                int layoutBoneIndex = 0;
+                int layoutNumBonesOffset = 0;
+                HooksDiagnoseBoneCollection(
+                    drawState,
+                    hasStudioHdr,
+                    layoutOk,
+                    layoutBones,
+                    layoutBoneIndex,
+                    layoutNumBonesOffset);
+                Game::logMsg(
+                    "[VR][MagCalib][reject] reason=bone-collect-failed ent=%d class=%s vmClass=%d model=\"%s\" hasStudioHdr=%d layoutOk=%d layoutBones=%d layoutBoneIndex=0x%X layoutNumBonesOff=0x%X",
+                    entityIndex,
+                    HooksClassNameForLog(className),
+                    sourceIsViewmodelClass ? 1 : 0,
+                    modelName.c_str(),
+                    hasStudioHdr ? 1 : 0,
+                    layoutOk ? 1 : 0,
+                    layoutBones,
+                    layoutBoneIndex,
+                    layoutNumBonesOffset);
+            }
             return;
         }
         if (numBones <= 0 || numBones > 512)
+        {
+            if (ShouldLogMagazineCalibrationDiagnostics(
+                vr,
+                "invalid-bone-count:" + modelName + ":" + std::to_string(entityIndex),
+                1.0f))
+            {
+                Game::logMsg(
+                    "[VR][MagCalib][reject] reason=invalid-bone-count ent=%d class=%s model=\"%s\" bones=%d boneIndex=0x%X numBonesOff=0x%X stride=%d",
+                    entityIndex,
+                    HooksClassNameForLog(className),
+                    modelName.c_str(),
+                    numBones,
+                    boneIndex,
+                    numBonesOffset,
+                    stride);
+            }
             return;
+        }
 
         const bool sourceLooksLikeWeaponBones = HooksCalibrationBoneNamesLookLikeWeapon(boneNames);
+        if (ShouldLogMagazineCalibrationDiagnostics(
+            vr,
+            "bones:" + modelName + ":" + std::to_string(entityIndex),
+            1.0f))
+        {
+            const std::string boneSample = HooksBoneSampleForLog(boneNames);
+            Game::logMsg(
+                "[VR][MagCalib][bones] ent=%d class=%s vmClass=%d model=\"%s\" bones=%d boneIndex=0x%X numBonesOff=0x%X stride=%d path=%d looseV=%d weaponBones=%d sample=\"%s\"",
+                entityIndex,
+                HooksClassNameForLog(className),
+                sourceIsViewmodelClass ? 1 : 0,
+                modelName.c_str(),
+                numBones,
+                boneIndex,
+                numBonesOffset,
+                stride,
+                sourceIsViewmodelPath ? 1 : 0,
+                sourceHasLooseViewmodelMarker ? 1 : 0,
+                sourceLooksLikeWeaponBones ? 1 : 0,
+                boneSample.c_str());
+        }
         if (!sourceIsViewmodelClass &&
             !sourceIsViewmodelPath &&
             !sourceHasLooseViewmodelMarker &&
             !sourceLooksLikeWeaponBones)
         {
+            if (ShouldLogMagazineCalibrationDiagnostics(
+                vr,
+                "filter-reject:" + modelName + ":" + std::to_string(entityIndex),
+                1.0f))
+            {
+                const std::string boneSample = HooksBoneSampleForLog(boneNames);
+                Game::logMsg(
+                    "[VR][MagCalib][reject] reason=not-viewmodel-or-weapon ent=%d class=%s vmClass=%d model=\"%s\" path=%d looseV=%d weaponBones=%d bones=%d sample=\"%s\"",
+                    entityIndex,
+                    HooksClassNameForLog(className),
+                    sourceIsViewmodelClass ? 1 : 0,
+                    modelName.c_str(),
+                    sourceIsViewmodelPath ? 1 : 0,
+                    sourceHasLooseViewmodelMarker ? 1 : 0,
+                    sourceLooksLikeWeaponBones ? 1 : 0,
+                    numBones,
+                    boneSample.c_str());
+            }
             return;
         }
 
-        const int inferredModelWeaponId = MagazineInteractionInferWeaponIdFromViewmodelModelName(lowerModel);
-        const int currentWeaponId = vr->m_MagazineInteractionCurrentWeaponId.load(std::memory_order_relaxed);
         const int weaponId = inferredModelWeaponId > 0
             ? inferredModelWeaponId
             : currentWeaponId > 0
@@ -2318,7 +2530,30 @@ namespace
             sourceScore += 25;
         sourceScore += std::min(numBones, 160);
 
-        const uint32_t renderFrameSeq = vr->m_RenderFrameSeq.load(std::memory_order_relaxed);
+        if (ShouldLogMagazineCalibrationDiagnostics(
+            vr,
+            "publish-attempt:" + modelName + ":" + std::to_string(entityIndex),
+            1.0f))
+        {
+            Game::logMsg(
+                "[VR][MagCalib][publish-attempt] frame=%u ent=%d class=%s vmClass=%d model=\"%s\" wid=%d inferredWid=%d curWid=%d score=%d bones=%d fp=%08X boneSig=%08X recMag=%d magScore=%d recBolt=%d boltScore=%d",
+                renderFrameSeq,
+                entityIndex,
+                HooksClassNameForLog(className),
+                sourceIsViewmodelClass ? 1 : 0,
+                modelName.c_str(),
+                weaponId,
+                inferredModelWeaponId,
+                currentWeaponId,
+                sourceScore,
+                numBones,
+                modelFingerprint,
+                boneSignature,
+                recommendedMagazineBone,
+                recommendedMagazineScore,
+                recommendedBoltBone,
+                recommendedBoltScore);
+        }
         vr->PublishMagazineInteractionCalibrationSnapshot(
             modelName.c_str(),
             className,
@@ -2638,6 +2873,76 @@ namespace
         matrix.m[0][clampedAxis] = value.x;
         matrix.m[1][clampedAxis] = value.y;
         matrix.m[2][clampedAxis] = value.z;
+    }
+
+    inline void ApplyMagazineInteractionMagazineBoxCalibrationAdjustments(
+        VR* vr,
+        vr_vm_stabilize::Mat3x4& boxWorld,
+        Vector& mins,
+        Vector& maxs)
+    {
+        if (!vr)
+            return;
+
+        const float scale = (std::isfinite(vr->m_VRScale) && vr->m_VRScale > 0.001f) ? vr->m_VRScale : 43.2f;
+        const Vector configuredHalfMeters(
+            std::clamp(vr->m_MagazineInteractionMagazineBoxHalfExtentsMeters.x, 0.0f, 0.50f),
+            std::clamp(vr->m_MagazineInteractionMagazineBoxHalfExtentsMeters.y, 0.0f, 0.50f),
+            std::clamp(vr->m_MagazineInteractionMagazineBoxHalfExtentsMeters.z, 0.0f, 0.50f));
+        const Vector localOffsetMeters(
+            std::clamp(vr->m_MagazineInteractionMagazineBoxLocalOffsetMeters.x, -0.50f, 0.50f),
+            std::clamp(vr->m_MagazineInteractionMagazineBoxLocalOffsetMeters.y, -0.50f, 0.50f),
+            std::clamp(vr->m_MagazineInteractionMagazineBoxLocalOffsetMeters.z, -0.50f, 0.50f));
+        const Vector rotationDeg(
+            std::clamp(vr->m_MagazineInteractionMagazineBoxLocalRotationOffsetDeg.x, -180.0f, 180.0f),
+            std::clamp(vr->m_MagazineInteractionMagazineBoxLocalRotationOffsetDeg.y, -180.0f, 180.0f),
+            std::clamp(vr->m_MagazineInteractionMagazineBoxLocalRotationOffsetDeg.z, -180.0f, 180.0f));
+
+        const Vector sourceHalf = (maxs - mins) * 0.5f;
+        Vector center = (mins + maxs) * 0.5f;
+        center = center + localOffsetMeters * scale;
+
+        const Vector half(
+            configuredHalfMeters.x > 0.0001f ? configuredHalfMeters.x * scale : std::max(0.001f, sourceHalf.x),
+            configuredHalfMeters.y > 0.0001f ? configuredHalfMeters.y * scale : std::max(0.001f, sourceHalf.y),
+            configuredHalfMeters.z > 0.0001f ? configuredHalfMeters.z * scale : std::max(0.001f, sourceHalf.z));
+        mins = center - half;
+        maxs = center + half;
+
+        if (std::fabs(rotationDeg.x) <= 0.0001f &&
+            std::fabs(rotationDeg.y) <= 0.0001f &&
+            std::fabs(rotationDeg.z) <= 0.0001f)
+        {
+            return;
+        }
+
+        Vector axisX = HooksNormalizeVector(HooksMatrixAxis(boxWorld, 0), Vector(1.0f, 0.0f, 0.0f));
+        Vector axisY = HooksNormalizeVector(HooksMatrixAxis(boxWorld, 1), Vector(0.0f, 1.0f, 0.0f));
+        Vector axisZ = HooksNormalizeVector(HooksMatrixAxis(boxWorld, 2), Vector(0.0f, 0.0f, 1.0f));
+
+        if (std::fabs(rotationDeg.x) > 0.0001f)
+        {
+            axisY = VectorRotate(axisY, axisX, rotationDeg.x);
+            axisZ = VectorRotate(axisZ, axisX, rotationDeg.x);
+        }
+        if (std::fabs(rotationDeg.y) > 0.0001f)
+        {
+            axisX = VectorRotate(axisX, axisY, rotationDeg.y);
+            axisZ = VectorRotate(axisZ, axisY, rotationDeg.y);
+        }
+        if (std::fabs(rotationDeg.z) > 0.0001f)
+        {
+            axisX = VectorRotate(axisX, axisZ, rotationDeg.z);
+            axisY = VectorRotate(axisY, axisZ, rotationDeg.z);
+        }
+
+        axisX = HooksNormalizeVector(axisX, Vector(1.0f, 0.0f, 0.0f));
+        axisY = HooksNormalizeVector(axisY, Vector(0.0f, 1.0f, 0.0f));
+        axisZ = HooksNormalizeVector(CrossProduct(axisX, axisY), axisZ);
+        axisY = HooksNormalizeVector(CrossProduct(axisZ, axisX), axisY);
+        HooksSetMatrixAxis(boxWorld, 0, axisX);
+        HooksSetMatrixAxis(boxWorld, 1, axisY);
+        HooksSetMatrixAxis(boxWorld, 2, axisZ);
     }
 
     inline bool HooksProjectBasisReference(
@@ -3968,6 +4273,8 @@ namespace
             return;
 
         CalibrationBoneHighlightEnsureMinimumSpan(mins, maxs, fallbackHalf);
+        if (step == 1)
+            ApplyMagazineInteractionMagazineBoxCalibrationAdjustments(vr, selectedWorld, mins, maxs);
 
         const bool boltStep = (step == 3);
         const int r = boltStep ? 74 : 40;
@@ -4352,6 +4659,8 @@ namespace
         {
             CalibrationBoneHighlightEnsureMinimumSpan(mins, maxs, fallbackHalf);
             const int step = std::clamp(vr->m_MagazineInteractionCalibrationStep.load(std::memory_order_relaxed), 0, 3);
+            if (step == 1)
+                ApplyMagazineInteractionMagazineBoxCalibrationAdjustments(vr, previewSelectedWorld, mins, maxs);
             const bool boltStep = (step == 3);
             const int r = boltStep ? 74 : 40;
             const int g = boltStep ? 142 : 224;
@@ -4559,14 +4868,19 @@ namespace
             return;
         }
 
-        const bool wantsMagazineBox = vr->m_MagazineInteractionEnabled || vr->m_MagazineBoxDebugEnabled;
+        const bool calibrationOverlayActive =
+            vr->m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed);
+        const bool wantsMagazineBox =
+            vr->m_MagazineInteractionEnabled ||
+            vr->m_MagazineBoxDebugEnabled ||
+            calibrationOverlayActive;
         if (!wantsMagazineBox)
             return;
         const bool logMagazineBoxDiagnostics = ShouldLogMagazineBoxDiagnostics(vr);
         constexpr bool drawDebugBox = false;
 
         const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
-        if (!HooksModelNameIsViewmodel(lowerModel) || HooksModelNameIsArmsOrHands(lowerModel))
+        if (HooksModelNameIsArmsOrHands(lowerModel))
             return;
 
         std::vector<std::string> boneNames;
@@ -4588,6 +4902,15 @@ namespace
         }
         if (numBones <= 0 || numBones > 512 || static_cast<int>(boneNames.size()) < numBones ||
             static_cast<int>(boneParents.size()) < numBones)
+        {
+            return;
+        }
+        const bool sourceIsViewmodelPath = HooksModelNameIsViewmodel(lowerModel);
+        const bool sourceHasLooseViewmodelMarker = HooksModelNameHasLooseViewmodelMarker(lowerModel);
+        const bool sourceLooksLikeWeaponBones = HooksCalibrationBoneNamesLookLikeWeapon(boneNames);
+        if (!sourceIsViewmodelPath &&
+            !sourceHasLooseViewmodelMarker &&
+            !sourceLooksLikeWeaponBones)
         {
             return;
         }
@@ -4642,6 +4965,19 @@ namespace
             magazineBone = FindMagazineBoxBone(boneNames);
         if (magazineBone < 0)
             magazineBone = FindMagazineBoxOfficialProfileFallbackBone(lowerModel, boneNames, logMagazineBoxDiagnostics);
+        const int calibrationStep = std::clamp(
+            vr->m_MagazineInteractionCalibrationStep.load(std::memory_order_relaxed),
+            0,
+            3);
+        const int calibrationSelectedBone =
+            vr->m_MagazineInteractionCalibrationSelectedBone.load(std::memory_order_relaxed);
+        if (calibrationOverlayActive &&
+            calibrationStep == 1 &&
+            calibrationSelectedBone >= 0 &&
+            calibrationSelectedBone < numBones)
+        {
+            magazineBone = calibrationSelectedBone;
+        }
         if (magazineBone < 0 || magazineBone >= numBones)
         {
             if (MagazineBoxOfficialProfileExists(lowerModel))
@@ -4952,6 +5288,8 @@ namespace
                 }
             }
         }
+
+        ApplyMagazineInteractionMagazineBoxCalibrationAdjustments(vr, boxWorld, mins, maxs);
 
         vr->PublishMagazineInteractionBox(
             Vector(boxWorld.m[0][3], boxWorld.m[1][3], boxWorld.m[2][3]),
@@ -10456,9 +10794,12 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 			className,
 			pBonesToWorldFinal);
 
+		const bool magazineInteractionCalibrationOverlayActive =
+			m_VR &&
+			m_VR->m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed);
 		if (!m_VR ||
-			(!m_VR->m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed) &&
-				!m_VR->ShouldHideMagazineInteractionNativeClip()))
+			magazineInteractionCalibrationOverlayActive ||
+			!m_VR->ShouldHideMagazineInteractionNativeClip())
 		{
 			DrawCurrentWeaponMagazineBox(
 				m_VR,

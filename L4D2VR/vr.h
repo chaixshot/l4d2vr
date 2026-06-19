@@ -1201,6 +1201,9 @@ public:
 	Vector m_MagazineInteractionFreshMagazinePickupOffsetMeters = { 0.45f, -0.28f, 0.25f };
 	Vector m_MagazineInteractionFreshMagazineBoxHalfExtentsMeters = { 0.055f, 0.045f, 0.12f };
 	Vector m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters = { -0.12f, 0.0f, 0.0f };
+	Vector m_MagazineInteractionMagazineBoxHalfExtentsMeters = { 0.0f, 0.0f, 0.0f };
+	Vector m_MagazineInteractionMagazineBoxLocalOffsetMeters = { 0.0f, 0.0f, 0.0f };
+	Vector m_MagazineInteractionMagazineBoxLocalRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	float m_MagazineInteractionSocketCaptureRadiusMeters = 0.06f;
 	float m_MagazineInteractionSocketCaptureAngleDeg = 35.0f;
 	float m_MagazineInteractionSocketRequiredDepthMeters = 0.04f;
