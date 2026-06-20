@@ -75,6 +75,19 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 
 	m_VR->m_EffectiveAttackRangeAutoFireActive = false;
 
+	constexpr int kAutoActionIN_USE = (1 << 5);
+	const bool localUseButtonDownForAutoActions = (cmd->buttons & kAutoActionIN_USE) != 0;
+	C_BasePlayer* localPlayerForAutoActions = nullptr;
+	if (m_Game && m_Game->m_EngineClient)
+	{
+		const int lpIdx = m_Game->m_EngineClient->GetLocalPlayer();
+		localPlayerForAutoActions = (lpIdx > 0) ? (C_BasePlayer*)m_Game->GetClientEntity(lpIdx) : nullptr;
+	}
+	const bool suppressAutoActionsForUseOrRevive =
+		localUseButtonDownForAutoActions ||
+		m_VR->m_UseCmdOwned ||
+		IsPlayerDoingUseOrReviveAction(localPlayerForAutoActions);
+
 	if (m_VR && m_VR->m_TeleportVisualScoutActive)
 	{
 		// Detached scout view is local-only. Return before VR aim, melee helpers,
@@ -183,7 +196,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			&& !m_VR->m_AimLineEffectiveAttackRangeTargetIsWitch
 			&& !m_VR->m_SuppressPlayerInput
 			&& !m_VR->m_AdjustingViewmodel
-				&& !m_VR->m_AdjustingScope)
+			&& !m_VR->m_AdjustingScope
+			&& !suppressAutoActionsForUseOrRevive)
 		{
 			const int lpIdx = (m_Game->m_EngineClient) ? m_Game->m_EngineClient->GetLocalPlayer() : -1;
 			C_BasePlayer* lp = (lpIdx > 0) ? (C_BasePlayer*)m_Game->GetClientEntity(lpIdx) : nullptr;
@@ -191,7 +205,6 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			{
 				const int lifeState = (int)ReadNetvar<uint8_t>(lp, VR::kLifeStateOffset);
 				const int observerMode = (int)ReadNetvar<int>(lp, VR::kObserverModeOffset);
-				const int currentUseAction = ReadNetvar<int>(lp, 0x1ba8); // m_iCurrentUseAction
 				C_WeaponCSBase* activeWeapon = reinterpret_cast<C_WeaponCSBase*>(lp->GetActiveWeapon());
 				const C_WeaponCSBase::WeaponID weaponId = activeWeapon ? activeWeapon->GetWeaponID() : C_WeaponCSBase::WeaponID::NONE;
 				const bool isHoldToUseWeaponId =
@@ -201,7 +214,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 					(weaponId == C_WeaponCSBase::WeaponID::INCENDIARY_AMMO) ||
 					(weaponId == C_WeaponCSBase::WeaponID::FRAG_AMMO) ||
 					(weaponId == C_WeaponCSBase::WeaponID::UPGRADE_ITEM);
-				const bool canAutoFire = (lifeState == 0) && (observerMode == 0) && (currentUseAction == 0) && !isHoldToUseWeaponId;
+				const bool canAutoFire = (lifeState == 0) && (observerMode == 0) && !isHoldToUseWeaponId;
 				if (canAutoFire)
 				{
 					constexpr int kIN_ATTACK = (1 << 0);
@@ -859,7 +872,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			&& m_VR->m_SpecialInfectedWarningActionStep != VR::SpecialInfectedWarningActionStep::None
 			&& m_VR->m_SpecialInfectedWarningTargetActive
 			&& !m_VR->m_AdjustingViewmodel
-				&& !m_VR->m_AdjustingScope)
+			&& !m_VR->m_AdjustingScope
+			&& !suppressAutoActionsForUseOrRevive)
 		{
 			Vector aimOrigin = (m_VR->GetViewOriginLeft() + m_VR->GetViewOriginRight()) * 0.5f;
 			if (aimOrigin.IsZero())

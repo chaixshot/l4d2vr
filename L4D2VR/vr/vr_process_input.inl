@@ -1201,7 +1201,21 @@ void VR::ProcessInput()
         const unsigned char lifeState = *reinterpret_cast<const unsigned char*>(base + kLifeStateOffset);
         const int obsMode = *reinterpret_cast<const int*>(base + kObserverModeOffset);
         const int currentUseAction = *reinterpret_cast<const int*>(base + 0x1ba8); // m_iCurrentUseAction
-        effectiveRangeAutoFireOwnsPrimary = (lifeState == 0) && (obsMode == 0) && (currentUseAction == 0);
+        const int useActionOwner = *reinterpret_cast<const int*>(base + 0x1ba4);  // m_useActionOwner
+        const int useActionTarget = *reinterpret_cast<const int*>(base + 0x1ba0); // m_useActionTarget
+        const int reviveOwner = *reinterpret_cast<const int*>(base + 0x1f88);     // m_reviveOwner
+        const int reviveTarget = *reinterpret_cast<const int*>(base + 0x1f8c);    // m_reviveTarget
+        const auto handleValid = [](int h) { return h != 0 && h != -1; };
+        const bool useOrReviveActive =
+            wantUse ||
+            useButtonDown ||
+            m_UseCmdOwned ||
+            currentUseAction != 0 ||
+            handleValid(useActionOwner) ||
+            handleValid(useActionTarget) ||
+            handleValid(reviveOwner) ||
+            handleValid(reviveTarget);
+        effectiveRangeAutoFireOwnsPrimary = (lifeState == 0) && (obsMode == 0) && !useOrReviveActive;
     }
 
     if (effectiveRangeAutoFireOwnsPrimary)

@@ -5971,7 +5971,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
     {
         if (!leftGripDown)
         {
-            if (m_MagazineInteractionReloadTriggered)
+            if (m_MagazineInteractionOldMagazinePulled ||
+                m_MagazineInteractionReloadTriggered)
             {
                 m_MagazineInteractionState = MagazineInteractionManualState::WaitingForFreshMagazine;
                 m_MagazineInteractionLeftHandHolding = false;
@@ -6016,7 +6017,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             std::max(0.0f, m_MagazineInteractionPullTriggerByMagazineMeters) * m_VRScale;
         const bool handPulled = handTriggerDistance <= 0.0f || handPullDistance >= handTriggerDistance;
         const bool magazinePulled = magazineTriggerDistance <= 0.0f || magazinePullDistance >= magazineTriggerDistance;
-        if (!m_MagazineInteractionReloadTriggered && (handPulled || magazinePulled))
+        if (!m_MagazineInteractionOldMagazinePulled && (handPulled || magazinePulled))
         {
             m_MagazineInteractionOldMagazinePulled = true;
             m_MagazineInteractionOldMagazineContactActive = false;

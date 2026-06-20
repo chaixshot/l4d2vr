@@ -1375,6 +1375,25 @@ static inline bool HandleValid(int h)
 	return (h != 0 && h != -1);
 }
 
+static inline bool IsPlayerDoingUseOrReviveAction(const C_BasePlayer* player)
+{
+	if (!player)
+		return false;
+
+	const int currentUseAction = ReadNetvar<int>(player, 0x1ba8); // m_iCurrentUseAction
+	if (currentUseAction != 0)
+		return true;
+
+	const int useActionOwner = ReadNetvar<int>(player, 0x1ba4);  // m_useActionOwner
+	const int useActionTarget = ReadNetvar<int>(player, 0x1ba0); // m_useActionTarget
+	const int reviveOwner = ReadNetvar<int>(player, 0x1f88);     // m_reviveOwner
+	const int reviveTarget = ReadNetvar<int>(player, 0x1f8c);    // m_reviveTarget
+	return HandleValid(useActionOwner) ||
+		HandleValid(useActionTarget) ||
+		HandleValid(reviveOwner) ||
+		HandleValid(reviveTarget);
+}
+
 // Mouse-mode aiming helpers (mouse+keyboard play; no controllers required)
 static inline Vector GetMouseModeGunOriginAbs(const VR* vr)
 {
