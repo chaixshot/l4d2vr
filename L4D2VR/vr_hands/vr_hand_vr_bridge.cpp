@@ -1115,6 +1115,55 @@ namespace
         return value;
     }
 
+    bool MagazineInteractionHasBoltPullAxisProfileOverride(const VR* vr)
+    {
+        if (!vr)
+            return false;
+
+        Vector unused{};
+        return MagazineInteractionFindProfileOverride(
+            vr,
+            vr->m_MagazineInteractionBoltPullAxisLocalProfileOverrides,
+            unused);
+    }
+
+    Vector MagazineInteractionBuildBoltInputAxisWorld(const VR* vr, const Vector& fallbackAxis)
+    {
+        Vector fallback = VrHandMath::Normalize(fallbackAxis);
+        if (!vr || !MagazineInteractionHasBoltPullAxisProfileOverride(vr))
+            return fallback;
+
+        Vector viewmodelBack = vr->m_ViewmodelForward * -1.0f;
+        viewmodelBack.z = 0.0f;
+        viewmodelBack = VrHandMath::Normalize(viewmodelBack);
+        if (viewmodelBack.Length() > 0.0001f)
+            return viewmodelBack;
+
+        Vector hmdBack = vr->m_HmdForward * -1.0f;
+        hmdBack.z = 0.0f;
+        hmdBack = VrHandMath::Normalize(hmdBack);
+        if (hmdBack.Length() > 0.0001f)
+            return hmdBack;
+
+        return fallback;
+    }
+
+    Vector MagazineInteractionAlignBoltVisualAxisToInputAxis(
+        const VR* vr,
+        const Vector& visualAxis,
+        const Vector& inputAxis)
+    {
+        Vector visual = VrHandMath::Normalize(visualAxis);
+        if (!vr || !MagazineInteractionHasBoltPullAxisProfileOverride(vr))
+            return visual;
+
+        const Vector input = VrHandMath::Normalize(inputAxis);
+        if (visual.Length() <= 0.0001f || input.Length() <= 0.0001f)
+            return visual;
+
+        return (VrHandMath::Dot(visual, input) < -0.15f) ? (visual * -1.0f) : visual;
+    }
+
     float MagazineInteractionResolveBoltGrabPaddingMeters(const VR* vr)
     {
         if (!vr)
@@ -2219,6 +2268,108 @@ namespace
         return std::string();
     }
 
+    std::string MagazineInteractionBoltSoundSample(const VR* vr, bool forward)
+    {
+        if (!vr)
+            return std::string();
+
+        std::string lowerModel = vr->m_MagazineInteractionMagazineModelName;
+        std::transform(lowerModel.begin(), lowerModel.end(), lowerModel.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        const char* suffix = forward ? "forward" : "back";
+        auto slide = [&](const char* directory, const char* stem, bool numbered = true) -> std::string
+        {
+            std::string sample = std::string("weapons/") + directory + "/gunother/" + stem + "_slide" + suffix;
+            if (numbered)
+                sample += "_1";
+            sample += ".wav";
+            return sample;
+        };
+        auto bolt = [&](const char* directory, const char* stem) -> std::string
+        {
+            return std::string("weapons/") + directory + "/gunother/" + stem + "_bolt" + suffix + ".wav";
+        };
+
+        if (lowerModel.find("dual_pistol") != std::string::npos ||
+            lowerModel.find("dual_pistola") != std::string::npos)
+        {
+            return slide("dual_pistol", "dualpistol");
+        }
+        if (lowerModel.find("desert_eagle") != std::string::npos ||
+            lowerModel.find("magnum") != std::string::npos)
+        {
+            return slide("magnum", "pistol");
+        }
+        if (lowerModel.find("pistol") != std::string::npos)
+            return slide("pistol", "pistol");
+        if (lowerModel.find("rifle_ak47") != std::string::npos ||
+            lowerModel.find("ak47") != std::string::npos)
+        {
+            return slide("rifle_ak47", "rifle", false);
+        }
+        if (lowerModel.find("desert_rifle") != std::string::npos)
+            return slide("rifle_desert", "rifle");
+        if (lowerModel.find("sg552") != std::string::npos)
+        {
+            return forward
+                ? "weapons/sg552/gunother/sg552_boltpullforward.wav"
+                : "weapons/sg552/gunother/sg552_boltpull.wav";
+        }
+        if (lowerModel.find("silenced_smg") != std::string::npos ||
+            lowerModel.find("smg_silenced") != std::string::npos)
+        {
+            return slide("smg_silenced", "smg");
+        }
+        if (lowerModel.find("mp5") != std::string::npos)
+            return slide("mp5navy", "mp5", false);
+        if (lowerModel.find("smg") != std::string::npos ||
+            lowerModel.find("uzi") != std::string::npos)
+        {
+            return slide("smg", "smg");
+        }
+        if (lowerModel.find("huntingrifle") != std::string::npos ||
+            lowerModel.find("hunting_rifle") != std::string::npos)
+        {
+            return bolt("hunting_rifle", "hunting_rifle");
+        }
+        if (lowerModel.find("sniper_military") != std::string::npos)
+            return slide("sniper_military", "sniper_military");
+        if (lowerModel.find("awp") != std::string::npos)
+            return bolt("awp", "awp");
+        if (lowerModel.find("scout") != std::string::npos)
+            return bolt("scout", "scout");
+        if (lowerModel.find("m60") != std::string::npos ||
+            lowerModel.find("machinegun_m60") != std::string::npos)
+        {
+            return slide("machinegun_m60", "rifle");
+        }
+        if (lowerModel.find("shotgun_chrome") != std::string::npos ||
+            lowerModel.find("pumpshotgun") != std::string::npos ||
+            lowerModel.find("pump_shotgun") != std::string::npos)
+        {
+            return forward ? std::string() : "weapons/shotgun/gunother/shotgun_pump_1.wav";
+        }
+        if (lowerModel.find("autoshotgun") != std::string::npos ||
+            lowerModel.find("auto_shotgun") != std::string::npos)
+        {
+            return forward
+                ? "weapons/auto_shotgun/gunother/autoshotgun_boltforward.wav"
+                : "weapons/auto_shotgun/gunother/autoshotgun_boltback.wav";
+        }
+        if (lowerModel.find("shotgun_spas") != std::string::npos ||
+            lowerModel.find("spas") != std::string::npos)
+        {
+            return forward
+                ? "weapons/auto_shotgun/gunother/autoshotgun_boltforward.wav"
+                : "weapons/auto_shotgun/gunother/autoshotgun_boltback.wav";
+        }
+        if (lowerModel.find("rifle") != std::string::npos ||
+            lowerModel.find("sg552") != std::string::npos)
+        {
+            return slide("rifle", "rifle");
+        }
+        return std::string();
+    }
+
     std::string MagazineInteractionLowerAscii(std::string value)
     {
         std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -2401,13 +2552,11 @@ namespace
             return;
         }
 
-        const std::string sample = forward
-            ? vr->m_MagazineInteractionCapturedBoltForwardSample
-            : vr->m_MagazineInteractionCapturedBoltBackSample;
+        const std::string sample = MagazineInteractionBoltSoundSample(vr, forward);
         if (MagazineInteractionPrepareSoundSamplePath(sample).empty())
         {
             Game::logMsg(
-                "[VR][MagazineInteraction][Audio] no captured native bolt-%s sample for model=%s weaponId=%d",
+                "[VR][MagazineInteraction][Audio] no configured bolt-%s sample for model=%s weaponId=%d",
                 forward ? "forward" : "back",
                 vr->m_MagazineInteractionMagazineModelName.c_str(),
                 vr->m_MagazineInteractionWeaponId);
@@ -3597,6 +3746,7 @@ void VR::CancelMagazineInteractionManual()
     m_MagazineInteractionSocketCaptureBox = {};
     m_MagazineInteractionShotgunStableCaptureBox = {};
     m_MagazineInteractionBoltPullAxisWorld = {};
+    m_MagazineInteractionBoltInputAxisWorld = {};
     m_MagazineInteractionGrabStartLeftControllerPosAbs = {};
     m_MagazineInteractionHeldMagazineCenterOffsetLocal = {};
     m_MagazineInteractionBoltGrabStartLeftControllerPosAbs = {};
@@ -4033,6 +4183,10 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         Vector axis = VrHandMath::Normalize(m_MagazineInteractionBoltPullAxisWorld);
         if (axis.Length() <= 0.0001f)
             axis = MagazineInteractionBuildBoltPullAxisWorld(this, m_MagazineInteractionBoltRestBox, m_MagazineInteractionBoltRestWorld);
+        axis = MagazineInteractionAlignBoltVisualAxisToInputAxis(
+            this,
+            axis,
+            m_MagazineInteractionBoltInputAxisWorld);
         m_MagazineInteractionBoltPullAxisWorld = axis;
 
         const Vector restOrigin = MagazineInteractionMatrixOrigin(m_MagazineInteractionBoltRestWorld);
@@ -4091,6 +4245,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             MagazineInteractionBuildBoltPullAxisWorld(this, m_MagazineInteractionBoltRestBox, m_MagazineInteractionBoltRestWorld);
         if (reversePullAxisForAutoBolt)
             m_MagazineInteractionBoltPullAxisWorld = buildAutoBoltRearPullAxis(m_MagazineInteractionBoltPullAxisWorld);
+        m_MagazineInteractionBoltInputAxisWorld =
+            MagazineInteractionBuildBoltInputAxisWorld(this, m_MagazineInteractionBoltPullAxisWorld);
         setBoltPullDistance(m_MagazineInteractionBoltPullDistance);
     };
 
@@ -4127,6 +4283,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_MagazineInteractionBoltRestWorld = MagazineInteractionBuildBoxWorld(boltBox);
         m_MagazineInteractionBoltPullAxisWorld =
             MagazineInteractionBuildBoltPullAxisWorld(this, m_MagazineInteractionBoltRestBox, m_MagazineInteractionBoltRestWorld);
+        m_MagazineInteractionBoltInputAxisWorld =
+            MagazineInteractionBuildBoltInputAxisWorld(this, m_MagazineInteractionBoltPullAxisWorld);
         m_MagazineInteractionBoltGrabStartLeftControllerPosAbs = {};
         m_MagazineInteractionBoltGrabStartPullDistance = 0.0f;
         m_MagazineInteractionBoltPullDistance = 0.0f;
@@ -4151,7 +4309,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             ? ((boltBox.maxs - boltBox.mins) * (0.5f / m_VRScale))
             : Vector(0.0f, 0.0f, 0.0f);
         Game::logMsg(
-            "[VR][MagazineInteraction] %s; bolt stage armed weaponId=%d ent=%d bone=%d pull=%.2f return=%.2f axis=(%.2f %.2f %.2f) boxOffsetMeters=(%.3f %.3f %.3f) boxHalfExtentsMeters=(%.3f %.3f %.3f) model=%s reason=%s",
+            "[VR][MagazineInteraction] %s; bolt stage armed weaponId=%d ent=%d bone=%d pull=%.2f return=%.2f visualAxis=(%.2f %.2f %.2f) inputAxis=(%.2f %.2f %.2f) boxOffsetMeters=(%.3f %.3f %.3f) boxHalfExtentsMeters=(%.3f %.3f %.3f) model=%s reason=%s",
             backendReloadStillPending ? "backend reload still pending" : "backend reload complete",
             static_cast<int>(weaponId),
             boltBox.entityIndex,
@@ -4161,6 +4319,9 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             m_MagazineInteractionBoltPullAxisWorld.x,
             m_MagazineInteractionBoltPullAxisWorld.y,
             m_MagazineInteractionBoltPullAxisWorld.z,
+            m_MagazineInteractionBoltInputAxisWorld.x,
+            m_MagazineInteractionBoltInputAxisWorld.y,
+            m_MagazineInteractionBoltInputAxisWorld.z,
             boltBoxOffsetMeters.x,
             boltBoxOffsetMeters.y,
             boltBoxOffsetMeters.z,
@@ -4184,15 +4345,25 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_MagazineInteractionBoltGrabStartPullDistance = m_MagazineInteractionBoltPullDistance;
         m_MagazineInteractionBoltGrabbedAt = now;
         m_MagazineInteractionBoltPullAxisSignLocked = false;
+        m_MagazineInteractionBoltInputAxisWorld =
+            MagazineInteractionBuildBoltInputAxisWorld(this, m_MagazineInteractionBoltPullAxisWorld);
+        m_MagazineInteractionBoltPullAxisWorld =
+            MagazineInteractionAlignBoltVisualAxisToInputAxis(
+                this,
+                m_MagazineInteractionBoltPullAxisWorld,
+                m_MagazineInteractionBoltInputAxisWorld);
         m_MagazineInteractionLeftHandPoseActive.store(1, std::memory_order_relaxed);
         Game::logMsg(
-            "[VR][MagazineInteraction] bolt grabbed distance=%.2f range=%.2f pull=%.2f axis=(%.2f %.2f %.2f) model=%s",
+            "[VR][MagazineInteraction] bolt grabbed distance=%.2f range=%.2f pull=%.2f visualAxis=(%.2f %.2f %.2f) inputAxis=(%.2f %.2f %.2f) model=%s",
             grabDistance,
             grabRange,
             m_MagazineInteractionBoltMaxPullDistance,
             m_MagazineInteractionBoltPullAxisWorld.x,
             m_MagazineInteractionBoltPullAxisWorld.y,
             m_MagazineInteractionBoltPullAxisWorld.z,
+            m_MagazineInteractionBoltInputAxisWorld.x,
+            m_MagazineInteractionBoltInputAxisWorld.y,
+            m_MagazineInteractionBoltInputAxisWorld.z,
             m_MagazineInteractionBoltRestBox.modelName.c_str());
     };
 
@@ -4208,6 +4379,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             m_MagazineInteractionBoltRestValid = false;
             m_MagazineInteractionBoltRestWorld = {};
             m_MagazineInteractionBoltWorld = {};
+            m_MagazineInteractionBoltInputAxisWorld = {};
             m_MagazineInteractionBoltGrabStartLeftControllerPosAbs = {};
             m_MagazineInteractionBoltGrabStartPullDistance = 0.0f;
             m_MagazineInteractionBoltPullDistance = 0.0f;
@@ -4298,6 +4470,72 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             MagazineInteractionMatrixAxis(socketWorld, 2)
         };
 
+        auto detachedInsertProbeTouchesSocket = [&]() -> bool
+        {
+            const int insertionAxis = std::clamp(
+                MagazineInteractionDominantAxis(m_MagazineInteractionMagazineInsertionAxisLocal),
+                0,
+                2);
+            const int sideAxisA = (insertionAxis + 1) % 3;
+            const int sideAxisB = (insertionAxis + 2) % 3;
+            const Vector detachedMins = m_MagazineInteractionSocketBox.mins;
+            const Vector detachedMaxs = m_MagazineInteractionSocketBox.maxs;
+            const Vector detachedCenter = (detachedMins + detachedMaxs) * 0.5f;
+            auto axisValue = [](const Vector& value, int axis) -> float
+            {
+                return (axis == 0) ? value.x : (axis == 1) ? value.y : value.z;
+            };
+            auto setAxisValue = [](Vector value, int axis, float component) -> Vector
+            {
+                if (axis == 0)
+                    value.x = component;
+                else if (axis == 1)
+                    value.y = component;
+                else
+                    value.z = component;
+                return value;
+            };
+
+            Vector probes[15]{};
+            int probeCount = 0;
+            const float insertionValues[] =
+            {
+                axisValue(detachedMins, insertionAxis),
+                axisValue(detachedCenter, insertionAxis),
+                axisValue(detachedMaxs, insertionAxis)
+            };
+            for (float insertionValue : insertionValues)
+            {
+                Vector probe = setAxisValue(detachedCenter, insertionAxis, insertionValue);
+                probes[probeCount++] = probe;
+                probes[probeCount++] = setAxisValue(probe, sideAxisA, axisValue(detachedMins, sideAxisA));
+                probes[probeCount++] = setAxisValue(probe, sideAxisA, axisValue(detachedMaxs, sideAxisA));
+                probes[probeCount++] = setAxisValue(probe, sideAxisB, axisValue(detachedMins, sideAxisB));
+                probes[probeCount++] = setAxisValue(probe, sideAxisB, axisValue(detachedMaxs, sideAxisB));
+            }
+
+            const Vector socketOrigin = MagazineInteractionMatrixOrigin(socketWorld);
+            const float inflate = std::max(0.001f, 0.012f * m_VRScale);
+            const Vector socketMins = socketCaptureBox.mins - Vector(inflate, inflate, inflate);
+            const Vector socketMaxs = socketCaptureBox.maxs + Vector(inflate, inflate, inflate);
+            for (int i = 0; i < probeCount; ++i)
+            {
+                const Vector probeWorld = MagazineInteractionMatrixPointWorld(detachedWorld, probes[i]);
+                const Vector delta = probeWorld - socketOrigin;
+                const Vector local(
+                    VrHandMath::Dot(delta, socketAxes[0]),
+                    VrHandMath::Dot(delta, socketAxes[1]),
+                    VrHandMath::Dot(delta, socketAxes[2]));
+                if (local.x >= socketMins.x && local.x <= socketMaxs.x &&
+                    local.y >= socketMins.y && local.y <= socketMaxs.y &&
+                    local.z >= socketMins.z && local.z <= socketMaxs.z)
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+
         if (!m_MagazineInteractionShotgunShellMode)
         {
             const float minDot = std::cos(MagazineInteractionResolveSocketCaptureAngleDeg(this) *
@@ -4315,6 +4553,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             2);
         const float overlapFraction = MagazineInteractionResolveSocketRequiredOverlapFraction(this);
         const float requiredDepth = MagazineInteractionResolveSocketRequiredDepthMeters(this) * m_VRScale;
+        bool strictOverlapSatisfied = true;
         for (int axis = 0; axis < 3; ++axis)
         {
             float socketMin = 0.0f;
@@ -4345,9 +4584,18 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 ? std::max(requiredDepth, std::min(socketSpan, detachedSpan) * overlapFraction)
                 : std::min(socketSpan, detachedSpan) * overlapFraction;
             if (overlap < requiredOverlap)
-                return false;
+            {
+                strictOverlapSatisfied = false;
+                break;
+            }
         }
-        return true;
+        if (strictOverlapSatisfied)
+            return true;
+
+        const bool probeTouchesSocket = detachedInsertProbeTouchesSocket();
+        if (probeTouchesSocket)
+            Game::logMsg("[VR][MagazineInteraction] detached magazine insert accepted by socket probe fallback");
+        return probeTouchesSocket;
     };
 
     C_WeaponCSBase* activeWeapon = nullptr;
@@ -4655,6 +4903,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_MagazineInteractionBoltPullAxisWorld =
             MagazineInteractionBuildBoltPullAxisWorld(this, m_MagazineInteractionBoltRestBox, m_MagazineInteractionBoltRestWorld);
         m_MagazineInteractionBoltPullAxisWorld = buildAutoBoltRearPullAxis(m_MagazineInteractionBoltPullAxisWorld);
+        m_MagazineInteractionBoltInputAxisWorld =
+            MagazineInteractionBuildBoltInputAxisWorld(this, m_MagazineInteractionBoltPullAxisWorld);
         m_MagazineInteractionBoltGrabStartLeftControllerPosAbs = {};
         m_MagazineInteractionBoltGrabStartPullDistance = 0.0f;
         m_MagazineInteractionBoltPullDistance = 0.0f;
@@ -4670,12 +4920,15 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         setBoltPullDistance(0.0f);
         m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
         Game::logMsg(
-            "[VR][MagazineInteraction] quick reload auto-bolt animation started weaponId=%d pull=%.2f axis=(%.2f %.2f %.2f) model=%s reason=%s",
+            "[VR][MagazineInteraction] quick reload auto-bolt animation started weaponId=%d pull=%.2f visualAxis=(%.2f %.2f %.2f) inputAxis=(%.2f %.2f %.2f) model=%s reason=%s",
             static_cast<int>(activeWeaponId),
             requiredPull,
             m_MagazineInteractionBoltPullAxisWorld.x,
             m_MagazineInteractionBoltPullAxisWorld.y,
             m_MagazineInteractionBoltPullAxisWorld.z,
+            m_MagazineInteractionBoltInputAxisWorld.x,
+            m_MagazineInteractionBoltInputAxisWorld.y,
+            m_MagazineInteractionBoltInputAxisWorld.z,
             boltBox.modelName.c_str(),
             reason ? reason : "unknown");
         return true;
@@ -5276,30 +5529,43 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 : false;
         }
 
-        Vector axis = VrHandMath::Normalize(m_MagazineInteractionBoltPullAxisWorld);
+        Vector visualAxis = VrHandMath::Normalize(m_MagazineInteractionBoltPullAxisWorld);
+        if (visualAxis.Length() <= 0.0001f)
+            visualAxis = MagazineInteractionBuildBoltPullAxisWorld(this, m_MagazineInteractionBoltRestBox, m_MagazineInteractionBoltRestWorld);
+        if (visualAxis.Length() > 0.0001f)
+            m_MagazineInteractionBoltPullAxisWorld = visualAxis;
+
+        Vector inputAxis = VrHandMath::Normalize(m_MagazineInteractionBoltInputAxisWorld);
+        if (inputAxis.Length() <= 0.0001f)
+            inputAxis = MagazineInteractionBuildBoltInputAxisWorld(this, visualAxis);
+        if (inputAxis.Length() > 0.0001f)
+            m_MagazineInteractionBoltInputAxisWorld = inputAxis;
+        visualAxis = MagazineInteractionAlignBoltVisualAxisToInputAxis(this, visualAxis, inputAxis);
+        if (visualAxis.Length() > 0.0001f)
+            m_MagazineInteractionBoltPullAxisWorld = visualAxis;
+
         const Vector handDelta = m_LeftControllerPosAbs - m_MagazineInteractionBoltGrabStartLeftControllerPosAbs;
-        float handPullDistance = VrHandMath::Dot(handDelta, axis);
+        const float handPullDistance = VrHandMath::Dot(handDelta, inputAxis);
         if (!m_MagazineInteractionBoltPullAxisSignLocked)
         {
             const float signLockDistance = std::max(0.10f, 0.006f * m_VRScale);
             if (std::fabs(handPullDistance) >= signLockDistance)
             {
-                if (handPullDistance < 0.0f)
-                {
-                    axis = axis * -1.0f;
-                    m_MagazineInteractionBoltPullAxisWorld = axis;
-                    handPullDistance = -handPullDistance;
-                }
                 m_MagazineInteractionBoltPullAxisSignLocked = true;
                 Game::logMsg(
-                    "[VR][MagazineInteraction] bolt pull axis sign locked axis=(%.2f %.2f %.2f) firstProjected=%.2f",
-                    axis.x,
-                    axis.y,
-                    axis.z,
+                    "[VR][MagazineInteraction] bolt pull input locked visualAxis=(%.2f %.2f %.2f) inputAxis=(%.2f %.2f %.2f) firstProjected=%.2f",
+                    visualAxis.x,
+                    visualAxis.y,
+                    visualAxis.z,
+                    inputAxis.x,
+                    inputAxis.y,
+                    inputAxis.z,
                     handPullDistance);
             }
         }
-        const float desiredPull = m_MagazineInteractionBoltGrabStartPullDistance + handPullDistance;
+        const float desiredPull = std::max(
+            0.0f,
+            m_MagazineInteractionBoltGrabStartPullDistance + handPullDistance);
         setBoltPullDistance(desiredPull);
         m_MagazineInteractionLeftHandPoseActive.store(1, std::memory_order_relaxed);
 

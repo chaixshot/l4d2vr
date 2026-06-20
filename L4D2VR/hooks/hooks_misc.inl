@@ -2670,6 +2670,12 @@ namespace
     {
         const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
         bool usedAxisOverride = false;
+        Vector profileLocalAxis{};
+        const bool usedProfileAxisOverride = FindMagazineInteractionProfileOverride(
+            vr,
+            profileKey,
+            vr->m_MagazineInteractionBoltPullAxisLocalProfileOverrides,
+            profileLocalAxis);
         Vector configuredLocalAxis = ResolveMagazineInteractionBoltPullAxisLocal(vr, weaponId, profileKey, usedAxisOverride);
         const bool legacyM16Axis =
             !usedAxisOverride &&
@@ -2728,6 +2734,32 @@ namespace
                 axis = HooksNormalizeVector(axis, Vector(0.0f, 0.0f, 0.0f));
                 return (axis.Length() > 0.0001f) ? axis : Vector(0.0f, 0.0f, 0.0f);
             };
+
+        if (usedProfileAxisOverride)
+        {
+            const Vector profileBoltAxis = axisFromMatrix(boltWorld) * -1.0f;
+            if (profileBoltAxis.Length() > 0.0001f)
+            {
+                logAxis("profile-bolt-local", profileBoltAxis);
+                return profileBoltAxis;
+            }
+
+            if (pModelToWorld)
+            {
+                vr_vm_stabilize::Mat3x4 modelWorld{};
+                if (vr_vm_stabilize::SafeRead(
+                    reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pModelToWorld),
+                    modelWorld))
+                {
+                    const Vector axis = axisFromMatrix(modelWorld);
+                    if (axis.Length() > 0.0001f)
+                    {
+                        logAxis("profile-model-local", axis);
+                        return axis;
+                    }
+                }
+            }
+        }
 
         if (sourceBones &&
             boltBone >= 0 &&

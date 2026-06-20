@@ -1348,6 +1348,7 @@ public:
 	float m_MagazineInteractionFreshPickupHmdYawOffsetDeg = 0.0f;
 	float m_MagazineInteractionFreshPickupRotationOffset = 0.0f;
 	Vector m_MagazineInteractionBoltPullAxisWorld{};
+	Vector m_MagazineInteractionBoltInputAxisWorld{};
 	Vector m_MagazineInteractionGrabStartLeftControllerPosAbs{};
 	Vector m_MagazineInteractionHeldMagazineCenterOffsetLocal{};
 	Vector m_MagazineInteractionBoltGrabStartLeftControllerPosAbs{};
