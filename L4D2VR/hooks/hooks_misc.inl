@@ -6730,7 +6730,218 @@ namespace
         Vector forearmPos = Vector(0.0f, 0.0f, 0.0f);
         float wristKeepDistance = 0.0f;
         float wristPlaneWorld[4]{};
+        bool deterministicWristPlaneLocalValid = false;
+        float deterministicWristPlaneLocal[4]{};
     };
+
+    inline bool HooksNativeViewmodelHandsOnlyVectorFinite(const Vector& value);
+    inline bool HooksNativeViewmodelHandsOnlyPlaneFinite(const float plane[4]);
+
+    inline bool HooksNativeViewmodelHandsOnlyResolveRestOffsetToAncestor(
+        void* drawState,
+        int boneIndex,
+        int stride,
+        const std::vector<int>& boneParents,
+        int numBones,
+        int child,
+        int ancestor,
+        Vector& outOffset)
+    {
+        outOffset = Vector(0.0f, 0.0f, 0.0f);
+        if (!drawState || child < 0 || child >= numBones || ancestor < 0 || ancestor >= numBones ||
+            static_cast<int>(boneParents.size()) < numBones)
+        {
+            return false;
+        }
+
+        int current = child;
+        for (int guard = 0; guard < numBones && current >= 0 && current < numBones; ++guard)
+        {
+            if (current == ancestor)
+                return true;
+
+            Vector local{};
+            if (!HooksNativeViewmodelHandsOnlyReadBoneRestPos(
+                    drawState,
+                    boneIndex,
+                    stride,
+                    current,
+                    local) ||
+                !HooksNativeViewmodelHandsOnlyVectorFinite(local))
+            {
+                return false;
+            }
+
+            outOffset += local;
+            current = boneParents[static_cast<size_t>(current)];
+        }
+
+        return false;
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyResolveRestBonePositionInHandLocal(
+        void* drawState,
+        int boneIndex,
+        int stride,
+        const std::vector<int>& boneParents,
+        int numBones,
+        int hand,
+        int bone,
+        Vector& outPosition)
+    {
+        outPosition = Vector(0.0f, 0.0f, 0.0f);
+        if (bone == hand)
+            return true;
+
+        Vector offset{};
+        if (HooksNativeViewmodelHandsOnlyIsAncestor(boneParents, hand, bone, numBones) &&
+            HooksNativeViewmodelHandsOnlyResolveRestOffsetToAncestor(
+                drawState,
+                boneIndex,
+                stride,
+                boneParents,
+                numBones,
+                hand,
+                bone,
+                offset))
+        {
+            outPosition = offset * -1.0f;
+            return HooksNativeViewmodelHandsOnlyVectorFinite(outPosition);
+        }
+
+        if (HooksNativeViewmodelHandsOnlyIsAncestor(boneParents, bone, hand, numBones) &&
+            HooksNativeViewmodelHandsOnlyResolveRestOffsetToAncestor(
+                drawState,
+                boneIndex,
+                stride,
+                boneParents,
+                numBones,
+                bone,
+                hand,
+                offset))
+        {
+            outPosition = offset;
+            return HooksNativeViewmodelHandsOnlyVectorFinite(outPosition);
+        }
+
+        return false;
+    }
+
+    inline Vector HooksNativeViewmodelHandsOnlyApplyLocalCutNormalRotation(
+        VR* vr,
+        const Vector& normal,
+        int side)
+    {
+        if (!vr)
+            return normal;
+
+        const Vector rotation = HooksNativeViewmodelHandsOnlyResolveCutRotationDeg(vr, side);
+        if (!std::isfinite(rotation.x) || !std::isfinite(rotation.y) || !std::isfinite(rotation.z))
+            return normal;
+
+        const Vector axes[3] = {
+            Vector(1.0f, 0.0f, 0.0f),
+            Vector(0.0f, 0.0f, 1.0f),
+            Vector(0.0f, 1.0f, 0.0f),
+        };
+
+        Vector out = normal;
+        for (int axis = 0; axis < 3; ++axis)
+        {
+            const float degrees = std::clamp(
+                HooksVectorComponent(rotation, axis),
+                -89.0f,
+                89.0f);
+            if (std::fabs(degrees) <= 0.0001f)
+                continue;
+
+            out = HooksNativeViewmodelHandsOnlyRotateVectorAroundAxis(out, axes[axis], degrees);
+        }
+
+        out = HooksNormalizeVector(out, normal);
+        return (out.Length() > 0.0001f) ? out : normal;
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyBuildDeterministicWristPlaneLocal(
+        VR* vr,
+        void* drawState,
+        const std::vector<int>& boneParents,
+        int numBones,
+        int boneIndex,
+        int stride,
+        const HooksNativeViewmodelHandsOnlySideInfo& keepSide,
+        float outPlane[4])
+    {
+        if (!vr || !drawState || !outPlane || keepSide.side == 0 ||
+            numBones <= 0 || numBones > 512 ||
+            keepSide.hand < 0 || keepSide.hand >= numBones ||
+            keepSide.forearm < 0 || keepSide.forearm >= numBones ||
+            static_cast<int>(boneParents.size()) < numBones)
+        {
+            return false;
+        }
+
+        Vector forearmLocal{};
+        if (!HooksNativeViewmodelHandsOnlyResolveRestBonePositionInHandLocal(
+                drawState,
+                boneIndex,
+                stride,
+                boneParents,
+                numBones,
+                keepSide.hand,
+                keepSide.forearm,
+                forearmLocal))
+        {
+            return false;
+        }
+
+        Vector normal = forearmLocal * -1.0f;
+        Vector wristNormal = normal;
+        if (keepSide.wrist >= 0 && keepSide.wrist < numBones)
+        {
+            Vector wristLocal{};
+            if (HooksNativeViewmodelHandsOnlyResolveRestBonePositionInHandLocal(
+                    drawState,
+                    boneIndex,
+                    stride,
+                    boneParents,
+                    numBones,
+                    keepSide.hand,
+                    keepSide.wrist,
+                    wristLocal))
+            {
+                const Vector candidate = wristLocal * -1.0f;
+                const float candidateLen = candidate.Length();
+                if (std::isfinite(candidateLen) && candidateLen > 0.001f)
+                    wristNormal = candidate;
+            }
+        }
+
+        const float wristLength = normal.Length();
+        if (!std::isfinite(wristLength) || wristLength <= 0.001f)
+            return false;
+
+        normal = HooksNativeViewmodelHandsOnlyResolveArmBendBaseNormal(
+            vr,
+            normal,
+            wristNormal);
+        normal = HooksNativeViewmodelHandsOnlyApplyLocalCutNormalRotation(vr, normal, keepSide.side);
+        normal = HooksNormalizeVector(normal, forearmLocal * -1.0f);
+        if (normal.Length() <= 0.0001f)
+            return false;
+
+        const float trimDistance =
+            HooksNativeViewmodelHandsOnlyResolveSideTrimDistance(vr, wristLength, keepSide.side);
+        const float wristKeepDistance =
+            HooksNativeViewmodelHandsOnlyResolveWristKeepDistance(vr, wristLength);
+        const Vector planePoint = normal * (trimDistance - wristKeepDistance);
+        outPlane[0] = normal.x;
+        outPlane[1] = normal.y;
+        outPlane[2] = normal.z;
+        outPlane[3] = -DotProduct(normal, planePoint);
+        return HooksNativeViewmodelHandsOnlyNormalizePlane(outPlane) &&
+            HooksNativeViewmodelHandsOnlyPlaneFinite(outPlane);
+    }
 
     inline bool HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(VR* vr);
 
@@ -6741,7 +6952,8 @@ namespace
         int numBones,
         vr_vm_stabilize::Mat3x4* outTargetAnchor,
         vr_vm_stabilize::Mat3x4* outTargetDelta,
-        float outPlane[4]);
+        float outPlane[4],
+        const vr_vm_stabilize::Mat3x4* planeAnchor = nullptr);
 
     inline bool HooksNativeViewmodelHandsOnlyBuildClipPlane(
         VR* vr,
@@ -6877,6 +7089,16 @@ namespace
             sideInfo.forearmPos = forearmPos;
             sideInfo.wristKeepDistance = wristKeepDistance;
             memcpy(sideInfo.wristPlaneWorld, worldPlane, sizeof(sideInfo.wristPlaneWorld));
+            sideInfo.deterministicWristPlaneLocalValid =
+                HooksNativeViewmodelHandsOnlyBuildDeterministicWristPlaneLocal(
+                    vr,
+                    drawState,
+                    boneParents,
+                    numBones,
+                    boneIndex,
+                    stride,
+                    sideInfo,
+                    sideInfo.deterministicWristPlaneLocal);
 
             float lockedWorldPlane[4]{};
             if (!HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
@@ -6886,7 +7108,8 @@ namespace
                     numBones,
                     nullptr,
                     nullptr,
-                    lockedWorldPlane))
+                    lockedWorldPlane,
+                    &handBone))
             {
                 return false;
             }
@@ -8074,6 +8297,33 @@ namespace
             {
                 return false;
             }
+            if (canonicalCapture &&
+                captureWristPlane &&
+                HooksNativeViewmodelHandsOnlyPlaneFinite(captureWristPlane) &&
+                HooksNativeViewmodelHandsOnlyMatrixFinite(captureTargetAnchor))
+            {
+                float fixedWorldPlane[4] = {
+                    captureWristPlane[0],
+                    captureWristPlane[1],
+                    captureWristPlane[2],
+                    captureWristPlane[3],
+                };
+                if (HooksNativeViewmodelHandsOnlyNormalizePlane(fixedWorldPlane))
+                {
+                    vr_vm_stabilize::Mat3x4 inverseCaptureAnchor{};
+                    vr_vm_stabilize::InvertTR(captureTargetAnchor, inverseCaptureAnchor);
+                    float fixedLocalPlane[4]{};
+                    if (HooksNativeViewmodelHandsOnlyTransformPlaneByMatrix(
+                            inverseCaptureAnchor,
+                            fixedWorldPlane,
+                            fixedLocalPlane))
+                    {
+                        memcpy(cache.frozenWristPlaneWorld, fixedWorldPlane, sizeof(cache.frozenWristPlaneWorld));
+                        memcpy(cache.frozenWristPlaneLocal, fixedLocalPlane, sizeof(cache.frozenWristPlaneLocal));
+                        cache.frozenWristPlaneValid = true;
+                    }
+                }
+            }
             if (canonicalCapture && vr->m_VrHandsDebugLog)
             {
                 Game::logMsg(
@@ -8132,7 +8382,8 @@ namespace
                         numBones,
                         nullptr,
                         nullptr,
-                        lockedWorldPlane))
+                        lockedWorldPlane,
+                        &targetAnchor))
                 {
                     return false;
                 }
@@ -8909,7 +9160,11 @@ namespace
     {
         VR* owner = nullptr;
         uint32_t generation = 0;
+        int numBones = 0;
         int side = 0;
+        int hand = -1;
+        int wrist = -1;
+        int forearm = -1;
         bool valid = false;
         float armBendScale = 1.0f;
         Vector cutRotationDeg = Vector(0.0f, 0.0f, 0.0f);
@@ -8918,13 +9173,17 @@ namespace
         Vector leftPoseOffsetMeters = Vector(0.0f, 0.0f, 0.0f);
         Vector leftPoseRotationOffsetDeg = Vector(0.0f, 0.0f, 0.0f);
         vr_vm_stabilize::Mat3x4 targetAnchor{};
-        float wristPlaneWorld[4]{};
+        float wristPlaneLocal[4]{};
 
         void Reset()
         {
             owner = nullptr;
             generation = 0;
+            numBones = 0;
             side = 0;
+            hand = -1;
+            wrist = -1;
+            forearm = -1;
             valid = false;
             armBendScale = 1.0f;
             cutRotationDeg = Vector(0.0f, 0.0f, 0.0f);
@@ -8933,7 +9192,7 @@ namespace
             leftPoseOffsetMeters = Vector(0.0f, 0.0f, 0.0f);
             leftPoseRotationOffsetDeg = Vector(0.0f, 0.0f, 0.0f);
             targetAnchor = vr_vm_stabilize::Mat3x4{};
-            memset(wristPlaneWorld, 0, sizeof(wristPlaneWorld));
+            memset(wristPlaneLocal, 0, sizeof(wristPlaneLocal));
         }
     };
 
@@ -8976,14 +9235,20 @@ namespace
         const HooksNativeViewmodelHandsOnlyFixedFreezePlaneLock& state,
         VR* vr,
         int side,
+        const HooksNativeViewmodelHandsOnlySideInfo& keepSide,
+        int numBones,
         uint32_t generation)
     {
         if (!state.valid ||
             state.owner != vr ||
             state.generation != generation ||
+            state.numBones != numBones ||
             state.side != side ||
+            state.hand != keepSide.hand ||
+            state.wrist != keepSide.wrist ||
+            state.forearm != keepSide.forearm ||
             !HooksNativeViewmodelHandsOnlyMatrixFinite(state.targetAnchor) ||
-            !HooksNativeViewmodelHandsOnlyPlaneFinite(state.wristPlaneWorld))
+            !HooksNativeViewmodelHandsOnlyPlaneFinite(state.wristPlaneLocal))
         {
             return false;
         }
@@ -9050,7 +9315,8 @@ namespace
         int numBones,
         vr_vm_stabilize::Mat3x4* outTargetAnchor,
         vr_vm_stabilize::Mat3x4* outTargetDelta,
-        float outPlane[4])
+        float outPlane[4],
+        const vr_vm_stabilize::Mat3x4* planeAnchor)
     {
         if (!HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(vr) ||
             keepSide.side == 0 ||
@@ -9075,6 +9341,8 @@ namespace
                 state,
                 vr,
                 keepSide.side,
+                keepSide,
+                numBones,
                 generation))
         {
             state.Reset();
@@ -9099,35 +9367,63 @@ namespace
                 return false;
             }
 
-            float fixedPlaneWorld[4]{};
-            bool havePlane =
-                HooksNativeViewmodelHandsOnlyBuildCanonicalFreezeWristPlaneWorld(
-                    vr,
-                    keepSide,
-                    sourceBones,
-                    numBones,
-                    targetAnchor,
-                    targetDelta,
-                    fixedPlaneWorld);
-            if (!havePlane)
+            float fixedPlaneLocal[4]{};
+            bool haveLocalPlane = false;
+            if (keepSide.deterministicWristPlaneLocalValid &&
+                HooksNativeViewmodelHandsOnlyPlaneFinite(keepSide.deterministicWristPlaneLocal))
             {
-                memcpy(fixedPlaneWorld, keepSide.wristPlaneWorld, sizeof(fixedPlaneWorld));
-                havePlane =
-                    HooksNativeViewmodelHandsOnlyReanchorPlaneToTargetHand(
-                        targetAnchor,
-                        keepSide.handPos,
-                        fixedPlaneWorld);
+                memcpy(fixedPlaneLocal, keepSide.deterministicWristPlaneLocal, sizeof(fixedPlaneLocal));
+                haveLocalPlane =
+                    HooksNativeViewmodelHandsOnlyNormalizePlane(fixedPlaneLocal) &&
+                    HooksNativeViewmodelHandsOnlyPlaneFinite(fixedPlaneLocal);
             }
-            if (!havePlane ||
-                !HooksNativeViewmodelHandsOnlyNormalizePlane(fixedPlaneWorld) ||
-                !HooksNativeViewmodelHandsOnlyPlaneFinite(fixedPlaneWorld))
+
+            if (!haveLocalPlane)
             {
-                return false;
+                float fixedPlaneWorld[4]{};
+                bool havePlane =
+                    HooksNativeViewmodelHandsOnlyBuildCanonicalFreezeWristPlaneWorld(
+                        vr,
+                        keepSide,
+                        sourceBones,
+                        numBones,
+                        targetAnchor,
+                        targetDelta,
+                        fixedPlaneWorld);
+                if (!havePlane)
+                {
+                    memcpy(fixedPlaneWorld, keepSide.wristPlaneWorld, sizeof(fixedPlaneWorld));
+                    havePlane =
+                        HooksNativeViewmodelHandsOnlyReanchorPlaneToTargetHand(
+                            targetAnchor,
+                            keepSide.handPos,
+                            fixedPlaneWorld);
+                }
+                if (!havePlane ||
+                    !HooksNativeViewmodelHandsOnlyNormalizePlane(fixedPlaneWorld) ||
+                    !HooksNativeViewmodelHandsOnlyPlaneFinite(fixedPlaneWorld))
+                {
+                    return false;
+                }
+
+                vr_vm_stabilize::Mat3x4 inverseTargetAnchor{};
+                vr_vm_stabilize::InvertTR(targetAnchor, inverseTargetAnchor);
+                if (!HooksNativeViewmodelHandsOnlyTransformPlaneByMatrix(
+                        inverseTargetAnchor,
+                        fixedPlaneWorld,
+                        fixedPlaneLocal))
+                {
+                    return false;
+                }
             }
 
             state.owner = vr;
             state.generation = generation;
+            state.numBones = numBones;
             state.side = keepSide.side;
+            state.hand = keepSide.hand;
+            state.wrist = keepSide.wrist;
+            state.forearm = keepSide.forearm;
             state.valid = true;
             state.armBendScale = std::clamp(vr->m_NativeViewmodelHandsOnlyArmBendScale, 0.0f, 1.0f);
             state.cutRotationDeg = HooksNativeViewmodelHandsOnlyResolveCutRotationDeg(vr, keepSide.side);
@@ -9137,11 +9433,11 @@ namespace
             state.leftPoseOffsetMeters = vr->m_NativeViewmodelLeftHandPoseOffsetMeters;
             state.leftPoseRotationOffsetDeg = vr->m_NativeViewmodelLeftHandPoseRotationOffsetDeg;
             state.targetAnchor = targetAnchor;
-            memcpy(state.wristPlaneWorld, fixedPlaneWorld, sizeof(state.wristPlaneWorld));
+            memcpy(state.wristPlaneLocal, fixedPlaneLocal, sizeof(state.wristPlaneLocal));
         }
 
         if (!HooksNativeViewmodelHandsOnlyMatrixFinite(state.targetAnchor) ||
-            !HooksNativeViewmodelHandsOnlyPlaneFinite(state.wristPlaneWorld))
+            !HooksNativeViewmodelHandsOnlyPlaneFinite(state.wristPlaneLocal))
         {
             state.Reset();
             return false;
@@ -9162,7 +9458,18 @@ namespace
             }
         }
         if (outPlane)
-            memcpy(outPlane, state.wristPlaneWorld, sizeof(state.wristPlaneWorld));
+        {
+            const vr_vm_stabilize::Mat3x4& resolvedPlaneAnchor =
+                planeAnchor ? *planeAnchor : state.targetAnchor;
+            if (!HooksNativeViewmodelHandsOnlyMatrixFinite(resolvedPlaneAnchor) ||
+                !HooksNativeViewmodelHandsOnlyTransformPlaneByMatrix(
+                    resolvedPlaneAnchor,
+                    state.wristPlaneLocal,
+                    outPlane))
+            {
+                return false;
+            }
+        }
         return true;
     }
 
@@ -9353,20 +9660,9 @@ namespace
             {
                 useTargetDelta = false;
                 haveTargetAnchor = false;
-                if (!HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
-                        vr,
-                        keepSide,
-                        sourceBones,
-                        numBones,
-                        nullptr,
-                        nullptr,
-                        workingWristPlaneWorld))
-                {
-                    return false;
-                }
             }
 
-            if (inOutWristPlaneWorld)
+            if (useCanonicalFreezeLock && inOutWristPlaneWorld)
                 memcpy(inOutWristPlaneWorld, workingWristPlaneWorld, sizeof(workingWristPlaneWorld));
         }
         else if (useCanonicalFreezeLock)
@@ -9404,6 +9700,46 @@ namespace
                 }
                 if (haveCanonicalPlane && inOutWristPlaneWorld)
                     memcpy(inOutWristPlaneWorld, workingWristPlaneWorld, sizeof(workingWristPlaneWorld));
+            }
+        }
+        if (useFixedFreezePlaneLock && !useCanonicalFreezeLock)
+        {
+            if (!useTargetDelta)
+            {
+                useTargetDelta = HooksNativeViewmodelHandsOnlyTryBuildSideTargetDelta(
+                    vr,
+                    keepSide,
+                    sourceBones,
+                    numBones,
+                    targetDelta,
+                    &targetAnchor);
+                haveTargetAnchor = useTargetDelta;
+            }
+            if (!haveTargetAnchor)
+            {
+                if (vr_vm_stabilize::SafeRead(sourceBones + keepSide.hand, targetAnchor) &&
+                    HooksNativeViewmodelHandsOnlyMatrixFinite(targetAnchor))
+                {
+                    haveTargetAnchor = true;
+                }
+            }
+            if (haveTargetAnchor)
+            {
+                float lockedWorldPlane[4]{};
+                if (HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
+                        vr,
+                        keepSide,
+                        sourceBones,
+                        numBones,
+                        nullptr,
+                        nullptr,
+                        lockedWorldPlane,
+                        &targetAnchor))
+                {
+                    memcpy(workingWristPlaneWorld, lockedWorldPlane, sizeof(workingWristPlaneWorld));
+                    if (inOutWristPlaneWorld)
+                        memcpy(inOutWristPlaneWorld, lockedWorldPlane, sizeof(lockedWorldPlane));
+                }
             }
         }
 
@@ -9484,6 +9820,25 @@ namespace
                 targetAnchor,
                 keepSide.handPos,
                 inOutWristPlaneWorld);
+        }
+        else if (useFixedFreezePlaneLock &&
+            !useCanonicalFreezeLock &&
+            haveTargetAnchor &&
+            inOutWristPlaneWorld)
+        {
+            float lockedWorldPlane[4]{};
+            if (HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
+                    vr,
+                    keepSide,
+                    sourceBones,
+                    numBones,
+                    nullptr,
+                    nullptr,
+                    lockedWorldPlane,
+                    &targetAnchor))
+            {
+                memcpy(inOutWristPlaneWorld, lockedWorldPlane, sizeof(lockedWorldPlane));
+            }
         }
 
         if (useTargetDelta)
@@ -9622,7 +9977,20 @@ namespace
         outInfo.wristPlaneWorld[1] = normal.y;
         outInfo.wristPlaneWorld[2] = normal.z;
         outInfo.wristPlaneWorld[3] = -DotProduct(normal, planePoint);
-        return HooksNativeViewmodelHandsOnlyNormalizePlane(outInfo.wristPlaneWorld);
+        if (!HooksNativeViewmodelHandsOnlyNormalizePlane(outInfo.wristPlaneWorld))
+            return false;
+
+        outInfo.deterministicWristPlaneLocalValid =
+            HooksNativeViewmodelHandsOnlyBuildDeterministicWristPlaneLocal(
+                vr,
+                drawState,
+                boneParents,
+                numBones,
+                boneIndex,
+                stride,
+                outInfo,
+                outInfo.deterministicWristPlaneLocal);
+        return true;
     }
 
     inline bool HooksNativeViewmodelHandsOnlyBuildSplitClipSets(
@@ -9674,29 +10042,27 @@ namespace
         if (HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(vr))
         {
             float ignoredPlane[4]{};
-            if (hasLeft &&
-                !HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
+            if (hasLeft)
+            {
+                HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
                     vr,
                     leftInfo,
                     bones,
                     numBones,
                     nullptr,
                     nullptr,
-                    ignoredPlane))
-            {
-                return false;
+                    ignoredPlane);
             }
-            if (hasRight &&
-                !HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
+            if (hasRight)
+            {
+                HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
                     vr,
                     rightInfo,
                     bones,
                     numBones,
                     nullptr,
                     nullptr,
-                    ignoredPlane))
-            {
-                return false;
+                    ignoredPlane);
             }
         }
 
@@ -11685,16 +12051,11 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 			}
 			else
 			{
-				const bool strictFixedFreezeClip =
-					HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(m_VR) &&
-					HooksModelNameIsArmsOrHands(lowerModelForCalibrationHide);
 				ScopedNativeViewmodelHandsOnlyClipPlane nativeHandsOnlyClip(
 					m_VR,
 					state,
 					modelName,
 					pBonesToWorldFinal);
-				if (strictFixedFreezeClip && !nativeHandsOnlyClip.Active())
-					return;
 				hkDrawModelExecute.fOriginal(
 					ecx,
 					state,
