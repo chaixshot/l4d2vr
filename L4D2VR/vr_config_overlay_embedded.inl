@@ -1062,6 +1062,12 @@ namespace
         return dir.empty() ? std::string("vr\\config.txt") : dir + "\\vr\\config.txt";
     }
 
+    static std::string CfgDefaultCustomGunsDir()
+    {
+        const std::string dir = CfgGetModuleDir();
+        return dir.empty() ? std::string("vr\\customguns") : dir + "\\vr\\customguns";
+    }
+
     static bool CfgReadConfigWriteTime(CfgOverlayState& s, std::filesystem::file_time_type& outTime)
     {
         if (s.configPath.empty())
@@ -1599,10 +1605,45 @@ namespace
 
     static std::string CfgCalibrationProfileKey(const MagazineInteractionCalibrationSnapshot& snapshot)
     {
-        if (snapshot.modelFingerprint == 0 || snapshot.boneSignature == 0)
+        if (snapshot.boneSignature == 0)
             return std::string();
-        return std::string("fp") + CfgHex32Lower(snapshot.modelFingerprint) +
-            "_bs" + CfgHex32Lower(snapshot.boneSignature);
+        return std::string("bs") + CfgHex32Lower(snapshot.boneSignature);
+    }
+
+    static std::string CfgCalibrationWeaponTypeName(const MagazineInteractionCalibrationSnapshot& snapshot)
+    {
+        const int weaponId = snapshot.inferredWeaponId > 0 ? snapshot.inferredWeaponId : snapshot.weaponId;
+        switch (weaponId)
+        {
+        case C_WeaponCSBase::WeaponID::PISTOL: return "pistol";
+        case C_WeaponCSBase::WeaponID::UZI: return "uzi";
+        case C_WeaponCSBase::WeaponID::PUMPSHOTGUN: return "pump";
+        case C_WeaponCSBase::WeaponID::AUTOSHOTGUN: return "autoshotgun";
+        case C_WeaponCSBase::WeaponID::M16A1: return "m16";
+        case C_WeaponCSBase::WeaponID::HUNTING_RIFLE: return "hunting_rifle";
+        case C_WeaponCSBase::WeaponID::MAC10: return "mac10";
+        case C_WeaponCSBase::WeaponID::SHOTGUN_CHROME: return "chrome";
+        case C_WeaponCSBase::WeaponID::SCAR: return "scar";
+        case C_WeaponCSBase::WeaponID::SNIPER_MILITARY: return "military_sniper";
+        case C_WeaponCSBase::WeaponID::SPAS: return "spas";
+        case C_WeaponCSBase::WeaponID::AK47: return "ak";
+        case C_WeaponCSBase::WeaponID::MAGNUM: return "magnum";
+        case C_WeaponCSBase::WeaponID::MP5: return "mp5";
+        case C_WeaponCSBase::WeaponID::SG552: return "sg552";
+        case C_WeaponCSBase::WeaponID::AWP: return "awp";
+        case C_WeaponCSBase::WeaponID::SCOUT: return "scout";
+        case C_WeaponCSBase::WeaponID::M60: return "m60";
+        default: return "weapon";
+        }
+    }
+
+    static std::filesystem::path CfgCalibrationCustomGunPath(const MagazineInteractionCalibrationSnapshot& snapshot)
+    {
+        const std::string profileKey = CfgCalibrationProfileKey(snapshot);
+        if (profileKey.empty())
+            return std::filesystem::path();
+        return std::filesystem::path(CfgDefaultCustomGunsDir()) /
+            (CfgCalibrationWeaponTypeName(snapshot) + "_" + profileKey + ".txt");
     }
 
     static std::string CfgCalibrationBoneToken(
@@ -1921,6 +1962,33 @@ namespace
         if (profileKey.empty())
             return -1;
 
+        if (g_Game && g_Game->m_VR)
+        {
+            const std::string normalizedProfileKey = CfgLower(profileKey);
+            const std::unordered_map<std::string, std::vector<std::string>>* liveMap = nullptr;
+            if (std::strcmp(configKey, "ManualReloadMagazineBoneOverrides") == 0)
+                liveMap = &g_Game->m_VR->m_MagazineInteractionMagazineBoneProfileOverrides;
+            else if (std::strcmp(configKey, "MagazineInteractionBoltBoneOverrides") == 0)
+                liveMap = &g_Game->m_VR->m_MagazineInteractionBoltBoneProfileOverrides;
+
+            if (liveMap)
+            {
+                const auto it = liveMap->find(normalizedProfileKey);
+                if (it != liveMap->end())
+                {
+                    int foundBone = -1;
+                    for (const std::string& token : it->second)
+                    {
+                        const int bone = CfgFindCalibrationBoneByToken(snapshot, token);
+                        if (bone >= 0)
+                            foundBone = bone;
+                    }
+                    if (foundBone >= 0)
+                        return foundBone;
+                }
+            }
+        }
+
         const std::string spec = CfgRawValueForKey(s, configKey);
         const std::string normalizedProfileKey = CfgLower(profileKey);
         int foundBone = -1;
@@ -2022,17 +2090,27 @@ namespace
             return 0;
 
         int savedCount = 0;
+        std::vector<std::string> customGunLines;
+        customGunLines.push_back("ProfileKey=" + profileKey);
+        customGunLines.push_back("WeaponType=" + CfgCalibrationWeaponTypeName(snapshot));
+        customGunLines.push_back("WeaponId=" + std::to_string(snapshot.weaponId));
+        customGunLines.push_back("InferredWeaponId=" + std::to_string(snapshot.inferredWeaponId));
+        customGunLines.push_back("ModelName=" + snapshot.modelName);
+        auto appendCustomGunValue = [&](const char* key, const std::string& value)
+            {
+                if (!key || !*key || value.empty())
+                    return;
+                customGunLines.push_back(std::string(key) + "=" + value);
+                ++savedCount;
+            };
+
         const std::string magazineToken =
             CfgCalibrationBoneToken(snapshot, s.calibrationMagazineSelectedBone);
         if (!magazineToken.empty())
         {
-            const std::string key = "ManualReloadMagazineBoneOverrides";
-            const std::string nextSpec =
-                CfgUpsertProfileBoneOverride(CfgRawValueForKey(s, key.c_str()), profileKey, magazineToken);
-            CfgSetRawConfigValue(s, key.c_str(), nextSpec);
+            appendCustomGunValue("ManualReloadMagazineBone", magazineToken);
             if (g_Game && g_Game->m_VR)
                 g_Game->m_VR->m_MagazineInteractionMagazineBoneProfileOverrides[CfgLower(profileKey)] = { magazineToken };
-            ++savedCount;
         }
 
         const std::string boltToken =
@@ -2041,13 +2119,9 @@ namespace
             : std::string();
         if (!boltToken.empty())
         {
-            const std::string key = "MagazineInteractionBoltBoneOverrides";
-            const std::string nextSpec =
-                CfgUpsertProfileBoneOverride(CfgRawValueForKey(s, key.c_str()), profileKey, boltToken);
-            CfgSetRawConfigValue(s, key.c_str(), nextSpec);
+            appendCustomGunValue("MagazineInteractionBoltBone", boltToken);
             if (g_Game && g_Game->m_VR)
                 g_Game->m_VR->m_MagazineInteractionBoltBoneProfileOverrides[CfgLower(profileKey)] = { boltToken };
-            ++savedCount;
         }
 
         const std::string normalizedProfileKey = CfgLower(profileKey);
@@ -2058,12 +2132,16 @@ namespace
             std::unordered_map<std::string, Vector>* liveProfileMap) -> void
             {
                 const std::string valueText = CfgProfileVector3ValueText(value, step);
-                const std::string nextSpec =
-                    CfgUpsertProfileSemicolonOverride(CfgRawValueForKey(s, key), profileKey, valueText);
-                CfgSetRawConfigValue(s, key, nextSpec);
+                std::string customGunKey = key ? key : "";
+                static const std::string suffix = "Overrides";
+                if (customGunKey.size() > suffix.size() &&
+                    customGunKey.compare(customGunKey.size() - suffix.size(), suffix.size(), suffix) == 0)
+                {
+                    customGunKey.erase(customGunKey.size() - suffix.size());
+                }
+                appendCustomGunValue(customGunKey.c_str(), valueText);
                 if (liveProfileMap)
                     (*liveProfileMap)[normalizedProfileKey] = value;
-                ++savedCount;
             };
 
         auto saveFloatProfileOverride = [&](
@@ -2073,12 +2151,16 @@ namespace
             std::unordered_map<std::string, float>* liveProfileMap) -> void
             {
                 const std::string valueText = CfgFormatFloat(value, step);
-                const std::string nextSpec =
-                    CfgUpsertProfileSemicolonOverride(CfgRawValueForKey(s, key), profileKey, valueText);
-                CfgSetRawConfigValue(s, key, nextSpec);
+                std::string customGunKey = key ? key : "";
+                static const std::string suffix = "Overrides";
+                if (customGunKey.size() > suffix.size() &&
+                    customGunKey.compare(customGunKey.size() - suffix.size(), suffix.size(), suffix) == 0)
+                {
+                    customGunKey.erase(customGunKey.size() - suffix.size());
+                }
+                appendCustomGunValue(customGunKey.c_str(), valueText);
                 if (liveProfileMap)
                     (*liveProfileMap)[normalizedProfileKey] = value;
-                ++savedCount;
             };
 
         if (g_Game && g_Game->m_VR && s.calibrationStep >= 1)
@@ -2254,6 +2336,34 @@ namespace
                 &vrState->m_MagazineInteractionBoltReturnDistanceMetersProfileOverrides);
         }
 
+        if (savedCount <= 0)
+            return 0;
+
+        const std::filesystem::path customGunPath = CfgCalibrationCustomGunPath(snapshot);
+        if (customGunPath.empty())
+            return 0;
+
+        try
+        {
+            const std::filesystem::path parent = customGunPath.parent_path();
+            if (!parent.empty())
+                std::filesystem::create_directories(parent);
+
+            std::ofstream out(customGunPath, std::ios::binary | std::ios::trunc);
+            if (!out)
+                return 0;
+
+            out << "# L4D2VR custom gun magazine calibration\n";
+            for (const std::string& line : customGunLines)
+                out << line << "\n";
+            if (!out)
+                return 0;
+        }
+        catch (...)
+        {
+            return 0;
+        }
+
         return savedCount;
     }
 
@@ -2321,7 +2431,7 @@ namespace
         s.hasUnsavedEdits = false;
         s.status = s.useChinese ? "\345\267\262\344\277\235\345\255\230 config.txt\357\274\214\347\216\260\346\234\211\347\203\255\345\212\240\350\275\275\351\200\273\350\276\221\344\274\232\350\207\252\345\212\250\347\224\237\346\225\210\343\200\202" : "Saved config.txt. Existing hot-reload logic will apply it.";
         if (savedCalibrationOverrides > 0)
-            s.status += s.useChinese ? "\345\267\262\345\206\231\345\205\245\345\275\223\345\211\215\346\250\241\345\236\213 profile\343\200\202" : " Saved current model profile.";
+            s.status += s.useChinese ? "\345\267\262\345\206\231\345\205\245 customguns \346\240\241\345\207\206\346\226\207\344\273\266\343\200\202" : " Saved current customguns profile file.";
         s.dirty = true;
     }
 
@@ -4359,7 +4469,7 @@ namespace
             "  vmClass=" + std::to_string(snapshot.sourceIsViewmodelClass ? 1 : 0);
         CfgGdiText(g, 44, 228, 1000, 24, ids, g.smallFont, { 160, 178, 205 });
         std::string sigs = "score=" + std::to_string(snapshot.sourceScore) +
-            "  fp=" + CfgHex32(snapshot.modelFingerprint) +
+            "  profile=" + CfgCalibrationProfileKey(snapshot) +
             "  boneSig=" + CfgHex32(snapshot.boneSignature);
         CfgGdiText(g, 44, 252, 1000, 24, sigs, g.smallFont, { 180, 214, 188 });
         std::string age = s.useChinese

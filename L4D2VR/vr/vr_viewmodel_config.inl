@@ -1461,12 +1461,35 @@ void VR::ParseConfigFile()
                 trim(value);
                 std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
                 std::replace(value.begin(), value.end(), ' ', '_');
+                auto isHex = [](char ch)
+                    {
+                        return std::isxdigit(static_cast<unsigned char>(ch)) != 0;
+                    };
+                if (value.size() == 21u &&
+                    value.rfind("fp", 0) == 0 &&
+                    value.compare(10u, 3u, "_bs") == 0)
+                {
+                    bool valid = true;
+                    for (size_t i = 2u; i < 10u; ++i)
+                        valid = valid && isHex(value[i]);
+                    for (size_t i = 13u; i < 21u; ++i)
+                        valid = valid && isHex(value[i]);
+                    if (valid)
+                        return std::string("bs") + value.substr(13u, 8u);
+                }
                 return value;
             };
 
         auto boneOverrideProfileKeyLooksValid = [&](const std::string& value)
             {
-                return value.rfind("fp", 0) == 0 && value.find("_bs") != std::string::npos;
+                if (value.size() != 10u || value.rfind("bs", 0) != 0)
+                    return false;
+                for (size_t i = 2u; i < 10u; ++i)
+                {
+                    if (!std::isxdigit(static_cast<unsigned char>(value[i])))
+                        return false;
+                }
+                return true;
             };
 
         const std::unordered_map<std::string, int> weaponBoneOverrideAliases =
@@ -1542,7 +1565,8 @@ void VR::ParseConfigFile()
             const char* configName,
             const std::string& spec,
             std::unordered_map<int, std::vector<std::string>>& outOverrides,
-            std::unordered_map<std::string, std::vector<std::string>>& outProfileOverrides)
+            std::unordered_map<std::string, std::vector<std::string>>& outProfileOverrides,
+            bool allowProfileOverrides)
             {
                 std::string normalizedSpec = spec;
                 std::replace(normalizedSpec.begin(), normalizedSpec.end(), ';', ',');
@@ -1585,6 +1609,8 @@ void VR::ParseConfigFile()
                         Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
                         continue;
                     }
+                    if (!allowProfileOverrides)
+                        continue;
 
                     outProfileOverrides[profileKey].push_back(boneName);
                 }
@@ -1633,7 +1659,8 @@ void VR::ParseConfigFile()
             const char* configName,
             const std::string& spec,
             std::unordered_map<int, Vector>& outOverrides,
-            std::unordered_map<std::string, Vector>* outProfileOverrides)
+            std::unordered_map<std::string, Vector>* outProfileOverrides,
+            bool allowProfileOverrides)
             {
                 std::stringstream ss(spec);
                 std::string entry;
@@ -1678,6 +1705,8 @@ void VR::ParseConfigFile()
                         Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
                         continue;
                     }
+                    if (!allowProfileOverrides)
+                        continue;
 
                     (*outProfileOverrides)[profileKey] = axis;
                 }
@@ -1723,7 +1752,8 @@ void VR::ParseConfigFile()
             float minValue,
             float maxValue,
             std::unordered_map<int, Vector>& outOverrides,
-            std::unordered_map<std::string, Vector>* outProfileOverrides)
+            std::unordered_map<std::string, Vector>* outProfileOverrides,
+            bool allowProfileOverrides)
             {
                 std::stringstream ss(spec);
                 std::string entry;
@@ -1771,6 +1801,8 @@ void VR::ParseConfigFile()
                         Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
                         continue;
                     }
+                    if (!allowProfileOverrides)
+                        continue;
 
                     (*outProfileOverrides)[profileKey] = value;
                 }
@@ -1782,7 +1814,8 @@ void VR::ParseConfigFile()
             float minValue,
             float maxValue,
             std::unordered_map<int, float>& outOverrides,
-            std::unordered_map<std::string, float>* outProfileOverrides)
+            std::unordered_map<std::string, float>* outProfileOverrides,
+            bool allowProfileOverrides)
             {
                 std::string normalizedSpec = spec;
                 std::replace(normalizedSpec.begin(), normalizedSpec.end(), ',', ';');
@@ -1833,6 +1866,8 @@ void VR::ParseConfigFile()
                         Game::logMsg("[VR][Config] ignored invalid %s entry=%s", configName, entry.c_str());
                         continue;
                     }
+                    if (!allowProfileOverrides)
+                        continue;
 
                     (*outProfileOverrides)[profileKey] = clampedValue;
                 }
@@ -1842,115 +1877,382 @@ void VR::ParseConfigFile()
             "ManualReloadMagazineBoneOverrides",
             m_MagazineInteractionMagazineBoneOverridesSpec,
             m_MagazineInteractionMagazineBoneOverrides,
-            m_MagazineInteractionMagazineBoneProfileOverrides);
+            m_MagazineInteractionMagazineBoneProfileOverrides,
+            false);
         parseBoneOverrideSpec(
             "MagazineInteractionBoltBoneOverrides",
             m_MagazineInteractionBoltBoneOverridesSpec,
             m_MagazineInteractionBoltBoneOverrides,
-            m_MagazineInteractionBoltBoneProfileOverrides);
+            m_MagazineInteractionBoltBoneProfileOverrides,
+            false);
         parseVector3OverrideSpec(
             "MagazineInteractionMagazineBoxHalfExtentsMetersOverrides",
             m_MagazineInteractionMagazineBoxHalfExtentsMetersOverridesSpec,
             0.0f,
             0.50f,
             m_MagazineInteractionMagazineBoxHalfExtentsMetersOverrides,
-            &m_MagazineInteractionMagazineBoxHalfExtentsMetersProfileOverrides);
+            &m_MagazineInteractionMagazineBoxHalfExtentsMetersProfileOverrides,
+            false);
         parseVector3OverrideSpec(
             "MagazineInteractionMagazineBoxLocalOffsetMetersOverrides",
             m_MagazineInteractionMagazineBoxLocalOffsetMetersOverridesSpec,
             -0.50f,
             0.50f,
             m_MagazineInteractionMagazineBoxLocalOffsetMetersOverrides,
-            &m_MagazineInteractionMagazineBoxLocalOffsetMetersProfileOverrides);
+            &m_MagazineInteractionMagazineBoxLocalOffsetMetersProfileOverrides,
+            false);
         parseVector3OverrideSpec(
             "MagazineInteractionMagazineBoxLocalRotationOffsetDegOverrides",
             m_MagazineInteractionMagazineBoxLocalRotationOffsetDegOverridesSpec,
             -180.0f,
             180.0f,
             m_MagazineInteractionMagazineBoxLocalRotationOffsetDegOverrides,
-            &m_MagazineInteractionMagazineBoxLocalRotationOffsetDegProfileOverrides);
+            &m_MagazineInteractionMagazineBoxLocalRotationOffsetDegProfileOverrides,
+            false);
         parseBoltPullAxisOverrideSpec(
             "MagazineInteractionBoltPullAxisLocalOverrides",
             m_MagazineInteractionBoltPullAxisLocalOverridesSpec,
             m_MagazineInteractionBoltPullAxisLocalOverrides,
-            &m_MagazineInteractionBoltPullAxisLocalProfileOverrides);
+            &m_MagazineInteractionBoltPullAxisLocalProfileOverrides,
+            false);
         parseVector3OverrideSpec(
             "MagazineInteractionBoltBoxHalfExtentsMetersOverrides",
             m_MagazineInteractionBoltBoxHalfExtentsMetersOverridesSpec,
             0.005f,
             0.25f,
             m_MagazineInteractionBoltBoxHalfExtentsMetersOverrides,
-            &m_MagazineInteractionBoltBoxHalfExtentsMetersProfileOverrides);
+            &m_MagazineInteractionBoltBoxHalfExtentsMetersProfileOverrides,
+            false);
         parseVector3OverrideSpec(
             "MagazineInteractionBoltBoxLocalOffsetMetersOverrides",
             m_MagazineInteractionBoltBoxLocalOffsetMetersOverridesSpec,
             -0.25f,
             0.25f,
             m_MagazineInteractionBoltBoxLocalOffsetMetersOverrides,
-            &m_MagazineInteractionBoltBoxLocalOffsetMetersProfileOverrides);
+            &m_MagazineInteractionBoltBoxLocalOffsetMetersProfileOverrides,
+            false);
         parseFloatOverrideSpec(
             "MagazineInteractionBoltGrabPaddingMetersOverrides",
             m_MagazineInteractionBoltGrabPaddingMetersOverridesSpec,
             0.0f,
             0.25f,
             m_MagazineInteractionBoltGrabPaddingMetersOverrides,
-            &m_MagazineInteractionBoltGrabPaddingMetersProfileOverrides);
+            &m_MagazineInteractionBoltGrabPaddingMetersProfileOverrides,
+            false);
         parseFloatOverrideSpec(
             "MagazineInteractionBoltPullDistanceMetersOverrides",
             m_MagazineInteractionBoltPullDistanceMetersOverridesSpec,
             0.0f,
             0.25f,
             m_MagazineInteractionBoltPullDistanceMetersOverrides,
-            &m_MagazineInteractionBoltPullDistanceMetersProfileOverrides);
+            &m_MagazineInteractionBoltPullDistanceMetersProfileOverrides,
+            false);
         parseFloatOverrideSpec(
             "MagazineInteractionBoltReturnDistanceMetersOverrides",
             m_MagazineInteractionBoltReturnDistanceMetersOverridesSpec,
             0.0f,
             0.10f,
             m_MagazineInteractionBoltReturnDistanceMetersOverrides,
-            &m_MagazineInteractionBoltReturnDistanceMetersProfileOverrides);
+            &m_MagazineInteractionBoltReturnDistanceMetersProfileOverrides,
+            false);
         parseVector3OverrideSpec(
             "MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides",
             m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverridesSpec,
             0.0f,
             0.50f,
             m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersOverrides,
-            &m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersProfileOverrides);
+            &m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersProfileOverrides,
+            false);
         parseVector3OverrideSpec(
             "MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides",
             m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverridesSpec,
             -0.50f,
             0.50f,
             m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersOverrides,
-            &m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersProfileOverrides);
+            &m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersProfileOverrides,
+            false);
         parseVector3OverrideSpec(
             "MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides",
             m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverridesSpec,
             -180.0f,
             180.0f,
             m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegOverrides,
-            &m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegProfileOverrides);
+            &m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegProfileOverrides,
+            false);
         parseFloatOverrideSpec(
             "MagazineInteractionSocketCaptureAngleDegOverrides",
             m_MagazineInteractionSocketCaptureAngleDegOverridesSpec,
             0.0f,
             89.0f,
             m_MagazineInteractionSocketCaptureAngleDegOverrides,
-            &m_MagazineInteractionSocketCaptureAngleDegProfileOverrides);
+            &m_MagazineInteractionSocketCaptureAngleDegProfileOverrides,
+            false);
         parseFloatOverrideSpec(
             "MagazineInteractionSocketRequiredDepthMetersOverrides",
             m_MagazineInteractionSocketRequiredDepthMetersOverridesSpec,
             0.0f,
             0.25f,
             m_MagazineInteractionSocketRequiredDepthMetersOverrides,
-            &m_MagazineInteractionSocketRequiredDepthMetersProfileOverrides);
+            &m_MagazineInteractionSocketRequiredDepthMetersProfileOverrides,
+            false);
         parseFloatOverrideSpec(
             "MagazineInteractionSocketRequiredOverlapFractionOverrides",
             m_MagazineInteractionSocketRequiredOverlapFractionOverridesSpec,
             0.0f,
             1.0f,
             m_MagazineInteractionSocketRequiredOverlapFractionOverrides,
-            &m_MagazineInteractionSocketRequiredOverlapFractionProfileOverrides);
+            &m_MagazineInteractionSocketRequiredOverlapFractionProfileOverrides,
+            false);
+
+        auto normalizeCustomGunKey = [&](std::string value)
+            {
+                trim(value);
+                std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                return value;
+            };
+
+        auto customGunKeyAllowsHash = [&](const std::string& normalizedKey)
+            {
+                return normalizedKey == "manualreloadmagazinebone" ||
+                    normalizedKey == "manualreloadmagazineboneoverride" ||
+                    normalizedKey == "manualreloadmagazineboneoverrides" ||
+                    normalizedKey == "magazineinteractionboltbone" ||
+                    normalizedKey == "magazineinteractionboltboneoverride" ||
+                    normalizedKey == "magazineinteractionboltboneoverrides";
+            };
+
+        auto customGunProfileKeyFromFilename = [&](const std::filesystem::path& path)
+            {
+                std::string stem = path.stem().string();
+                std::transform(stem.begin(), stem.end(), stem.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                auto isHex = [](char ch)
+                    {
+                        const unsigned char c = static_cast<unsigned char>(ch);
+                        return std::isxdigit(c) != 0;
+                    };
+
+                for (size_t bs = stem.find("bs"); bs != std::string::npos; bs = stem.find("bs", bs + 1))
+                {
+                    if (bs + 10u > stem.size())
+                        continue;
+
+                    bool valid = true;
+                    for (size_t i = bs + 2u; i < bs + 10u; ++i)
+                        valid = valid && isHex(stem[i]);
+                    if (valid)
+                        return stem.substr(bs, 10u);
+                }
+                return std::string();
+            };
+
+        auto parseCustomGunProfileFile = [&](const std::filesystem::path& path)
+            {
+                std::string profileKey = customGunProfileKeyFromFilename(path);
+                if (profileKey.empty())
+                    return false;
+
+                std::ifstream input(path);
+                if (!input)
+                    return false;
+
+                std::unordered_map<std::string, std::string> fileValues;
+                std::string line;
+                while (std::getline(input, line))
+                {
+                    if (!line.empty() && line.back() == '\r')
+                        line.pop_back();
+
+                    const size_t eqBeforeComment = line.find('=');
+                    size_t cut = std::string::npos;
+                    const size_t p1 = line.find("//");
+                    const size_t p2 = line.find('#');
+                    const size_t p3 = line.find(';');
+                    std::string keyBeforeComment =
+                        eqBeforeComment == std::string::npos ? std::string() : line.substr(0, eqBeforeComment);
+                    const std::string normalizedKeyBeforeComment = normalizeCustomGunKey(keyBeforeComment);
+                    if (p1 != std::string::npos)
+                        cut = p1;
+                    if (p2 != std::string::npos &&
+                        (eqBeforeComment == std::string::npos ||
+                            p2 < eqBeforeComment ||
+                            !customGunKeyAllowsHash(normalizedKeyBeforeComment)))
+                    {
+                        cut = (cut == std::string::npos) ? p2 : std::min(cut, p2);
+                    }
+                    if (p3 != std::string::npos &&
+                        (eqBeforeComment == std::string::npos || p3 < eqBeforeComment))
+                    {
+                        cut = (cut == std::string::npos) ? p3 : std::min(cut, p3);
+                    }
+                    if (cut != std::string::npos)
+                        line.erase(cut);
+
+                    trim(line);
+                    if (line.empty())
+                        continue;
+
+                    const size_t eq = line.find('=');
+                    if (eq == std::string::npos)
+                        continue;
+
+                    std::string key = line.substr(0, eq);
+                    std::string value = line.substr(eq + 1);
+                    trim(key);
+                    trim(value);
+                    if (key.empty())
+                        continue;
+
+                    const std::string normalizedKey = normalizeCustomGunKey(key);
+                    if (normalizedKey == "profilekey")
+                    {
+                        const std::string explicitProfileKey = normalizeBoneOverrideProfileKey(value);
+                        if (boneOverrideProfileKeyLooksValid(explicitProfileKey))
+                            profileKey = explicitProfileKey;
+                        continue;
+                    }
+                    fileValues[normalizedKey] = value;
+                }
+
+                if (!boneOverrideProfileKeyLooksValid(profileKey))
+                    return false;
+
+                bool applied = false;
+                auto applyBone = [&](const char* key, std::unordered_map<std::string, std::vector<std::string>>& map)
+                    {
+                        const auto it = fileValues.find(key);
+                        if (it == fileValues.end())
+                            return;
+                        std::string value = it->second;
+                        trim(value);
+                        if (value.empty())
+                            return;
+                        map[profileKey] = { value };
+                        applied = true;
+                    };
+                auto applyVector = [&](
+                    const char* key,
+                    float minValue,
+                    float maxValue,
+                    std::unordered_map<std::string, Vector>& map)
+                    {
+                        const auto it = fileValues.find(key);
+                        if (it == fileValues.end())
+                            return;
+                        Vector value{};
+                        if (!parseVector3OverrideValue(it->second, value))
+                            return;
+                        value.x = std::clamp(value.x, minValue, maxValue);
+                        value.y = std::clamp(value.y, minValue, maxValue);
+                        value.z = std::clamp(value.z, minValue, maxValue);
+                        map[profileKey] = value;
+                        applied = true;
+                    };
+                auto applyFloat = [&](
+                    const char* key,
+                    float minValue,
+                    float maxValue,
+                    std::unordered_map<std::string, float>& map)
+                    {
+                        const auto it = fileValues.find(key);
+                        if (it == fileValues.end())
+                            return;
+                        char* end = nullptr;
+                        const float parsed = std::strtof(it->second.c_str(), &end);
+                        if (it->second.empty() || !end || *end != '\0' || !std::isfinite(parsed))
+                            return;
+                        map[profileKey] = std::clamp(parsed, minValue, maxValue);
+                        applied = true;
+                    };
+                auto applyAxis = [&](const char* key, std::unordered_map<std::string, Vector>& map)
+                    {
+                        const auto it = fileValues.find(key);
+                        if (it == fileValues.end())
+                            return;
+                        Vector axis{};
+                        if (!parseBoltPullAxisOverrideVector(it->second, axis))
+                            return;
+                        map[profileKey] = axis;
+                        applied = true;
+                    };
+
+                applyBone("manualreloadmagazinebone", m_MagazineInteractionMagazineBoneProfileOverrides);
+                applyBone("manualreloadmagazineboneoverride", m_MagazineInteractionMagazineBoneProfileOverrides);
+                applyBone("manualreloadmagazineboneoverrides", m_MagazineInteractionMagazineBoneProfileOverrides);
+                applyBone("magazineinteractionboltbone", m_MagazineInteractionBoltBoneProfileOverrides);
+                applyBone("magazineinteractionboltboneoverride", m_MagazineInteractionBoltBoneProfileOverrides);
+                applyBone("magazineinteractionboltboneoverrides", m_MagazineInteractionBoltBoneProfileOverrides);
+
+                applyVector("magazineinteractionmagazineboxhalfextentsmeters", 0.0f, 0.50f, m_MagazineInteractionMagazineBoxHalfExtentsMetersProfileOverrides);
+                applyVector("magazineinteractionmagazineboxlocaloffsetmeters", -0.50f, 0.50f, m_MagazineInteractionMagazineBoxLocalOffsetMetersProfileOverrides);
+                applyVector("magazineinteractionmagazineboxlocalrotationoffsetdeg", -180.0f, 180.0f, m_MagazineInteractionMagazineBoxLocalRotationOffsetDegProfileOverrides);
+                applyVector("magazineinteractionsocketcaptureboxhalfextentsmeters", 0.0f, 0.50f, m_MagazineInteractionSocketCaptureBoxHalfExtentsMetersProfileOverrides);
+                applyVector("magazineinteractionsocketcaptureboxlocaloffsetmeters", -0.50f, 0.50f, m_MagazineInteractionSocketCaptureBoxLocalOffsetMetersProfileOverrides);
+                applyVector("magazineinteractionsocketcaptureboxlocalrotationoffsetdeg", -180.0f, 180.0f, m_MagazineInteractionSocketCaptureBoxLocalRotationOffsetDegProfileOverrides);
+                applyVector("magazineinteractionboltboxhalfextentsmeters", 0.005f, 0.25f, m_MagazineInteractionBoltBoxHalfExtentsMetersProfileOverrides);
+                applyVector("magazineinteractionboltboxlocaloffsetmeters", -0.25f, 0.25f, m_MagazineInteractionBoltBoxLocalOffsetMetersProfileOverrides);
+                applyAxis("magazineinteractionboltpullaxislocal", m_MagazineInteractionBoltPullAxisLocalProfileOverrides);
+                applyFloat("magazineinteractionsocketcaptureangledeg", 0.0f, 89.0f, m_MagazineInteractionSocketCaptureAngleDegProfileOverrides);
+                applyFloat("magazineinteractionsocketrequireddepthmeters", 0.0f, 0.25f, m_MagazineInteractionSocketRequiredDepthMetersProfileOverrides);
+                applyFloat("magazineinteractionsocketrequiredoverlapfraction", 0.0f, 1.0f, m_MagazineInteractionSocketRequiredOverlapFractionProfileOverrides);
+                applyFloat("magazineinteractionboltgrabpaddingmeters", 0.0f, 0.25f, m_MagazineInteractionBoltGrabPaddingMetersProfileOverrides);
+                applyFloat("magazineinteractionboltpulldistancemeters", 0.0f, 0.25f, m_MagazineInteractionBoltPullDistanceMetersProfileOverrides);
+                applyFloat("magazineinteractionboltreturndistancemeters", 0.0f, 0.10f, m_MagazineInteractionBoltReturnDistanceMetersProfileOverrides);
+
+                return applied;
+            };
+
+        auto loadCustomGunProfiles = [&]()
+            {
+                const std::filesystem::path customGunDir("VR\\customguns");
+                std::error_code ec;
+                if (!std::filesystem::exists(customGunDir, ec) ||
+                    !std::filesystem::is_directory(customGunDir, ec))
+                {
+                    return;
+                }
+
+                std::vector<std::filesystem::path> profileFiles;
+                for (std::filesystem::directory_iterator it(customGunDir, ec), end; !ec && it != end; it.increment(ec))
+                {
+                    const std::filesystem::directory_entry& entry = *it;
+                    if (!entry.is_regular_file(ec))
+                        continue;
+                    std::string ext = entry.path().extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                    if (ext != ".txt" && ext != ".cfg")
+                        continue;
+                    profileFiles.push_back(entry.path());
+                }
+                std::sort(profileFiles.begin(), profileFiles.end(), [&](const std::filesystem::path& a, const std::filesystem::path& b)
+                    {
+                        const std::string aKey = customGunProfileKeyFromFilename(a);
+                        const std::string bKey = customGunProfileKeyFromFilename(b);
+                        auto canonicalRank = [&](const std::filesystem::path& path, const std::string& key)
+                            {
+                                if (key.empty())
+                                    return 0;
+                                std::string stem = path.stem().string();
+                                std::transform(stem.begin(), stem.end(), stem.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                                const std::string suffix = std::string("_") + key;
+                                const bool legacyFpBsName =
+                                    stem.find("_fp") != std::string::npos &&
+                                    stem.find("_bs") != std::string::npos;
+                                return stem.size() >= suffix.size() &&
+                                    stem.compare(stem.size() - suffix.size(), suffix.size(), suffix) == 0 &&
+                                    !legacyFpBsName
+                                    ? 1
+                                    : 0;
+                            };
+                        const int aRank = canonicalRank(a, aKey);
+                        const int bRank = canonicalRank(b, bKey);
+                        if (aRank != bRank)
+                            return aRank < bRank;
+                        return a.filename().string() < b.filename().string();
+                    });
+                for (const std::filesystem::path& path : profileFiles)
+                    parseCustomGunProfileFile(path);
+            };
+        loadCustomGunProfiles();
     }
     m_MagazineInteractionMagazineInsertionAxisLocal = getVector3("ManualReloadMagazineInsertionAxisLocal", m_MagazineInteractionMagazineInsertionAxisLocal);
     m_MagazineInteractionMagazineHandOffsetMeters = getVector3("ManualReloadMagazineHandOffsetMeters", m_MagazineInteractionMagazineHandOffsetMeters);

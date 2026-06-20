@@ -18,6 +18,7 @@
 #include <sstream>
 #include <unordered_map>
 #include <string>
+#include <filesystem>
 #include <system_error>
 #include <thread>
 #include <chrono>

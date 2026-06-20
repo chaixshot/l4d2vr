@@ -915,11 +915,12 @@ namespace
             vr->m_MagazineInteractionCurrentModelFingerprint.load(std::memory_order_relaxed);
         const uint32_t boneSignature =
             vr->m_MagazineInteractionCurrentBoneSignature.load(std::memory_order_relaxed);
-        if (modelFingerprint == 0 || boneSignature == 0)
+        (void)modelFingerprint;
+        if (boneSignature == 0)
             return std::string();
 
-        char text[32] = {};
-        std::snprintf(text, sizeof(text), "fp%08x_bs%08x", modelFingerprint, boneSignature);
+        char text[16] = {};
+        std::snprintf(text, sizeof(text), "bs%08x", boneSignature);
         return std::string(text);
     }
 
