@@ -5243,6 +5243,16 @@ namespace
             boneNames,
             configuredMagazineBoneName,
             logMagazineBoxDiagnostics);
+        const std::string normalizedOverrideProfileKey =
+            vr_vm_stabilize::ToLowerAscii(overrideProfileKey);
+        const auto profileMagazineBoneIt =
+            normalizedOverrideProfileKey.empty()
+            ? vr->m_MagazineInteractionMagazineBoneProfileOverrides.end()
+            : vr->m_MagazineInteractionMagazineBoneProfileOverrides.find(normalizedOverrideProfileKey);
+        const bool profileMagazineBoneOverride =
+            !configuredMagazineBoneName.empty() &&
+            profileMagazineBoneIt != vr->m_MagazineInteractionMagazineBoneProfileOverrides.end() &&
+            !profileMagazineBoneIt->second.empty();
         if (magazineBone < 0 && MagazineInteractionWeaponIdIsShotgun(magazineInteractionWeaponId))
             magazineBone = FindMagazineInteractionShotgunShellBone(lowerModel, boneNames, logMagazineBoxDiagnostics);
         if (magazineBone < 0)
@@ -5411,7 +5421,17 @@ namespace
                 std::max(fallbackHalf.y * 2.4f, ((clampedLengthAxis == 1) ? 0.18f : 0.035f) * vr->m_VRScale),
                 std::max(fallbackHalf.z * 2.4f, ((clampedLengthAxis == 2) ? 0.18f : 0.035f) * vr->m_VRScale)
             };
-            if (span.x > maxAllowed[0] || span.y > maxAllowed[1] || span.z > maxAllowed[2])
+            float effectiveMaxAllowed[3] = { maxAllowed[0], maxAllowed[1], maxAllowed[2] };
+            if (profileMagazineBoneOverride)
+            {
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    const float relaxedMeters = (axis == clampedLengthAxis) ? 0.30f : 0.12f;
+                    effectiveMaxAllowed[axis] =
+                        std::max(effectiveMaxAllowed[axis], relaxedMeters * vr->m_VRScale);
+                }
+            }
+            if (span.x > effectiveMaxAllowed[0] || span.y > effectiveMaxAllowed[1] || span.z > effectiveMaxAllowed[2])
             {
                 const char* rejectedSource = boundsSource;
                 useFallbackBounds();
@@ -5428,9 +5448,9 @@ namespace
                         span.x,
                         span.y,
                         span.z,
-                        maxAllowed[0],
-                        maxAllowed[1],
-                        maxAllowed[2]);
+                        effectiveMaxAllowed[0],
+                        effectiveMaxAllowed[1],
+                        effectiveMaxAllowed[2]);
                 }
             }
         }
