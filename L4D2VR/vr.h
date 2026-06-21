@@ -1388,6 +1388,7 @@ public:
 	std::chrono::steady_clock::time_point m_MagazineInteractionShotgunDirectShellCommitUntil{};
 	std::chrono::steady_clock::time_point m_MagazineInteractionServerClipCommitUntil{};
 	std::chrono::steady_clock::time_point m_MagazineInteractionNativeReloadSuppressUntil{};
+	std::chrono::steady_clock::time_point m_MagazineInteractionViewmodelFreezeDeferredUntil{};
 	int m_MagazineInteractionNativeReloadSuppressWeaponId = 0;
 	std::string m_MagazineInteractionSyntheticClipOutSample;
 	std::chrono::steady_clock::time_point m_MagazineInteractionSyntheticClipOutStarted{};

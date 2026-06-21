@@ -23,6 +23,8 @@ VR::~VR() = default;
 
 namespace
 {
+    constexpr float kMagazineInteractionEmptyClipAutoEjectFreezeDelaySeconds = 0.18f;
+
     std::string MagazineInteractionPrepareConsoleSoundSample(const std::string& rawSample);
     std::string MagazineInteractionPrepareSoundSamplePath(const std::string& rawSample);
     bool MagazineInteractionPlaySyntheticSound(
@@ -3309,6 +3311,12 @@ void VR::PlayMagazineInteractionBlockedFireEmptySound()
 
 bool VR::ShouldFreezeMagazineInteractionViewmodel() const
 {
+    if (m_MagazineInteractionViewmodelFreezeDeferredUntil.time_since_epoch().count() != 0 &&
+        std::chrono::steady_clock::now() < m_MagazineInteractionViewmodelFreezeDeferredUntil)
+    {
+        return false;
+    }
+
     if (IsMagazineInteractionNativeReloadSuppressActive())
         return true;
 
@@ -4045,6 +4053,7 @@ void VR::CancelMagazineInteractionManual()
     m_MagazineInteractionBoltStageStarted = {};
     m_MagazineInteractionBoltGrabbedAt = {};
     m_MagazineInteractionShotgunServerReloadAbortUntil = {};
+    m_MagazineInteractionViewmodelFreezeDeferredUntil = {};
     m_MagazineInteractionSyntheticClipOutSample.clear();
     m_MagazineInteractionSyntheticClipOutStarted = {};
     m_MagazineInteractionSyntheticClipInSample.clear();
@@ -5453,6 +5462,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_MagazineInteractionFreshGrabbedAt = {};
         m_MagazineInteractionPostInsertStarted = {};
         m_MagazineInteractionShotgunServerReloadAbortUntil = {};
+        m_MagazineInteractionViewmodelFreezeDeferredUntil = {};
         m_MagazineInteractionSyntheticClipOutSample.clear();
         m_MagazineInteractionSyntheticClipOutStarted = {};
         m_MagazineInteractionSyntheticClipInSample.clear();
@@ -6573,6 +6583,9 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             m_MagazineInteractionLeftHandHolding = false;
             m_MagazineInteractionOldMagazinePulled = true;
             m_MagazineInteractionFreshPickupBasisValid = false;
+            m_MagazineInteractionViewmodelFreezeDeferredUntil =
+                now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                    std::chrono::duration<float>(kMagazineInteractionEmptyClipAutoEjectFreezeDelaySeconds));
             if (m_MagazineInteractionServerClipSettlementActive &&
                 !m_MagazineInteractionShotgunShellMode)
             {
@@ -6591,11 +6604,21 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             }
             else
             {
-                startImmediateReloadCommand("empty-clip-auto-eject");
+                m_MagazineInteractionReloadTriggered = false;
+                m_MagazineInteractionReloadCommandPending = false;
+                m_MagazineInteractionReloadCommandIssued = false;
+                m_MagazineInteractionReloadCommandHoldUntil = {};
+                clearNativeClientReloadState("empty-clip-auto-eject-defer-reload");
+                if (m_Game)
+                {
+                    m_Game->ClientCmd_Unrestricted("-reload");
+                    m_Game->ClientCmd_Unrestricted("-attack");
+                }
+                m_ReloadCmdOwned = false;
             }
             MagazineInteractionPlayClipOutSound(this);
             Game::logMsg(
-                "[VR][MagazineInteraction] empty clip auto-ejected magazine; waiting for fresh magazine weaponId=%d clip=%d ent=%d bone=%d age=%.3fs cached=%d serverClipSettlement=%d model=%s",
+                "[VR][MagazineInteraction] empty clip auto-ejected magazine; waiting for fresh magazine weaponId=%d clip=%d ent=%d bone=%d age=%.3fs cached=%d serverClipSettlement=%d freezeDelay=%.2fs model=%s",
                 static_cast<int>(activeWeaponId),
                 activeClip,
                 box.entityIndex,
@@ -6603,6 +6626,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 boxAgeSeconds,
                 usedCachedBox ? 1 : 0,
                 m_MagazineInteractionServerClipSettlementActive ? 1 : 0,
+                kMagazineInteractionEmptyClipAutoEjectFreezeDelaySeconds,
                 box.modelName.c_str());
             return reloadCommandPending();
         }

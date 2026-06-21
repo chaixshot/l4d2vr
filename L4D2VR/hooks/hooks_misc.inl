@@ -10729,10 +10729,10 @@ namespace
         const bool visuallyPauseViewmodel = vr->ShouldFreezeMagazineInteractionViewmodel();
         const bool hideNativeClip = vr->ShouldHideMagazineInteractionNativeClip() && clipBone >= 0;
         const bool moveBolt = vr->ShouldMoveMagazineInteractionBolt() && magazineInteractionBoltBone >= 0;
+        if (!visuallyPauseViewmodel && frozenCache.owner == vr)
+            frozenCache.models.erase(lowerModel);
         if (!visuallyPauseViewmodel && !hideNativeClip && !moveBolt)
         {
-            if (frozenCache.owner == vr)
-                frozenCache.models.erase(lowerModel);
             return;
         }
 
