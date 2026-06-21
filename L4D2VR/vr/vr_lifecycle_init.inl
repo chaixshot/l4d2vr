@@ -1186,6 +1186,7 @@ int VR::SetActionManifest(const char* fileName)
     m_Input->GetActionHandle("/actions/main/in/CustomAction4", &m_CustomAction4);
     m_Input->GetActionHandle("/actions/main/in/CustomAction5", &m_CustomAction5);
     m_Input->GetActionHandle("/actions/base/in/skeleton_lefthand", &m_NativeViewmodelLeftHandOpenVRAction);
+    m_Input->GetActionHandle("/actions/base/in/skeleton_righthand", &m_NativeViewmodelRightHandOpenVRAction);
 
     m_Input->GetActionSetHandle("/actions/main", &m_ActionSet);
     m_Input->GetActionSetHandle("/actions/base", &m_BaseActionSet);

@@ -1335,6 +1335,11 @@ void VR::ParseConfigFile()
         m_MagazineInteractionEnabled = false;
     m_MagazineInteractionQuickReloadMode = getBool("MagazineInteractionQuickReloadMode", m_MagazineInteractionQuickReloadMode);
     m_MagazineInteractionSuppressEmptyClipAutoReload = getBool("MagazineInteractionSuppressEmptyClipAutoReload", m_MagazineInteractionSuppressEmptyClipAutoReload);
+    m_MagazineInteractionShotgunShellsPerInsert = std::clamp(getInt("MagazineInteractionShotgunShellsPerInsert", m_MagazineInteractionShotgunShellsPerInsert), 1, 8);
+    m_MagazineInteractionThumbIndexCurlStart = std::clamp(getFloat("MagazineInteractionThumbIndexCurlStart", m_MagazineInteractionThumbIndexCurlStart), 0.0f, 1.0f);
+    m_MagazineInteractionThumbIndexCurlRelease = std::clamp(getFloat("MagazineInteractionThumbIndexCurlRelease", m_MagazineInteractionThumbIndexCurlRelease), 0.0f, m_MagazineInteractionThumbIndexCurlStart);
+    m_MagazineInteractionThreeFingerCurlStart = std::clamp(getFloat("MagazineInteractionThreeFingerCurlStart", m_MagazineInteractionThreeFingerCurlStart), 0.0f, 1.0f);
+    m_MagazineInteractionThreeFingerCurlRelease = std::clamp(getFloat("MagazineInteractionThreeFingerCurlRelease", m_MagazineInteractionThreeFingerCurlRelease), 0.0f, m_MagazineInteractionThreeFingerCurlStart);
     m_MagazineInteractionGrabPaddingMeters = std::clamp(getFloat("MagazineInteractionGrabPaddingMeters", m_MagazineInteractionGrabPaddingMeters), 0.0f, 0.25f);
     m_MagazineInteractionPullTriggerMeters = std::clamp(getFloat("MagazineInteractionPullTriggerMeters", m_MagazineInteractionPullTriggerMeters), 0.0f, 0.50f);
     m_MagazineInteractionPullTriggerByMagazineMeters = std::clamp(getFloat("MagazineInteractionPullTriggerByMagazineMeters", m_MagazineInteractionPullTriggerByMagazineMeters), 0.0f, 0.50f);
@@ -2369,10 +2374,22 @@ void VR::ParseConfigFile()
     m_LedgeGuardDebugLog = getBool("LedgeGuardDebugLog", m_LedgeGuardDebugLog);
     m_LedgeGuardDebugLogHz = std::clamp(getFloat("LedgeGuardDebugLogHz", m_LedgeGuardDebugLogHz), 0.0f, 60.0f);
     m_MotionGesturesEnabled = getBool("MotionGesturesEnabled", m_MotionGesturesEnabled);
+    m_MotionGestureSwingEnabled = getBool("MotionGestureSwingEnabled", m_MotionGestureSwingEnabled);
+    m_MotionGesturePushEnabled = getBool("MotionGesturePushEnabled", m_MotionGesturePushEnabled);
+    m_MotionGestureDownSwingEnabled = getBool("MotionGestureDownSwingEnabled", m_MotionGestureDownSwingEnabled);
+    m_MotionGestureJumpEnabled = getBool("MotionGestureJumpEnabled", m_MotionGestureJumpEnabled);
     m_MotionGestureSwingThreshold = std::max(0.0f, getFloat("MotionGestureSwingThreshold", m_MotionGestureSwingThreshold));
     m_MotionGesturePushThreshold = std::max(0.0f, getFloat("MotionGesturePushThreshold", m_MotionGesturePushThreshold));
     m_MotionGestureDownSwingThreshold = std::max(0.0f, getFloat("MotionGestureDownSwingThreshold", m_MotionGestureDownSwingThreshold));
     m_MotionGestureJumpThreshold = std::max(0.0f, getFloat("MotionGestureJumpThreshold", m_MotionGestureJumpThreshold));
+    if (!m_MotionGestureSwingEnabled)
+        m_MotionGestureSwingThreshold = 999.0f;
+    if (!m_MotionGesturePushEnabled)
+        m_MotionGesturePushThreshold = 999.0f;
+    if (!m_MotionGestureDownSwingEnabled)
+        m_MotionGestureDownSwingThreshold = 999.0f;
+    if (!m_MotionGestureJumpEnabled)
+        m_MotionGestureJumpThreshold = 999.0f;
     m_MotionGestureCooldown = std::max(0.0f, getFloat("MotionGestureCooldown", m_MotionGestureCooldown));
     m_MotionGestureHoldDuration = std::max(0.0f, getFloat("MotionGestureHoldDuration", m_MotionGestureHoldDuration));
     m_ViewmodelAdjustEnabled = getBool("ViewmodelAdjustEnabled", m_ViewmodelAdjustEnabled);

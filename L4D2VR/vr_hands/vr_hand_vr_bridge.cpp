@@ -3783,6 +3783,51 @@ void VR::CancelMagazineInteractionManual()
         Game::logMsg("[VR][MagazineInteraction] reset manual magazine interaction state");
 }
 
+bool VR::ReadMagazineInteractionFingerCurls(std::array<float, 5>& outCurls)
+{
+    outCurls = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+    if (!m_Input)
+        return false;
+
+    const bool physicalLeftHand = IsGameplayHandLeftPhysical(true);
+    vr::VRActionHandle_t& action = physicalLeftHand
+        ? m_NativeViewmodelLeftHandOpenVRAction
+        : m_NativeViewmodelRightHandOpenVRAction;
+    const char* actionPath = physicalLeftHand
+        ? "/actions/base/in/skeleton_lefthand"
+        : "/actions/base/in/skeleton_righthand";
+
+    if (action == vr::k_ulInvalidActionHandle)
+    {
+        if (m_Input->GetActionHandle(actionPath, &action) != vr::VRInputError_None ||
+            action == vr::k_ulInvalidActionHandle)
+        {
+            return false;
+        }
+    }
+
+    vr::InputSkeletalActionData_t actionData{};
+    if (m_Input->GetSkeletalActionData(action, &actionData, sizeof(actionData)) != vr::VRInputError_None ||
+        !actionData.bActive)
+    {
+        return false;
+    }
+
+    vr::VRSkeletalSummaryData_t summary{};
+    if (m_Input->GetSkeletalSummaryData(
+            action,
+            vr::VRSummaryType_FromAnimation,
+            &summary) != vr::VRInputError_None)
+    {
+        return false;
+    }
+
+    for (int finger = 0; finger < 5; ++finger)
+        outCurls[static_cast<size_t>(finger)] = std::clamp(summary.flFingerCurl[finger], 0.0f, 1.0f);
+
+    return true;
+}
+
 bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown, bool leftGripJustPressed)
 {
     const auto now = std::chrono::steady_clock::now();
@@ -3790,7 +3835,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
     if (m_MagazineInteractionSuppressLeftInputUntilRelease && !leftGripDown)
     {
         m_MagazineInteractionSuppressLeftInputUntilRelease = false;
-        Game::logMsg("[VR][MagazineInteraction] left grip released after physical reload; normal left-hand input restored");
+        Game::logMsg("[VR][MagazineInteraction] interaction gesture released after physical reload; normal left-hand input restored");
     }
     if (m_MagazineInteractionSuppressLeftInputUntilRelease)
         return false;
@@ -4331,9 +4376,9 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             boltBox.modelName.c_str(),
             reason ? reason : "unknown");
         if (m_MagazineInteractionBoltGrabRequiresGripRelease)
-            Game::logMsg("[VR][MagazineInteraction] bolt stage armed while left grip is still held; bolt grab requires release first");
+            Game::logMsg("[VR][MagazineInteraction] bolt stage armed while interaction gesture is still held; bolt grab requires release first");
         else if (leftGripDown && m_MagazineInteractionShotgunShellMode)
-            Game::logMsg("[VR][MagazineInteraction] shotgun bolt stage armed while left grip is still held; allowing continuous grip transition");
+            Game::logMsg("[VR][MagazineInteraction] shotgun bolt stage armed while interaction gesture is still held; allowing continuous grip transition");
         return true;
     };
 
@@ -4422,7 +4467,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         if (suppressLeftInputUntilRelease)
         {
             m_MagazineInteractionSuppressLeftInputUntilRelease = true;
-            Game::logMsg("[VR][MagazineInteraction] bolt completed while left grip is still held; suppressing normal reload until release");
+            Game::logMsg("[VR][MagazineInteraction] bolt completed while interaction gesture is still held; suppressing normal reload until release");
         }
     };
 
@@ -5313,7 +5358,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 if (suppressLeftInputUntilRelease)
                 {
                     m_MagazineInteractionSuppressLeftInputUntilRelease = true;
-                    Game::logMsg("[VR][MagazineInteraction] backend reload complete while left grip is still held; suppressing normal reload until release");
+                    Game::logMsg("[VR][MagazineInteraction] backend reload complete while interaction gesture is still held; suppressing normal reload until release");
                 }
             }
         }
@@ -5429,7 +5474,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             }
 
             m_MagazineInteractionBoltGrabRequiresGripRelease = false;
-            Game::logMsg("[VR][MagazineInteraction] left grip released after magazine insertion; bolt grab enabled");
+            Game::logMsg("[VR][MagazineInteraction] interaction gesture released after magazine insertion; bolt grab enabled");
         }
 
         if (!m_MagazineInteractionBoltRestValid)
@@ -5675,7 +5720,9 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             m_MagazineInteractionQuickReloadMode &&
             hasPickupBox &&
             freshGrabDistance <= freshGrabRange;
-        const bool freshGrabRequested = quickFreshAutoGrab || (leftGripDown && leftGripJustPressed);
+        const bool freshGrabRequested =
+            quickFreshAutoGrab ||
+            (leftGripDown && freshGrabDistance <= freshGrabRange);
         if (freshGrabRequested)
         {
             if (!hasPickupBox)
@@ -5788,11 +5835,10 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 captureShotgunStableSocketCapture("shotgun-shell-inserted");
                 m_MagazineInteractionStartClip = activeClip;
 
-                const int targetClip = (maxClip > 0)
-                    ? std::min(activeClip + 1, maxClip)
-                    : activeClip + 1;
-                shotgunInsertedShellWouldFillClip = maxClip > 0 && targetClip >= maxClip;
-                shotgunInsertedShellCanArmBoltBeforeBackend = true;
+                const int requestedShells = std::clamp(m_MagazineInteractionShotgunShellsPerInsert, 1, 8);
+                const int clipSpace = (maxClip > 0)
+                    ? std::max(0, maxClip - activeClip)
+                    : requestedShells;
                 int ammoType = -1;
                 int reserve = -1;
                 const bool ammoTypeKnown =
@@ -5816,6 +5862,23 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                     return false;
                 }
 
+                const int shellsToLoad = reserveKnown
+                    ? std::min(std::min(requestedShells, clipSpace), reserve)
+                    : std::min(requestedShells, clipSpace);
+                if (shellsToLoad <= 0)
+                {
+                    m_MagazineInteractionState = MagazineInteractionManualState::WaitingForFreshMagazine;
+                    m_MagazineInteractionLeftHandHolding = false;
+                    m_MagazineInteractionFreshPickupBasisValid = false;
+                    m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
+                    if (leftGripDown)
+                        m_MagazineInteractionSuppressLeftInputUntilRelease = true;
+                    return false;
+                }
+
+                const int targetClip = activeClip + shellsToLoad;
+                shotgunInsertedShellWouldFillClip = maxClip > 0 && targetClip >= maxClip;
+                shotgunInsertedShellCanArmBoltBeforeBackend = true;
                 const bool wroteClientClip =
                     MagazineInteractionTryWriteValue<int>(activeWeapon, VR::kClip1Offset, targetClip);
                 if (wroteClientClip)
@@ -5823,7 +5886,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                     m_MagazineInteractionFreshMagazineContactActive = false;
                     triggerMagazineInteractionBothHandsHaptic(0.026f, 105.0f, 0.42f, 2);
                     MagazineInteractionPlayClipInSound(this);
-                    const int targetReserve = reserveKnown ? std::max(0, reserve - 1) : -1;
+                    const int targetReserve = reserveKnown ? std::max(0, reserve - shellsToLoad) : -1;
                     if (reserveKnown)
                     {
                         MagazineInteractionTryWriteValue<int>(localPlayer, reserveOffset, targetReserve);
@@ -5840,7 +5903,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                     m_MagazineInteractionReloadCommandPending = false;
                     m_MagazineInteractionReloadCommandIssued = false;
                     m_MagazineInteractionReloadCommandHoldUntil = {};
-                    ++m_MagazineInteractionShotgunShellsLoadedThisSession;
+                    m_MagazineInteractionShotgunShellsLoadedThisSession += shellsToLoad;
                     m_MagazineInteractionShotgunLastInterruptedClip = targetClip;
                     m_MagazineInteractionStartClip = targetClip;
                     ApplyMagazineInteractionShotgunClientReloadAbort(
@@ -6184,7 +6247,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         {
             s_lastMissLog = now;
             Game::logMsg(
-                "[VR][MagazineInteraction] left grip held but magazine box is out of reach nearest=%.2f padding=%.2f ent=%d bone=%d age=%.3fs",
+                "[VR][MagazineInteraction] interaction gesture held but magazine box is out of reach nearest=%.2f padding=%.2f ent=%d bone=%d age=%.3fs",
                 distance,
                 grabPadding,
                 box.entityIndex,

@@ -23,12 +23,55 @@ namespace
         __except (EXCEPTION_EXECUTE_HANDLER) { out = 0.0f; return false; }
     }
 
+    static inline int VR_GetHighestClientEntityIndexSafe(IClientEntityList* entityList)
+    {
+        if (!entityList)
+            return -1;
+
+#ifdef _MSC_VER
+        __try
+        {
+            return entityList->GetHighestEntityIndex();
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return -1;
+        }
+#else
+        return entityList->GetHighestEntityIndex();
+#endif
+    }
+
+    static inline C_BaseEntity* VR_GetClientEntitySafe(IClientEntityList* entityList, int entityIndex)
+    {
+        if (!entityList || entityIndex < 0)
+            return nullptr;
+
+#ifdef _MSC_VER
+        __try
+        {
+            return static_cast<C_BaseEntity*>(entityList->GetClientEntity(entityIndex));
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return nullptr;
+        }
+#else
+        return static_cast<C_BaseEntity*>(entityList->GetClientEntity(entityIndex));
+#endif
+    }
+
+    static inline bool VR_IsClientPlayerEntityIndex(int entityIndex)
+    {
+        return entityIndex > 0 && entityIndex < static_cast<int>(Game::kMaxPlayers);
+    }
+
     static inline int VR_FindClientEntityIndex(IClientEntityList* entityList, const void* ptr)
     {
         if (!entityList || !ptr)
             return -1;
 
-        int highestIndex = entityList->GetHighestEntityIndex();
+        int highestIndex = VR_GetHighestClientEntityIndexSafe(entityList);
         if (highestIndex < 0)
             return -1;
 
@@ -36,7 +79,7 @@ namespace
         highestIndex = (std::min)(highestIndex, 4096);
         for (int i = 0; i <= highestIndex; ++i)
         {
-            if (entityList->GetClientEntity(i) == ptr)
+            if (VR_GetClientEntitySafe(entityList, i) == ptr)
                 return i;
         }
 
@@ -1283,7 +1326,10 @@ bool VR::UpdateFriendlyFireAimHit(C_BasePlayer* localPlayer)
         {
             if (!a || !b)
                 return false;
-            if (b->IsPlayer() == nullptr)
+
+            // Avoid C_BaseEntity::IsPlayer() here: stale trace entities can have bad vtables.
+            const int bIndex = VR_FindClientEntityIndex(entityList, b);
+            if (!VR_IsClientPlayerEntityIndex(bIndex))
                 return false;
 
             const unsigned char* aBase = reinterpret_cast<const unsigned char*>(a);
@@ -1336,7 +1382,9 @@ bool VR::UpdateFriendlyFireAimHit(C_BasePlayer* localPlayer)
                 ray2.Init(start, end);
                 VR_SafeTraceRay(m_Game->m_EngineTrace, ray2, STANDARD_TRACE_MASK, pTraceFilter2, tr2);
 
-                const Vector hitPos1 = (tr1.fraction < 1.0f && tr1.fraction > 0.0f) ? tr1.endpos : hitEnt->GetAbsOrigin();
+                Vector hitEntOrigin{};
+                const bool hasHitEntOrigin = VR_TryGetEntityAbsOrigin(hitEnt, hitEntOrigin);
+                const Vector hitPos1 = (tr1.fraction < 1.0f && tr1.fraction > 0.0f) ? tr1.endpos : (hasHitEntOrigin ? hitEntOrigin : tr1.endpos);
                 const Vector hitPos2 = (tr2.fraction < 1.0f && tr2.fraction > 0.0f) ? tr2.endpos : hitPos1;
                 const float distSqr = (hitPos2 - hitPos1).LengthSqr();
 

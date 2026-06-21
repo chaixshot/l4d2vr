@@ -1164,6 +1164,7 @@ public:
 	Vector m_NativeViewmodelLeftHandOpenVRThumbRootOffsetUnits = { 0.0f, 0.0f, 0.0f };
 	Vector m_NativeViewmodelLeftHandOpenVRThumbRootRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	vr::VRActionHandle_t m_NativeViewmodelLeftHandOpenVRAction = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_NativeViewmodelRightHandOpenVRAction = vr::k_ulInvalidActionHandle;
 	bool m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev = false;
 	bool m_NativeViewmodelLeftHandFreezePending = false;
 	std::chrono::steady_clock::time_point m_NativeViewmodelLeftHandFreezeDueTime{};
@@ -1190,10 +1191,15 @@ public:
 	Vector m_MagazineBoxDebugFallbackHalfExtentsMeters = { 0.025f, 0.095f, 0.018f };
 	Vector m_MagazineBoxDebugPaddingMeters = { 0.002f, 0.002f, 0.002f };
 	// Independent magazine interaction prototype. It consumes the current weapon magazine OBB and
-	// lets the off hand claim the left grip before that input reaches reload/inventory logic.
+	// lets off-hand finger-curl gestures claim physical reload interactions before normal input.
 	bool m_MagazineInteractionEnabled = false;
 	bool m_MagazineInteractionQuickReloadMode = false;
 	bool m_MagazineInteractionSuppressEmptyClipAutoReload = false;
+	int m_MagazineInteractionShotgunShellsPerInsert = 1;
+	float m_MagazineInteractionThumbIndexCurlStart = 0.62f;
+	float m_MagazineInteractionThumbIndexCurlRelease = 0.42f;
+	float m_MagazineInteractionThreeFingerCurlStart = 0.62f;
+	float m_MagazineInteractionThreeFingerCurlRelease = 0.42f;
 	float m_MagazineInteractionGrabPaddingMeters = 0.12f;
 	float m_MagazineInteractionPullTriggerMeters = 0.08f;
 	float m_MagazineInteractionPullTriggerByMagazineMeters = 0.025f;
@@ -1360,6 +1366,8 @@ public:
 	bool m_MagazineInteractionBoltPullAxisSignLocked = false;
 	bool m_MagazineInteractionBoltStageBeforeBackendReloadComplete = false;
 	bool m_MagazineInteractionBoltCompletedBeforeBackendReload = false;
+	bool m_MagazineInteractionThumbIndexCurlDownPrev = false;
+	bool m_MagazineInteractionThreeFingerCurlDownPrev = false;
 	bool m_MagazineInteractionShotgunStableCaptureValid = false;
 	std::chrono::steady_clock::time_point m_MagazineInteractionStarted{};
 	std::chrono::steady_clock::time_point m_MagazineInteractionFreshGrabbedAt{};
@@ -1654,6 +1662,10 @@ public:
 	CustomActionBinding m_CustomAction5Binding{};
 
 	bool m_MotionGesturesEnabled = true;
+	bool m_MotionGestureSwingEnabled = true;
+	bool m_MotionGesturePushEnabled = true;
+	bool m_MotionGestureDownSwingEnabled = true;
+	bool m_MotionGestureJumpEnabled = true;
 	float m_MotionGestureSwingThreshold = 2.0f;
 	float m_MotionGesturePushThreshold = 1.5f;
 	float m_MotionGestureDownSwingThreshold = 2.0f;
@@ -3054,6 +3066,7 @@ public:
 	bool GetMagazineInteractionBoltBox(MagazineInteractionBoxSnapshot& outSnapshot) const;
 	bool HasFreshMagazineInteractionDebugBoxWork() const;
 	bool GetMagazineInteractionCalibrationSnapshot(MagazineInteractionCalibrationSnapshot& outSnapshot) const;
+	bool ReadMagazineInteractionFingerCurls(std::array<float, 5>& outCurls);
 	bool UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown, bool leftGripJustPressed);
 	void MarkMagazineInteractionReloadCommandIssued();
 	bool IsMagazineInteractionReloadCommandActive() const;

@@ -71,6 +71,8 @@ void VR::ProcessInput()
             StopVoiceRecordCommandNow();
         }
         m_PrimaryAttackDown = false;
+        m_MagazineInteractionThumbIndexCurlDownPrev = false;
+        m_MagazineInteractionThreeFingerCurlDownPrev = false;
         (void)UpdateMagazineInteraction(nullptr, false, false);
         CancelMagazineInteractionManual();
         CancelTeleportTargeting();
@@ -461,14 +463,45 @@ void VR::ProcessInput()
         jumpDataValid &&
         (originMatchesRole(jumpActionData.activeOrigin, gameplayLeftRole) ||
             jumpActionData.activeOrigin == vr::k_ulInvalidInputValueHandle);
-    const bool magazineGripDown =
-        (reloadFromLeftHand && reloadButtonDown) ||
-        (crouchFromLeftHand && crouchButtonDown) ||
-        (jumpFromLeftHand && jumpButtonDown);
+
+    std::array<float, 5> magazineInteractionFingerCurls{};
+    const bool magazineInteractionFingerCurlsValid =
+        ReadMagazineInteractionFingerCurls(magazineInteractionFingerCurls);
+    const bool thumbIndexWasDown = m_MagazineInteractionThumbIndexCurlDownPrev;
+    const bool threeFingerWasDown = m_MagazineInteractionThreeFingerCurlDownPrev;
+    const float thumbIndexCurlStart = std::clamp(m_MagazineInteractionThumbIndexCurlStart, 0.0f, 1.0f);
+    const float thumbIndexCurlRelease = std::clamp(
+        m_MagazineInteractionThumbIndexCurlRelease,
+        0.0f,
+        thumbIndexCurlStart);
+    const float threeFingerCurlStart = std::clamp(m_MagazineInteractionThreeFingerCurlStart, 0.0f, 1.0f);
+    const float threeFingerCurlRelease = std::clamp(
+        m_MagazineInteractionThreeFingerCurlRelease,
+        0.0f,
+        threeFingerCurlStart);
+
+    bool thumbIndexGripDown = false;
+    bool threeFingerGripDown = false;
+    if (magazineInteractionFingerCurlsValid)
+    {
+        const float thumbIndexThreshold = thumbIndexWasDown ? thumbIndexCurlRelease : thumbIndexCurlStart;
+        const float threeFingerThreshold = threeFingerWasDown ? threeFingerCurlRelease : threeFingerCurlStart;
+        thumbIndexGripDown =
+            magazineInteractionFingerCurls[0] >= thumbIndexThreshold &&
+            magazineInteractionFingerCurls[1] >= thumbIndexThreshold;
+        threeFingerGripDown =
+            magazineInteractionFingerCurls[2] >= threeFingerThreshold &&
+            magazineInteractionFingerCurls[3] >= threeFingerThreshold &&
+            magazineInteractionFingerCurls[4] >= threeFingerThreshold;
+    }
+
+    const bool magazineGripDown = thumbIndexGripDown || threeFingerGripDown;
     const bool magazineGripJustPressed =
-        (reloadFromLeftHand && reloadJustPressed) ||
-        (crouchFromLeftHand && crouchJustPressed) ||
-        (jumpFromLeftHand && jumpJustPressed);
+        (thumbIndexGripDown && !thumbIndexWasDown) ||
+        (threeFingerGripDown && !threeFingerWasDown);
+    m_MagazineInteractionThumbIndexCurlDownPrev = thumbIndexGripDown;
+    m_MagazineInteractionThreeFingerCurlDownPrev = threeFingerGripDown;
+
     const bool magazineInteractionReloadPulse = UpdateMagazineInteraction(
         localPlayer,
         magazineGripDown,
