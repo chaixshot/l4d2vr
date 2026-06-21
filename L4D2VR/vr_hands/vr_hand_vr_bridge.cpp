@@ -1372,6 +1372,19 @@ namespace
             std::max(0.005f, vr->m_MagazineInteractionFreshMagazineBoxHalfExtentsMeters.z) * vr->m_VRScale);
     }
 
+    Vector MagazineInteractionFreshMagazineHandAnchorLocal(
+        const VR* vr,
+        const MagazineInteractionBoxSnapshot& magazineBox)
+    {
+        Vector anchorLocal = MagazineInteractionBoxCenterLocal(magazineBox);
+        const Vector freshHalf = MagazineInteractionFreshMagazineHalfExtentsSourceUnits(vr);
+        const float configuredHeight = freshHalf.z * 2.0f;
+        const float fallbackHeight = std::max(0.0f, magazineBox.maxs.z - magazineBox.mins.z);
+        const float boxHeight = configuredHeight > 0.0f ? configuredHeight : fallbackHeight;
+        anchorLocal.z -= boxHeight * 0.5f;
+        return anchorLocal;
+    }
+
     bool MagazineInteractionBuildModelBasisWorld(
         const MagazineInteractionBoxSnapshot& box,
         VrHandMatrix4& outWorld)
@@ -5759,16 +5772,27 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 MagazineInteractionMatrixBasisLooksValid(m_MagazineInteractionControllerToMagazine);
             m_MagazineInteractionFreshGrabbedAt = now;
             m_MagazineInteractionLeftHandPoseActive.store(1, std::memory_order_relaxed);
-            const Vector freshClipOrigin = MagazineInteractionMatrixOrigin(freshMagazineWorld);
             const Vector freshCenterLocal = MagazineInteractionBoxCenterLocal(m_MagazineInteractionSocketBox);
-            const Vector freshCenterWorld = MagazineInteractionMatrixPointWorld(freshMagazineWorld, freshCenterLocal);
+            const Vector freshHandAnchorLocal =
+                MagazineInteractionFreshMagazineHandAnchorLocal(this, m_MagazineInteractionSocketBox);
+            const Vector snappedCenterOffsetWorld = MagazineInteractionMatrixLocalVectorToWorld(
+                freshMagazineWorld,
+                freshCenterLocal - freshHandAnchorLocal);
             m_MagazineInteractionHeldMagazineCenterOffsetLocal =
                 MagazineInteractionWorldVectorToMatrixLocal(
                     controllerWorld,
-                    freshCenterWorld - MagazineInteractionMatrixOrigin(controllerWorld));
-            setDetachedMagazineWorld(buildFreshHeldMagazineWorldFromLeftHand());
+                    snappedCenterOffsetWorld);
+            const VrHandMatrix4 snappedFreshMagazineWorld = buildFreshHeldMagazineWorldFromLeftHand();
+            setDetachedMagazineWorld(snappedFreshMagazineWorld);
+            const Vector freshClipOrigin = MagazineInteractionMatrixOrigin(snappedFreshMagazineWorld);
+            const Vector freshCenterWorld = MagazineInteractionMatrixPointWorld(
+                snappedFreshMagazineWorld,
+                freshCenterLocal);
+            const Vector freshHandAnchorWorld = MagazineInteractionMatrixPointWorld(
+                snappedFreshMagazineWorld,
+                freshHandAnchorLocal);
             Game::logMsg(
-                "[VR][MagazineInteraction] fresh magazine grabbed from fresh magazine box distance=%.2f range=%.2f relationCaptured=%d quickAutoGrab=%d clipOrigin=(%.2f %.2f %.2f) visibleCenter=(%.2f %.2f %.2f) centerLocalOffset=(%.2f %.2f %.2f) centerLocal=(%.2f %.2f %.2f) model=%s; move it into MagazineSocket",
+                "[VR][MagazineInteraction] fresh magazine snapped to hand from fresh magazine box distance=%.2f range=%.2f relationCaptured=%d quickAutoGrab=%d clipOrigin=(%.2f %.2f %.2f) visibleCenter=(%.2f %.2f %.2f) handAnchor=(%.2f %.2f %.2f) centerLocalOffset=(%.2f %.2f %.2f) centerLocal=(%.2f %.2f %.2f) anchorLocal=(%.2f %.2f %.2f) model=%s; move it into MagazineSocket",
                 freshGrabDistance,
                 freshGrabRange,
                 relationCaptured ? 1 : 0,
@@ -5779,12 +5803,18 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 freshCenterWorld.x,
                 freshCenterWorld.y,
                 freshCenterWorld.z,
+                freshHandAnchorWorld.x,
+                freshHandAnchorWorld.y,
+                freshHandAnchorWorld.z,
                 m_MagazineInteractionHeldMagazineCenterOffsetLocal.x,
                 m_MagazineInteractionHeldMagazineCenterOffsetLocal.y,
                 m_MagazineInteractionHeldMagazineCenterOffsetLocal.z,
                 freshCenterLocal.x,
                 freshCenterLocal.y,
                 freshCenterLocal.z,
+                freshHandAnchorLocal.x,
+                freshHandAnchorLocal.y,
+                freshHandAnchorLocal.z,
                 m_MagazineInteractionMagazineModelName.c_str());
         }
         return reloadCommandPending();
