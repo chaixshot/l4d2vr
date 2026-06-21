@@ -1314,6 +1314,7 @@ public:
 	int m_MagazineInteractionShotgunDirectShellTargetClip = -1;
 	int m_MagazineInteractionShotgunDirectShellAmmoType = -1;
 	int m_MagazineInteractionShotgunDirectShellTargetReserve = -1;
+	int m_MagazineInteractionShotgunDirectShellExpectedPriorReserve = -1;
 	int m_MagazineInteractionShotgunDirectShellWeaponId = 0;
 	int m_MagazineInteractionServerClipTarget = -1;
 	int m_MagazineInteractionServerClipAmmoType = -1;
@@ -1383,6 +1384,7 @@ public:
 	std::chrono::steady_clock::time_point m_MagazineInteractionShotgunDirectShellCommitUntil{};
 	std::chrono::steady_clock::time_point m_MagazineInteractionServerClipCommitUntil{};
 	std::chrono::steady_clock::time_point m_MagazineInteractionNativeReloadSuppressUntil{};
+	int m_MagazineInteractionNativeReloadSuppressWeaponId = 0;
 	std::string m_MagazineInteractionSyntheticClipOutSample;
 	std::chrono::steady_clock::time_point m_MagazineInteractionSyntheticClipOutStarted{};
 	std::string m_MagazineInteractionSyntheticClipInSample;
@@ -3109,6 +3111,7 @@ public:
 		int targetClip,
 		int ammoType,
 		int targetReserve,
+		int expectedPriorReserve,
 		const char* reason);
 	bool TryApplyMagazineInteractionShotgunServerReloadAbort(
 		void* serverWeapon,
