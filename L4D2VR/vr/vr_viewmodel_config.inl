@@ -1353,6 +1353,13 @@ void VR::ParseConfigFile()
     m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters.x = std::clamp(m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters.x, -0.50f, 0.50f);
     m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters.y = std::clamp(m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters.y, -0.50f, 0.50f);
     m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters.z = std::clamp(m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters.z, -0.50f, 0.50f);
+    const Vector legacyFreshMagazineWristAnchorOffsetMeters =
+        getVector3("MagazineInteractionFreshMagazineMiddleFingerAnchorOffsetMeters", m_MagazineInteractionFreshMagazineWristAnchorOffsetMeters);
+    m_MagazineInteractionFreshMagazineWristAnchorOffsetMeters =
+        getVector3("MagazineInteractionFreshMagazineWristAnchorOffsetMeters", legacyFreshMagazineWristAnchorOffsetMeters);
+    m_MagazineInteractionFreshMagazineWristAnchorOffsetMeters.x = std::clamp(m_MagazineInteractionFreshMagazineWristAnchorOffsetMeters.x, -0.25f, 0.25f);
+    m_MagazineInteractionFreshMagazineWristAnchorOffsetMeters.y = std::clamp(m_MagazineInteractionFreshMagazineWristAnchorOffsetMeters.y, -0.25f, 0.25f);
+    m_MagazineInteractionFreshMagazineWristAnchorOffsetMeters.z = std::clamp(m_MagazineInteractionFreshMagazineWristAnchorOffsetMeters.z, -0.25f, 0.25f);
     m_MagazineInteractionMagazineBoxHalfExtentsMeters = getVector3("MagazineInteractionMagazineBoxHalfExtentsMeters", m_MagazineInteractionMagazineBoxHalfExtentsMeters);
     m_MagazineInteractionMagazineBoxHalfExtentsMeters.x = std::clamp(m_MagazineInteractionMagazineBoxHalfExtentsMeters.x, 0.0f, 0.50f);
     m_MagazineInteractionMagazineBoxHalfExtentsMeters.y = std::clamp(m_MagazineInteractionMagazineBoxHalfExtentsMeters.y, 0.0f, 0.50f);

@@ -8485,6 +8485,51 @@ namespace
         return false;
     }
 
+    inline void HooksNativeViewmodelHandsOnlyPublishLeftWristAnchor(
+        VR* vr,
+        const std::vector<std::string>& boneNames,
+        int numBones,
+        const vr_vm_stabilize::Mat3x4* currentBones)
+    {
+        if (!vr || !currentBones || numBones <= 0 || numBones > 512 ||
+            static_cast<int>(boneNames.size()) < numBones)
+        {
+            return;
+        }
+
+        int anchorBone = -1;
+        if (!HooksNativeViewmodelHandsOnlyFindBoneByLowerSuffix(
+                boneNames,
+                "bip01_l_wrist",
+                anchorBone) ||
+            anchorBone < 0 ||
+            anchorBone >= numBones)
+        {
+            if (!HooksNativeViewmodelHandsOnlyFindBoneByLowerSuffix(
+                    boneNames,
+                    "bip01_l_hand",
+                    anchorBone) ||
+                anchorBone < 0 ||
+                anchorBone >= numBones)
+            {
+                return;
+            }
+        }
+
+        vr_vm_stabilize::Mat3x4 anchorWorld{};
+        if (!vr_vm_stabilize::SafeRead(currentBones + anchorBone, anchorWorld) ||
+            !HooksNativeViewmodelHandsOnlyMatrixFinite(anchorWorld))
+        {
+            return;
+        }
+
+        vr->PublishMagazineInteractionNativeLeftWristAnchor(
+            vr_vm_stabilize::GetOrigin(anchorWorld),
+            HooksMatrixAxis(anchorWorld, 0),
+            HooksMatrixAxis(anchorWorld, 1),
+            HooksMatrixAxis(anchorWorld, 2));
+    }
+
     inline vr_vm_stabilize::Mat3x4 HooksNativeViewmodelHandsOnlyMakeLocalAxisRotation(
         int axis,
         float radians)
@@ -9912,6 +9957,15 @@ namespace
             numBones,
             keepSide,
             isolated);
+
+        if (keepSide.side == -1)
+        {
+            HooksNativeViewmodelHandsOnlyPublishLeftWristAnchor(
+                vr,
+                boneNames,
+                numBones,
+                isolated);
+        }
 
         outBones = isolated;
         return true;

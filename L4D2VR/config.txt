@@ -163,6 +163,7 @@ MagazineInteractionFreshMagazineGrabRangeMeters=0.18
 MagazineInteractionFreshMagazinePickupOffsetMeters=0.45,-0.28,0.25
 MagazineInteractionFreshMagazineBoxHalfExtentsMeters=0.055,0.045,0.12
 MagazineInteractionFreshMagazineSocketLocalOffsetMeters=-0.12,0,0
+MagazineInteractionFreshMagazineWristAnchorOffsetMeters=0,0,0
 MagazineInteractionSocketCaptureRadiusMeters=0.06
 MagazineInteractionSocketCaptureAngleDeg=35
 MagazineInteractionSocketRequiredDepthMeters=0.04

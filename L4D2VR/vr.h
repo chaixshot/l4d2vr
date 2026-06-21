@@ -1207,6 +1207,7 @@ public:
 	Vector m_MagazineInteractionFreshMagazinePickupOffsetMeters = { 0.45f, -0.28f, 0.25f };
 	Vector m_MagazineInteractionFreshMagazineBoxHalfExtentsMeters = { 0.055f, 0.045f, 0.12f };
 	Vector m_MagazineInteractionFreshMagazineSocketLocalOffsetMeters = { -0.12f, 0.0f, 0.0f };
+	Vector m_MagazineInteractionFreshMagazineWristAnchorOffsetMeters = { 0.0f, 0.0f, 0.0f };
 	Vector m_MagazineInteractionMagazineBoxHalfExtentsMeters = { 0.0f, 0.0f, 0.0f };
 	std::string m_MagazineInteractionMagazineBoxHalfExtentsMetersOverridesSpec;
 	std::unordered_map<int, Vector> m_MagazineInteractionMagazineBoxHalfExtentsMetersOverrides;
@@ -1277,11 +1278,15 @@ public:
 	mutable std::mutex m_MagazineInteractionBoxMutex;
 	mutable std::mutex m_MagazineInteractionBoltBoxMutex;
 	mutable std::mutex m_MagazineInteractionPoseMutex;
+	mutable std::mutex m_MagazineInteractionHandAnchorMutex;
 	MagazineInteractionBoxSnapshot m_MagazineInteractionBox{};
 	MagazineInteractionBoxSnapshot m_MagazineInteractionBoltBox{};
 	MagazineInteractionBoxSnapshot m_MagazineInteractionShotgunStableCaptureBox{};
 	bool m_MagazineInteractionBoxValid = false;
 	bool m_MagazineInteractionBoltBoxValid = false;
+	VrHandMatrix4 m_MagazineInteractionNativeLeftWristWorld{};
+	bool m_MagazineInteractionNativeLeftWristValid = false;
+	std::chrono::steady_clock::time_point m_MagazineInteractionNativeLeftWristPublishedAt{};
 	uint32_t m_MagazineInteractionPublishSeq = 0;
 	uint32_t m_MagazineInteractionBoltPublishSeq = 0;
 	bool m_MagazineInteractionLeftHandHolding = false;
@@ -3047,6 +3052,11 @@ public:
 		int entityIndex,
 		int boneIndex,
 		const char* modelName);
+	void PublishMagazineInteractionNativeLeftWristAnchor(
+		const Vector& origin,
+		const Vector& axisX,
+		const Vector& axisY,
+		const Vector& axisZ);
 	void PublishMagazineInteractionCalibrationSnapshot(
 		const char* modelName,
 		const char* sourceClassName,
@@ -3064,6 +3074,7 @@ public:
 		const std::vector<MagazineInteractionCalibrationBone>& bones);
 	bool GetMagazineInteractionBox(MagazineInteractionBoxSnapshot& outSnapshot) const;
 	bool GetMagazineInteractionBoltBox(MagazineInteractionBoxSnapshot& outSnapshot) const;
+	bool GetMagazineInteractionNativeLeftWristAnchor(VrHandMatrix4& outWorld) const;
 	bool HasFreshMagazineInteractionDebugBoxWork() const;
 	bool GetMagazineInteractionCalibrationSnapshot(MagazineInteractionCalibrationSnapshot& outSnapshot) const;
 	bool ReadMagazineInteractionFingerCurls(std::array<float, 5>& outCurls);
