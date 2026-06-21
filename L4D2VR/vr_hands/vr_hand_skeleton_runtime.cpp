@@ -16,6 +16,7 @@
 #include <array>
 #include <cctype>
 #include <cstdint>
+#include <excpt.h>
 #include <functional>
 #include <cmath>
 #include <string>
@@ -41,6 +42,30 @@ namespace
         for (char& c : value)
             c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         return value;
+    }
+
+    bool TryReadOpenVRSkeletalSummary(
+        vr::IVRInput* input,
+        vr::VRActionHandle_t action,
+        vr::EVRSummaryType summaryType,
+        vr::VRSkeletalSummaryData_t& outSummary)
+    {
+        outSummary = {};
+        if (!input || action == vr::k_ulInvalidActionHandle)
+            return false;
+
+        vr::EVRInputError result = vr::VRInputError_None;
+        bool faulted = false;
+        __try
+        {
+            result = input->GetSkeletalSummaryData(action, summaryType, &outSummary);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            faulted = true;
+        }
+
+        return !faulted && result == vr::VRInputError_None;
     }
 
     VrHandMatrix4 ToVrHandMatrix(const ozz::math::Float4x4& matrix)
@@ -387,10 +412,11 @@ bool VrHandSkeletonRuntime::Update(vr::IVRInput* input, vr::EVRSkeletalMotionRan
         return false;
     }
 
-    m_Impl->hasSummary = input->GetSkeletalSummaryData(
+    m_Impl->hasSummary = TryReadOpenVRSkeletalSummary(
+        input,
         m_Impl->action,
         vr::VRSummaryType_FromAnimation,
-        &m_Impl->summary) == vr::VRInputError_None;
+        m_Impl->summary);
 
     const bool hasBoneData = input->GetSkeletalBoneData(
         m_Impl->action,

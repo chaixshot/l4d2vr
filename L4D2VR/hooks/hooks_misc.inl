@@ -8607,32 +8607,8 @@ namespace
         std::array<float, 5>& outCurls)
     {
         outCurls = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-        if (!vr || !vr->m_NativeViewmodelLeftHandOpenVRSkeleton || !vr->m_Input)
-            return false;
-
-        vr::VRActionHandle_t action = vr->m_NativeViewmodelLeftHandOpenVRAction;
-        if (action == vr::k_ulInvalidActionHandle)
-        {
-            if (vr->m_Input->GetActionHandle("/actions/base/in/skeleton_lefthand", &action) != vr::VRInputError_None ||
-                action == vr::k_ulInvalidActionHandle)
-            {
-                return false;
-            }
-            vr->m_NativeViewmodelLeftHandOpenVRAction = action;
-        }
-
-        vr::InputSkeletalActionData_t actionData{};
-        if (vr->m_Input->GetSkeletalActionData(action, &actionData, sizeof(actionData)) != vr::VRInputError_None ||
-            !actionData.bActive)
-        {
-            return false;
-        }
-
-        vr::VRSkeletalSummaryData_t summary{};
-        if (vr->m_Input->GetSkeletalSummaryData(
-                action,
-                vr::VRSummaryType_FromAnimation,
-                &summary) != vr::VRInputError_None)
+        if (!vr || !vr->m_NativeViewmodelLeftHandOpenVRSkeleton ||
+            !vr->GetNativeViewmodelLeftHandOpenVRFingerCurls(outCurls))
         {
             return false;
         }
@@ -8644,7 +8620,7 @@ namespace
 
         for (int finger = 0; finger < 5; ++finger)
         {
-            const float baseCurl = std::clamp(summary.flFingerCurl[finger], 0.0f, 1.0f) * curlScale;
+            const float baseCurl = std::clamp(outCurls[static_cast<size_t>(finger)], 0.0f, 1.0f) * curlScale;
             const float initialCurl =
                 (finger < static_cast<int>(vr->m_NativeViewmodelLeftHandOpenVRInitialCurl.size()))
                 ? vr->m_NativeViewmodelLeftHandOpenVRInitialCurl[static_cast<size_t>(finger)]

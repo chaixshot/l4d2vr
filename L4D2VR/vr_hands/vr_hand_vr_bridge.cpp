@@ -33,6 +33,90 @@ namespace
         const char* label);
     int MagazineInteractionFindClientEntityIndex(Game* game, const void* entity);
 
+    bool TryReadOpenVRSkeletalSummary(
+        vr::IVRInput* input,
+        vr::VRActionHandle_t action,
+        vr::EVRSummaryType summaryType,
+        vr::VRSkeletalSummaryData_t& outSummary,
+        const char* label)
+    {
+        outSummary = {};
+        if (!input || action == vr::k_ulInvalidActionHandle)
+            return false;
+
+        vr::EVRInputError result = vr::VRInputError_None;
+        bool faulted = false;
+        __try
+        {
+            result = input->GetSkeletalSummaryData(action, summaryType, &outSummary);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            faulted = true;
+        }
+
+        if (faulted)
+        {
+            static DWORD s_lastFaultLogTick = 0;
+            const DWORD now = GetTickCount();
+            if (now - s_lastFaultLogTick >= 1000u)
+            {
+                s_lastFaultLogTick = now;
+                Game::logMsg(
+                    "[VR][OpenVR] GetSkeletalSummaryData faulted for %s; ignoring skeletal curl this frame",
+                    (label && label[0] != '\0') ? label : "unknown action");
+            }
+            return false;
+        }
+
+        return result == vr::VRInputError_None;
+    }
+
+    bool ReadOpenVRSkeletalFingerCurls(
+        vr::IVRInput* input,
+        vr::VRActionHandle_t& action,
+        const char* actionPath,
+        std::array<float, 5>& outCurls,
+        const char* label)
+    {
+        outCurls = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+        if (!input || !actionPath || actionPath[0] == '\0')
+            return false;
+
+        if (action == vr::k_ulInvalidActionHandle)
+        {
+            if (input->GetActionHandle(actionPath, &action) != vr::VRInputError_None ||
+                action == vr::k_ulInvalidActionHandle)
+            {
+                return false;
+            }
+        }
+
+        vr::InputSkeletalActionData_t actionData{};
+        if (input->GetSkeletalActionData(action, &actionData, sizeof(actionData)) != vr::VRInputError_None ||
+            !actionData.bActive ||
+            actionData.activeOrigin == vr::k_ulInvalidInputValueHandle)
+        {
+            return false;
+        }
+
+        vr::VRSkeletalSummaryData_t summary{};
+        if (!TryReadOpenVRSkeletalSummary(
+                input,
+                action,
+                vr::VRSummaryType_FromAnimation,
+                summary,
+                label))
+        {
+            return false;
+        }
+
+        for (int finger = 0; finger < 5; ++finger)
+            outCurls[static_cast<size_t>(finger)] = std::clamp(summary.flFingerCurl[finger], 0.0f, 1.0f);
+
+        return true;
+    }
+
     class ScopedVrHandsQueuedD3DLock
     {
     public:
@@ -3993,34 +4077,59 @@ bool VR::ReadMagazineInteractionFingerCurls(std::array<float, 5>& outCurls)
         ? "/actions/base/in/skeleton_lefthand"
         : "/actions/base/in/skeleton_righthand";
 
-    if (action == vr::k_ulInvalidActionHandle)
+    return ReadOpenVRSkeletalFingerCurls(
+        m_Input,
+        action,
+        actionPath,
+        outCurls,
+        physicalLeftHand ? "magazine left hand" : "magazine right hand");
+}
+
+void VR::UpdateNativeViewmodelLeftHandOpenVRFingerCurls()
+{
+    std::array<float, 5> curls{};
+    const bool valid =
+        m_NativeViewmodelLeftHandOpenVRSkeleton &&
+        m_Input &&
+        ReadOpenVRSkeletalFingerCurls(
+            m_Input,
+            m_NativeViewmodelLeftHandOpenVRAction,
+            "/actions/base/in/skeleton_lefthand",
+            curls,
+            "native viewmodel left hand");
+
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(m_NativeViewmodelLeftHandOpenVRFingerCurlMutex);
+    if (valid)
     {
-        if (m_Input->GetActionHandle(actionPath, &action) != vr::VRInputError_None ||
-            action == vr::k_ulInvalidActionHandle)
-        {
-            return false;
-        }
+        m_NativeViewmodelLeftHandOpenVRFingerCurls = curls;
+        m_NativeViewmodelLeftHandOpenVRFingerCurlsAt = now;
+        m_NativeViewmodelLeftHandOpenVRFingerCurlsValid = true;
+        return;
     }
 
-    vr::InputSkeletalActionData_t actionData{};
-    if (m_Input->GetSkeletalActionData(action, &actionData, sizeof(actionData)) != vr::VRInputError_None ||
-        !actionData.bActive)
+    const bool stale =
+        m_NativeViewmodelLeftHandOpenVRFingerCurlsValid &&
+        std::chrono::duration<float>(now - m_NativeViewmodelLeftHandOpenVRFingerCurlsAt).count() > 0.35f;
+    if (!m_NativeViewmodelLeftHandOpenVRSkeleton || !m_Input || stale)
+        m_NativeViewmodelLeftHandOpenVRFingerCurlsValid = false;
+}
+
+bool VR::GetNativeViewmodelLeftHandOpenVRFingerCurls(std::array<float, 5>& outCurls) const
+{
+    outCurls = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+    if (!m_NativeViewmodelLeftHandOpenVRSkeleton)
+        return false;
+
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(m_NativeViewmodelLeftHandOpenVRFingerCurlMutex);
+    if (!m_NativeViewmodelLeftHandOpenVRFingerCurlsValid ||
+        std::chrono::duration<float>(now - m_NativeViewmodelLeftHandOpenVRFingerCurlsAt).count() > 0.35f)
     {
         return false;
     }
 
-    vr::VRSkeletalSummaryData_t summary{};
-    if (m_Input->GetSkeletalSummaryData(
-            action,
-            vr::VRSummaryType_FromAnimation,
-            &summary) != vr::VRInputError_None)
-    {
-        return false;
-    }
-
-    for (int finger = 0; finger < 5; ++finger)
-        outCurls[static_cast<size_t>(finger)] = std::clamp(summary.flFingerCurl[finger], 0.0f, 1.0f);
-
+    outCurls = m_NativeViewmodelLeftHandOpenVRFingerCurls;
     return true;
 }
 

@@ -1165,6 +1165,10 @@ public:
 	Vector m_NativeViewmodelLeftHandOpenVRThumbRootRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	vr::VRActionHandle_t m_NativeViewmodelLeftHandOpenVRAction = vr::k_ulInvalidActionHandle;
 	vr::VRActionHandle_t m_NativeViewmodelRightHandOpenVRAction = vr::k_ulInvalidActionHandle;
+	mutable std::mutex m_NativeViewmodelLeftHandOpenVRFingerCurlMutex;
+	std::array<float, 5> m_NativeViewmodelLeftHandOpenVRFingerCurls = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+	std::chrono::steady_clock::time_point m_NativeViewmodelLeftHandOpenVRFingerCurlsAt{};
+	bool m_NativeViewmodelLeftHandOpenVRFingerCurlsValid = false;
 	bool m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev = false;
 	bool m_NativeViewmodelLeftHandFreezePending = false;
 	std::chrono::steady_clock::time_point m_NativeViewmodelLeftHandFreezeDueTime{};
@@ -3079,6 +3083,8 @@ public:
 	bool GetMagazineInteractionNativeLeftWristAnchor(VrHandMatrix4& outWorld) const;
 	bool HasFreshMagazineInteractionDebugBoxWork() const;
 	bool GetMagazineInteractionCalibrationSnapshot(MagazineInteractionCalibrationSnapshot& outSnapshot) const;
+	void UpdateNativeViewmodelLeftHandOpenVRFingerCurls();
+	bool GetNativeViewmodelLeftHandOpenVRFingerCurls(std::array<float, 5>& outCurls) const;
 	bool ReadMagazineInteractionFingerCurls(std::array<float, 5>& outCurls);
 	bool UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown, bool leftGripJustPressed);
 	void MarkMagazineInteractionReloadCommandIssued();
