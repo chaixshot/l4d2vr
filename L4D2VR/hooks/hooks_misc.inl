@@ -7106,6 +7106,7 @@ namespace
     };
 
     inline bool HooksNativeViewmodelHandsOnlyVectorFinite(const Vector& value);
+    inline bool HooksNativeViewmodelHandsOnlyMatrixFinite(const vr_vm_stabilize::Mat3x4& matrix);
     inline bool HooksNativeViewmodelHandsOnlyPlaneFinite(const float plane[4]);
     inline bool HooksNativeViewmodelHandsOnlyBuildPlaneLocalToAnchor(
         const vr_vm_stabilize::Mat3x4& anchor,
@@ -7831,8 +7832,7 @@ namespace
             return false;
         }
 
-        if (bone == keepSide.hand ||
-            HooksNativeViewmodelHandsOnlyIsAncestor(boneParents, keepSide.hand, bone, numBones))
+        if (HooksNativeViewmodelHandsOnlyIsAncestor(boneParents, bone, keepSide.hand, numBones))
         {
             return true;
         }
@@ -7854,6 +7854,288 @@ namespace
         }
 
         return false;
+    }
+
+    inline std::string HooksNativeViewmodelHandsOnlyDebugBoneName(
+        const std::vector<std::string>& boneNames,
+        int bone)
+    {
+        if (bone >= 0 &&
+            bone < static_cast<int>(boneNames.size()) &&
+            !boneNames[static_cast<size_t>(bone)].empty())
+        {
+            return boneNames[static_cast<size_t>(bone)];
+        }
+
+        return "<unnamed>";
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyDebugBoneLooksInteresting(
+        const std::vector<std::string>& boneNames,
+        const vr_vm_stabilize::Mat3x4* sourceBones,
+        const HooksNativeViewmodelHandsOnlySideInfo& keepSide,
+        int bone)
+    {
+        const std::string name = HooksNativeViewmodelHandsOnlyDebugBoneName(boneNames, bone);
+        const std::string lowerName = vr_vm_stabilize::ToLowerAscii(name);
+        if (lowerName == "<unnamed>" ||
+            lowerName.find("hand") != std::string::npos ||
+            lowerName.find("finger") != std::string::npos ||
+            lowerName.find("thumb") != std::string::npos ||
+            lowerName.find("wrist") != std::string::npos ||
+            lowerName.find("forearm") != std::string::npos ||
+            lowerName.find("lowerarm") != std::string::npos ||
+            lowerName.find("upperarm") != std::string::npos ||
+            lowerName.find("ulna") != std::string::npos ||
+            lowerName.find("helper") != std::string::npos ||
+            lowerName.find("hlp") != std::string::npos ||
+            lowerName.find("sleeve") != std::string::npos ||
+            lowerName.find("cloth") != std::string::npos ||
+            lowerName.find("cuff") != std::string::npos)
+        {
+            return true;
+        }
+
+        return HooksNativeViewmodelHandsOnlyBoneNearSideHandRegion(sourceBones, bone, keepSide);
+    }
+
+    inline std::string HooksNativeViewmodelHandsOnlyFormatBoneListForLog(
+        const std::vector<std::string>& boneNames,
+        const std::vector<int>& boneParents,
+        const vr_vm_stabilize::Mat3x4* sourceBones,
+        const HooksNativeViewmodelHandsOnlySideInfo& keepSide,
+        const std::vector<uint8_t>& keepMask,
+        int numBones,
+        bool wantKept,
+        bool interestingOnly,
+        int maxItems)
+    {
+        std::string out;
+        int matched = 0;
+        int emitted = 0;
+        for (int bone = 0; bone < numBones; ++bone)
+        {
+            if (bone >= static_cast<int>(keepMask.size()))
+                break;
+
+            const bool kept = keepMask[static_cast<size_t>(bone)] != 0u;
+            if (kept != wantKept)
+                continue;
+
+            if (interestingOnly &&
+                !HooksNativeViewmodelHandsOnlyDebugBoneLooksInteresting(
+                    boneNames,
+                    sourceBones,
+                    keepSide,
+                    bone))
+            {
+                continue;
+            }
+
+            ++matched;
+            if (emitted >= maxItems)
+                continue;
+
+            const int parent = (bone >= 0 && bone < static_cast<int>(boneParents.size()))
+                ? boneParents[static_cast<size_t>(bone)]
+                : -1;
+            if (!out.empty())
+                out += "; ";
+            out += std::to_string(bone);
+            out += ":p";
+            out += std::to_string(parent);
+            out += ":";
+            out += HooksNativeViewmodelHandsOnlyDebugBoneName(boneNames, bone);
+            ++emitted;
+        }
+
+        if (matched > emitted)
+        {
+            if (!out.empty())
+                out += "; ";
+            out += "... +";
+            out += std::to_string(matched - emitted);
+            out += " more";
+        }
+
+        if (out.empty())
+            out = "<none>";
+        return out;
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyThrottleIsolationDebugLog(
+        const std::string& key,
+        float maxHz = 1.0f)
+    {
+        if (key.empty() || maxHz <= 0.0f)
+            return false;
+
+        static std::mutex s_isolationLogMutex;
+        static std::unordered_map<std::string, std::chrono::steady_clock::time_point> s_lastIsolationLog;
+        const auto now = std::chrono::steady_clock::now();
+        const auto minInterval =
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<float>(1.0f / maxHz));
+
+        std::lock_guard<std::mutex> lock(s_isolationLogMutex);
+        auto& last = s_lastIsolationLog[key];
+        if (last.time_since_epoch().count() != 0 && now - last < minInterval)
+            return true;
+
+        last = now;
+        return false;
+    }
+
+    inline void HooksNativeViewmodelHandsOnlyLogIsolationDebug(
+        VR* vr,
+        const std::string& lowerModel,
+        const std::vector<std::string>& boneNames,
+        const std::vector<int>& boneParents,
+        int numBones,
+        const vr_vm_stabilize::Mat3x4* sourceBones,
+        const HooksNativeViewmodelHandsOnlySideInfo& keepSide,
+        const std::vector<uint8_t>& keepMask,
+        int keptBones,
+        const float workingWristPlaneWorld[4],
+        const Vector& planePoint,
+        const Vector& normal,
+        const Vector& hiddenOriginPreTransform,
+        bool useTargetDelta,
+        bool haveTargetAnchor,
+        const vr_vm_stabilize::Mat3x4& targetDelta,
+        const vr_vm_stabilize::Mat3x4& targetAnchor,
+        bool useFixedFreezePlaneLock,
+        bool useCanonicalFreezeLock,
+        bool appliedFrozenPose,
+        const vr_vm_stabilize::Mat3x4* finalBones)
+    {
+        if (!vr || !vr->m_VrHandsDebugLog || keepSide.side == 0 || numBones <= 0)
+            return;
+
+        const char* sideName = (keepSide.side < 0) ? "L" : "R";
+        const std::string key =
+            lowerModel + "|" + sideName + "|" + std::to_string(numBones);
+        if (HooksNativeViewmodelHandsOnlyThrottleIsolationDebugLog(key, 1.0f))
+            return;
+
+        Vector hiddenAfterTarget = hiddenOriginPreTransform;
+        if (useTargetDelta && HooksNativeViewmodelHandsOnlyMatrixFinite(targetDelta))
+            hiddenAfterTarget = HooksTransformPoint(targetDelta, hiddenOriginPreTransform);
+
+        Vector targetAnchorOrigin = keepSide.handPos;
+        if (haveTargetAnchor && HooksNativeViewmodelHandsOnlyMatrixFinite(targetAnchor))
+            targetAnchorOrigin = vr_vm_stabilize::GetOrigin(targetAnchor);
+
+        Vector finalHand = targetAnchorOrigin;
+        if (finalBones && keepSide.hand >= 0 && keepSide.hand < numBones)
+        {
+            vr_vm_stabilize::Mat3x4 finalHandBone{};
+            if (vr_vm_stabilize::SafeRead(finalBones + keepSide.hand, finalHandBone) &&
+                HooksNativeViewmodelHandsOnlyMatrixFinite(finalHandBone))
+            {
+                finalHand = vr_vm_stabilize::GetOrigin(finalHandBone);
+            }
+        }
+
+        int sampleHiddenBone = -1;
+        Vector sampleHiddenOrigin = hiddenAfterTarget;
+        if (finalBones)
+        {
+            for (int bone = 0; bone < numBones; ++bone)
+            {
+                if (bone >= static_cast<int>(keepMask.size()) ||
+                    keepMask[static_cast<size_t>(bone)] != 0u)
+                {
+                    continue;
+                }
+
+                vr_vm_stabilize::Mat3x4 hiddenBone{};
+                if (vr_vm_stabilize::SafeRead(finalBones + bone, hiddenBone) &&
+                    HooksNativeViewmodelHandsOnlyMatrixFinite(hiddenBone))
+                {
+                    sampleHiddenBone = bone;
+                    sampleHiddenOrigin = vr_vm_stabilize::GetOrigin(hiddenBone);
+                    break;
+                }
+            }
+        }
+
+        const float hiddenPreDist = (hiddenOriginPreTransform - targetAnchorOrigin).Length();
+        const float hiddenAfterTargetDist = (hiddenAfterTarget - targetAnchorOrigin).Length();
+        const float sampleHiddenDist = (sampleHiddenOrigin - finalHand).Length();
+        const int hiddenBones = std::max(0, numBones - keptBones);
+
+        Game::logMsg(
+            "[VR][NativeHandsOnly][Iso] model=\"%s\" side=%s bones=%d kept=%d hidden=%d hand=%d wrist=%d forearm=%d useTargetDelta=%d haveTargetAnchor=%d fixed=%d canonical=%d frozen=%d plane=(%.3f %.3f %.3f %.3f) planePoint=(%.1f %.1f %.1f) hiddenPre=(%.1f %.1f %.1f) hiddenAfterTarget=(%.1f %.1f %.1f) targetHand=(%.1f %.1f %.1f) finalHand=(%.1f %.1f %.1f) hiddenDistPre=%.1f hiddenDistAfterTarget=%.1f sampleHidden=%d sampleHiddenDist=%.1f",
+            lowerModel.c_str(),
+            sideName,
+            numBones,
+            keptBones,
+            hiddenBones,
+            keepSide.hand,
+            keepSide.wrist,
+            keepSide.forearm,
+            useTargetDelta ? 1 : 0,
+            haveTargetAnchor ? 1 : 0,
+            useFixedFreezePlaneLock ? 1 : 0,
+            useCanonicalFreezeLock ? 1 : 0,
+            appliedFrozenPose ? 1 : 0,
+            workingWristPlaneWorld ? workingWristPlaneWorld[0] : 0.0f,
+            workingWristPlaneWorld ? workingWristPlaneWorld[1] : 0.0f,
+            workingWristPlaneWorld ? workingWristPlaneWorld[2] : 0.0f,
+            workingWristPlaneWorld ? workingWristPlaneWorld[3] : 0.0f,
+            planePoint.x,
+            planePoint.y,
+            planePoint.z,
+            hiddenOriginPreTransform.x,
+            hiddenOriginPreTransform.y,
+            hiddenOriginPreTransform.z,
+            hiddenAfterTarget.x,
+            hiddenAfterTarget.y,
+            hiddenAfterTarget.z,
+            targetAnchorOrigin.x,
+            targetAnchorOrigin.y,
+            targetAnchorOrigin.z,
+            finalHand.x,
+            finalHand.y,
+            finalHand.z,
+            hiddenPreDist,
+            hiddenAfterTargetDist,
+            sampleHiddenBone,
+            sampleHiddenDist);
+
+        const std::string keptList =
+            HooksNativeViewmodelHandsOnlyFormatBoneListForLog(
+                boneNames,
+                boneParents,
+                sourceBones,
+                keepSide,
+                keepMask,
+                numBones,
+                true,
+                false,
+                48);
+        const std::string hiddenList =
+            HooksNativeViewmodelHandsOnlyFormatBoneListForLog(
+                boneNames,
+                boneParents,
+                sourceBones,
+                keepSide,
+                keepMask,
+                numBones,
+                false,
+                true,
+                48);
+        Game::logMsg(
+            "[VR][NativeHandsOnly][IsoBones] model=\"%s\" side=%s kept=%s",
+            lowerModel.c_str(),
+            sideName,
+            keptList.c_str());
+        Game::logMsg(
+            "[VR][NativeHandsOnly][IsoBones] model=\"%s\" side=%s hiddenInteresting=%s",
+            lowerModel.c_str(),
+            sideName,
+            hiddenList.c_str());
     }
 
     inline vr_vm_stabilize::Mat3x4 HooksNativeViewmodelHandsOnlyCollapsedBoneAt(
@@ -10674,9 +10956,11 @@ namespace
             }
         }
 
+        bool appliedFrozenPose = false;
         if (haveTargetAnchor)
         {
-            HooksNativeViewmodelHandsOnlyApplyFrozenSideHandPose(
+            appliedFrozenPose =
+                HooksNativeViewmodelHandsOnlyApplyFrozenSideHandPose(
                 vr,
                 drawState,
                 boneIndex,
@@ -10702,6 +10986,29 @@ namespace
             boneParents,
             numBones,
             keepSide,
+            isolated);
+
+        HooksNativeViewmodelHandsOnlyLogIsolationDebug(
+            vr,
+            lowerModel,
+            boneNames,
+            boneParents,
+            numBones,
+            sourceBones,
+            keepSide,
+            keepMask,
+            keptBones,
+            workingWristPlaneWorld,
+            planePoint,
+            normal,
+            hiddenOrigin,
+            useTargetDelta,
+            haveTargetAnchor,
+            targetDelta,
+            targetAnchor,
+            useFixedFreezePlaneLock,
+            useCanonicalFreezeLock,
+            appliedFrozenPose,
             isolated);
 
         if (keepSide.side == -1)
