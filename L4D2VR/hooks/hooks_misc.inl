@@ -6379,6 +6379,129 @@ namespace
         return false;
     }
 
+    inline bool HooksNativeViewmodelHandsOnlyBoneNameMatchesAny(
+        const std::string& lowerName,
+        const std::vector<const char*>& needles)
+    {
+        for (const char* needle : needles)
+        {
+            if (needle && lowerName.find(needle) != std::string::npos)
+                return true;
+        }
+        return false;
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyFindNamedBoneOnAncestorChain(
+        const std::vector<std::string>& boneNames,
+        const std::vector<int>& boneParents,
+        int numBones,
+        int startBone,
+        const std::vector<const char*>& needles,
+        int side,
+        int& outBone)
+    {
+        outBone = -1;
+        if (startBone < 0 || startBone >= numBones ||
+            static_cast<int>(boneNames.size()) < numBones ||
+            static_cast<int>(boneParents.size()) < numBones)
+        {
+            return false;
+        }
+
+        int current = boneParents[static_cast<size_t>(startBone)];
+        for (int guard = 0; guard < numBones && current >= 0 && current < numBones; ++guard)
+        {
+            const std::string lowerName = vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(current)]);
+            if ((side == 0 || HooksNativeViewmodelHandsOnlyBoneSide(lowerName) == side) &&
+                HooksNativeViewmodelHandsOnlyBoneNameMatchesAny(lowerName, needles))
+            {
+                outBone = current;
+                return true;
+            }
+            current = boneParents[static_cast<size_t>(current)];
+        }
+        return false;
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyFindBestWristBone(
+        const std::vector<std::string>& boneNames,
+        const std::vector<int>& boneParents,
+        int numBones,
+        int hand,
+        const std::vector<const char*>& wristNeedles,
+        int side,
+        int& outBone)
+    {
+        if (HooksNativeViewmodelHandsOnlyFindNamedBoneOnAncestorChain(
+                boneNames,
+                boneParents,
+                numBones,
+                hand,
+                wristNeedles,
+                side,
+                outBone))
+        {
+            return true;
+        }
+
+        return HooksNativeViewmodelHandsOnlyFindNamedBone(boneNames, wristNeedles, side, outBone);
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyFindBestForearmBone(
+        const std::vector<std::string>& boneNames,
+        const std::vector<int>& boneParents,
+        int numBones,
+        int hand,
+        int side,
+        int& outBone)
+    {
+        const std::vector<const char*> preferredNeedles = {
+            "forearm", "lowerarm", "lower_arm", "lower-arm", "ulna", "radius",
+        };
+        const std::vector<const char*> fallbackNeedles = {
+            "elbow", "upperarm",
+        };
+
+        if (HooksNativeViewmodelHandsOnlyFindNamedBoneOnAncestorChain(
+                boneNames,
+                boneParents,
+                numBones,
+                hand,
+                preferredNeedles,
+                side,
+                outBone))
+        {
+            return true;
+        }
+
+        if (HooksNativeViewmodelHandsOnlyFindNamedBone(
+                boneNames,
+                preferredNeedles,
+                side,
+                outBone))
+        {
+            return true;
+        }
+
+        if (HooksNativeViewmodelHandsOnlyFindNamedBoneOnAncestorChain(
+                boneNames,
+                boneParents,
+                numBones,
+                hand,
+                fallbackNeedles,
+                side,
+                outBone))
+        {
+            return true;
+        }
+
+        return HooksNativeViewmodelHandsOnlyFindNamedBone(
+            boneNames,
+            fallbackNeedles,
+            side,
+            outBone);
+    }
+
     inline bool HooksNativeViewmodelHandsOnlyReadBoneRestPos(
         void* drawState,
         int boneIndex,
@@ -6580,7 +6703,17 @@ namespace
         return value * c + CrossProduct(n, value) * s + n * (DotProduct(n, value) * (1.0f - c));
     }
 
-    inline Vector HooksNativeViewmodelHandsOnlyResolveCutRotationDeg(VR* vr, int side);
+    inline Vector HooksNativeViewmodelHandsOnlyResolveCutRotationDeg(
+        VR* vr,
+        int side,
+        const std::string* lowerModel = nullptr);
+    inline Vector HooksNativeViewmodelHandsOnlyResolveCutRotationDegForRig(
+        VR* vr,
+        int side,
+        const std::string& lowerModel,
+        const std::vector<std::string>& boneNames,
+        int numBones,
+        const Vector& forearmToHandNormal);
     inline bool HooksNativeViewmodelHandsOnlyResolveViewFrame(
         VR* vr,
         Vector& outViewOrigin,
@@ -6649,14 +6782,15 @@ namespace
         VR* vr,
         const vr_vm_stabilize::Mat3x4& handBone,
         const Vector& normal,
-        int side)
+        int side,
+        const Vector& cutRotationDeg)
     {
         (void)handBone;
 
         if (!vr)
             return normal;
 
-        const Vector rotation = HooksNativeViewmodelHandsOnlyResolveCutRotationDeg(vr, side);
+        const Vector rotation = cutRotationDeg;
         if (!std::isfinite(rotation.x) || !std::isfinite(rotation.y) || !std::isfinite(rotation.z))
             return normal;
 
@@ -6692,7 +6826,8 @@ namespace
         const vr_vm_stabilize::Mat3x4& handBone,
         const Vector& forearmNormal,
         const Vector& wristNormal,
-        int side)
+        int side,
+        const Vector& cutRotationDeg)
     {
         const Vector bentNormal = HooksNormalizeVector(forearmNormal, Vector(0.0f, 0.0f, 0.0f));
         const Vector blended = HooksNativeViewmodelHandsOnlyResolveArmBendBaseNormal(
@@ -6700,7 +6835,12 @@ namespace
             forearmNormal,
             wristNormal);
 
-        Vector rotated = HooksNativeViewmodelHandsOnlyApplyCutNormalRotation(vr, handBone, blended, side);
+        Vector rotated = HooksNativeViewmodelHandsOnlyApplyCutNormalRotation(
+            vr,
+            handBone,
+            blended,
+            side,
+            cutRotationDeg);
         if (DotProduct(rotated, bentNormal) < 0.0f)
             rotated *= -1.0f;
         return rotated;
@@ -6760,6 +6900,7 @@ namespace
         Vector handPos = Vector(0.0f, 0.0f, 0.0f);
         Vector anchorPos = Vector(0.0f, 0.0f, 0.0f);
         Vector forearmPos = Vector(0.0f, 0.0f, 0.0f);
+        Vector cutRotationDeg = Vector(0.0f, 0.0f, 0.0f);
         float wristKeepDistance = 0.0f;
         float wristPlaneWorld[4]{};
         bool deterministicWristPlaneLocalValid = false;
@@ -6862,12 +7003,12 @@ namespace
     inline Vector HooksNativeViewmodelHandsOnlyApplyLocalCutNormalRotation(
         VR* vr,
         const Vector& normal,
-        int side)
+        const Vector& cutRotationDeg)
     {
         if (!vr)
             return normal;
 
-        const Vector rotation = HooksNativeViewmodelHandsOnlyResolveCutRotationDeg(vr, side);
+        const Vector rotation = cutRotationDeg;
         if (!std::isfinite(rotation.x) || !std::isfinite(rotation.y) || !std::isfinite(rotation.z))
             return normal;
 
@@ -6957,7 +7098,10 @@ namespace
             vr,
             normal,
             wristNormal);
-        normal = HooksNativeViewmodelHandsOnlyApplyLocalCutNormalRotation(vr, normal, keepSide.side);
+        normal = HooksNativeViewmodelHandsOnlyApplyLocalCutNormalRotation(
+            vr,
+            normal,
+            keepSide.cutRotationDeg);
         normal = HooksNormalizeVector(normal, forearmLocal * -1.0f);
         if (normal.Length() <= 0.0001f)
             return false;
@@ -7029,23 +7173,42 @@ namespace
             "bip01_r_wrist", "_r_wrist", ".r.wrist", "r.wrist",
             "bip01_l_wrist", "_l_wrist", ".l.wrist", "l.wrist",
         };
-        const std::vector<const char*> forearmNeedles = {
-            "forearm", "ulna", "elbow", "upperarm",
-        };
-
         int hand = -1;
         int wrist = -1;
         int forearm = -1;
-        if (!HooksNativeViewmodelHandsOnlyFindNamedBone(boneNames, handNeedles, 1, hand) ||
-            !HooksNativeViewmodelHandsOnlyFindNamedBone(boneNames, forearmNeedles, 1, forearm))
+        auto resolveSideBones = [&](int side) -> bool
         {
-            if (!HooksNativeViewmodelHandsOnlyFindNamedBone(boneNames, handNeedles, -1, hand) ||
-                !HooksNativeViewmodelHandsOnlyFindNamedBone(boneNames, forearmNeedles, -1, forearm))
+            int sideHand = -1;
+            int sideForearm = -1;
+            if (!HooksNativeViewmodelHandsOnlyFindNamedBone(boneNames, handNeedles, side, sideHand) ||
+                !HooksNativeViewmodelHandsOnlyFindBestForearmBone(
+                    boneNames,
+                    boneParents,
+                    numBones,
+                    sideHand,
+                    side,
+                    sideForearm))
             {
                 return false;
             }
-        }
-        HooksNativeViewmodelHandsOnlyFindNamedBone(boneNames, wristNeedles, HooksNativeViewmodelHandsOnlyBoneSide(vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(hand)])), wrist);
+
+            hand = sideHand;
+            forearm = sideForearm;
+            return true;
+        };
+        if (!resolveSideBones(1) && !resolveSideBones(-1))
+            return false;
+
+        const int resolvedSide =
+            HooksNativeViewmodelHandsOnlyBoneSide(vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(hand)]));
+        HooksNativeViewmodelHandsOnlyFindBestWristBone(
+            boneNames,
+            boneParents,
+            numBones,
+            hand,
+            wristNeedles,
+            resolvedSide,
+            wrist);
 
         if (hand < 0 || hand >= numBones || forearm < 0 || forearm >= numBones)
             return false;
@@ -7088,12 +7251,21 @@ namespace
             return false;
         const int handSide =
             HooksNativeViewmodelHandsOnlyBoneSide(vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(hand)]));
+        const Vector cutRotationDeg =
+            HooksNativeViewmodelHandsOnlyResolveCutRotationDegForRig(
+                vr,
+                handSide,
+                lowerModel,
+                boneNames,
+                numBones,
+                normal);
         normal = HooksNativeViewmodelHandsOnlyResolveArmBendNormal(
             vr,
             handBone,
             normal,
             wristNormal,
-            handSide);
+            handSide,
+            cutRotationDeg);
 
         const float trimDistance =
             HooksNativeViewmodelHandsOnlyResolveSideTrimDistance(vr, len, handSide);
@@ -7119,6 +7291,7 @@ namespace
             sideInfo.handPos = handPos;
             sideInfo.anchorPos = anchorPos;
             sideInfo.forearmPos = forearmPos;
+            sideInfo.cutRotationDeg = cutRotationDeg;
             sideInfo.wristKeepDistance = wristKeepDistance;
             memcpy(sideInfo.wristPlaneWorld, worldPlane, sizeof(sideInfo.wristPlaneWorld));
             sideInfo.deterministicWristPlaneLocalValid =
@@ -7783,7 +7956,8 @@ namespace
             handBone,
             normal,
             wristNormal,
-            keepSide.side);
+            keepSide.side,
+            keepSide.cutRotationDeg);
         normal = HooksNormalizeVector(normal, handPos - forearmPos);
         if (normal.Length() <= 0.0001f)
             return neutralized;
@@ -7869,7 +8043,7 @@ namespace
             : vr->m_NativeViewmodelHandsOnlyRightFreezePoseRotationOffsetDeg;
     }
 
-    inline Vector HooksNativeViewmodelHandsOnlyResolveCutRotationDeg(VR* vr, int side)
+    inline Vector HooksNativeViewmodelHandsOnlyBaseCutRotationDeg(VR* vr, int side)
     {
         if (!vr)
             return Vector(0.0f, 0.0f, 0.0f);
@@ -7877,6 +8051,193 @@ namespace
         return (side < 0)
             ? vr->m_NativeViewmodelHandsOnlyLeftCutRotationDeg
             : vr->m_NativeViewmodelHandsOnlyRightCutRotationDeg;
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyTryResolveExplicitCutRotationDeg(
+        VR* vr,
+        int side,
+        const std::string* lowerModel,
+        Vector& outRotation)
+    {
+        if (!vr || !lowerModel || lowerModel->empty())
+            return false;
+
+        outRotation = HooksNativeViewmodelHandsOnlyBaseCutRotationDeg(vr, side);
+
+        for (const auto& overrideEntry : vr->m_NativeViewmodelHandsOnlyCutRotationOverrides)
+        {
+            if (overrideEntry.modelPattern.empty() ||
+                lowerModel->find(overrideEntry.modelPattern) == std::string::npos)
+            {
+                continue;
+            }
+
+            const bool useLeft = side < 0;
+            const bool hasOverride = useLeft ? overrideEntry.hasLeft : overrideEntry.hasRight;
+            if (!hasOverride)
+                return false;
+
+            outRotation = useLeft ? overrideEntry.left : overrideEntry.right;
+            if (vr->m_VrHandsDebugLog)
+            {
+                static std::mutex s_cutRotationLogMutex;
+                static std::unordered_set<std::string> s_loggedCutRotationOverrides;
+                const std::string logKey =
+                    *lowerModel + "|" + std::to_string(side) + "|" + overrideEntry.modelPattern;
+                bool shouldLog = false;
+                {
+                    std::lock_guard<std::mutex> lock(s_cutRotationLogMutex);
+                    shouldLog = s_loggedCutRotationOverrides.insert(logKey).second;
+                }
+                if (shouldLog)
+                {
+                    Game::logMsg(
+                        "[VR][NativeHandsOnly] cut rotation override model=\"%s\" pattern=\"%s\" side=%s rotation=(%.2f %.2f %.2f)",
+                        lowerModel->c_str(),
+                        overrideEntry.modelPattern.c_str(),
+                        useLeft ? "left" : "right",
+                        outRotation.x,
+                        outRotation.y,
+                        outRotation.z);
+                }
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    inline Vector HooksNativeViewmodelHandsOnlyResolveCutRotationDeg(
+        VR* vr,
+        int side,
+        const std::string* lowerModel)
+    {
+        Vector explicitRotation{};
+        if (HooksNativeViewmodelHandsOnlyTryResolveExplicitCutRotationDeg(
+                vr,
+                side,
+                lowerModel,
+                explicitRotation))
+        {
+            return explicitRotation;
+        }
+
+        return HooksNativeViewmodelHandsOnlyBaseCutRotationDeg(vr, side);
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyLooksLikeHelperCutProfile(
+        VR* vr,
+        const std::vector<std::string>& boneNames,
+        int numBones,
+        const Vector& forearmToHandNormal)
+    {
+        if (!vr || !vr->m_NativeViewmodelHandsOnlyAutoCutRotation ||
+            numBones <= 0 ||
+            static_cast<int>(boneNames.size()) < numBones)
+        {
+            return false;
+        }
+
+        int helperBones = 0;
+        int unnamedBones = 0;
+        for (int i = 0; i < numBones; ++i)
+        {
+            const std::string lowerName =
+                vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(i)]);
+            if (lowerName.empty())
+            {
+                ++unnamedBones;
+                continue;
+            }
+            if (lowerName.find("wrist_helper") != std::string::npos ||
+                lowerName.find("hlp_wrist") != std::string::npos ||
+                lowerName.find("thumb_fix") != std::string::npos ||
+                lowerName.find("forearm_driven") != std::string::npos ||
+                lowerName.find("driven_ulna") != std::string::npos ||
+                lowerName.find("hlp_ulna") != std::string::npos)
+            {
+                ++helperBones;
+            }
+        }
+
+        const bool helperRich = numBones >= 64 || helperBones >= 8 || unnamedBones >= 4;
+        if (!helperRich)
+            return false;
+
+        Vector normal = HooksNormalizeVector(forearmToHandNormal, Vector(0.0f, 0.0f, 0.0f));
+        if (normal.Length() <= 0.0001f)
+            return false;
+
+        Vector viewOrigin{};
+        Vector viewForward{};
+        Vector viewRight{};
+        Vector viewUp{};
+        if (HooksNativeViewmodelHandsOnlyResolveViewFrame(vr, viewOrigin, viewForward, viewRight, viewUp))
+        {
+            const float rightness = std::fabs(DotProduct(normal, HooksNormalizeVector(viewRight, Vector(1.0f, 0.0f, 0.0f))));
+            const float forwardness = std::fabs(DotProduct(normal, HooksNormalizeVector(viewForward, Vector(0.0f, 1.0f, 0.0f))));
+            return rightness > 0.65f && forwardness < 0.75f;
+        }
+
+        return std::fabs(normal.x) > 0.65f && std::fabs(normal.z) < 0.75f;
+    }
+
+    inline Vector HooksNativeViewmodelHandsOnlyResolveCutRotationDegForRig(
+        VR* vr,
+        int side,
+        const std::string& lowerModel,
+        const std::vector<std::string>& boneNames,
+        int numBones,
+        const Vector& forearmToHandNormal)
+    {
+        Vector explicitRotation{};
+        if (HooksNativeViewmodelHandsOnlyTryResolveExplicitCutRotationDeg(
+                vr,
+                side,
+                &lowerModel,
+                explicitRotation))
+        {
+            return explicitRotation;
+        }
+
+        if (HooksNativeViewmodelHandsOnlyLooksLikeHelperCutProfile(
+                vr,
+                boneNames,
+                numBones,
+                forearmToHandNormal))
+        {
+            const Vector resolved = (side < 0)
+                ? vr->m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg
+                : vr->m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg;
+            if (vr->m_VrHandsDebugLog)
+            {
+                static std::mutex s_autoCutRotationLogMutex;
+                static std::unordered_set<std::string> s_loggedAutoCutRotation;
+                const std::string logKey = lowerModel + "|" + std::to_string(side);
+                bool shouldLog = false;
+                {
+                    std::lock_guard<std::mutex> lock(s_autoCutRotationLogMutex);
+                    shouldLog = s_loggedAutoCutRotation.insert(logKey).second;
+                }
+                if (shouldLog)
+                {
+                    Game::logMsg(
+                        "[VR][NativeHandsOnly] auto helper cut rotation model=\"%s\" side=%s bones=%d normal=(%.2f %.2f %.2f) rotation=(%.2f %.2f %.2f)",
+                        lowerModel.c_str(),
+                        side < 0 ? "left" : "right",
+                        numBones,
+                        forearmToHandNormal.x,
+                        forearmToHandNormal.y,
+                        forearmToHandNormal.z,
+                        resolved.x,
+                        resolved.y,
+                        resolved.z);
+                }
+            }
+            return resolved;
+        }
+
+        return HooksNativeViewmodelHandsOnlyBaseCutRotationDeg(vr, side);
     }
 
     inline float HooksNativeViewmodelHandsOnlyNormalizeAngleDelta(float degrees)
@@ -8153,7 +8514,7 @@ namespace
         cache.handBone = keepSide.hand;
         cache.anchorBone = keepSide.hand;
         cache.armBendScale = std::clamp(vr->m_NativeViewmodelHandsOnlyArmBendScale, 0.0f, 1.0f);
-        cache.cutRotationDeg = HooksNativeViewmodelHandsOnlyResolveCutRotationDeg(vr, keepSide.side);
+        cache.cutRotationDeg = keepSide.cutRotationDeg;
         cache.freezePoseOffsetMeters = vr->m_NativeViewmodelHandsOnlyFreezePoseOffsetMeters;
         cache.freezePoseRotationOffsetDeg =
             HooksNativeViewmodelHandsOnlyResolveFreezePoseRotationOffsetDeg(vr, keepSide.side);
@@ -8251,7 +8612,7 @@ namespace
         const uint32_t generation =
             vr->m_NativeViewmodelLeftHandFreezeGeneration.load(std::memory_order_acquire);
         const float armBendScale = std::clamp(vr->m_NativeViewmodelHandsOnlyArmBendScale, 0.0f, 1.0f);
-        const Vector cutRotationDeg = HooksNativeViewmodelHandsOnlyResolveCutRotationDeg(vr, keepSide.side);
+        const Vector cutRotationDeg = keepSide.cutRotationDeg;
         const Vector freezePoseOffsetMeters = vr->m_NativeViewmodelHandsOnlyFreezePoseOffsetMeters;
         const Vector freezePoseRotationOffsetDeg =
             HooksNativeViewmodelHandsOnlyResolveFreezePoseRotationOffsetDeg(vr, keepSide.side);
@@ -9174,7 +9535,8 @@ namespace
             handBone,
             normal,
             wristNormal,
-            keepSide.side);
+            keepSide.side,
+            keepSide.cutRotationDeg);
         normal = HooksNormalizeVector(normal, handPos - forearmPos);
         if (normal.Length() <= 0.0001f)
             return false;
@@ -9313,7 +9675,7 @@ namespace
         return std::fabs(state.armBendScale - armBendScale) <= 0.0001f &&
             HooksNativeViewmodelHandsOnlyVectorNearlyEqual(
                 state.cutRotationDeg,
-                HooksNativeViewmodelHandsOnlyResolveCutRotationDeg(vr, side),
+                keepSide.cutRotationDeg,
                 0.0001f) &&
             HooksNativeViewmodelHandsOnlyVectorNearlyEqual(
                 state.freezePoseOffsetMeters,
@@ -9479,7 +9841,7 @@ namespace
             state.forearm = keepSide.forearm;
             state.valid = true;
             state.armBendScale = std::clamp(vr->m_NativeViewmodelHandsOnlyArmBendScale, 0.0f, 1.0f);
-            state.cutRotationDeg = HooksNativeViewmodelHandsOnlyResolveCutRotationDeg(vr, keepSide.side);
+            state.cutRotationDeg = keepSide.cutRotationDeg;
             state.freezePoseOffsetMeters = vr->m_NativeViewmodelHandsOnlyFreezePoseOffsetMeters;
             state.freezePoseRotationOffsetDeg =
                 HooksNativeViewmodelHandsOnlyResolveFreezePoseRotationOffsetDeg(vr, keepSide.side);
@@ -9956,6 +10318,7 @@ namespace
         int boneIndex,
         int stride,
         const vr_vm_stabilize::Mat3x4* bones,
+        const std::string& lowerModel,
         int side,
         HooksNativeViewmodelHandsOnlySideInfo& outInfo)
     {
@@ -9972,19 +10335,28 @@ namespace
             "bip01_r_wrist", "_r_wrist", ".r.wrist", "r.wrist",
             "bip01_l_wrist", "_l_wrist", ".l.wrist", "l.wrist",
         };
-        const std::vector<const char*> forearmNeedles = {
-            "forearm", "ulna", "elbow", "upperarm",
-        };
-
         if (!HooksNativeViewmodelHandsOnlyFindNamedBone(boneNames, handNeedles, side, outInfo.hand) ||
-            !HooksNativeViewmodelHandsOnlyFindNamedBone(boneNames, forearmNeedles, side, outInfo.forearm))
+            !HooksNativeViewmodelHandsOnlyFindBestForearmBone(
+                boneNames,
+                boneParents,
+                numBones,
+                outInfo.hand,
+                side,
+                outInfo.forearm))
         {
             return false;
         }
 
         if (outInfo.hand < 0 || outInfo.hand >= numBones || outInfo.forearm < 0 || outInfo.forearm >= numBones)
             return false;
-        HooksNativeViewmodelHandsOnlyFindNamedBone(boneNames, wristNeedles, side, outInfo.wrist);
+        HooksNativeViewmodelHandsOnlyFindBestWristBone(
+            boneNames,
+            boneParents,
+            numBones,
+            outInfo.hand,
+            wristNeedles,
+            side,
+            outInfo.wrist);
 
         vr_vm_stabilize::Mat3x4 handBone{};
         vr_vm_stabilize::Mat3x4 forearmBone{};
@@ -10021,12 +10393,21 @@ namespace
         }
         if (!std::isfinite(len) || len < 0.001f)
             return false;
+        outInfo.cutRotationDeg =
+            HooksNativeViewmodelHandsOnlyResolveCutRotationDegForRig(
+                vr,
+                side,
+                lowerModel,
+                boneNames,
+                numBones,
+                normal);
         normal = HooksNativeViewmodelHandsOnlyResolveArmBendNormal(
             vr,
             handBone,
             normal,
             wristNormal,
-            side);
+            side,
+            outInfo.cutRotationDeg);
 
         const float trimDistance =
             HooksNativeViewmodelHandsOnlyResolveSideTrimDistance(vr, len, side);
@@ -10096,9 +10477,9 @@ namespace
         HooksNativeViewmodelHandsOnlySideInfo rightInfo{};
         HooksNativeViewmodelHandsOnlySideInfo leftInfo{};
         const bool hasRight = HooksNativeViewmodelHandsOnlyBuildSideInfo(
-            vr, drawState, boneNames, boneParents, numBones, boneIndex, stride, bones, 1, rightInfo);
+            vr, drawState, boneNames, boneParents, numBones, boneIndex, stride, bones, lowerModel, 1, rightInfo);
         const bool hasLeft = HooksNativeViewmodelHandsOnlyBuildSideInfo(
-            vr, drawState, boneNames, boneParents, numBones, boneIndex, stride, bones, -1, leftInfo);
+            vr, drawState, boneNames, boneParents, numBones, boneIndex, stride, bones, lowerModel, -1, leftInfo);
         const bool hidePendingFreeze =
             HooksNativeViewmodelHandsOnlyShouldHidePendingFreeze(vr);
         if (HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(vr))

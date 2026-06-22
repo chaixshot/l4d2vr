@@ -729,6 +729,9 @@ void VR::ParseConfigFile()
         return;
 
     // С   ߣ   Ĭ  ֵ İ ȫ  ȡ
+    auto hasConfigKey = [&](const char* k)->bool {
+        return userConfig.find(k) != userConfig.end();
+        };
     auto getBool = [&](const char* k, bool defVal)->bool {
         auto it = userConfig.find(k);
         if (it == userConfig.end()) return defVal;
@@ -1192,16 +1195,137 @@ void VR::ParseConfigFile()
     m_NativeViewmodelHandsOnlyCutRotationDeg.x = std::clamp(m_NativeViewmodelHandsOnlyCutRotationDeg.x, -89.0f, 89.0f);
     m_NativeViewmodelHandsOnlyCutRotationDeg.y = std::clamp(m_NativeViewmodelHandsOnlyCutRotationDeg.y, -89.0f, 89.0f);
     m_NativeViewmodelHandsOnlyCutRotationDeg.z = std::clamp(m_NativeViewmodelHandsOnlyCutRotationDeg.z, -89.0f, 89.0f);
+    auto nonZeroCutRotation = [](const Vector& value)->bool {
+        return std::fabs(value.x) > 0.0001f ||
+            std::fabs(value.y) > 0.0001f ||
+            std::fabs(value.z) > 0.0001f;
+        };
+    const bool useLegacySharedCutRotation =
+        hasConfigKey("NativeViewmodelHandsOnlyCutRotationDeg") &&
+        nonZeroCutRotation(m_NativeViewmodelHandsOnlyCutRotationDeg);
     m_NativeViewmodelHandsOnlyLeftCutRotationDeg =
-        getVector3("NativeViewmodelHandsOnlyLeftCutRotationDeg", m_NativeViewmodelHandsOnlyCutRotationDeg);
+        getVector3(
+            "NativeViewmodelHandsOnlyLeftCutRotationDeg",
+            useLegacySharedCutRotation
+                ? m_NativeViewmodelHandsOnlyCutRotationDeg
+                : m_NativeViewmodelHandsOnlyLeftCutRotationDeg);
     m_NativeViewmodelHandsOnlyLeftCutRotationDeg.x = std::clamp(m_NativeViewmodelHandsOnlyLeftCutRotationDeg.x, -89.0f, 89.0f);
     m_NativeViewmodelHandsOnlyLeftCutRotationDeg.y = std::clamp(m_NativeViewmodelHandsOnlyLeftCutRotationDeg.y, -89.0f, 89.0f);
     m_NativeViewmodelHandsOnlyLeftCutRotationDeg.z = std::clamp(m_NativeViewmodelHandsOnlyLeftCutRotationDeg.z, -89.0f, 89.0f);
     m_NativeViewmodelHandsOnlyRightCutRotationDeg =
-        getVector3("NativeViewmodelHandsOnlyRightCutRotationDeg", m_NativeViewmodelHandsOnlyCutRotationDeg);
+        getVector3(
+            "NativeViewmodelHandsOnlyRightCutRotationDeg",
+            useLegacySharedCutRotation
+                ? m_NativeViewmodelHandsOnlyCutRotationDeg
+                : m_NativeViewmodelHandsOnlyRightCutRotationDeg);
     m_NativeViewmodelHandsOnlyRightCutRotationDeg.x = std::clamp(m_NativeViewmodelHandsOnlyRightCutRotationDeg.x, -89.0f, 89.0f);
     m_NativeViewmodelHandsOnlyRightCutRotationDeg.y = std::clamp(m_NativeViewmodelHandsOnlyRightCutRotationDeg.y, -89.0f, 89.0f);
     m_NativeViewmodelHandsOnlyRightCutRotationDeg.z = std::clamp(m_NativeViewmodelHandsOnlyRightCutRotationDeg.z, -89.0f, 89.0f);
+    m_NativeViewmodelHandsOnlyAutoCutRotation = getBool(
+        "NativeViewmodelHandsOnlyAutoCutRotation",
+        m_NativeViewmodelHandsOnlyAutoCutRotation);
+    m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg =
+        getVector3(
+            "NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg",
+            m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg);
+    m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg.x = std::clamp(m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg.x, -89.0f, 89.0f);
+    m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg.y = std::clamp(m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg.y, -89.0f, 89.0f);
+    m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg.z = std::clamp(m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg.z, -89.0f, 89.0f);
+    m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg =
+        getVector3(
+            "NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg",
+            m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg);
+    m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg.x = std::clamp(m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg.x, -89.0f, 89.0f);
+    m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg.y = std::clamp(m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg.y, -89.0f, 89.0f);
+    m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg.z = std::clamp(m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg.z, -89.0f, 89.0f);
+    auto parseNativeHandsOnlyCutRotationVector = [&](std::string value, Vector& outValue) -> bool
+        {
+            trim(value);
+            std::replace(value.begin(), value.end(), '/', ',');
+            std::stringstream ss(value);
+            std::string componentText;
+            float components[3] = {};
+            for (int i = 0; i < 3; ++i)
+            {
+                if (!std::getline(ss, componentText, ','))
+                    return false;
+                trim(componentText);
+                if (componentText.empty())
+                    return false;
+                char* end = nullptr;
+                const float component = std::strtof(componentText.c_str(), &end);
+                if (!end || *end != '\0' || !std::isfinite(component))
+                    return false;
+                components[i] = std::clamp(component, -89.0f, 89.0f);
+            }
+
+            std::string extra;
+            while (std::getline(ss, extra, ','))
+            {
+                trim(extra);
+                if (!extra.empty())
+                    return false;
+            }
+
+            outValue = Vector(components[0], components[1], components[2]);
+            return true;
+        };
+    auto parseNativeHandsOnlyCutRotationOverrides = [&](const std::string& spec)
+        {
+            m_NativeViewmodelHandsOnlyCutRotationOverrides.clear();
+            std::stringstream entries(spec);
+            std::string entry;
+            while (std::getline(entries, entry, ';'))
+            {
+                trim(entry);
+                if (entry.empty())
+                    continue;
+
+                std::vector<std::string> parts;
+                std::stringstream partStream(entry);
+                std::string part;
+                while (std::getline(partStream, part, '|'))
+                {
+                    trim(part);
+                    parts.push_back(part);
+                }
+
+                if (parts.size() < 2)
+                {
+                    Game::logMsg("[VR][Config] ignored invalid NativeViewmodelHandsOnlyCutRotationOverrides entry=%s", entry.c_str());
+                    continue;
+                }
+
+                NativeViewmodelHandsOnlyCutRotationOverride overrideEntry{};
+                overrideEntry.modelPattern = parts[0];
+                std::transform(
+                    overrideEntry.modelPattern.begin(),
+                    overrideEntry.modelPattern.end(),
+                    overrideEntry.modelPattern.begin(),
+                    [](unsigned char c) { return std::tolower(c); });
+                if (overrideEntry.modelPattern.empty())
+                {
+                    Game::logMsg("[VR][Config] ignored invalid NativeViewmodelHandsOnlyCutRotationOverrides entry=%s", entry.c_str());
+                    continue;
+                }
+
+                if (!parts[1].empty())
+                    overrideEntry.hasLeft = parseNativeHandsOnlyCutRotationVector(parts[1], overrideEntry.left);
+                if (parts.size() >= 3 && !parts[2].empty())
+                    overrideEntry.hasRight = parseNativeHandsOnlyCutRotationVector(parts[2], overrideEntry.right);
+
+                if (!overrideEntry.hasLeft && !overrideEntry.hasRight)
+                {
+                    Game::logMsg("[VR][Config] ignored invalid NativeViewmodelHandsOnlyCutRotationOverrides entry=%s", entry.c_str());
+                    continue;
+                }
+
+                m_NativeViewmodelHandsOnlyCutRotationOverrides.push_back(overrideEntry);
+            }
+        };
+    m_NativeViewmodelHandsOnlyCutRotationOverridesSpec =
+        getString("NativeViewmodelHandsOnlyCutRotationOverrides", "");
+    parseNativeHandsOnlyCutRotationOverrides(m_NativeViewmodelHandsOnlyCutRotationOverridesSpec);
     m_NativeViewmodelRightHandAnimationKeepUnits = std::clamp(
         getFloat("NativeViewmodelRightHandAnimationKeepUnits", m_NativeViewmodelRightHandAnimationKeepUnits),
         -16.0f,
