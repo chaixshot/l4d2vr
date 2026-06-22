@@ -1224,20 +1224,6 @@ void VR::ParseConfigFile()
     m_NativeViewmodelHandsOnlyAutoCutRotation = getBool(
         "NativeViewmodelHandsOnlyAutoCutRotation",
         m_NativeViewmodelHandsOnlyAutoCutRotation);
-    m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg =
-        getVector3(
-            "NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg",
-            m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg);
-    m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg.x = std::clamp(m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg.x, -89.0f, 89.0f);
-    m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg.y = std::clamp(m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg.y, -89.0f, 89.0f);
-    m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg.z = std::clamp(m_NativeViewmodelHandsOnlyAutoHelperLeftCutRotationDeg.z, -89.0f, 89.0f);
-    m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg =
-        getVector3(
-            "NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg",
-            m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg);
-    m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg.x = std::clamp(m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg.x, -89.0f, 89.0f);
-    m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg.y = std::clamp(m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg.y, -89.0f, 89.0f);
-    m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg.z = std::clamp(m_NativeViewmodelHandsOnlyAutoHelperRightCutRotationDeg.z, -89.0f, 89.0f);
     auto parseNativeHandsOnlyCutRotationVector = [&](std::string value, Vector& outValue) -> bool
         {
             trim(value);
