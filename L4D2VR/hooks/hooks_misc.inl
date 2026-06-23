@@ -9369,6 +9369,17 @@ namespace
         }
         if (frozenBones <= 0)
             return false;
+        if (keepSide.forearm >= 0 &&
+            keepSide.forearm < numBones &&
+            !freezeMask[static_cast<size_t>(keepSide.forearm)])
+        {
+            Game::logMsg(
+                "[VR][NativeHandsOnly] ignoring %s-hand freeze pose config because forearm bone is not frozen path=%s bone=%d",
+                HooksNativeViewmodelHandsOnlyFreezePoseSideName(keepSide.side),
+                path,
+                keepSide.forearm);
+            return false;
+        }
 
         cache.Reset();
         cache.owner = vr;
@@ -9580,6 +9591,32 @@ namespace
     {
         if (keepSide.side == 0 || bone < 0 || bone >= numBones || keepSide.hand < 0 || keepSide.hand >= numBones)
             return false;
+
+        const bool haveName = bone < static_cast<int>(boneNames.size());
+        const std::string lowerName = haveName
+            ? vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(bone)])
+            : std::string();
+        const int boneSide = lowerName.empty() ? 0 : HooksNativeViewmodelHandsOnlyBoneSide(lowerName);
+        const bool belongsToSide = boneSide == 0 || boneSide == keepSide.side;
+
+        if (belongsToSide &&
+            (bone == keepSide.forearm ||
+                bone == keepSide.wrist ||
+                (keepSide.forearm >= 0 &&
+                    HooksNativeViewmodelHandsOnlyIsAncestor(boneParents, keepSide.hand, bone, numBones) &&
+                    HooksNativeViewmodelHandsOnlyIsAncestor(boneParents, bone, keepSide.forearm, numBones))))
+        {
+            return true;
+        }
+
+        if (belongsToSide &&
+            !lowerName.empty() &&
+            (HooksNativeViewmodelHandsOnlyBoneNameLooksArmKeep(lowerName) ||
+                HooksNativeViewmodelHandsOnlyBoneNameLooksWristBlend(lowerName)) &&
+            HooksNativeViewmodelHandsOnlyBoneNearSideHandRegion(captureBones, bone, keepSide))
+        {
+            return true;
+        }
 
         if (keepSide.side > 0)
         {
