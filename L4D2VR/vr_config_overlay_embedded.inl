@@ -158,32 +158,6 @@ namespace
         { "RightAmmoHudZOffset", CfgOptionType::Float, "HUD\xEF\xBC\x88\xE6\x89\x8B\xE6\x9F\x84\xEF\xBC\x89", "\xE5\xBC\xB9\xE8\x8D\xAFHUD Z\xE5\x81\x8F\xE7\xA7\xBB", -0.25f, 0.25f, "-0.09" },
         { "RightAmmoHudAngleOffset", CfgOptionType::Vec3, "HUD\xEF\xBC\x88\xE6\x89\x8B\xE6\x9F\x84\xEF\xBC\x89", "\xE5\xBC\xB9\xE8\x8D\xAFHUD\xE8\xA7\x92\xE5\xBA\xA6\xE5\x81\x8F\xE7\xA7\xBB (\xE4\xBF\xAF\xE4\xBB\xB0,\xE5\x81\x8F\xE8\x88\xAA,\xE7\xBF\xBB\xE6\xBB\x9A)", -180.0f, 180.0f, "-75,0,0" },
         { "HideArms", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "\xE9\x9A\x90\xE8\x97\x8F\xE6\x89\x8B\xE8\x87\x82", 0.0f, 0.0f, "false" },
-        { "NativeViewmodelHandsOnly", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Native Hands Only", 0.0f, 0.0f, "false" },
-        { "NativeViewmodelHandsOnlyWristKeepFraction", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Native Wrist Units", 0.0f, 8.0f, "0.0" },
-        { "NativeViewmodelHandsOnlyTrimUnits", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Native Trim Units", -32.0f, 32.0f, "0.0" },
-        { "NativeViewmodelHandsOnlyArmBendScale", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Native Arm Bend Scale", 0.0f, 1.0f, "1.0" },
-        { "NativeViewmodelHandsOnlyLeftCutRotationDeg", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Left Cut Rotation", -89.0f, 89.0f, "0,-20,0" },
-        { "NativeViewmodelHandsOnlyRightCutRotationDeg", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Right Cut Rotation", -89.0f, 89.0f, "0,-25,20" },
-        { "NativeViewmodelHandsOnlyAutoCutRotation", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Auto Cut Rotation", 0.0f, 0.0f, "true" },
-        { "NativeViewmodelRightHandAnimationKeepUnits", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Right Animation Keep Units", -16.0f, 16.0f, "4.0" },
-        { "NativeViewmodelHandsOnlyFreezePoseLock", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Freeze Pose Lock", 0.0f, 0.0f, "false" },
-        { "NativeViewmodelHandsOnlyFreezePoseOffsetMeters", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Freeze Pose Offset", -2.0f, 2.0f, "0.55,0.18,-0.18" },
-        { "NativeViewmodelHandsOnlyLeftFreezePoseRotationOffsetDeg", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Left Freeze Pose Rotation", -180.0f, 180.0f, "0,0,0" },
-        { "NativeViewmodelHandsOnlyRightFreezePoseRotationOffsetDeg", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Right Freeze Pose Rotation", -180.0f, 180.0f, "0,0,0" },
-        { "NativeViewmodelLeftHandPoseOffsetMeters", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Native Left Pose Offset", -1.0f, 1.0f, "0,0,0" },
-        { "NativeViewmodelLeftHandPoseRotationOffsetDeg", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Native Left Pose Rotation", -180.0f, 180.0f, "0,0,0" },
-        { "NativeViewmodelLeftHandOpenVRSkeleton", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Left OpenVR Skeleton", 0.0f, 0.0f, "true" },
-        { "NativeViewmodelLeftHandOpenVRCurlStrength", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Left OpenVR Curl Strength", 0.0f, 2.0f, "1.0" },
-        { "NativeViewmodelLeftHandOpenVRCurlScale", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Left OpenVR Curl Scale", 0.0f, 2.0f, "1.0" },
-        { "NativeViewmodelLeftHandOpenVRCurlDirection", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Left OpenVR Curl Direction", -1.0f, 1.0f, "1.0" },
-        { "NativeViewmodelLeftHandOpenVRCurlAxis", CfgOptionType::Int, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Left OpenVR Curl Axis", 0.0f, 2.0f, "2" },
-        { "NativeViewmodelLeftHandOpenVRThumbRootOffsetUnits", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Thumb Root Offset", -16.0f, 16.0f, "0,0,0" },
-        { "NativeViewmodelLeftHandOpenVRThumbRootRotationOffsetDeg", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Thumb Root Rotation", -90.0f, 90.0f, "0,0,0" },
-        { "NativeViewmodelLeftHandOpenVRThumbInitialCurl", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Thumb Initial Curl", -1.0f, 1.0f, "0.0" },
-        { "NativeViewmodelLeftHandOpenVRIndexInitialCurl", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Index Initial Curl", -1.0f, 1.0f, "0.0" },
-        { "NativeViewmodelLeftHandOpenVRMiddleInitialCurl", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Middle Initial Curl", -1.0f, 1.0f, "0.0" },
-        { "NativeViewmodelLeftHandOpenVRRingInitialCurl", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Ring Initial Curl", -1.0f, 1.0f, "0.0" },
-        { "NativeViewmodelLeftHandOpenVRPinkyInitialCurl", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "Pinky Initial Curl", -1.0f, 1.0f, "0.0" },
         { "VrHandsEnabled", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR \xE5\x8F\x8C\xE6\x89\x8B", 0.0f, 0.0f, "false" },
         { "VrHandsGlovesEnabled", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR \xE6\x89\x8B\xE5\xA5\x97", 0.0f, 0.0f, "false" },
         { "MagazineInteractionEnabled", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "\xE6\x89\x8B\xE5\x8A\xA8\xE6\x8D\xA2\xE5\xBC\xB9", 0.0f, 0.0f, "false" },
@@ -194,29 +168,6 @@ namespace
         { "MagazineInteractionShotgunShellsPerInsert", CfgOptionType::Int, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "\xE9\x9C\xB0\xE5\xBC\xB9\xE6\x9E\xAA\xE5\x8D\x95\xE6\xAC\xA1\xE8\xA3\x85\xE5\xBC\xB9\xE6\x95\xB0", 1.0f, 8.0f, "1" },
         { "MagazineInteractionFreshMagazinePickupOffsetMeters", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "\xE6\x96\xB0\xE5\xBC\xB9\xE5\x8C\xA3\xE6\x8B\xBE\xE5\x8F\x96\xE5\x81\x8F\xE7\xA7\xBB", -1.5f, 1.5f, "0.45,-0.28,0.25" },
         { "MagazineInteractionFreshMagazineWristAnchorOffsetMeters", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Fresh Mag Wrist Offset", -0.25f, 0.25f, "0,0,0" },
-        { "MagazineInteractionMagazineBoxHalfExtentsMeters", CfgOptionType::Vec3, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE5\xBC\xB9\xE5\x8C\xA3\xE7\x9B\x92\xE5\x8D\x8A\xE5\xB0\xBA\xE5\xAF\xB8", 0.0f, 0.5f, "0,0,0" },
-        { "MagazineInteractionMagazineBoxLocalOffsetMeters", CfgOptionType::Vec3, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE5\xBC\xB9\xE5\x8C\xA3\xE7\x9B\x92\xE4\xBD\x8D\xE7\xBD\xAE\xE5\x81\x8F\xE7\xA7\xBB", -0.5f, 0.5f, "0,0,0" },
-        { "MagazineInteractionMagazineBoxLocalRotationOffsetDeg", CfgOptionType::Vec3, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE5\xBC\xB9\xE5\x8C\xA3\xE7\x9B\x92\xE6\x97\x8B\xE8\xBD\xAC", -180.0f, 180.0f, "0,0,0" },
-        { "MagazineInteractionSocketCaptureBoxHalfExtentsMeters", CfgOptionType::Vec3, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x8F\x92\xE5\x85\xA5\xE5\x88\xA4\xE5\xAE\x9A\xE7\x9B\x92\xE5\x8D\x8A\xE5\xB0\xBA\xE5\xAF\xB8", 0.0f, 0.5f, "0,0,0" },
-        { "MagazineInteractionSocketCaptureBoxLocalOffsetMeters", CfgOptionType::Vec3, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x8F\x92\xE5\x85\xA5\xE5\x88\xA4\xE5\xAE\x9A\xE7\x9B\x92\xE4\xBD\x8D\xE7\xBD\xAE\xE5\x81\x8F\xE7\xA7\xBB", -0.5f, 0.5f, "0,0,0" },
-        { "MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg", CfgOptionType::Vec3, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x8F\x92\xE5\x85\xA5\xE5\x88\xA4\xE5\xAE\x9A\xE7\x9B\x92\xE6\x97\x8B\xE8\xBD\xAC", -180.0f, 180.0f, "0,0,0" },
-        { "MagazineInteractionSocketCaptureAngleDeg", CfgOptionType::Float, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x8F\x92\xE6\xA7\xBD\xE6\x8D\x95\xE8\x8E\xB7\xE8\xA7\x92\xE5\xBA\xA6", 0.0f, 89.0f, "35" },
-        { "MagazineInteractionSocketRequiredDepthMeters", CfgOptionType::Float, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x8F\x92\xE5\x85\xA5\xE6\xB7\xB1\xE5\xBA\xA6", 0.0f, 0.25f, "0.04" },
-        { "MagazineInteractionSocketRequiredOverlapFraction", CfgOptionType::Float, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x8F\x92\xE5\x85\xA5\xE9\x87\x8D\xE5\x8F\xA0\xE7\x8E\x87", 0.0f, 1.0f, "0.45" },
-        { "MagazineInteractionBoltGrabPaddingMeters", CfgOptionType::Float, "\xE6\x9E\xAA\xE6\xA0\x93\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x9E\xAA\xE6\xA0\x93\xE6\x8A\x93\xE5\x8F\x96\xE8\xBE\xB9\xE8\xB7\x9D", 0.0f, 0.25f, "0.10" },
-        { "MagazineInteractionBoltPullDistanceMeters", CfgOptionType::Float, "\xE6\x9E\xAA\xE6\xA0\x93\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x9E\xAA\xE6\xA0\x93\xE6\x8B\x89\xE5\x8A\xA8\xE8\xB7\x9D\xE7\xA6\xBB", 0.0f, 0.25f, "0.055" },
-        { "MagazineInteractionBoltReturnDistanceMeters", CfgOptionType::Float, "\xE6\x9E\xAA\xE6\xA0\x93\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x9E\xAA\xE6\xA0\x93\xE5\xBD\x92\xE4\xBD\x8D\xE8\xB7\x9D\xE7\xA6\xBB", 0.0f, 0.10f, "0.018" },
-        { "MagazineInteractionBoltBoxHalfExtentsMeters", CfgOptionType::Vec3, "\xE6\x9E\xAA\xE6\xA0\x93\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x9E\xAA\xE6\xA0\x93\xE7\x9B\x92\xE5\x8D\x8A\xE5\xB0\xBA\xE5\xAF\xB8", 0.005f, 0.25f, "0.045,0.035,0.035" },
-        { "MagazineInteractionBoltBoxLocalOffsetMeters", CfgOptionType::Vec3, "\xE6\x9E\xAA\xE6\xA0\x93\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x9E\xAA\xE6\xA0\x93\xE7\x9B\x92\xE4\xBD\x8D\xE7\xBD\xAE\xE5\x81\x8F\xE7\xA7\xBB", -0.25f, 0.25f, "0,0,0" },
-        { "MagazineInteractionBoltPullAxisLocal", CfgOptionType::Vec3, "\xE6\x9E\xAA\xE6\xA0\x93\xE4\xBA\xA4\xE4\xBA\x92", "\xE6\x9E\xAA\xE6\xA0\x93\xE6\x8B\x89\xE5\x8A\xA8\xE8\xBD\xB4", -1.0f, 1.0f, "0,0,1" },
-        { "VrHandsMotionRangeWithoutController", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "\xE6\x89\x8B\xE6\x8C\x87\xE5\x8A\xA8\xE4\xBD\x9C\xE5\xBF\xBD\xE7\x95\xA5\xE5\xAE\x9E\xE4\xBD\x93\xE6\x89\x8B\xE6\x9F\x84\xE9\x99\x90\xE5\x88\xB6", 0.0f, 0.0f, "false" },
-        { "VrHandsModelScale", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "\xE7\x8B\xAC\xE7\xAB\x8B\xE6\xB8\xB2\xE6\x9F\x93\x20\x56\x52\x20\xE6\x89\x8B\xE5\xB0\xBA\xE5\xAF\xB8\xE5\x80\x8D\xE7\x8E\x87", 0.25f, 4.0f, "1.0" },
-        { "VrHandsLeftPoseOffsetMeters", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "\xE5\xB7\xA6\xE6\x89\x8B\xE5\xA7\xBF\xE6\x80\x81\xE4\xBD\x8D\xE7\xBD\xAE\xE5\x81\x8F\xE7\xA7\xBB\xEF\xBC\x88\xE7\xB1\xB3\xEF\xBC\x89", -1.0f, 1.0f, "0,0,0" },
-        { "VrHandsLeftHandedViewmodelPoseOffsetMeters", CfgOptionType::Vec3, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "\xE5\xB7\xA6\xE6\x89\x8B\xE6\xA8\xA1\xE5\xBC\x8F\xE8\xA7\x86\xE6\xA8\xA1\xE5\xA7\xBF\xE6\x80\x81\xE4\xBD\x8D\xE7\xBD\xAE\xE5\x81\x8F\xE7\xA7\xBB\xEF\xBC\x88\xE7\xB1\xB3\xEF\xBC\x89", -1.0f, 1.0f, "0,0,0" },
-        { "VrHandsDebugLog", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "\xE7\x8B\xAC\xE7\xAB\x8B\xE6\xB8\xB2\xE6\x9F\x93\x20\x56\x52\x20\xE6\x89\x8B\xE8\xB0\x83\xE8\xAF\x95\xE6\x97\xA5\xE5\xBF\x97", 0.0f, 0.0f, "false" },
-        { "ManualReloadMagazineInsertionAxisLocal", CfgOptionType::Vec3, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\345\274\271\345\214\243\346\217\222\345\205\245\350\275\264", -1.0f, 1.0f, "0,-1,0" },
-        { "ManualReloadMagazineHandOffsetMeters", CfgOptionType::Vec3, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\346\211\213\346\214\201\345\274\271\345\214\243\344\275\215\347\275\256\345\201\217\347\247\273", -1.0f, 1.0f, "0,0,0" },
-        { "ManualReloadMagazineHandRotationOffsetDeg", CfgOptionType::Vec3, "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "\346\211\213\346\214\201\345\274\271\345\214\243\350\247\222\345\272\246\345\201\217\347\247\273", -180.0f, 180.0f, "0,0,0" },
         { "RequireSecondaryAttackForItemSwitch", CfgOptionType::Bool, "\xE4\xBA\xA4\xE4\xBA\x92 / \xE7\xBB\x84\xE5\x90\x88\xE9\x94\xAE", "\xE5\x88\x87\xE6\x8D\xA2\xE7\x89\xA9\xE5\x93\x81\xE9\x9C\x80\xE5\x89\xAF\xE6\x94\xBB\xE9\x94\xAE", 0.0f, 0.0f, "false" },
         { "VoiceRecordCombo", CfgOptionType::String, "\xE4\xBA\xA4\xE4\xBA\x92 / \xE7\xBB\x84\xE5\x90\x88\xE9\x94\xAE", "\xE8\xAF\xAD\xE9\x9F\xB3\xE8\x81\x8A\xE5\xA4\xA9\xE7\xBB\x84\xE5\x90\x88\xE9\x94\xAE", 0.0f, 0.0f, "Crouch+Reload" },
         { "QuickTurnCombo", CfgOptionType::String, "\xE4\xBA\xA4\xE4\xBA\x92 / \xE7\xBB\x84\xE5\x90\x88\xE9\x94\xAE", "\xE5\xBF\xAB\xE9\x80\x9F\xE8\xBD\xAC\xE8\xBA\xAB\xE7\xBB\x84\xE5\x90\x88\xE9\x94\xAE", 0.0f, 0.0f, "SecondaryAttack+Crouch" },
@@ -310,6 +261,36 @@ namespace
     };
 
     constexpr int kCfgOptionSpecCount = (int)(sizeof(kCfgOptionSpecs) / sizeof(kCfgOptionSpecs[0]));
+
+    static const CfgOptionSpec kCfgHiddenValueSpecs[] =
+    {
+        { "MagazineInteractionMagazineBoxHalfExtentsMeters", CfgOptionType::Vec3, "", "", 0.0f, 0.5f, "0,0,0" },
+        { "MagazineInteractionMagazineBoxLocalOffsetMeters", CfgOptionType::Vec3, "", "", -0.5f, 0.5f, "0,0,0" },
+        { "MagazineInteractionMagazineBoxLocalRotationOffsetDeg", CfgOptionType::Vec3, "", "", -180.0f, 180.0f, "0,0,0" },
+        { "MagazineInteractionSocketCaptureBoxHalfExtentsMeters", CfgOptionType::Vec3, "", "", 0.0f, 0.5f, "0,0,0" },
+        { "MagazineInteractionSocketCaptureBoxLocalOffsetMeters", CfgOptionType::Vec3, "", "", -0.5f, 0.5f, "0,0,0" },
+        { "MagazineInteractionSocketCaptureBoxLocalRotationOffsetDeg", CfgOptionType::Vec3, "", "", -180.0f, 180.0f, "0,0,0" },
+        { "MagazineInteractionSocketCaptureAngleDeg", CfgOptionType::Float, "", "", 0.0f, 89.0f, "35" },
+        { "MagazineInteractionSocketRequiredDepthMeters", CfgOptionType::Float, "", "", 0.0f, 0.25f, "0.04" },
+        { "MagazineInteractionSocketRequiredOverlapFraction", CfgOptionType::Float, "", "", 0.0f, 1.0f, "0.45" },
+        { "MagazineInteractionBoltGrabPaddingMeters", CfgOptionType::Float, "", "", 0.0f, 0.25f, "0.10" },
+        { "MagazineInteractionBoltPullDistanceMeters", CfgOptionType::Float, "", "", 0.0f, 0.25f, "0.055" },
+        { "MagazineInteractionBoltReturnDistanceMeters", CfgOptionType::Float, "", "", 0.0f, 0.10f, "0.018" },
+        { "MagazineInteractionBoltBoxHalfExtentsMeters", CfgOptionType::Vec3, "", "", 0.005f, 0.25f, "0.045,0.035,0.035" },
+        { "MagazineInteractionBoltBoxLocalOffsetMeters", CfgOptionType::Vec3, "", "", -0.25f, 0.25f, "0,0,0" },
+        { "MagazineInteractionBoltPullAxisLocal", CfgOptionType::Vec3, "", "", -1.0f, 1.0f, "0,0,1" },
+        { "VrHandsMotionRangeWithoutController", CfgOptionType::Bool, "", "", 0.0f, 0.0f, "false" },
+        { "VrHandsModelScale", CfgOptionType::Float, "", "", 0.25f, 4.0f, "1.0" },
+        { "VrHandsLeftPoseOffsetMeters", CfgOptionType::Vec3, "", "", -1.0f, 1.0f, "0,0,0" },
+        { "VrHandsLeftHandedViewmodelPoseOffsetMeters", CfgOptionType::Vec3, "", "", -1.0f, 1.0f, "0,0,0" },
+        { "VrHandsDebugLog", CfgOptionType::Bool, "", "", 0.0f, 0.0f, "false" },
+        { "ManualReloadMagazineInsertionAxisLocal", CfgOptionType::Vec3, "", "", -1.0f, 1.0f, "0,-1,0" },
+        { "ManualReloadMagazineHandOffsetMeters", CfgOptionType::Vec3, "", "", -1.0f, 1.0f, "0,0,0" },
+        { "ManualReloadMagazineHandRotationOffsetDeg", CfgOptionType::Vec3, "", "", -180.0f, 180.0f, "0,0,0" },
+    };
+
+    constexpr int kCfgHiddenValueSpecCount =
+        (int)(sizeof(kCfgHiddenValueSpecs) / sizeof(kCfgHiddenValueSpecs[0]));
     struct CfgOptionTextSpec
     {
         const char* key;
@@ -382,52 +363,16 @@ namespace
         { "RightAmmoHudZOffset", "HUD (Hand)", "HUD\357\274\210\346\211\213\346\237\204\357\274\211", "Ammo HUD Z Offset", "\345\274\271\350\215\257HUD Z\345\201\217\347\247\273", "Overlay translation in controller local space (meters).", "\350\246\206\347\233\226\345\261\202\345\234\250\346\211\213\346\237\204\346\234\254\345\234\260\345\235\220\346\240\207\347\263\273\344\270\255\347\232\204\345\271\263\347\247\273\357\274\210\347\261\263\357\274\211\343\200\202", "Uses the same axis convention as other overlay offsets (ScopeOverlay*).", "\344\270\216\345\205\266\344\273\226\350\246\206\347\233\226\345\261\202\345\201\217\347\247\273\357\274\210ScopeOverlay*\357\274\211\344\275\277\347\224\250\347\233\270\345\220\214\345\235\220\346\240\207\347\272\246\345\256\232\343\200\202" },
         { "RightAmmoHudAngleOffset", "HUD (Hand)", "HUD\357\274\210\346\211\213\346\237\204\357\274\211", "Ammo HUD Angle Offset (pitch,yaw,roll)", "\345\274\271\350\215\257HUD\350\247\222\345\272\246\345\201\217\347\247\273 (\344\277\257\344\273\260,\345\201\217\350\210\252,\347\277\273\346\273\232)", "Additional rotation for the ammo HUD overlay (degrees).", "\345\274\271\350\215\257HUD\350\246\206\347\233\226\345\261\202\347\232\204\351\242\235\345\244\226\346\227\213\350\275\254\357\274\210\345\272\246\357\274\211\343\200\202", "Adjust so it sits like a weapon-side panel.", "\350\260\203\345\210\260\345\203\217\350\264\264\345\234\250\346\255\246\345\231\250\346\227\201\350\276\271\347\232\204\345\260\217\345\261\217\345\271\225\345\215\263\345\217\257\343\200\202" },
         { "HideArms", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Hide Arms", "\351\232\220\350\227\217\346\211\213\350\207\202", "Hides in-game arm models while keeping weapons.", "\351\232\220\350\227\217\346\270\270\346\210\217\344\270\255\347\232\204\346\211\213\350\207\202\346\250\241\345\236\213\357\274\214\344\273\205\344\277\235\347\225\231\346\255\246\345\231\250\343\200\202", "", "" },
-        { "NativeViewmodelHandsOnly", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Native Hands Only", "Native Hands Only", "Clips Source viewmodel arms at the hand so only the native palm and fingers remain.", "Clips Source viewmodel arms at the hand so only the native palm and fingers remain.", "Use this when you want the in-game hand mesh without full sleeves or forearms.", "" },
-        { "NativeViewmodelHandsOnlyWristKeepFraction", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Native Wrist Units", "Native Wrist Units", "Moves the native hand clipping plane toward the forearm in Source units. Higher values keep more wrist.", "Moves the native hand clipping plane toward the forearm in Source units. Higher values keep more wrist.", "0 is the tightest safe crop; 1 keeps a little wrist; 2 keeps more wrist.", "" },
-        { "NativeViewmodelHandsOnlyTrimUnits", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Native Trim Units", "Native Trim Units", "Offsets both native hand clipping planes in Source units. Positive values move toward the fingers; negative values move back toward the wrist/forearm.", "Offsets both native hand clipping planes in Source units. Positive values move toward the fingers; negative values move back toward the wrist/forearm.", "Use 0 for the default wrist crop. Try small negative values if the positive direction cuts into the palm or fingers.", "" },
-        { "NativeViewmodelHandsOnlyArmBendScale", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Native Arm Bend Scale", "Native Arm Bend Scale", "Blends the native hand clipping normal between the wrist-to-hand direction and the animated forearm direction.", "Blends the native hand clipping normal between the wrist-to-hand direction and the animated forearm direction.", "1 keeps the old forearm-bent cut; lower values make the wrist cut flatter. Try 0.25 to 0.5.", "" },
-        { "NativeViewmodelHandsOnlyCutRotationDeg", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Native Cut Rotation", "Native Cut Rotation", "Manual local-axis rotation for the native hand clipping plane normal.", "Manual local-axis rotation for the native hand clipping plane normal.", "Use this after Arm Bend Scale: adjust one axis at a time in 5-10 degree steps.", "" },
-        { "NativeViewmodelHandsOnlyLeftCutRotationDeg", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Left Cut Rotation", "Left Cut Rotation", "Manual local-axis rotation for only the left native hand clipping plane normal.", "Manual local-axis rotation for only the left native hand clipping plane normal.", "This overrides the legacy shared Native Cut Rotation for the left hand.", "" },
-        { "NativeViewmodelHandsOnlyRightCutRotationDeg", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Right Cut Rotation", "Right Cut Rotation", "Manual local-axis rotation for only the right native hand clipping plane normal.", "Manual local-axis rotation for only the right native hand clipping plane normal.", "This overrides the legacy shared Native Cut Rotation for the right hand.", "" },
-        { "NativeViewmodelHandsOnlyAutoCutRotation", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Auto Cut Rotation", "Auto Cut Rotation", "Maps the official native hand clipping normal onto the current arm rig using its forearm-to-hand axis.", "Maps the official native hand clipping normal onto the current arm rig using its forearm-to-hand axis.", "Leave this on for modded characters; turn it off only when manually tuning the cut rotation.", "" },
-        { "NativeViewmodelRightHandAnimationKeepUnits", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Right Animation Keep Units", "Right Animation Keep Units", "Moves only the right-hand clipping plane back toward the forearm when positive, or toward the fingers when negative.", "Moves only the right-hand clipping plane back toward the forearm when positive, or toward the fingers when negative.", "Use positive values to protect weapon animations; use negative values to trim more of the right hand toward the fingers.", "" },
-        { "NativeViewmodelHandsOnlyFreezePoseLock", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Freeze Pose Lock", "Freeze Pose Lock", "Forces both native hands to the configured HMD-relative freeze pose during the delay and captures from that pose.", "Forces both native hands to the configured HMD-relative freeze pose during the delay and captures from that pose.", "Keep this off while manually posing the controller for diagnostic logs.", "" },
-        { "NativeViewmodelHandsOnlyFreezePoseOffsetMeters", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Freeze Pose Offset", "Freeze Pose Offset", "Places the temporary freeze reference pose relative to the HMD before capture.", "Places the temporary freeze reference pose relative to the HMD before capture.", "X is HMD-forward meters, Y is mirrored side offset, Z is vertical offset.", "" },
-        { "NativeViewmodelHandsOnlyLeftFreezePoseRotationOffsetDeg", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Left Freeze Pose Rotation", "Left Freeze Pose Rotation", "Rotates only the left temporary freeze reference pose.", "Rotates only the left temporary freeze reference pose.", "Pitch, yaw, roll in degrees. The legacy shared FreezePoseRotation key is only a fallback.", "" },
-        { "NativeViewmodelHandsOnlyRightFreezePoseRotationOffsetDeg", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Right Freeze Pose Rotation", "Right Freeze Pose Rotation", "Rotates only the right temporary freeze reference pose.", "Rotates only the right temporary freeze reference pose.", "Pitch, yaw, roll in degrees. The legacy shared FreezePoseRotation key is only a fallback.", "" },
-        { "NativeViewmodelLeftHandPoseOffsetMeters", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Native Left Pose Offset", "Native Left Pose Offset", "Offsets only the native viewmodel left hand while it follows the left controller.", "Offsets only the native viewmodel left hand while it follows the left controller.", "This no longer changes the independent VR hand render.", "" },
-        { "NativeViewmodelLeftHandPoseRotationOffsetDeg", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Native Left Pose Rotation", "Native Left Pose Rotation", "Rotates only the native viewmodel left hand while it follows the left controller.", "Rotates only the native viewmodel left hand while it follows the left controller.", "Use this instead of VrHandsLeftPoseRotationOffsetDeg for native viewmodel hands.", "" },
-        { "NativeViewmodelLeftHandOpenVRSkeleton", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Left OpenVR Skeleton", "Left OpenVR Skeleton", "Drives the native viewmodel left-hand finger bones from the SteamVR left skeleton curl summary.", "Drives the native viewmodel left-hand finger bones from the SteamVR left skeleton curl summary.", "OpenVR fingertip bones are intentionally ignored because Source viewmodel hands usually do not have matching fingertip bones.", "" },
-        { "NativeViewmodelLeftHandOpenVRCurlStrength", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Left OpenVR Curl Strength", "Left OpenVR Curl Strength", "Multiplies the OpenVR left-hand curl before writing it into native viewmodel finger bones.", "Multiplies the OpenVR left-hand curl before writing it into native viewmodel finger bones.", "Use 1.0 first; lower if the native hand curls too much.", "" },
-        { "NativeViewmodelLeftHandOpenVRCurlScale", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Left OpenVR Curl Scale", "Left OpenVR Curl Scale", "Scales the OpenVR left-hand curl value before it is mapped to native viewmodel fingers.", "Scales the OpenVR left-hand curl value before it is mapped to native viewmodel fingers.", "Set 0.5 if a fully closed OpenVR hand should produce a half-closed native viewmodel hand.", "" },
-        { "NativeViewmodelLeftHandOpenVRCurlDirection", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Left OpenVR Curl Direction", "Left OpenVR Curl Direction", "Set to -1 if the native left fingers bend backward on this hand rig.", "Set to -1 if the native left fingers bend backward on this hand rig.", "Most rigs should use 1.0.", "" },
-        { "NativeViewmodelLeftHandOpenVRCurlAxis", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Left OpenVR Curl Axis", "Left OpenVR Curl Axis", "Local native finger rotation axis: 0=X, 1=Y, 2=Z.", "Local native finger rotation axis: 0=X, 1=Y, 2=Z.", "Use only if direction does not fix a wrong curl direction.", "" },
-        { "NativeViewmodelLeftHandOpenVRThumbRootOffsetUnits", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Thumb Root Offset", "Thumb Root Offset", "Offsets the native left thumb root bone in parent-bone units before OpenVR finger curl is applied.", "Offsets the native left thumb root bone in parent-bone units before OpenVR finger curl is applied.", "Use small steps such as 0.25 or 0.5 on one axis at a time.", "" },
-        { "NativeViewmodelLeftHandOpenVRThumbRootRotationOffsetDeg", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Thumb Root Rotation", "Thumb Root Rotation", "Adds local-axis rotation to the native left thumb root bone before OpenVR finger curl is applied.", "Adds local-axis rotation to the native left thumb root bone before OpenVR finger curl is applied.", "This is the main control for thumb spread and placement; try one axis at a time in 5 degree steps.", "" },
-        { "NativeViewmodelLeftHandOpenVRThumbInitialCurl", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Thumb Initial Curl", "Thumb Initial Curl", "Adds a per-finger base curl offset before clamping the OpenVR thumb curl.", "Adds a per-finger base curl offset before clamping the OpenVR thumb curl.", "Positive values pre-curl; negative values relax the reported pose.", "" },
-        { "NativeViewmodelLeftHandOpenVRIndexInitialCurl", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Index Initial Curl", "Index Initial Curl", "Adds a per-finger base curl offset before clamping the OpenVR index curl.", "Adds a per-finger base curl offset before clamping the OpenVR index curl.", "Positive values pre-curl; negative values relax the reported pose.", "" },
-        { "NativeViewmodelLeftHandOpenVRMiddleInitialCurl", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Middle Initial Curl", "Middle Initial Curl", "Adds a per-finger base curl offset before clamping the OpenVR middle curl.", "Adds a per-finger base curl offset before clamping the OpenVR middle curl.", "Positive values pre-curl; negative values relax the reported pose.", "" },
-        { "NativeViewmodelLeftHandOpenVRRingInitialCurl", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Ring Initial Curl", "Ring Initial Curl", "Adds a per-finger base curl offset before clamping the OpenVR ring curl.", "Adds a per-finger base curl offset before clamping the OpenVR ring curl.", "Positive values pre-curl; negative values relax the reported pose.", "" },
-        { "NativeViewmodelLeftHandOpenVRPinkyInitialCurl", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Pinky Initial Curl", "Pinky Initial Curl", "Adds a per-finger base curl offset before clamping the OpenVR pinky curl.", "Adds a per-finger base curl offset before clamping the OpenVR pinky curl.", "Positive values pre-curl; negative values relax the reported pose.", "" },
-        { "VrHandsEnabled", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR Hands", "VR \xE5\x8F\x8C\xE6\x89\x8B", "Enables the hand system. By default this uses native Source viewmodel hands instead of the independent glove renderer.", "", "Enable VR Gloves below only when you want the old independent GLB/SteamVR glove path.", "" },
-        { "VrHandsGlovesEnabled", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR Gloves", "VR \xE6\x89\x8B\xE5\xA5\x97", "Uses the old independent GLB/SteamVR glove renderer instead of native Source viewmodel hands.", "", "Requires VR Hands. Leave disabled to route VR Hands through Native Hands Only.", "" },
-        { "MagazineInteractionEnabled", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Manual Reload", "\xE6\x89\x8B\xE5\x8A\xA8\xE6\x8D\xA2\xE5\xBC\xB9", "Enables physical magazine and shell reload interactions driven by VR or native hands.", "", "Requires VR Hands or Native Hands Only. Detachable magazines and shotguns use different physical reload flows.", "" },
+        { "VrHandsEnabled", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR Hands", "VR \xE5\x8F\x8C\xE6\x89\x8B", "Enables the VR hand system. By default this uses the game's built-in hand mesh.", "", "Enable VR Gloves below only when you want separate GLB/SteamVR glove models.", "" },
+        { "VrHandsGlovesEnabled", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR Gloves", "VR \xE6\x89\x8B\xE5\xA5\x97", "Uses separate GLB/SteamVR glove models instead of the game's built-in hand mesh.", "", "Requires VR Hands. Leave disabled to use the built-in hand mesh.", "" },
+        { "MagazineInteractionEnabled", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Manual Reload", "\xE6\x89\x8B\xE5\x8A\xA8\xE6\x8D\xA2\xE5\xBC\xB9", "Enables physical magazine and shell reload interactions driven by VR hands.", "", "Requires VR Hands. Detachable magazines and shotguns use different physical reload flows.", "" },
         { "MagazineInteractionQuickReloadMode", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Quick Reload Mode", "\xE5\xBF\xAB\xE9\x80\x9F\xE6\x8D\xA2\xE5\xBC\xB9\xE6\xA8\xA1\xE5\xBC\x8F", "After the old magazine is removed, touching a spare magazine auto-attaches it to the off hand. Tactical reloads auto-run the bolt or slide after insertion.", "\xE6\x8B\x94\xE4\xB8\x8B\xE6\x97\xA7\xE5\xBC\xB9\xE5\x8C\xA3\xE5\x90\x8E\xEF\xBC\x8C\xE5\x89\xAF\xE6\x89\x8B\xE7\xA2\xB0\xE5\x88\xB0\xE5\xA4\x87\xE7\x94\xA8\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBC\x9A\xE8\x87\xAA\xE5\x8A\xA8\xE5\x90\xB8\xE9\x99\x84\xEF\xBC\x9B\xE6\x88\x98\xE6\x9C\xAF\xE6\x8D\xA2\xE5\xBC\xB9\xE6\x8F\x92\xE5\x85\xA5\xE5\x90\x8E\xE4\xBC\x9A\xE8\x87\xAA\xE5\x8A\xA8\xE6\x8B\x89\xE5\x8A\xA8\xE6\x9E\xAA\xE6\xA0\x93\xE6\x88\x96\xE6\xBB\x91\xE5\xA5\x97\xE3\x80\x82", "Use it when you want fewer grip-button steps during reloads.", "" },
         { "MagazineBoxDebugEnabled", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Magazine Debug Boxes", "\xE5\xBC\xB9\xE5\x8C\xA3\xE8\xB0\x83\xE8\xAF\x95\xE6\xA1\x86", "Shows the magazine, socket, and pickup debug boxes used by manual reload.", "", "Enable only while tuning weapon bones or socket placement.", "" },
         { "MagazineInteractionSuppressEmptyClipAutoReload", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Require Physical Empty Reload", "\xE6\x8A\x91\xE5\x88\xB6\xE7\xA9\xBA\xE5\xBC\xB9\xE5\x8C\xA3\xE8\x87\xAA\xE5\x8A\xA8\xE6\x8D\xA2\xE5\xBC\xB9", "Prevents native automatic reload when a detachable magazine weapon reaches an empty clip.", "", "Leave enabled if you want empty weapons to require a physical magazine reload.", "" },
         { "MagazineInteractionShotgunShellsPerInsert", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Shotgun Shells Per Insert", "\xE9\x9C\xB0\xE5\xBC\xB9\xE6\x9E\xAA\xE5\x8D\x95\xE6\xAC\xA1\xE8\xA3\x85\xE5\xBC\xB9\xE6\x95\xB0", "Shells added by one physical shotgun insertion. Runtime clamps this to the current weapon capacity and reserve ammo.", "", "Range is 1 to 8. It will never push the clip past the weapon max.", "" },
         { "MagazineInteractionFreshMagazinePickupOffsetMeters", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Spare Magazine Pickup Offset (x,y,z)", "\xE6\x96\xB0\xE5\xBC\xB9\xE5\x8C\xA3\xE6\x8B\xBE\xE5\x8F\x96\xE5\x81\x8F\xE7\xA7\xBB", "Offsets the generated spare magazine pickup position in meters.", "", "Adjust this to place spare magazines where the off hand can reach them naturally.", "" },
         { "MagazineInteractionFreshMagazineWristAnchorOffsetMeters", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Fresh Mag Wrist Offset", "Fresh Mag Wrist Offset", "Offsets the spare magazine snap target from the native left wrist bone in meters.", "", "Values follow the wrist bone local axes; use small steps such as 0.01. Falls back to the native left hand bone if the wrist bone is unavailable.", "" },
-        { "MagazineInteractionSocketCaptureAngleDeg", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Magazine Socket Capture Angle", "\xE6\x8F\x92\xE6\xA7\xBD\xE6\x8D\x95\xE8\x8E\xB7\xE8\xA7\x92\xE5\xBA\xA6", "Maximum angular mismatch allowed when inserting a magazine into the socket.", "", "Higher values are more forgiving; too high can cause accidental insertion.", "" },
-        { "VrHandsMotionRangeWithoutController", "Hands / Debug", "\xE6\x89\x8B\xE9\x83\xA8\x20\x2F\x20\xE8\xB0\x83\xE8\xAF\x95", "Hands Without-Controller Motion Range", "\xE6\x89\x8B\xE6\x8C\x87\xE5\x8A\xA8\xE4\xBD\x9C\xE5\xBF\xBD\xE7\x95\xA5\xE5\xAE\x9E\xE4\xBD\x93\xE6\x89\x8B\xE6\x9F\x84\xE9\x99\x90\xE5\x88\xB6", "Requests the retargeted OpenVR finger range that behaves as if no physical controller limits the hand.", "\xE4\xBD\xBF\xE7\x94\xA8\x20\x4F\x70\x65\x6E\x56\x52\x20\xE9\x87\x8D\xE5\xAE\x9A\xE5\x90\x91\xE5\x90\x8E\xE7\x9A\x84\xE6\x89\x8B\xE6\x8C\x87\xE6\xB4\xBB\xE5\x8A\xA8\xE8\x8C\x83\xE5\x9B\xB4\xEF\xBC\x8C\xE4\xBD\xBF\xE6\x89\x8B\xE5\x8A\xBF\xE4\xB8\x8D\xE5\x86\x8D\xE5\x8F\x97\xE5\xAE\x9E\xE4\xBD\x93\xE6\x89\x8B\xE6\x9F\x84\xE6\x8F\xA1\xE6\x8C\x81\xE9\x99\x90\xE5\x88\xB6\xE3\x80\x82", "Leave disabled for the pose closest to the real controller grip.", "\xE5\x85\xB3\xE9\x97\xAD\xE6\x97\xB6\xE6\x9B\xB4\xE6\x8E\xA5\xE8\xBF\x91\xE7\x9C\x9F\xE5\xAE\x9E\xE6\x8F\xA1\xE4\xBD\x8F\xE6\x89\x8B\xE6\x9F\x84\xE7\x9A\x84\xE5\xA7\xBF\xE5\x8A\xBF\xE3\x80\x82" },
-        { "VrHandsModelScale", "Hands / Debug", "\xE6\x89\x8B\xE9\x83\xA8\x20\x2F\x20\xE8\xB0\x83\xE8\xAF\x95", "Independent VR Hand Scale", "\xE7\x8B\xAC\xE7\xAB\x8B\xE6\xB8\xB2\xE6\x9F\x93\x20\x56\x52\x20\xE6\x89\x8B\xE5\xB0\xBA\xE5\xAF\xB8\xE5\x80\x8D\xE7\x8E\x87", "Multiplies the independent GLB hand model size after VRScale converts meters to Source units.", "\xE5\x9C\xA8\x20\x56\x52\x53\x63\x61\x6C\x65\x20\xE5\xB0\x86\xE7\xB1\xB3\xE8\xBD\xAC\xE6\x8D\xA2\xE4\xB8\xBA\x20\x53\x6F\x75\x72\x63\x65\x20\xE5\x8D\x95\xE4\xBD\x8D\xE5\x90\x8E\xEF\xBC\x8C\xE5\x86\x8D\xE4\xB9\x98\xE4\xBB\xA5\xE8\xAF\xA5\xE5\x80\x8D\xE7\x8E\x87\xE8\xB0\x83\xE6\x95\xB4\xE7\x8B\xAC\xE7\xAB\x8B\x20\x47\x4C\x42\x20\xE6\x89\x8B\xE6\xA8\xA1\xE5\x9E\x8B\xE5\xB0\xBA\xE5\xAF\xB8\xE3\x80\x82", "Use 1.0 first; adjust only after confirming the SteamVR glove assets load correctly.", "\xE5\x85\x88\xE4\xBD\xBF\xE7\x94\xA8\x20\x31\x2E\x30\xEF\xBC\x8C\xE7\xA1\xAE\xE8\xAE\xA4\x20\x53\x74\x65\x61\x6D\x56\x52\x20\xE6\x89\x8B\xE5\xA5\x97\xE8\xB5\x84\xE6\xBA\x90\xE5\x8A\xA0\xE8\xBD\xBD\xE6\xAD\xA3\xE5\xB8\xB8\xE5\x90\x8E\xE5\x86\x8D\xE8\xB0\x83\xE6\x95\xB4\xE3\x80\x82" },
-        { "VrHandsLeftPoseOffsetMeters", "Hands / Debug", "\xE6\x89\x8B\xE9\x83\xA8\x20\x2F\x20\xE8\xB0\x83\xE8\xAF\x95", "Left Hand Pose Offset (meters)", "\xE5\xB7\xA6\xE6\x89\x8B\xE5\xA7\xBF\xE6\x80\x81\xE4\xBD\x8D\xE7\xBD\xAE\xE5\x81\x8F\xE7\xA7\xBB\xEF\xBC\x88\xE7\xB1\xB3\xEF\xBC\x89", "Offsets the rendered left VR hand pose in meters before conversion to Source units.", "\xE5\x9C\xA8\xE8\xBD\xAC\xE6\x8D\xA2\xE4\xB8\xBA Source \xE5\x8D\x95\xE4\xBD\x8D\xE5\x89\x8D\xEF\xBC\x8C\xE8\xB0\x83\xE6\x95\xB4\xE6\xB8\xB2\xE6\x9F\x93\xE5\xB7\xA6\xE6\x89\x8B\xE5\xA7\xBF\xE6\x80\x81\xE7\x9A\x84\xE4\xBD\x8D\xE7\xBD\xAE\xE5\x81\x8F\xE7\xA7\xBB\xEF\xBC\x88\xE7\xB1\xB3\xEF\xBC\x89\xE3\x80\x82", "Use small values to align the independent hand model with the real controller pose.", "\xE7\x94\xA8\xE4\xBA\x8E\xE8\xAE\xA9\xE7\x8B\xAC\xE7\xAB\x8B\xE6\x89\x8B\xE9\x83\xA8\xE6\xA8\xA1\xE5\x9E\x8B\xE5\x92\x8C\xE7\x9C\x9F\xE5\xAE\x9E\xE6\x8E\xA7\xE5\x88\xB6\xE5\x99\xA8\xE5\xA7\xBF\xE6\x80\x81\xE5\xAF\xB9\xE9\xBD\x90\xEF\xBC\x8C\xE5\xBB\xBA\xE8\xAE\xAE\xE5\xB0\x8F\xE5\xB9\x85\xE8\xB0\x83\xE6\x95\xB4\xE3\x80\x82" },
-        { "VrHandsLeftHandedViewmodelPoseOffsetMeters", "Hands / Debug", "\xE6\x89\x8B\xE9\x83\xA8\x20\x2F\x20\xE8\xB0\x83\xE8\xAF\x95", "Left-Handed Viewmodel Pose Offset (meters)", "\xE5\xB7\xA6\xE6\x89\x8B\xE6\xA8\xA1\xE5\xBC\x8F\xE8\xA7\x86\xE6\xA8\xA1\xE5\xA7\xBF\xE6\x80\x81\xE4\xBD\x8D\xE7\xBD\xAE\xE5\x81\x8F\xE7\xA7\xBB\xEF\xBC\x88\xE7\xB1\xB3\xEF\xBC\x89", "Extra position offset applied when left-handed mode uses the viewmodel pose for the right hand.", "\xE5\xB7\xA6\xE6\x89\x8B\xE6\xA8\xA1\xE5\xBC\x8F\xE4\xB8\x8B\xEF\xBC\x8C\xE5\x8F\xB3\xE6\x89\x8B\xE4\xBD\xBF\xE7\x94\xA8\xE8\xA7\x86\xE6\xA8\xA1\xE5\xA7\xBF\xE6\x80\x81\xE6\x97\xB6\xE9\xA2\x9D\xE5\xA4\x96\xE5\x8F\xA0\xE5\x8A\xA0\xE7\x9A\x84\xE4\xBD\x8D\xE7\xBD\xAE\xE5\x81\x8F\xE7\xA7\xBB\xEF\xBC\x88\xE7\xB1\xB3\xEF\xBC\x89\xE3\x80\x82", "Use it to correct the right-hand position driven by weapon viewmodels in left-handed mode.", "\xE7\x94\xA8\xE4\xBA\x8E\xE6\xA0\xA1\xE6\xAD\xA3\xE5\xB7\xA6\xE6\x89\x8B\xE6\xA8\xA1\xE5\xBC\x8F\xE6\xAD\xA6\xE5\x99\xA8\xE8\xA7\x86\xE6\xA8\xA1\xE9\xA9\xB1\xE5\x8A\xA8\xE7\x9A\x84\xE5\x8F\xB3\xE6\x89\x8B\xE4\xBD\x8D\xE7\xBD\xAE\xE3\x80\x82" },
-        { "VrHandsDebugLog", "Hands / Debug", "\xE6\x89\x8B\xE9\x83\xA8\x20\x2F\x20\xE8\xB0\x83\xE8\xAF\x95", "Independent VR Hands Debug Log", "\xE7\x8B\xAC\xE7\xAB\x8B\xE6\xB8\xB2\xE6\x9F\x93\x20\x56\x52\x20\xE6\x89\x8B\xE8\xB0\x83\xE8\xAF\x95\xE6\x97\xA5\xE5\xBF\x97", "Logs hand asset initialization and one pose status line per second.", "\xE8\xAE\xB0\xE5\xBD\x95\xE6\x89\x8B\xE9\x83\xA8\xE8\xB5\x84\xE6\xBA\x90\xE5\x88\x9D\xE5\xA7\x8B\xE5\x8C\x96\xE4\xBF\xA1\xE6\x81\xAF\xEF\xBC\x8C\xE5\xB9\xB6\xE4\xB8\x94\xE6\xAF\x8F\xE7\xA7\x92\xE8\xBE\x93\xE5\x87\xBA\xE4\xB8\x80\xE6\xAC\xA1\xE9\xAA\xA8\xE9\xAA\xBC\xE5\xA7\xBF\xE5\x8A\xBF\xE7\x8A\xB6\xE6\x80\x81\xE3\x80\x82", "Enable only while diagnosing asset or skeletal-input issues.", "\xE5\x8F\xAA\xE5\x9C\xA8\xE6\x8E\x92\xE6\x9F\xA5\xE8\xB5\x84\xE6\xBA\x90\xE6\x88\x96\xE9\xAA\xA8\xE9\xAA\xBC\xE8\xBE\x93\xE5\x85\xA5\xE9\x97\xAE\xE9\xA2\x98\xE6\x97\xB6\xE5\xBC\x80\xE5\x90\xAF\xE3\x80\x82" },
         { "ViewmodelBoneLabelsEnabled", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8\x20\x2F\x20\xE6\x8D\xA2\xE5\xBC\xB9", "Viewmodel Bone Labels", "\xE8\xA7\x86\xE6\xA8\xA1\xE9\xAA\xA8\xE9\xAA\xBC\xE6\xA0\x87\xE6\xB3\xA8", "Draws filtered bone names and indices directly on the current weapon viewmodel.", "\xE5\x9C\xA8\xE5\xBD\x93\xE5\x89\x8D\xE6\xAD\xA6\xE5\x99\xA8\xE8\xA7\x86\xE6\xA8\xA1\xE4\xB8\x8A\xE7\x9B\xB4\xE6\x8E\xA5\xE7\xBB\x98\xE5\x88\xB6\xE8\xBF\x87\xE6\xBB\xA4\xE5\x90\x8E\xE7\x9A\x84\xE9\xAA\xA8\xE9\xAA\xBC\xE5\x90\x8D\xE7\xA7\xB0\xE5\x92\x8C\xE7\xBC\x96\xE5\x8F\xB7\xE3\x80\x82", "Use briefly while identifying custom magazine or bolt bones.", "\xE7\x94\xA8\xE4\xBA\x8E\xE4\xB8\xB4\xE6\x97\xB6\xE5\xAE\x9A\xE4\xBD\x8D\xE8\x87\xAA\xE5\xAE\x9A\xE4\xB9\x89\xE5\xBC\xB9\xE5\x8C\xA3\xE6\x88\x96\xE6\x8B\x89\xE6\x9C\xBA\xE6\x9F\x84\xE9\xAA\xA8\xE9\xAA\xBC\xE3\x80\x82" },
-        { "ManualReloadMagazineInsertionAxisLocal", "Magazine Interaction", "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "Magazine Insertion Axis", "\345\274\271\345\214\243\346\217\222\345\205\245\350\275\264", "Insertion axis in calibrated socket-local coordinates. Local -Y follows the magazine body outward from the feed lips by default.", "\346\240\241\345\207\206\345\220\216\345\274\271\345\214\243\346\247\275\345\261\200\351\203\250\345\235\220\346\240\207\347\263\273\344\270\255\347\232\204\346\217\222\345\205\245\350\275\264\343\200\202M16 \346\265\213\350\257\225\345\274\271\345\214\243\347\232\204\345\274\271\345\214\243\344\270\273\344\275\223\344\273\216\351\200\201\345\274\271\345\217\243\346\262\277\345\261\200\351\203\250 -Y \345\220\221\345\244\226\345\273\266\344\274\270\343\200\202", "Change only when the detached magazine or socket orientation uses another axis.", "\344\273\205\345\234\250\345\257\274\345\207\272\347\232\204 GLB \346\210\226\345\274\271\345\214\243\346\247\275\346\226\271\345\220\221\344\270\215\344\270\200\350\207\264\346\227\266\344\277\256\346\224\271\343\200\202" },
-        { "ManualReloadMagazineHandOffsetMeters", "Magazine Interaction", "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "Held Magazine Position Offset", "\346\211\213\346\214\201\345\274\271\345\214\243\344\275\215\347\275\256\345\201\217\347\247\273", "Position offset applied to the detached magazine while it follows the left controller.", "\347\213\254\347\253\213 GLB \345\274\271\345\214\243\350\267\237\351\232\217\345\267\246\346\211\213\346\216\247\345\210\266\345\231\250\346\227\266\345\272\224\347\224\250\347\232\204\344\275\215\347\275\256\345\201\217\347\247\273\343\200\202", "Use it to place the magazine naturally inside the left hand.", "\347\224\250\344\272\216\346\212\212\345\274\271\345\214\243\346\240\241\345\207\206\345\210\260\345\267\246\346\211\213\344\270\255\345\220\210\351\200\202\347\232\204\346\217\241\346\214\201\344\275\215\347\275\256\343\200\202" },
-        { "ManualReloadMagazineHandRotationOffsetDeg", "Magazine Interaction", "\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBA\xA4\xE4\xBA\x92", "Held Magazine Rotation Offset", "\346\211\213\346\214\201\345\274\271\345\214\243\350\247\222\345\272\246\345\201\217\347\247\273", "Rotation offset applied to the detached magazine while it follows the left controller.", "\347\213\254\347\253\213 GLB \345\274\271\345\214\243\350\267\237\351\232\217\345\267\246\346\211\213\346\216\247\345\210\266\345\231\250\346\227\266\345\272\224\347\224\250\347\232\204\350\247\222\345\272\246\345\201\217\347\247\273\343\200\202", "Adjust pitch, yaw and roll until the magazine orientation matches the hand.", "\350\260\203\346\225\264\344\277\257\344\273\260\343\200\201\345\201\217\350\210\252\345\222\214\347\277\273\346\273\232\357\274\214\344\275\277\345\274\271\345\214\243\346\226\271\345\220\221\344\270\216\346\211\213\351\203\250\344\270\200\350\207\264\343\200\202" },
         { "RequireSecondaryAttackForItemSwitch", "Interaction / Combos", "\344\272\244\344\272\222 / \347\273\204\345\220\210\351\224\256", "Require Alt-Fire for Item Switch", "\345\210\207\346\215\242\347\211\251\345\223\201\351\234\200\345\211\257\346\224\273\351\224\256", "Prevents accidental item switches unless secondary attack is held.", "\351\234\200\350\246\201\346\214\211\344\275\217\345\211\257\346\224\273\345\207\273\351\224\256\346\211\215\345\210\207\346\215\242\347\211\251\345\223\201\357\274\214\351\201\277\345\205\215\350\257\257\350\247\246\343\200\202", "", "" },
         { "VoiceRecordCombo", "Interaction / Combos", "\344\272\244\344\272\222 / \347\273\204\345\220\210\351\224\256", "Voice Chat Combo", "\350\257\255\351\237\263\350\201\212\345\244\251\347\273\204\345\220\210\351\224\256", "VR action combination that triggers voice chat (format: Action+Action).", "\350\247\246\345\217\221\350\257\255\351\237\263\350\201\212\345\244\251\347\232\204VR\345\212\250\344\275\234\347\273\204\345\220\210\357\274\210\346\240\274\345\274\217\357\274\232\345\212\250\344\275\234+\345\212\250\344\275\234\357\274\211\343\200\202", "Set to \"false\" to disable.", "\350\256\276\344\270\272 \"false\" \345\217\257\347\246\201\347\224\250\343\200\202" },
         { "QuickTurnCombo", "Interaction / Combos", "\344\272\244\344\272\222 / \347\273\204\345\220\210\351\224\256", "Quick Turn Combo", "\345\277\253\351\200\237\350\275\254\350\272\253\347\273\204\345\220\210\351\224\256", "Action combo that triggers a quick 180\302\260 turn.", "\350\247\246\345\217\221\345\277\253\351\200\237180\302\260\350\275\254\350\272\253\347\232\204\345\212\250\344\275\234\347\273\204\345\220\210\343\200\202", "Use VR action names joined with +.", "\344\275\277\347\224\250VR\345\212\250\344\275\234\345\220\215\345\271\266\347\224\250 + \350\277\236\346\216\245\343\200\202" },
@@ -694,6 +639,28 @@ namespace
         return it == s_index.end() ? -1 : it->second;
     }
 
+    static const CfgOptionSpec* CfgFindHiddenValueSpec(const char* key)
+    {
+        if (!key || !*key)
+            return nullptr;
+
+        static std::unordered_map<std::string, int> s_hiddenIndex = []()
+            {
+                std::unordered_map<std::string, int> m;
+                for (int i = 0; i < kCfgHiddenValueSpecCount; ++i)
+                    m.emplace(kCfgHiddenValueSpecs[i].key, i);
+                return m;
+            }();
+
+        auto it = s_hiddenIndex.find(key);
+        return it == s_hiddenIndex.end() ? nullptr : &kCfgHiddenValueSpecs[it->second];
+    }
+
+    static bool CfgIsKnownValueKey(const char* key)
+    {
+        return CfgFindSpecIndex(key ? key : "") >= 0 || CfgFindHiddenValueSpec(key) != nullptr;
+    }
+
 
     static const CfgOptionTextSpec* CfgFindTextSpec(const char* key)
     {
@@ -712,8 +679,84 @@ namespace
         return it == s_textIndex.end() ? nullptr : &kCfgOptionTextSpecs[it->second];
     }
 
+    struct CfgEnglishTextOverride
+    {
+        const char* key;
+        const char* groupEnUtf8;
+        const char* titleEnUtf8;
+        const char* descEnUtf8;
+        const char* tipEnUtf8;
+    };
+
+    static const CfgEnglishTextOverride kCfgEnglishTextOverrides[] =
+    {
+        { "MoveDirectionFromController", "Input / Turning", "Move Direction Follows Controller", "Uses the controller facing direction for forward movement instead of the headset direction.", "Turn this on if pushing forward should move where your hand points." },
+        { "MouseModeAimFromHmd", "Input / Mouse Mode", "Mouse Mode Uses Head Aim", "In mouse mode, aims from the headset center ray instead of a fixed weapon model point.", "Use this if you hold the gun naturally and fine-aim with head movement." },
+        { "MouseModeViewmodelAnchorOffset", "Input / Mouse Mode", "Mouse Mode Weapon Anchor Offset (m)", "Moves the fixed weapon and aim origin used by mouse mode, relative to the headset.", "X=forward, Y=right, Z=up. Tune this until the weapon sits where you expect." },
+        { "MouseModeAimConvergeDistance", "Input / Mouse Mode", "Mouse Mode Aim Convergence Distance", "Distance where the weapon aim line is steered to meet the headset-center aim line.", "Use higher values for a flatter, more centered aim line. 2048 to 4096 is common." },
+        { "MouseModeTurnSmoothing", "Input / Mouse Mode", "Mouse Turn Smoothing (seconds)", "Smooths mouse-driven left and right turning so it does not step between game ticks.", "0 disables smoothing. Typical values are 0.03 to 0.08." },
+        { "MouseModePitchSmoothing", "Input / Mouse Mode", "Mouse Aim Smoothing (seconds)", "Smooths mouse-driven up and down aiming so it does not stutter between game ticks.", "0 disables smoothing. Typical values are 0.03 to 0.08." },
+        { "MouseModeScopedViewmodelAnchorOffset", "Input / Mouse Mode", "Scoped Mouse Mode Weapon Offset (x,y,z)", "Separate weapon anchor offset used while scoped in mouse mode.", "Use this to line up scoped weapons separately from hip-fire." },
+        { "QueuedRenderPoseRelaxPercent", "Performance", "Queued Render Pose Reuse (%)", "Allows a small percentage of frames to reuse the last headset pose instead of waiting for a fresh one.", "0 is strict. Try 5 or 10 first; higher values can feel smoother but may add ghosting." },
+        { "HudFollowHmdMovement", "HUD (Main)", "HUD Follows Head Pitch/Height", "Makes the main HUD follow full headset movement instead of only horizontal head direction.", "Use this if the HUD should move with looking up, down, or changing height." },
+        { "LeftWristHudXOffset", "HUD (Hand)", "Status HUD Position X", "Moves the off-hand status HUD left or right in controller-local space.", "Adjust one axis at a time until the HUD sits naturally on the off hand." },
+        { "LeftWristHudYOffset", "HUD (Hand)", "Status HUD Position Y", "Moves the off-hand status HUD forward or backward in controller-local space.", "Adjust one axis at a time until the HUD sits naturally on the off hand." },
+        { "LeftWristHudZOffset", "HUD (Hand)", "Status HUD Position Z", "Moves the off-hand status HUD up or down in controller-local space.", "Adjust one axis at a time until the HUD sits naturally on the off hand." },
+        { "RightAmmoHudXOffset", "HUD (Hand)", "Ammo HUD Position X", "Moves the gun-hand ammo HUD left or right in controller-local space.", "Adjust one axis at a time until the ammo display sits naturally near the weapon hand." },
+        { "RightAmmoHudYOffset", "HUD (Hand)", "Ammo HUD Position Y", "Moves the gun-hand ammo HUD forward or backward in controller-local space.", "Adjust one axis at a time until the ammo display sits naturally near the weapon hand." },
+        { "RightAmmoHudZOffset", "HUD (Hand)", "Ammo HUD Position Z", "Moves the gun-hand ammo HUD up or down in controller-local space.", "Adjust one axis at a time until the ammo display sits naturally near the weapon hand." },
+        { "VrHandsEnabled", "Hands / Reload", "Enable VR Hand System", "Enables VR hand tracking and hand-driven reload interactions.", "By default this uses the game's built-in hand mesh. Enable VR Gloves only if you want separate glove models." },
+        { "VrHandsGlovesEnabled", "Hands / Reload", "Use Separate VR Glove Models", "Uses separate GLB/SteamVR glove models instead of the game's built-in hand mesh.", "Requires VR Hands. Leave off for the simpler built-in hand path." },
+        { "MagazineInteractionEnabled", "Hands / Reload", "Manual Reload Interactions", "Enables physical magazine and shell reload interactions driven by VR hands.", "Requires VR Hands. Detachable magazines and shotguns use different reload flows." },
+        { "MagazineInteractionSuppressEmptyClipAutoReload", "Hands / Reload", "Require Manual Reload When Empty", "Stops the game from automatically reloading detachable-magazine weapons when the clip is empty.", "Leave enabled if empty weapons should require a physical magazine reload." },
+        { "MagazineInteractionFreshMagazinePickupOffsetMeters", "Hands / Reload", "Spare Magazine Pickup Position (x,y,z)", "Moves where the spare magazine appears before you grab it, in meters.", "Adjust this so the off hand can naturally reach the spare magazine." },
+        { "MagazineInteractionFreshMagazineWristAnchorOffsetMeters", "Hands / Reload", "Spare Magazine Hand Snap Offset", "Moves where the spare magazine snaps onto the off hand after pickup, in meters.", "Uses the wrist bone axes; small changes such as 0.01 are usually enough." },
+        { "ViewmodelBoneLabelsEnabled", "Hands / Reload", "Weapon Bone Labels", "Draws bone names and indexes directly on the current weapon model.", "Use briefly while finding custom magazine or bolt bones." },
+        { "ViewmodelAdjustEnabled", "Interaction / Combos", "Enable Weapon Position Tuning", "Allows saving manual first-person weapon model offsets in VR.", "" },
+        { "ViewmodelAdjustCombo", "Interaction / Combos", "Weapon Tuning Button Combo", "Button combo used to enter weapon position tuning mode.", "Set to \"false\" if you never edit weapon offsets." },
+        { "ViewmodelAdjustMoveSpeed", "Interaction / Combos", "Weapon Tuning Move Speed", "Speed multiplier for moving the first-person weapon model during tuning.", "Lower is slower; higher is faster." },
+        { "ViewmodelAdjustRotateSpeed", "Interaction / Combos", "Weapon Tuning Rotate Speed", "Speed multiplier for rotating the first-person weapon model during tuning.", "Left stick rotates the weapon only while tuning mode is active." },
+        { "ViewmodelDisableMoveBob", "Interaction / Combos", "Disable Weapon Bob", "Disables movement bob and sway on the first-person weapon model.", "Enable this if the weapon model should stay more stable while moving." },
+        { "BlockFireOnFriendlyAimEnabled", "Aim Assist", "Friendly-fire Block", "Blocks firing when your aim line is on a teammate.", "This is the startup default; it can still be toggled at runtime through SteamVR bindings." },
+        { "InventoryGestureRange", "Inventory / Anchors", "Item Belt Grab Range", "Distance from an item-belt anchor where grip is allowed to grab that item.", "Increase if grabbing items feels too strict; decrease if items trigger accidentally." },
+        { "ShowInventoryAnchors", "Inventory / Anchors", "Show Item Belt Grab Zones", "Draws visible grab zones for the item-belt anchors.", "Turn this on while learning the positions; turn it off once familiar." },
+        { "ScopeReticleAlpha", "Optics", "Scope Reticle Opacity", "Opacity multiplier for the reticle drawn inside the scope view.", "0 hides the reticle; 1 keeps the default opacity." },
+        { "ScopeDefaultFov", "Optics", "Default Scope Zoom FOV", "Default scope zoom FOV for weapons without a saved scope profile.", "Smaller FOV means stronger zoom. Per-weapon values are saved to scope_adjustments.txt." },
+        { "ScopeMagnificationFovRange", "Optics", "Scope Zoom FOV Range", "Minimum and maximum FOV used by per-weapon scope zoom adjustment.", "Format: min,max. While scoped, hold Use and move the left stick vertically to adjust zoom." },
+        { "ScopeMagnificationAdjustSpeed", "Optics", "Scope Zoom Adjust Speed", "How fast scope FOV changes while holding Use and moving the left stick vertically.", "Measured in FOV degrees per second at full stick deflection." },
+        { "ScopeOffsetAdjustMoveSpeed", "Optics", "Scope Position Adjust Speed", "Speed multiplier for moving the scope screen with the weapon-position shortcut while scoped.", "While scoped, this shortcut edits scope position instead of weapon position." },
+        { "ScopeAimSensitivityFovReductionRate", "Optics", "Scope Aim Sensitivity Reduction", "Controls how much aiming sensitivity drops as realtime scope FOV gets smaller.", "0 disables reduction. Higher values reduce sensitivity faster at stronger zoom." },
+        { "ScopeZNear", "Optics", "Scope Camera Near Clip", "Near clipping distance for the scope camera.", "Increase if the scope camera cuts through nearby geometry." },
+        { "ScopeOverlayAngleOffset", "Optics", "Scope Screen Rotation (pitch,yaw,roll)", "Rotates the physical scope screen overlay.", "Use this to make the scope screen face your eye correctly." },
+        { "ScopeCameraOffset", "Optics", "Scope Camera Position (x,y,z)", "Moves the camera that renders the scope picture.", "Use this when the scope image is not aligned with the weapon." },
+        { "ScopeCameraAngleOffset", "Optics", "Scope Camera Rotation (pitch,yaw,roll)", "Rotates the camera that renders the scope picture.", "Use this when the scope picture is tilted or not centered." },
+    };
+
+    constexpr int kCfgEnglishTextOverrideCount =
+        (int)(sizeof(kCfgEnglishTextOverrides) / sizeof(kCfgEnglishTextOverrides[0]));
+
+    static const CfgEnglishTextOverride* CfgFindEnglishTextOverride(const char* key)
+    {
+        if (!key)
+            return nullptr;
+
+        static std::unordered_map<std::string, int> s_overrideIndex = []()
+            {
+                std::unordered_map<std::string, int> m;
+                for (int i = 0; i < kCfgEnglishTextOverrideCount; ++i)
+                    m.emplace(kCfgEnglishTextOverrides[i].key, i);
+                return m;
+            }();
+
+        auto it = s_overrideIndex.find(key);
+        return it == s_overrideIndex.end() ? nullptr : &kCfgEnglishTextOverrides[it->second];
+    }
+
     static const char* CfgGroupText(const CfgOverlayState& s, const CfgOptionSpec& spec)
     {
+        const CfgEnglishTextOverride* o = !s.useChinese ? CfgFindEnglishTextOverride(spec.key) : nullptr;
+        if (o && o->groupEnUtf8 && *o->groupEnUtf8)
+            return o->groupEnUtf8;
         const CfgOptionTextSpec* t = CfgFindTextSpec(spec.key);
         if (!s.useChinese && t && t->groupEnUtf8 && *t->groupEnUtf8)
             return t->groupEnUtf8;
@@ -724,6 +767,9 @@ namespace
 
     static const char* CfgTitleText(const CfgOverlayState& s, const CfgOptionSpec& spec)
     {
+        const CfgEnglishTextOverride* o = !s.useChinese ? CfgFindEnglishTextOverride(spec.key) : nullptr;
+        if (o && o->titleEnUtf8 && *o->titleEnUtf8)
+            return o->titleEnUtf8;
         const CfgOptionTextSpec* t = CfgFindTextSpec(spec.key);
         if (!s.useChinese && t && t->titleEnUtf8 && *t->titleEnUtf8)
             return t->titleEnUtf8;
@@ -738,6 +784,9 @@ namespace
             return s.useChinese
             ? "\xE5\xBC\x80\xE5\x90\xAF\xE5\xA4\x9A\xE6\xA0\xB8\xE6\xB8\xB2\xE6\x9F\x93\xE3\x80\x82\xE5\xA4\x9A\xE6\xA0\xB8\xE4\xB8\x8B\xE4\xBD\xBF\xE7\x94\xA8\xE6\xA1\x8C\xE9\x9D\xA2\xE9\x95\x9C\xE5\x83\x8F\xE5\xBF\x85\xE9\xA1\xBB\xE5\x90\x8C\xE6\x97\xB6\xE6\x89\x93\xE5\xBC\x80\xE9\x98\xB4\xE5\xBD\xB1\xE4\xBC\x98\xE5\x8C\x96\xEF\xBC\x8C\xE5\x90\xA6\xE5\x88\x99\xE6\xA1\x8C\xE9\x9D\xA2\xE9\x95\x9C\xE5\x83\x8F\xE6\x97\xA0\xE6\xB3\x95\xE6\x9B\xB4\xE6\x96\xB0\xE3\x80\x82"
             : "Turns on multi-core rendering for the mod. In multi-core mode, desktop mirror requires Shadow Tweaks or the mirror cannot update.";
+        const CfgEnglishTextOverride* o = !s.useChinese ? CfgFindEnglishTextOverride(spec.key) : nullptr;
+        if (o && o->descEnUtf8 && *o->descEnUtf8)
+            return o->descEnUtf8;
         const CfgOptionTextSpec* t = CfgFindTextSpec(spec.key);
         if (!s.useChinese && t && t->descEnUtf8 && *t->descEnUtf8)
             return t->descEnUtf8;
@@ -752,6 +801,9 @@ namespace
             return s.useChinese
             ? "\xE5\x8B\xBE\xE9\x80\x89\xE5\xA4\x9A\xE6\xA0\xB8\xE6\xB8\xB2\xE6\x9F\x93\xE6\x97\xB6\xE4\xBC\x9A\xE8\x87\xAA\xE5\x8A\xA8\xE5\x8B\xBE\xE9\x80\x89\xE9\x98\xB4\xE5\xBD\xB1\xE4\xBC\x98\xE5\x8C\x96\xEF\xBC\x9B\xE4\xB9\x8B\xE5\x90\x8E\xE4\xBB\x8D\xE5\x8F\xAF\xE5\x8D\x95\xE7\x8B\xAC\xE8\xB0\x83\xE6\x95\xB4\xE9\x98\xB4\xE5\xBD\xB1\xE4\xBC\x98\xE5\x8C\x96\xE3\x80\x82"
             : "Enabling multi-core also checks Shadow Tweaks; Shadow Tweaks remains independently editable afterward.";
+        const CfgEnglishTextOverride* o = !s.useChinese ? CfgFindEnglishTextOverride(spec.key) : nullptr;
+        if (o && o->tipEnUtf8 && *o->tipEnUtf8)
+            return o->tipEnUtf8;
         const CfgOptionTextSpec* t = CfgFindTextSpec(spec.key);
         if (!s.useChinese && t && t->tipEnUtf8 && *t->tipEnUtf8)
             return t->tipEnUtf8;
@@ -969,7 +1021,16 @@ namespace
         (void)index;
         if (spec.type == CfgOptionType::Color)
             return 1.0f;
+        if (spec.key && std::strcmp(spec.key, "MagazineInteractionFreshMagazinePickupOffsetMeters") == 0)
+            return 0.02f;
         return CfgStepForFloat(spec, current);
+    }
+
+    static float CfgComponentFormatStep(const CfgOptionSpec& spec, int index, float current)
+    {
+        if (spec.key && std::strcmp(spec.key, "MagazineInteractionFreshMagazinePickupOffsetMeters") == 0)
+            return 0.01f;
+        return CfgComponentStep(spec, index, current);
     }
 
     static std::string CfgFormatComponentValues(const CfgOptionSpec& spec, const std::vector<float>& values)
@@ -989,7 +1050,7 @@ namespace
             }
             else
             {
-                const float step = CfgComponentStep(spec, i, v);
+                const float step = CfgComponentFormatStep(spec, i, v);
                 result += CfgFormatFloat(CfgClampFloatToSpec(spec, v), step);
             }
         }
@@ -1052,9 +1113,10 @@ namespace
 
         values[(size_t)index] = next;
         const std::string value = CfgFormatComponentValues(spec, values);
+        const float formatStep = CfgComponentFormatStep(spec, index, next);
         s.values[spec.key] = value;
         s.status = std::string(spec.key) + ": " + CfgComponentLabel(spec, index) + " = " +
-            (spec.type == CfgOptionType::Color ? std::to_string((int)std::lround(next)) : CfgFormatFloat(next, step));
+            (spec.type == CfgOptionType::Color ? std::to_string((int)std::lround(next)) : CfgFormatFloat(next, formatStep));
         CfgRebuildVisibleIndexes(s);
         CfgMarkEdited(s);
     }
@@ -1132,12 +1194,15 @@ namespace
             return fallback;
 
         const int specIndex = CfgFindSpecIndex(key);
+        const CfgOptionSpec* hiddenSpec = specIndex < 0 ? CfgFindHiddenValueSpec(key) : nullptr;
         std::string value;
         auto it = s.values.find(key);
         if (it != s.values.end())
             value = it->second;
         else if (specIndex >= 0)
             value = kCfgOptionSpecs[specIndex].defaultValue ? kCfgOptionSpecs[specIndex].defaultValue : "";
+        else if (hiddenSpec)
+            value = hiddenSpec->defaultValue ? hiddenSpec->defaultValue : "";
 
         float parsed = fallback;
         if (!CfgTryFloat(value, parsed) || !std::isfinite(parsed))
@@ -1145,6 +1210,8 @@ namespace
 
         if (specIndex >= 0)
             parsed = CfgClampFloatToSpec(kCfgOptionSpecs[specIndex], parsed);
+        else if (hiddenSpec)
+            parsed = CfgClampFloatToSpec(*hiddenSpec, parsed);
         return parsed;
     }
 
@@ -1198,12 +1265,15 @@ namespace
         if (!key || !*key)
             return defVal;
         const int specIndex = CfgFindSpecIndex(key);
+        const CfgOptionSpec* hiddenSpec = specIndex < 0 ? CfgFindHiddenValueSpec(key) : nullptr;
         std::string value;
         auto it = s.values.find(key);
         if (it != s.values.end())
             value = it->second;
         else if (specIndex >= 0)
             value = kCfgOptionSpecs[specIndex].defaultValue ? kCfgOptionSpecs[specIndex].defaultValue : "";
+        else if (hiddenSpec && hiddenSpec->type == CfgOptionType::Bool)
+            value = hiddenSpec->defaultValue ? hiddenSpec->defaultValue : "";
         else
             return defVal;
         return CfgBoolValue(value);
@@ -1214,30 +1284,12 @@ namespace
         const bool vrHandsEntryEnabled = CfgIsEnabled(s, "VrHandsEnabled", false);
         const bool vrHandsGlovesEnabled =
             vrHandsEntryEnabled && CfgIsEnabled(s, "VrHandsGlovesEnabled", false);
-        bool nativeHandsOnly = CfgIsEnabled(s, "NativeViewmodelHandsOnly", false);
+        const bool nativeHandsOnly = vrHandsEntryEnabled && !vrHandsGlovesEnabled;
 
-        if (vrHandsGlovesEnabled)
-        {
-            s.values["NativeViewmodelHandsOnly"] = "false";
-            nativeHandsOnly = false;
-            s.values["HideArms"] = "true";
-        }
-        else if (vrHandsEntryEnabled)
-        {
-            s.values["NativeViewmodelHandsOnly"] = "true";
-            nativeHandsOnly = true;
-            s.values["HideArms"] = "false";
-        }
-        else if (nativeHandsOnly)
-        {
-            s.values["HideArms"] = "false";
-        }
-        else
-        {
-            s.values["HideArms"] = "false";
-        }
+        s.values["NativeViewmodelHandsOnly"] = nativeHandsOnly ? "true" : "false";
+        s.values["HideArms"] = vrHandsGlovesEnabled ? "true" : "false";
 
-        if (!vrHandsEntryEnabled && !nativeHandsOnly)
+        if (!vrHandsEntryEnabled)
         {
             s.values["MagazineInteractionEnabled"] = "false";
             s.values["MagazineInteractionQuickReloadMode"] = "false";
@@ -1352,46 +1404,11 @@ namespace
         if (std::strcmp(key, "VrHandsGlovesEnabled") == 0)
             return vrHandsEntryEnabled;
 
-        if (std::strcmp(key, "VrHandsLeftPoseOffsetMeters") == 0)
-            return vrHandsGlovesEnabled;
-
-        if (std::strcmp(key, "VrHandsLeftHandedViewmodelPoseOffsetMeters") == 0)
-            return vrHandsGlovesEnabled && CfgIsEnabled(s, "LeftHanded", false);
-
-        if (std::strcmp(key, "NativeViewmodelHandsOnlyWristKeepFraction") == 0 ||
-            std::strcmp(key, "NativeViewmodelHandsOnlyTrimUnits") == 0 ||
-            std::strcmp(key, "NativeViewmodelHandsOnlyArmBendScale") == 0 ||
-            std::strcmp(key, "NativeViewmodelHandsOnlyCutRotationDeg") == 0 ||
-            std::strcmp(key, "NativeViewmodelHandsOnlyLeftCutRotationDeg") == 0 ||
-            std::strcmp(key, "NativeViewmodelHandsOnlyRightCutRotationDeg") == 0 ||
-            std::strcmp(key, "NativeViewmodelHandsOnlyAutoCutRotation") == 0 ||
-            std::strcmp(key, "NativeViewmodelHandsOnlyFreezePoseLock") == 0 ||
-            std::strcmp(key, "NativeViewmodelHandsOnlyFreezePoseOffsetMeters") == 0 ||
-            std::strcmp(key, "NativeViewmodelHandsOnlyFreezePoseRotationOffsetDeg") == 0 ||
-            std::strcmp(key, "NativeViewmodelHandsOnlyLeftFreezePoseRotationOffsetDeg") == 0 ||
-            std::strcmp(key, "NativeViewmodelHandsOnlyRightFreezePoseRotationOffsetDeg") == 0 ||
-            std::strcmp(key, "NativeViewmodelRightHandAnimationKeepUnits") == 0 ||
-            std::strcmp(key, "NativeViewmodelLeftHandPoseOffsetMeters") == 0 ||
-            std::strcmp(key, "NativeViewmodelLeftHandPoseRotationOffsetDeg") == 0 ||
-            std::strcmp(key, "NativeViewmodelLeftHandOpenVRSkeleton") == 0)
-            return CfgIsEnabled(s, "NativeViewmodelHandsOnly", false);
-
-        if (CfgStartsWith(key, "NativeViewmodelLeftHandOpenVR"))
-            return CfgIsEnabled(s, "NativeViewmodelHandsOnly", false) &&
-                CfgIsEnabled(s, "NativeViewmodelLeftHandOpenVRSkeleton", true);
-
         if (std::strcmp(key, "MagazineInteractionQuickReloadMode") == 0)
-            return (CfgIsEnabled(s, "VrHandsEnabled", false) ||
-                CfgIsEnabled(s, "NativeViewmodelHandsOnly", false)) &&
+            return CfgIsEnabled(s, "VrHandsEnabled", false) &&
                 CfgIsEnabled(s, "MagazineInteractionEnabled", false);
 
-        if (std::strcmp(key, "HideArms") == 0 ||
-            std::strcmp(key, "VrHandsMotionRangeWithoutController") == 0 ||
-            std::strcmp(key, "VrHandsModelScale") == 0 ||
-            std::strcmp(key, "VrHandsDebugLog") == 0 ||
-            std::strcmp(key, "ManualReloadMagazineInsertionAxisLocal") == 0 ||
-            std::strcmp(key, "ManualReloadMagazineHandOffsetMeters") == 0 ||
-            std::strcmp(key, "ManualReloadMagazineHandRotationOffsetDeg") == 0)
+        if (std::strcmp(key, "HideArms") == 0)
             return false;
 
 
@@ -1558,7 +1575,7 @@ namespace
                 std::string val = (eq == std::string::npos) ? std::string() : line.substr(eq + 1);
                 while (!val.empty() && std::isspace((unsigned char)val.front()))
                     val.erase(val.begin());
-                if (CfgFindSpecIndex(cl.key) >= 0)
+                if (CfgIsKnownValueKey(cl.key.c_str()))
                     s.values[cl.key] = val;
             }
             s.lines.push_back(cl);
@@ -1620,7 +1637,7 @@ namespace
             s.lines.push_back(cl);
         }
 
-        if (CfgFindSpecIndex(key) >= 0)
+        if (CfgIsKnownValueKey(key))
             s.values[key] = value;
     }
 
@@ -1835,7 +1852,8 @@ namespace
         float maxValue)
     {
         const int specIndex = CfgFindSpecIndex(key ? key : "");
-        if (specIndex < 0 || kCfgOptionSpecs[specIndex].type != CfgOptionType::Vec3)
+        const CfgOptionSpec* spec = specIndex >= 0 ? &kCfgOptionSpecs[specIndex] : CfgFindHiddenValueSpec(key);
+        if (!spec || spec->type != CfgOptionType::Vec3)
         {
             return Vector(
                 std::clamp(fallback.x, minValue, maxValue),
@@ -1844,7 +1862,11 @@ namespace
         }
 
         std::vector<float> values;
-        CfgParseComponentValues(kCfgOptionSpecs[specIndex], CfgValueFor(s, kCfgOptionSpecs[specIndex]), values);
+        auto it = key ? s.values.find(key) : s.values.end();
+        const std::string value = it != s.values.end()
+            ? it->second
+            : (spec->defaultValue ? spec->defaultValue : "");
+        CfgParseComponentValues(*spec, value, values);
         const float x = values.size() > 0 ? values[0] : fallback.x;
         const float y = values.size() > 1 ? values[1] : fallback.y;
         const float z = values.size() > 2 ? values[2] : fallback.z;
@@ -2444,6 +2466,44 @@ namespace
             }
         }
 
+        auto upsertInternalValue = [&s](const char* key, const std::string& val)
+            {
+                bool written = false;
+                for (int i = (int)s.lines.size() - 1; i >= 0; --i)
+                {
+                    if (s.lines[i].key == key)
+                    {
+                        s.lines[i].raw = std::string(key) + "=" + val;
+                        written = true;
+                        break;
+                    }
+                }
+
+                if (!written)
+                {
+                    CfgOverlayLine cl;
+                    cl.key = key;
+                    cl.raw = std::string(key) + "=" + val;
+                    s.lines.push_back(cl);
+                }
+            };
+
+        for (int hiddenIndex = 0; hiddenIndex < kCfgHiddenValueSpecCount; ++hiddenIndex)
+        {
+            const CfgOptionSpec& spec = kCfgHiddenValueSpecs[hiddenIndex];
+            if (s.panelMode == CfgPanelMode::MagazineCalibration &&
+                CfgIsCalibrationProfileValueKey(spec.key))
+            {
+                continue;
+            }
+
+            const auto it = s.values.find(spec.key);
+            if (it != s.values.end())
+                upsertInternalValue(spec.key, it->second);
+        }
+
+        upsertInternalValue("NativeViewmodelHandsOnly", s.values["NativeViewmodelHandsOnly"]);
+
         std::ofstream out(s.configPath, std::ios::binary | std::ios::trunc);
         if (!out.good())
         {
@@ -2822,7 +2882,8 @@ namespace
             return fallback;
 
         const int specIndex = CfgFindSpecIndex(key);
-        if (specIndex < 0 || kCfgOptionSpecs[specIndex].type != CfgOptionType::Vec3)
+        const CfgOptionSpec* spec = specIndex >= 0 ? &kCfgOptionSpecs[specIndex] : CfgFindHiddenValueSpec(key);
+        if (!spec || spec->type != CfgOptionType::Vec3)
         {
             return Vector(
                 std::clamp(fallback.x, minValue, maxValue),
@@ -2831,7 +2892,11 @@ namespace
         }
 
         std::vector<float> values;
-        CfgParseComponentValues(kCfgOptionSpecs[specIndex], CfgValueFor(s, kCfgOptionSpecs[specIndex]), values);
+        auto it = s.values.find(key);
+        const std::string value = it != s.values.end()
+            ? it->second
+            : (spec->defaultValue ? spec->defaultValue : "");
+        CfgParseComponentValues(*spec, value, values);
         const float x = values.size() > 0 ? values[0] : fallback.x;
         const float y = values.size() > 1 ? values[1] : fallback.y;
         const float z = values.size() > 2 ? values[2] : fallback.z;
@@ -2847,13 +2912,13 @@ namespace
             return;
 
         const int specIndex = CfgFindSpecIndex(key);
+        const CfgOptionSpec* spec = specIndex >= 0 ? &kCfgOptionSpecs[specIndex] : CfgFindHiddenValueSpec(key);
         Vector clamped = value;
-        if (specIndex >= 0)
+        if (spec)
         {
-            const CfgOptionSpec& spec = kCfgOptionSpecs[specIndex];
-            clamped.x = CfgClampFloatToSpec(spec, clamped.x);
-            clamped.y = CfgClampFloatToSpec(spec, clamped.y);
-            clamped.z = CfgClampFloatToSpec(spec, clamped.z);
+            clamped.x = CfgClampFloatToSpec(*spec, clamped.x);
+            clamped.y = CfgClampFloatToSpec(*spec, clamped.y);
+            clamped.z = CfgClampFloatToSpec(*spec, clamped.z);
         }
 
         s.values[key] = CfgFormatVector3Value(clamped, step);
@@ -2865,9 +2930,10 @@ namespace
             return;
 
         const int specIndex = CfgFindSpecIndex(key);
+        const CfgOptionSpec* spec = specIndex >= 0 ? &kCfgOptionSpecs[specIndex] : CfgFindHiddenValueSpec(key);
         float clamped = std::isfinite(value) ? value : 0.0f;
-        if (specIndex >= 0)
-            clamped = CfgClampFloatToSpec(kCfgOptionSpecs[specIndex], clamped);
+        if (spec)
+            clamped = CfgClampFloatToSpec(*spec, clamped);
 
         s.values[key] = CfgFormatFloat(clamped, step);
     }
@@ -4925,6 +4991,13 @@ namespace
         return true;
     }
 
+    static bool CfgCloseSourceGameUiIfCalibrationActive(const CfgOverlayState& s)
+    {
+        if (!s.visible || s.panelMode != CfgPanelMode::MagazineCalibration)
+            return false;
+        return CfgCloseSourceGameUiForCalibration();
+    }
+
     static bool CfgIsValidOverlayHandle(vr::VROverlayHandle_t h)
     {
         return h != vr::k_ulOverlayHandleInvalid;
@@ -5321,9 +5394,12 @@ namespace
         CfgLoad(s);
         CfgInvalidateFixedPlacement(s);
         CfgApplyOverlayPlacement(s, ov);
+        const bool closedSourceGameUi = CfgCloseSourceGameUiIfCalibrationActive(s);
         s.status = s.useChinese
             ? "\345\267\262\346\211\223\345\274\200\343\200\202\347\224\250 VR \346\216\247\345\210\266\345\231\250\345\260\204\347\272\277\347\202\271\345\207\273\346\214\211\351\222\256\343\200\202"
             : "Opened. Point and click with the VR controller laser.";
+        if (closedSourceGameUi)
+            s.status += s.useChinese ? "\xE5\xB7\xB2\xE5\x85\xB3\xE9\x97\xAD\xE6\xB8\xB8\xE6\x88\x8F\xE6\x9A\x82\xE5\x81\x9C\xE8\x8F\x9C\xE5\x8D\x95\xE3\x80\x82" : " Game pause menu closed.";
         s.dirty = true;
         CfgSetMenuButtonInputGuard(s, false, ov);
         if (ov && CfgIsValidOverlayHandle(s.menuButtonHandle))
@@ -5788,6 +5864,8 @@ namespace
 
     static void CfgHandleClick(CfgOverlayState& s, int mx, int my)
     {
+        (void)CfgCloseSourceGameUiIfCalibrationActive(s);
+
         if (my >= kCfgTopButtonY && my <= kCfgTopButtonY + kCfgTopButtonH)
         {
             if (mx >= kCfgPagePrevX && mx <= kCfgPagePrevX + kCfgPageButtonW)
@@ -6204,9 +6282,12 @@ namespace
                     CfgInvalidateFixedPlacement(s);
                     CfgApplyOverlayPlacement(s);
                 }
+                const bool closedSourceGameUi = CfgCloseSourceGameUiIfCalibrationActive(s);
                 s.status = s.visible
                     ? (s.useChinese ? "\345\267\262\346\211\223\345\274\200\343\200\202\347\224\250 VR \346\216\247\345\210\266\345\231\250\345\260\204\347\272\277\347\202\271\345\207\273\346\214\211\351\222\256\343\200\202" : "Opened. Point and click with the VR controller laser.")
                     : (s.useChinese ? "\345\267\262\345\205\263\351\227\255\343\200\202\346\214\211 F8 \345\217\257\351\207\215\346\226\260\346\211\223\345\274\200\343\200\202" : "Closed. Press F8 to reopen.");
+                if (closedSourceGameUi)
+                    s.status += s.useChinese ? "\xE5\xB7\xB2\xE5\x85\xB3\xE9\x97\xAD\xE6\xB8\xB8\xE6\x88\x8F\xE6\x9A\x82\xE5\x81\x9C\xE8\x8F\x9C\xE5\x8D\x95\xE3\x80\x82" : " Game pause menu closed.";
                 CfgApplyCalibrationRuntimeState(s);
                 s.dirty = true;
             }
