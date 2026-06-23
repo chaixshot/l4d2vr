@@ -8952,6 +8952,103 @@ namespace
         return fields;
     }
 
+    inline std::string HooksNativeViewmodelHandsOnlyCanonicalFreezePoseBoneName(const std::string& lowerName)
+    {
+        const size_t bip01 = lowerName.find("bip01_");
+        if (bip01 != std::string::npos)
+            return lowerName.substr(bip01);
+
+        static const char kValveBipedPrefix[] = "valvebiped.";
+        const size_t valveBiped = lowerName.find(kValveBipedPrefix);
+        if (valveBiped != std::string::npos)
+            return lowerName.substr(valveBiped + std::strlen(kValveBipedPrefix));
+
+        const size_t separator = lowerName.find_last_of(".:/\\");
+        if (separator != std::string::npos && separator + 1u < lowerName.size())
+            return lowerName.substr(separator + 1u);
+
+        return lowerName;
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyFreezePoseBoneNameMatches(
+        const std::string& currentLowerName,
+        const std::string& currentCanonicalName,
+        const std::string& fileLowerName,
+        const std::string& fileCanonicalName)
+    {
+        if (fileLowerName.empty())
+            return false;
+
+        if (currentLowerName == fileLowerName ||
+            currentCanonicalName == fileLowerName ||
+            currentLowerName == fileCanonicalName ||
+            currentCanonicalName == fileCanonicalName)
+        {
+            return true;
+        }
+
+        const auto endsWith = [](const std::string& value, const std::string& suffix) -> bool
+            {
+                return !suffix.empty() &&
+                    value.size() >= suffix.size() &&
+                    value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
+            };
+
+        return endsWith(currentLowerName, fileLowerName) ||
+            endsWith(currentLowerName, fileCanonicalName) ||
+            endsWith(fileLowerName, currentLowerName) ||
+            endsWith(fileCanonicalName, currentCanonicalName);
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyTryMapFreezePoseBoneName(
+        const std::vector<std::string>& boneNames,
+        int numBones,
+        int side,
+        const std::string& fileBoneName,
+        int& outBone)
+    {
+        outBone = -1;
+        if (fileBoneName.empty() || numBones <= 0 || static_cast<int>(boneNames.size()) < numBones)
+            return false;
+
+        const std::string fileLowerName = vr_vm_stabilize::ToLowerAscii(fileBoneName);
+        const std::string fileCanonicalName =
+            HooksNativeViewmodelHandsOnlyCanonicalFreezePoseBoneName(fileLowerName);
+        if (fileLowerName.empty() || fileCanonicalName.empty())
+            return false;
+
+        for (int bone = 0; bone < numBones; ++bone)
+        {
+            const std::string currentLowerName =
+                vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(bone)]);
+            if (currentLowerName.empty())
+                continue;
+
+            if (side != 0)
+            {
+                const int currentSide = HooksNativeViewmodelHandsOnlyBoneSide(currentLowerName);
+                if (currentSide != 0 && currentSide != side)
+                    continue;
+            }
+
+            const std::string currentCanonicalName =
+                HooksNativeViewmodelHandsOnlyCanonicalFreezePoseBoneName(currentLowerName);
+            if (!HooksNativeViewmodelHandsOnlyFreezePoseBoneNameMatches(
+                    currentLowerName,
+                    currentCanonicalName,
+                    fileLowerName,
+                    fileCanonicalName))
+            {
+                continue;
+            }
+
+            outBone = bone;
+            return true;
+        }
+
+        return false;
+    }
+
     inline bool HooksNativeViewmodelHandsOnlyParseIntField(const std::string& value, int& out)
     {
         std::istringstream input(value);
@@ -9219,12 +9316,23 @@ namespace
         const HooksNativeViewmodelHandsOnlySideInfo& keepSide,
         const vr_vm_stabilize::Mat3x4& targetAnchor,
         uint32_t generation,
-        HooksNativeViewmodelHandsOnlyFreezeCache& cache)
+        HooksNativeViewmodelHandsOnlyFreezeCache& cache,
+        bool* outFoundSideSection = nullptr)
     {
+        if (outFoundSideSection)
+            *outFoundSideSection = false;
+
         const char* path = HooksNativeViewmodelHandsOnlyFreezePoseConfigPath();
         std::ifstream input(path, std::ios::in);
         if (!input)
             return false;
+
+        if (numBones <= 0 || numBones > 512 ||
+            static_cast<int>(boneNames.size()) < numBones ||
+            static_cast<int>(boneParents.size()) < numBones)
+        {
+            return false;
+        }
 
         const std::string wantedSide =
             std::string("side|") + HooksNativeViewmodelHandsOnlyFreezePoseSideName(keepSide.side);
@@ -9249,8 +9357,10 @@ namespace
         float loadedWristPlaneLocal[4]{};
         float loadedWristPlaneWorld[4]{};
         vr_vm_stabilize::Mat3x4 loadedFrozenAnchor = targetAnchor;
-        std::vector<uint8_t> freezeMask;
-        std::vector<vr_vm_stabilize::Mat3x4> frozenLocalBones;
+        std::vector<uint8_t> freezeMask(static_cast<size_t>(numBones), 0u);
+        std::vector<vr_vm_stabilize::Mat3x4> frozenLocalBones(
+            static_cast<size_t>(numBones),
+            vr_vm_stabilize::Mat3x4{});
 
         std::string line;
         while (std::getline(input, line))
@@ -9264,6 +9374,8 @@ namespace
                     break;
                 inSection = (line == wantedSide);
                 foundSection = inSection;
+                if (foundSection && outFoundSideSection)
+                    *outFoundSideSection = true;
                 continue;
             }
 
@@ -9284,11 +9396,6 @@ namespace
             else if (fields[0] == "numBones" && fields.size() >= 2u)
             {
                 haveNumBones = HooksNativeViewmodelHandsOnlyParseIntField(fields[1], fileNumBones);
-                if (haveNumBones && fileNumBones == numBones && numBones > 0 && numBones <= 512)
-                {
-                    freezeMask.assign(static_cast<size_t>(numBones), 0u);
-                    frozenLocalBones.assign(static_cast<size_t>(numBones), vr_vm_stabilize::Mat3x4{});
-                }
             }
             else if (fields[0] == "handBone" && fields.size() >= 2u)
             {
@@ -9320,38 +9427,46 @@ namespace
                     HooksNativeViewmodelHandsOnlyParsePlaneFields(fields, 1u, loadedWristPlaneWorld);
             }
             else if (fields[0] == "bone" && fields.size() >= 17u &&
-                haveNumBones &&
-                fileNumBones == numBones &&
                 static_cast<int>(freezeMask.size()) == numBones &&
                 static_cast<int>(frozenLocalBones.size()) == numBones)
             {
-                int bone = -1;
+                int fileBone = -1;
                 int frozen = 0;
-                if (!HooksNativeViewmodelHandsOnlyParseIntField(fields[1], bone) ||
+                if (!HooksNativeViewmodelHandsOnlyParseIntField(fields[1], fileBone) ||
                     !HooksNativeViewmodelHandsOnlyParseIntField(fields[3], frozen) ||
-                    bone < 0 ||
-                    bone >= numBones)
+                    frozen == 0)
                 {
                     continue;
                 }
 
-                if (frozen != 0)
+                vr_vm_stabilize::Mat3x4 matrix{};
+                if (!HooksNativeViewmodelHandsOnlyParseMatrixFields(fields, 5u, matrix))
+                    return false;
+
+                int currentBone = -1;
+                if (!HooksNativeViewmodelHandsOnlyTryMapFreezePoseBoneName(
+                        boneNames,
+                        numBones,
+                        keepSide.side,
+                        fields[4],
+                        currentBone) &&
+                    haveNumBones &&
+                    fileNumBones == numBones &&
+                    fileBone >= 0 &&
+                    fileBone < numBones)
                 {
-                    vr_vm_stabilize::Mat3x4 matrix{};
-                    if (!HooksNativeViewmodelHandsOnlyParseMatrixFields(fields, 5u, matrix))
-                        return false;
-                    freezeMask[static_cast<size_t>(bone)] = 1u;
-                    frozenLocalBones[static_cast<size_t>(bone)] = matrix;
+                    currentBone = fileBone;
                 }
+
+                if (currentBone < 0 || currentBone >= numBones)
+                    continue;
+
+                freezeMask[static_cast<size_t>(currentBone)] = 1u;
+                frozenLocalBones[static_cast<size_t>(currentBone)] = matrix;
             }
         }
 
         if (!foundSection ||
-            !haveNumBones ||
-            fileNumBones != numBones ||
-            (haveSignature && fileSignature != currentSignature) ||
-            fileHandBone != keepSide.hand ||
-            (fileAnchorBone >= 0 && fileAnchorBone != keepSide.hand) ||
             static_cast<int>(freezeMask.size()) != numBones ||
             static_cast<int>(frozenLocalBones.size()) != numBones)
         {
@@ -9380,6 +9495,12 @@ namespace
                 keepSide.forearm);
             return false;
         }
+
+        const bool remappedLayout =
+            (haveNumBones && fileNumBones != numBones) ||
+            (haveSignature && fileSignature != currentSignature) ||
+            (fileHandBone >= 0 && fileHandBone != keepSide.hand) ||
+            (fileAnchorBone >= 0 && fileAnchorBone != keepSide.hand);
 
         cache.Reset();
         cache.owner = vr;
@@ -9413,12 +9534,15 @@ namespace
         cache.frozenLocalBones.swap(frozenLocalBones);
 
         Game::logMsg(
-            "[VR][NativeHandsOnly] loaded %s-hand freeze pose config path=%s model=%s bones=%d frozen=%d",
+            "[VR][NativeHandsOnly] loaded %s-hand freeze pose config path=%s model=%s bones=%d frozen=%d remapped=%d sourceBones=%d sourceSignature=%u",
             HooksNativeViewmodelHandsOnlyFreezePoseSideName(keepSide.side),
             path,
             lowerModel.c_str(),
             numBones,
-            frozenBones);
+            frozenBones,
+            remappedLayout ? 1 : 0,
+            haveNumBones ? fileNumBones : 0,
+            haveSignature ? fileSignature : 0u);
         return true;
     }
 
@@ -9925,6 +10049,7 @@ namespace
         if (!cacheMatches)
         {
             cache.Reset();
+            bool foundFreezePoseSideSection = false;
             if (!HooksNativeViewmodelHandsOnlyTryLoadFreezePoseConfig(
                     vr,
                     lowerModel,
@@ -9934,7 +10059,8 @@ namespace
                     keepSide,
                     targetAnchor,
                     generation,
-                    cache))
+                    cache,
+                    &foundFreezePoseSideSection))
             {
                 vr_vm_stabilize::Mat3x4 captureTargetAnchor = targetAnchor;
                 vr_vm_stabilize::Mat3x4 captureTargetDelta = targetDelta;
@@ -10012,14 +10138,22 @@ namespace
                         "[VR][NativeHandsOnly] captured %s-hand freeze with canonical HMD-front horizontal anchor",
                         (keepSide.side < 0) ? "left" : "right");
                 }
-                if (!HooksNativeViewmodelHandsOnlyWriteFreezePoseConfig(
-                        vr,
-                        lowerModel,
-                        boneNames,
-                        boneParents,
-                        numBones,
-                        keepSide,
-                        cache))
+                if (foundFreezePoseSideSection)
+                {
+                    Game::logMsg(
+                        "[VR][NativeHandsOnly] kept existing %s-hand freeze pose config path=%s model=%s; using temporary runtime capture because the side section could not be mapped",
+                        HooksNativeViewmodelHandsOnlyFreezePoseSideName(keepSide.side),
+                        HooksNativeViewmodelHandsOnlyFreezePoseConfigPath(),
+                        lowerModel.c_str());
+                }
+                else if (!HooksNativeViewmodelHandsOnlyWriteFreezePoseConfig(
+                            vr,
+                            lowerModel,
+                            boneNames,
+                            boneParents,
+                            numBones,
+                            keepSide,
+                            cache))
                 {
                     Game::logMsg(
                         "[VR][NativeHandsOnly] failed to write %s-hand freeze pose config path=%s",
