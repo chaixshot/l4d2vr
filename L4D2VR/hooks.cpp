@@ -22,6 +22,9 @@
 #include <unordered_map>
 #include <cmath>
 #include <cfloat>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <intrin.h>
 #include <cstddef>
 #ifndef WIN32_LEAN_AND_MEAN
