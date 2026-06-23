@@ -765,6 +765,7 @@ namespace
     Vector MagazineInteractionMatrixLocalVectorToWorld(
         const VrHandMatrix4& matrix,
         const Vector& localVector);
+    bool MagazineInteractionMatrixLooksRenderable(const VrHandMatrix4& matrix);
 
     VrHandMatrix4 MagazineInteractionBuildFreshHandMagazineWorld(const VR* vr)
     {
@@ -809,14 +810,14 @@ namespace
         const VR* vr,
         const VrHandMatrix4& nativeLeftHandWorld)
     {
-        if (!vr)
-            return MagazineInteractionMatrixOrigin(nativeLeftHandWorld);
-
-        const Vector palmLocalMeters(0.0f, 0.0f, 0.07f);
+        const float scale = vr ? vr->m_VRScale : 1.0f;
+        Vector palmLocalMeters(0.0f, 0.0f, 0.07f);
+        if (vr)
+            palmLocalMeters += vr->m_MagazineInteractionFreshMagazineWristAnchorOffsetMeters;
         return MagazineInteractionMatrixOrigin(nativeLeftHandWorld) +
             MagazineInteractionMatrixLocalVectorToWorld(
                 nativeLeftHandWorld,
-                palmLocalMeters * vr->m_VRScale);
+                palmLocalMeters * scale);
     }
 
     Vector MagazineInteractionFreshMagazineWristAnchorOffsetWorld(
@@ -845,6 +846,15 @@ namespace
             return false;
         }
 
+        const VrHandMatrix4 nativeLeftHandWorld =
+            MagazineInteractionBuildNativeLeftHandWorldFromController(vr, controllerWorld);
+        if (MagazineInteractionMatrixLooksRenderable(nativeLeftHandWorld))
+        {
+            outAnchorWorld =
+                MagazineInteractionNativeLeftHandPalmAnchorWorld(vr, nativeLeftHandWorld);
+            return true;
+        }
+
         VrHandMatrix4 wristWorld{};
         if (vr->GetMagazineInteractionNativeLeftWristAnchor(wristWorld))
         {
@@ -854,11 +864,8 @@ namespace
             return true;
         }
 
-        const VrHandMatrix4 nativeLeftHandWorld =
-            MagazineInteractionBuildNativeLeftHandWorldFromController(vr, controllerWorld);
-        outAnchorWorld =
-            MagazineInteractionNativeLeftHandPalmAnchorWorld(vr, nativeLeftHandWorld);
-        return true;
+        outAnchorWorld = MagazineInteractionMatrixOrigin(controllerWorld);
+        return false;
     }
 
     bool MagazineInteractionMatrixBasisLooksValid(const VrHandMatrix4& matrix)
@@ -1680,6 +1687,16 @@ namespace
         outBox.viewmodelAnchorAxisX = MagazineInteractionMatrixAxis(currentAnchorWorld, 0);
         outBox.viewmodelAnchorAxisY = MagazineInteractionMatrixAxis(currentAnchorWorld, 1);
         outBox.viewmodelAnchorAxisZ = MagazineInteractionMatrixAxis(currentAnchorWorld, 2);
+        const Vector sourcePullAxis = VrHandMath::Normalize(sourceBox.pullAxisWorld);
+        if (sourcePullAxis.Length() > 0.0001f)
+        {
+            Vector rebasedPullAxis = MagazineInteractionMatrixLocalVectorToWorld(
+                currentAnchorWorld,
+                MagazineInteractionWorldVectorToMatrixLocal(oldAnchorWorld, sourcePullAxis));
+            rebasedPullAxis = VrHandMath::Normalize(rebasedPullAxis);
+            if (rebasedPullAxis.Length() > 0.0001f)
+                outBox.pullAxisWorld = rebasedPullAxis;
+        }
         outBox.publishedAt = std::chrono::steady_clock::now();
         return true;
     }
@@ -4242,6 +4259,11 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         triggerMagazineInteractionHapticForHand(false, durationSeconds, frequency, amplitude, priority);
     };
 
+    auto leftControllerPosRelativeToHmd = [&]() -> Vector
+    {
+        return m_LeftControllerPosAbs - m_HmdPosAbs;
+    };
+
     auto updateMagazineInteractionContactHaptic = [&](
         bool& contactActive,
         bool touching,
@@ -4604,6 +4626,18 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         {
             return false;
         }
+        {
+            MagazineInteractionBoxSnapshot rebasedBox{};
+            VrHandMatrix4 rebasedWorld{};
+            if (MagazineInteractionRebaseBoxToCurrentViewmodelModelBasis(
+                    this,
+                    box,
+                    rebasedBox,
+                    rebasedWorld))
+            {
+                box = rebasedBox;
+            }
+        }
         return MagazineInteractionMatrixLooksRenderable(MagazineInteractionBuildBoxWorld(box));
     };
 
@@ -4720,7 +4754,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
     {
         m_MagazineInteractionState = MagazineInteractionManualState::HoldingBolt;
         m_MagazineInteractionLeftHandHolding = true;
-        m_MagazineInteractionBoltGrabStartLeftControllerPosAbs = m_LeftControllerPosAbs;
+        m_MagazineInteractionBoltGrabStartLeftControllerPosAbs = leftControllerPosRelativeToHmd();
         m_MagazineInteractionBoltGrabStartPullDistance = m_MagazineInteractionBoltPullDistance;
         m_MagazineInteractionBoltGrabbedAt = now;
         m_MagazineInteractionBoltPullAxisSignLocked = false;
@@ -5457,7 +5491,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_MagazineInteractionFreshPickupBasisValid = false;
         m_MagazineInteractionFreshPickupForward = {};
         m_MagazineInteractionFreshPickupRight = {};
-        m_MagazineInteractionGrabStartLeftControllerPosAbs = m_LeftControllerPosAbs;
+        m_MagazineInteractionGrabStartLeftControllerPosAbs = leftControllerPosRelativeToHmd();
         m_MagazineInteractionStarted = now;
         m_MagazineInteractionFreshGrabbedAt = {};
         m_MagazineInteractionPostInsertStarted = {};
@@ -6023,7 +6057,9 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         if (visualAxis.Length() > 0.0001f)
             m_MagazineInteractionBoltPullAxisWorld = visualAxis;
 
-        const Vector handDelta = m_LeftControllerPosAbs - m_MagazineInteractionBoltGrabStartLeftControllerPosAbs;
+        const Vector handDelta =
+            leftControllerPosRelativeToHmd() -
+            m_MagazineInteractionBoltGrabStartLeftControllerPosAbs;
         const float handPullDistance = VrHandMath::Dot(handDelta, inputAxis);
         if (!m_MagazineInteractionBoltPullAxisSignLocked)
         {
@@ -6214,7 +6250,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 snappedFreshMagazineWorld,
                 freshHandAnchorLocal);
             Game::logMsg(
-                "[VR][MagazineInteraction] fresh magazine snapped to native wrist anchor from fresh magazine box distance=%.2f range=%.2f relationCaptured=%d quickAutoGrab=%d wristAnchor=%d clipOrigin=(%.2f %.2f %.2f) visibleCenter=(%.2f %.2f %.2f) handAnchor=(%.2f %.2f %.2f) targetHandAnchor=(%.2f %.2f %.2f) centerLocalOffset=(%.2f %.2f %.2f) centerLocal=(%.2f %.2f %.2f) anchorLocal=(%.2f %.2f %.2f) model=%s; move it into MagazineSocket",
+                "[VR][MagazineInteraction] fresh magazine snapped to left hand anchor from fresh magazine box distance=%.2f range=%.2f relationCaptured=%d quickAutoGrab=%d wristAnchor=%d clipOrigin=(%.2f %.2f %.2f) visibleCenter=(%.2f %.2f %.2f) handAnchor=(%.2f %.2f %.2f) targetHandAnchor=(%.2f %.2f %.2f) centerLocalOffset=(%.2f %.2f %.2f) centerLocal=(%.2f %.2f %.2f) anchorLocal=(%.2f %.2f %.2f) model=%s; move it into MagazineSocket",
                 freshGrabDistance,
                 freshGrabRange,
                 relationCaptured ? 1 : 0,
@@ -6506,7 +6542,9 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         const VrHandMatrix4 heldMagazineWorld = buildHeldMagazineWorldFromLeftHand();
         setDetachedMagazineWorld(heldMagazineWorld);
         m_MagazineInteractionLeftHandPoseActive.store(1, std::memory_order_relaxed);
-        const float handPullDistance = (m_LeftControllerPosAbs - m_MagazineInteractionGrabStartLeftControllerPosAbs).Length();
+        const float handPullDistance =
+            (leftControllerPosRelativeToHmd() -
+                m_MagazineInteractionGrabStartLeftControllerPosAbs).Length();
         const float handTriggerDistance = std::max(0.0f, m_MagazineInteractionPullTriggerMeters) * m_VRScale;
         float magazinePullDistance = 0.0f;
         const bool useInputSocket = inputSocketValid;
