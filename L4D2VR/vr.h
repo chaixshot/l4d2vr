@@ -1185,6 +1185,10 @@ public:
 	std::chrono::steady_clock::time_point m_NativeViewmodelLeftHandFreezeDueTime{};
 	std::atomic<uint32_t> m_NativeViewmodelLeftHandFreezeReady{ 0 };
 	std::atomic<uint32_t> m_NativeViewmodelLeftHandFreezeGeneration{ 1 };
+	bool m_NativeViewmodelLeftHandFreezeHasSurvivorCharacter = false;
+	int m_NativeViewmodelLeftHandFreezeSurvivorCharacter = -1;
+	bool m_NativeViewmodelHandsOnlyFreezePlaneContextActive = false;
+	std::atomic<uint32_t> m_NativeViewmodelHandsOnlyFreezePlaneGeneration{ 1 };
 	// Independent GLB + ozz-animation VR hand renderer. In queued rendering, raw D3D9 hand
 	// draws are inserted into Source's material call queue so they run at the correct eye-RT point.
 	bool m_VrHandsEnabled = false;

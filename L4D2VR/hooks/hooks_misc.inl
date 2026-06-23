@@ -8813,6 +8813,7 @@ namespace
     {
         VR* owner = nullptr;
         std::string modelName;
+        uint32_t boneLayoutSignature = 0;
         uint32_t generation = 0;
         int numBones = 0;
         int side = 0;
@@ -8837,6 +8838,7 @@ namespace
         {
             owner = nullptr;
             modelName.clear();
+            boneLayoutSignature = 0;
             generation = 0;
             numBones = 0;
             side = 0;
@@ -8864,6 +8866,29 @@ namespace
         static HooksNativeViewmodelHandsOnlyFreezeCache leftCache;
         static HooksNativeViewmodelHandsOnlyFreezeCache rightCache;
         return (side < 0) ? leftCache : rightCache;
+    }
+
+    inline uint32_t HooksNativeViewmodelHandsOnlyBuildBoneLayoutSignature(
+        const std::vector<std::string>& boneNames,
+        const std::vector<int>& boneParents,
+        int numBones)
+    {
+        uint32_t hash = 2166136261u;
+        hash = HooksFnv1aUpdate(hash, &numBones, sizeof(numBones));
+        for (int bone = 0; bone < numBones; ++bone)
+        {
+            const int parent =
+                bone < static_cast<int>(boneParents.size())
+                ? boneParents[static_cast<size_t>(bone)]
+                : -1;
+            hash = HooksFnv1aUpdate(hash, &bone, sizeof(bone));
+            hash = HooksFnv1aUpdate(hash, &parent, sizeof(parent));
+            if (bone < static_cast<int>(boneNames.size()))
+                hash = HooksFnv1aUpdateString(hash, boneNames[static_cast<size_t>(bone)]);
+            else
+                hash = HooksFnv1aUpdateString(hash, "");
+        }
+        return hash == 0 ? 1u : hash;
     }
 
     inline Vector HooksNativeViewmodelHandsOnlyResolveFreezePoseRotationOffsetDeg(VR* vr, int side)
@@ -9191,6 +9216,11 @@ namespace
 
         cache.owner = vr;
         cache.modelName = lowerModel;
+        cache.boneLayoutSignature =
+            HooksNativeViewmodelHandsOnlyBuildBoneLayoutSignature(
+                boneNames,
+                boneParents,
+                numBones);
         cache.generation = generation;
         cache.numBones = numBones;
         cache.side = keepSide.side;
@@ -9298,6 +9328,11 @@ namespace
         const float armBendScale = std::clamp(vr->m_NativeViewmodelHandsOnlyArmBendScale, 0.0f, 1.0f);
         const Vector cutRotationDeg = keepSide.cutRotationDeg;
         const bool autoCanonicalCutNormal = keepSide.autoCanonicalCutNormal;
+        const uint32_t boneLayoutSignature =
+            HooksNativeViewmodelHandsOnlyBuildBoneLayoutSignature(
+                boneNames,
+                boneParents,
+                numBones);
         const Vector freezePoseOffsetMeters = vr->m_NativeViewmodelHandsOnlyFreezePoseOffsetMeters;
         const Vector freezePoseRotationOffsetDeg =
             HooksNativeViewmodelHandsOnlyResolveFreezePoseRotationOffsetDeg(vr, keepSide.side);
@@ -9314,7 +9349,7 @@ namespace
         const bool cacheMatches =
             cache.valid &&
             cache.owner == vr &&
-            cache.modelName == lowerModel &&
+            cache.boneLayoutSignature == boneLayoutSignature &&
             cache.generation == generation &&
             cache.side == keepSide.side &&
             std::fabs(cache.armBendScale - armBendScale) <= 0.0001f &&
@@ -10434,7 +10469,7 @@ namespace
         }
 
         const uint32_t generation =
-            vr->m_NativeViewmodelLeftHandFreezeGeneration.load(std::memory_order_acquire);
+            vr->m_NativeViewmodelHandsOnlyFreezePlaneGeneration.load(std::memory_order_acquire);
         std::lock_guard<std::mutex> lock(HooksNativeViewmodelHandsOnlyFixedFreezePlaneMutex());
         HooksNativeViewmodelHandsOnlyFixedFreezePlaneLock& state =
             HooksNativeViewmodelHandsOnlyFixedFreezePlaneLockInstance(keepSide.side);

@@ -1473,7 +1473,31 @@ void VR::Update()
 
     {
         const bool inGame = m_Game->m_EngineClient->IsInGame();
-        auto resetNativeLeftHandFreeze = [&]()
+        auto setNativeLeftHandFreezePlaneContextActive = [&](bool active)
+            {
+                if (m_NativeViewmodelHandsOnlyFreezePlaneContextActive == active)
+                    return;
+
+                m_NativeViewmodelHandsOnlyFreezePlaneContextActive = active;
+                m_NativeViewmodelHandsOnlyFreezePlaneGeneration.fetch_add(1u, std::memory_order_acq_rel);
+            };
+        auto resetNativeLeftHandFreezeForMapChange = [&]()
+            {
+                const bool hadState =
+                    m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev ||
+                    m_NativeViewmodelLeftHandFreezePending ||
+                    m_NativeViewmodelLeftHandFreezeReady.load(std::memory_order_acquire) != 0u ||
+                    m_NativeViewmodelLeftHandFreezeHasSurvivorCharacter;
+                m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev = false;
+                m_NativeViewmodelLeftHandFreezePending = false;
+                m_NativeViewmodelLeftHandFreezeDueTime = {};
+                m_NativeViewmodelLeftHandFreezeReady.store(0u, std::memory_order_release);
+                m_NativeViewmodelLeftHandFreezeHasSurvivorCharacter = false;
+                m_NativeViewmodelLeftHandFreezeSurvivorCharacter = -1;
+                if (hadState)
+                    m_NativeViewmodelLeftHandFreezeGeneration.fetch_add(1u, std::memory_order_acq_rel);
+            };
+        auto invalidateNativeLeftHandFreezeForCharacterChange = [&](int oldCharacter, int newCharacter)
             {
                 const bool hadState =
                     m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev ||
@@ -1485,6 +1509,14 @@ void VR::Update()
                 m_NativeViewmodelLeftHandFreezeReady.store(0u, std::memory_order_release);
                 if (hadState)
                     m_NativeViewmodelLeftHandFreezeGeneration.fetch_add(1u, std::memory_order_acq_rel);
+                m_NativeViewmodelHandsOnlyFreezePlaneGeneration.fetch_add(1u, std::memory_order_acq_rel);
+                if (m_VrHandsDebugLog)
+                {
+                    Game::logMsg(
+                        "[VR][NativeHandsOnly] left-hand animation freeze invalidated survivorCharacter %d -> %d",
+                        oldCharacter,
+                        newCharacter);
+                }
             };
         if (!inGame)
         {
@@ -1492,7 +1524,8 @@ void VR::Update()
             m_AutoResetHadLocalPlayerPrev = false;
             m_LocalVScriptConvarsMapAuditPending = false;
             m_LocalVScriptConvarsHadLocalPlayerPrev = false;
-            resetNativeLeftHandFreeze();
+            setNativeLeftHandFreezePlaneContextActive(false);
+            resetNativeLeftHandFreezeForMapChange();
         }
         else
         {
@@ -1501,6 +1534,8 @@ void VR::Update()
             const bool hasLocalPlayer = (localPlayer != nullptr);
             const auto now = std::chrono::steady_clock::now();
             bool hasLiveLocalPlayerWithWeapon = false;
+            bool hasLocalSurvivorCharacter = false;
+            int localSurvivorCharacter = -1;
             if (hasLocalPlayer)
             {
                 const unsigned char* base = reinterpret_cast<const unsigned char*>(localPlayer);
@@ -1508,6 +1543,13 @@ void VR::Update()
                 const unsigned char lifeState = *reinterpret_cast<const unsigned char*>(base + kLifeStateOffset);
                 const int obsMode = *reinterpret_cast<const int*>(base + kObserverModeOffset);
                 C_WeaponCSBase* activeWeapon = static_cast<C_WeaponCSBase*>(localPlayer->GetActiveWeapon());
+                if (teamNum == 2)
+                {
+                    localSurvivorCharacter = *reinterpret_cast<const int*>(base + kSurvivorCharacterOffset);
+                    hasLocalSurvivorCharacter =
+                        localSurvivorCharacter >= 0 &&
+                        localSurvivorCharacter <= 16;
+                }
                 hasLiveLocalPlayerWithWeapon =
                     teamNum != 1 &&
                     lifeState == 0 &&
@@ -1518,18 +1560,30 @@ void VR::Update()
 
             const bool nativeLeftHandFreezeEnabled =
                 m_NativeViewmodelHandsOnly;
-            if (!nativeLeftHandFreezeEnabled || !hasLiveLocalPlayerWithWeapon)
+            if (hasLocalSurvivorCharacter)
             {
-                resetNativeLeftHandFreeze();
+                if (!m_NativeViewmodelLeftHandFreezeHasSurvivorCharacter)
+                {
+                    m_NativeViewmodelLeftHandFreezeHasSurvivorCharacter = true;
+                    m_NativeViewmodelLeftHandFreezeSurvivorCharacter = localSurvivorCharacter;
+                }
+                else if (m_NativeViewmodelLeftHandFreezeSurvivorCharacter != localSurvivorCharacter)
+                {
+                    const int oldCharacter = m_NativeViewmodelLeftHandFreezeSurvivorCharacter;
+                    invalidateNativeLeftHandFreezeForCharacterChange(oldCharacter, localSurvivorCharacter);
+                    m_NativeViewmodelLeftHandFreezeHasSurvivorCharacter = true;
+                    m_NativeViewmodelLeftHandFreezeSurvivorCharacter = localSurvivorCharacter;
+                }
             }
-            else
+
+            setNativeLeftHandFreezePlaneContextActive(nativeLeftHandFreezeEnabled && hasLocalPlayer);
+            if (nativeLeftHandFreezeEnabled && hasLiveLocalPlayerWithWeapon)
             {
                 if (!m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev)
                 {
                     const int freezeDelayMs =
                         (int)(std::max)(0.0f, m_NativeViewmodelLeftHandFreezeAfterMapSeconds * 1000.0f);
                     m_NativeViewmodelLeftHandFreezeReady.store(0u, std::memory_order_release);
-                    m_NativeViewmodelLeftHandFreezeGeneration.fetch_add(1u, std::memory_order_acq_rel);
 
                     if (freezeDelayMs <= 0)
                     {
