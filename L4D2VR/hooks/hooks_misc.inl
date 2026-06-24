@@ -6769,6 +6769,13 @@ namespace
                 : Vector(0.30f, 0.14f, -0.94f));
     }
 
+    inline Vector HooksNativeViewmodelHandsOnlyAutoReferenceCutRotationDeg(int side)
+    {
+        return (side < 0)
+            ? Vector(0.0f, -25.0f, 0.0f)
+            : Vector(8.0f, -25.0f, 0.0f);
+    }
+
     inline Vector HooksNativeViewmodelHandsOnlyRotateVectorBetweenNormals(
         const Vector& fromNormal,
         const Vector& toNormal,
@@ -6933,6 +6940,8 @@ namespace
         if (canonicalBase.Length() <= 0.0001f)
             return false;
 
+        const Vector referenceCutRotationDeg =
+            HooksNativeViewmodelHandsOnlyAutoReferenceCutRotationDeg(side);
         const vr_vm_stabilize::Mat3x4 ignoredHandBone{};
         const Vector canonicalCut =
             HooksNativeViewmodelHandsOnlyApplyCutNormalRotation(
@@ -6940,7 +6949,7 @@ namespace
                 ignoredHandBone,
                 canonicalBase,
                 side,
-                cutRotationDeg);
+                referenceCutRotationDeg);
         if (canonicalCut.Length() <= 0.0001f)
             return false;
 
@@ -6951,6 +6960,24 @@ namespace
         outNormal = HooksNormalizeVector(outNormal, currentBase);
         if (outNormal.Length() <= 0.0001f)
             return false;
+        const Vector userDeltaRotationDeg(
+            cutRotationDeg.x - referenceCutRotationDeg.x,
+            cutRotationDeg.y - referenceCutRotationDeg.y,
+            cutRotationDeg.z - referenceCutRotationDeg.z);
+        if (std::fabs(userDeltaRotationDeg.x) > 0.0001f ||
+            std::fabs(userDeltaRotationDeg.y) > 0.0001f ||
+            std::fabs(userDeltaRotationDeg.z) > 0.0001f)
+        {
+            outNormal = HooksNativeViewmodelHandsOnlyApplyCutNormalRotation(
+                vr,
+                ignoredHandBone,
+                outNormal,
+                side,
+                userDeltaRotationDeg);
+            outNormal = HooksNormalizeVector(outNormal, currentBase);
+            if (outNormal.Length() <= 0.0001f)
+                return false;
+        }
         if (DotProduct(outNormal, currentBase) < 0.0f)
             outNormal *= -1.0f;
 
@@ -6967,7 +6994,7 @@ namespace
             if (shouldLog)
             {
                 Game::logMsg(
-                    "[VR][NativeHandsOnly] auto canonical cut normal model=\"%s\" side=%s base=(%.2f %.2f %.2f) ref=(%.2f %.2f %.2f) refCut=(%.2f %.2f %.2f) normal=(%.2f %.2f %.2f) rotation=(%.2f %.2f %.2f)",
+                    "[VR][NativeHandsOnly] auto canonical cut normal model=\"%s\" side=%s base=(%.2f %.2f %.2f) ref=(%.2f %.2f %.2f) refCut=(%.2f %.2f %.2f) normal=(%.2f %.2f %.2f) rotation=(%.2f %.2f %.2f) autoRefRotation=(%.2f %.2f %.2f) userDelta=(%.2f %.2f %.2f)",
                     lowerModel.c_str(),
                     side < 0 ? "left" : "right",
                     currentBase.x,
@@ -6984,7 +7011,13 @@ namespace
                     outNormal.z,
                     cutRotationDeg.x,
                     cutRotationDeg.y,
-                    cutRotationDeg.z);
+                    cutRotationDeg.z,
+                    referenceCutRotationDeg.x,
+                    referenceCutRotationDeg.y,
+                    referenceCutRotationDeg.z,
+                    userDeltaRotationDeg.x,
+                    userDeltaRotationDeg.y,
+                    userDeltaRotationDeg.z);
             }
         }
 
@@ -11097,11 +11130,7 @@ namespace
         if (!state.valid ||
             state.owner != vr ||
             state.generation != generation ||
-            state.numBones != numBones ||
             state.side != side ||
-            state.hand != keepSide.hand ||
-            state.wrist != keepSide.wrist ||
-            state.forearm != keepSide.forearm ||
             !HooksNativeViewmodelHandsOnlyMatrixFinite(state.targetAnchor) ||
             !HooksNativeViewmodelHandsOnlyPlaneFinite(state.wristPlaneLocal))
         {
@@ -11112,12 +11141,12 @@ namespace
             vr ? vr->m_NativeViewmodelHandsOnlyArmBendScale : 1.0f,
             0.0f,
             1.0f);
-        return std::fabs(state.armBendScale - armBendScale) <= 0.0001f &&
+        const bool configMatches =
+            std::fabs(state.armBendScale - armBendScale) <= 0.0001f &&
             HooksNativeViewmodelHandsOnlyVectorNearlyEqual(
                 state.cutRotationDeg,
                 keepSide.cutRotationDeg,
                 0.0001f) &&
-            state.autoCanonicalCutNormal == keepSide.autoCanonicalCutNormal &&
             HooksNativeViewmodelHandsOnlyVectorNearlyEqual(
                 state.freezePoseOffsetMeters,
                 vr->m_NativeViewmodelHandsOnlyFreezePoseOffsetMeters,
@@ -11134,6 +11163,17 @@ namespace
                 state.leftPoseRotationOffsetDeg,
                 vr->m_NativeViewmodelLeftHandPoseRotationOffsetDeg,
                 0.0001f);
+        if (!configMatches)
+            return false;
+
+        if (vr && vr->m_NativeViewmodelLeftHandFreezeReady.load(std::memory_order_acquire) != 0u)
+            return true;
+
+        return state.numBones == numBones &&
+            state.hand == keepSide.hand &&
+            state.wrist == keepSide.wrist &&
+            state.forearm == keepSide.forearm &&
+            state.autoCanonicalCutNormal == keepSide.autoCanonicalCutNormal;
     }
 
     inline bool HooksNativeViewmodelHandsOnlyBuildDeltaToTargetAnchor(

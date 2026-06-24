@@ -1144,8 +1144,8 @@ public:
 	float m_NativeViewmodelHandsOnlyTrimUnits = 0.0f;
 	float m_NativeViewmodelHandsOnlyArmBendScale = 1.0f;
 	Vector m_NativeViewmodelHandsOnlyCutRotationDeg = { 0.0f, 0.0f, 0.0f };
-	Vector m_NativeViewmodelHandsOnlyLeftCutRotationDeg = { 0.0f, -20.0f, 0.0f };
-	Vector m_NativeViewmodelHandsOnlyRightCutRotationDeg = { 0.0f, -25.0f, 20.0f };
+	Vector m_NativeViewmodelHandsOnlyLeftCutRotationDeg = { 0.0f, -25.0f, 0.0f };
+	Vector m_NativeViewmodelHandsOnlyRightCutRotationDeg = { 8.0f, -25.0f, 0.0f };
 	bool m_NativeViewmodelHandsOnlyAutoCutRotation = true;
 	struct NativeViewmodelHandsOnlyCutRotationOverride
 	{
@@ -1159,7 +1159,7 @@ public:
 	std::vector<NativeViewmodelHandsOnlyCutRotationOverride> m_NativeViewmodelHandsOnlyCutRotationOverrides;
 	float m_NativeViewmodelRightHandAnimationKeepUnits = 4.0f;
 	float m_NativeViewmodelLeftHandFreezeAfterMapSeconds = 0.0f;
-	bool m_NativeViewmodelHandsOnlyFreezePoseLock = false;
+	bool m_NativeViewmodelHandsOnlyFreezePoseLock = true;
 	Vector m_NativeViewmodelHandsOnlyFreezePoseOffsetMeters = { 0.55f, 0.18f, -0.18f };
 	Vector m_NativeViewmodelHandsOnlyFreezePoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	Vector m_NativeViewmodelHandsOnlyLeftFreezePoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
