@@ -65,6 +65,7 @@ public:
         const Vector& currentBoltBoxMaxs,
         bool currentBoltBoxUseViewmodelLayer,
         bool leftHandMagazineGripPose,
+        const std::array<float, 5>& gloveFingerMaxCurl,
         VrHandDrawPass drawPass);
 
     bool DrawMagazineDebugBoxesForEye(
@@ -134,6 +135,7 @@ private:
         bool rightUseViewmodelPose,
         bool leftHanded,
         bool leftHandMagazineGripPose,
+        const std::array<float, 5>& gloveFingerMaxCurl,
         bool debugLog);
     bool DrawControllerlessTestPose(
         IDirect3DDevice9* device,
@@ -149,7 +151,11 @@ private:
         const Vector& rightHandPoseOffsetMeters,
         const Vector& rightHandPoseRotationOffsetDeg,
         VrHandDrawPass drawPass);
-    bool BuildRightViewmodelPalette(const VrHandVmPose::Snapshot& snapshot, int targetHandIndex, std::vector<VrHandMatrixRows3x4>& outPalette);
+    bool BuildRightViewmodelPalette(
+        const VrHandVmPose::Snapshot& snapshot,
+        int targetHandIndex,
+        const std::array<float, 5>& gloveFingerMaxCurl,
+        std::vector<VrHandMatrixRows3x4>& outPalette);
     bool BuildRightViewmodelWorld(
         float sourceUnitsPerMeter,
         float modelScale,

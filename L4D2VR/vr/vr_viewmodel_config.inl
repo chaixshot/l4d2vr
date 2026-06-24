@@ -1407,6 +1407,26 @@ void VR::ParseConfigFile()
         1.0f);
     const bool vrHandsEntryEnabled = getBool("VrHandsEnabled", false);
     m_VrHandsGlovesEnabled = getBool("VrHandsGlovesEnabled", false);
+    m_VrHandsGloveFingerMaxCurl[0] = std::clamp(
+        getFloat("VrHandsGloveThumbMaxCurl", m_VrHandsGloveFingerMaxCurl[0]),
+        0.0f,
+        1.0f);
+    m_VrHandsGloveFingerMaxCurl[1] = std::clamp(
+        getFloat("VrHandsGloveIndexMaxCurl", m_VrHandsGloveFingerMaxCurl[1]),
+        0.0f,
+        1.0f);
+    m_VrHandsGloveFingerMaxCurl[2] = std::clamp(
+        getFloat("VrHandsGloveMiddleMaxCurl", m_VrHandsGloveFingerMaxCurl[2]),
+        0.0f,
+        1.0f);
+    m_VrHandsGloveFingerMaxCurl[3] = std::clamp(
+        getFloat("VrHandsGloveRingMaxCurl", m_VrHandsGloveFingerMaxCurl[3]),
+        0.0f,
+        1.0f);
+    m_VrHandsGloveFingerMaxCurl[4] = std::clamp(
+        getFloat("VrHandsGlovePinkyMaxCurl", m_VrHandsGloveFingerMaxCurl[4]),
+        0.0f,
+        1.0f);
     m_VrHandsEnabled = vrHandsEntryEnabled && m_VrHandsGlovesEnabled;
     if (m_VrHandsEnabled)
     {

@@ -61,6 +61,13 @@ namespace
     constexpr std::uint32_t kMagazineDebugBoltBoxColorArgb = 0xFF4A8CFFu;
     constexpr float kVrHandsVmCurlDeadZoneRadians = 0.08f;
 
+    float ResolveVrHandsFingerMaxCurl(const std::array<float, 5>& fingerMaxCurl, size_t finger)
+    {
+        if (finger >= fingerMaxCurl.size())
+            return 1.0f;
+        return std::clamp(fingerMaxCurl[finger], 0.0f, 1.0f);
+    }
+
     float ResolveVrHandsSceneAspect(const CViewSetup& view)
     {
         float aspect = view.m_flAspectRatio;
@@ -881,6 +888,7 @@ bool VrHandSystem::EnsureInitialized(vr::IVRInput* input, bool rightUseViewmodel
 bool VrHandSystem::BuildRightViewmodelPalette(
     const VrHandVmPose::Snapshot& snapshot,
     int targetHandIndex,
+    const std::array<float, 5>& gloveFingerMaxCurl,
     std::vector<VrHandMatrixRows3x4>& outPalette)
 {
     outPalette.clear();
@@ -1036,6 +1044,10 @@ bool VrHandSystem::BuildRightViewmodelPalette(
         std::array<float, 3> curl{};
         if (!ComputeVrHandsVmFingerCurl(snapshot, palmInverse, kSources[finger], curl))
             continue;
+        const float maxCurl = ResolveVrHandsFingerMaxCurl(gloveFingerMaxCurl, finger);
+        curl[0] = std::min(curl[0], kSources[finger].maxProximal * maxCurl);
+        curl[1] = std::min(curl[1], kSources[finger].maxMiddle * maxCurl);
+        curl[2] = std::min(curl[2], kSources[finger].maxDistal * maxCurl);
 
         const char* joints[] = { chains[finger].joint0, chains[finger].joint1, chains[finger].joint2 };
         bool applied = true;
@@ -1154,6 +1166,7 @@ void VrHandSystem::UpdatePoses(
     bool rightUseViewmodelPose,
     bool leftHanded,
     bool leftHandMagazineGripPose,
+    const std::array<float, 5>& gloveFingerMaxCurl,
     bool debugLog)
 {
     if (m_RightViewmodelPoseWasEnabled != rightUseViewmodelPose)
@@ -1198,7 +1211,7 @@ void VrHandSystem::UpdatePoses(
         }
         const VrHandFingerCurlOverride* fingerCurlOverride =
             (handIndex == magazineGripPhysicalHandIndex && leftHandMagazineGripPose) ? &magazineGripOverride : nullptr;
-        if (!hand.skeleton.BuildSkinningPalette(hand.asset, hand.palette, error, fingerCurlOverride))
+        if (!hand.skeleton.BuildSkinningPalette(hand.asset, hand.palette, error, fingerCurlOverride, &gloveFingerMaxCurl))
         {
             m_DependencyUnavailable = true;
             continue;
@@ -1212,7 +1225,7 @@ void VrHandSystem::UpdatePoses(
         const int viewmodelPoseHandIndex = leftHanded ? 0 : 1;
         VrHandVmPose::Snapshot snapshot{};
         if (VrHandVmPose::GetLatest(snapshot, kVrHandsVmPoseMaxAgeMs) &&
-            BuildRightViewmodelPalette(snapshot, viewmodelPoseHandIndex, m_RightViewmodelPalette))
+            BuildRightViewmodelPalette(snapshot, viewmodelPoseHandIndex, gloveFingerMaxCurl, m_RightViewmodelPalette))
         {
             m_RightViewmodelPaletteValid = true;
             hasRightViewmodelPose = true;
@@ -1290,6 +1303,7 @@ bool VrHandSystem::DrawForEye(
     const Vector& currentBoltBoxMaxs,
     bool currentBoltBoxUseViewmodelLayer,
     bool leftHandMagazineGripPose,
+    const std::array<float, 5>& gloveFingerMaxCurl,
     VrHandDrawPass drawPass)
 {
     if (m_DependencyUnavailable || !device || !input)
@@ -1412,7 +1426,7 @@ bool VrHandSystem::DrawForEye(
         };
 
     if (needsPoseUpdate())
-        UpdatePoses(input, motionRangeWithoutController, rightUseViewmodelPose, leftHanded, leftHandMagazineGripPose, debugLog);
+        UpdatePoses(input, motionRangeWithoutController, rightUseViewmodelPose, leftHanded, leftHandMagazineGripPose, gloveFingerMaxCurl, debugLog);
 
     const VrHandMatrix4 sceneProjection = BuildVrHandsProjection(view, false);
     const bool leftHandUsesMagazineViewmodelLayer =
@@ -1600,6 +1614,7 @@ bool VrHandSystem::DrawControllerlessTestPose(
     bool drewAny = false;
     const Vector positionOffsets[2] = { leftHandPoseOffsetMeters, rightHandPoseOffsetMeters };
     const Vector rotationOffsets[2] = { leftHandPoseRotationOffsetDeg, rightHandPoseRotationOffsetDeg };
+    const std::array<float, 5> defaultGloveFingerMaxCurl = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
     auto physicalHandIndexForGameplay = [&](int gameplayHandIndex) -> int
         {
             return leftHanded ? (1 - gameplayHandIndex) : gameplayHandIndex;
@@ -1623,7 +1638,7 @@ bool VrHandSystem::DrawControllerlessTestPose(
         {
             VrHandVmPose::Snapshot snapshot{};
             if (!VrHandVmPose::GetLatest(snapshot, kVrHandsVmPoseMaxAgeMs) ||
-                !BuildRightViewmodelPalette(snapshot, physicalHandIndex, bindPalette))
+                !BuildRightViewmodelPalette(snapshot, physicalHandIndex, defaultGloveFingerMaxCurl, bindPalette))
             {
                 continue;
             }

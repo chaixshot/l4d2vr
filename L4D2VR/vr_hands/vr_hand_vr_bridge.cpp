@@ -7094,6 +7094,7 @@ bool VR::DrawVrHandsForEyeImmediate(
             currentBoltBoxMaxs,
             currentBoltBoxUseViewmodelLayer,
             m_MagazineInteractionLeftHandPoseActive.load(std::memory_order_relaxed) != 0,
+            m_VrHandsGloveFingerMaxCurl,
             drawPass);
     }
     else

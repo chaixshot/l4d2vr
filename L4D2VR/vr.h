@@ -1193,6 +1193,7 @@ public:
 	// draws are inserted into Source's material call queue so they run at the correct eye-RT point.
 	bool m_VrHandsEnabled = false;
 	bool m_VrHandsGlovesEnabled = false;
+	std::array<float, 5> m_VrHandsGloveFingerMaxCurl = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
 	bool m_VrHandsGlovesRuntimeFallback = false;
 	bool m_VrHandsGlovesFallbackLogged = false;
 	bool m_VrHandsMotionRangeWithoutController = false;

@@ -22,7 +22,8 @@ public:
         const VrHandMeshAsset& asset,
         std::vector<VrHandMatrixRows3x4>& outPalette,
         std::string& outError,
-        const VrHandFingerCurlOverride* fingerCurlOverride = nullptr) const;
+        const VrHandFingerCurlOverride* fingerCurlOverride = nullptr,
+        const std::array<float, 5>* fingerMaxCurl = nullptr) const;
 
     bool IsInitialized() const;
     bool HasPose() const;
