@@ -160,11 +160,6 @@ namespace
         { "HideArms", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE8\xB0\x83\xE8\xAF\x95", "\xE9\x9A\x90\xE8\x97\x8F\xE6\x89\x8B\xE8\x87\x82", 0.0f, 0.0f, "false" },
         { "VrHandsEnabled", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR \xE5\x8F\x8C\xE6\x89\x8B", 0.0f, 0.0f, "false" },
         { "VrHandsGlovesEnabled", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR \xE6\x89\x8B\xE5\xA5\x97", 0.0f, 0.0f, "false" },
-        { "VrHandsGloveThumbMaxCurl", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "\x56\x52\x20\xE6\x89\x8B\xE5\xA5\x97\xE6\x8B\x87\xE6\x8C\x87\xE6\x9C\x80\xE5\xA4\xA7\xE5\xBC\xAF\xE6\x9B\xB2", 0.0f, 1.0f, "1.0" },
-        { "VrHandsGloveIndexMaxCurl", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "\x56\x52\x20\xE6\x89\x8B\xE5\xA5\x97\xE9\xA3\x9F\xE6\x8C\x87\xE6\x9C\x80\xE5\xA4\xA7\xE5\xBC\xAF\xE6\x9B\xB2", 0.0f, 1.0f, "1.0" },
-        { "VrHandsGloveMiddleMaxCurl", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "\x56\x52\x20\xE6\x89\x8B\xE5\xA5\x97\xE4\xB8\xAD\xE6\x8C\x87\xE6\x9C\x80\xE5\xA4\xA7\xE5\xBC\xAF\xE6\x9B\xB2", 0.0f, 1.0f, "1.0" },
-        { "VrHandsGloveRingMaxCurl", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "\x56\x52\x20\xE6\x89\x8B\xE5\xA5\x97\xE6\x97\xA0\xE5\x90\x8D\xE6\x8C\x87\xE6\x9C\x80\xE5\xA4\xA7\xE5\xBC\xAF\xE6\x9B\xB2", 0.0f, 1.0f, "1.0" },
-        { "VrHandsGlovePinkyMaxCurl", CfgOptionType::Float, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "\x56\x52\x20\xE6\x89\x8B\xE5\xA5\x97\xE5\xB0\x8F\xE6\x8C\x87\xE6\x9C\x80\xE5\xA4\xA7\xE5\xBC\xAF\xE6\x9B\xB2", 0.0f, 1.0f, "1.0" },
         { "MagazineInteractionEnabled", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "\xE6\x89\x8B\xE5\x8A\xA8\xE6\x8D\xA2\xE5\xBC\xB9", 0.0f, 0.0f, "false" },
         { "MagazineInteractionQuickReloadMode", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Quick Reload Mode", 0.0f, 0.0f, "false" },
         { "MagazineBoxDebugEnabled", CfgOptionType::Bool, "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "\xE5\xBC\xB9\xE5\x8C\xA3\xE8\xB0\x83\xE8\xAF\x95\xE6\xA1\x86", 0.0f, 0.0f, "false" },
@@ -370,11 +365,6 @@ namespace
         { "HideArms", "Hands / Debug", "\346\211\213\351\203\250 / \350\260\203\350\257\225", "Hide Arms", "\351\232\220\350\227\217\346\211\213\350\207\202", "Hides in-game arm models while keeping weapons.", "\351\232\220\350\227\217\346\270\270\346\210\217\344\270\255\347\232\204\346\211\213\350\207\202\346\250\241\345\236\213\357\274\214\344\273\205\344\277\235\347\225\231\346\255\246\345\231\250\343\200\202", "", "" },
         { "VrHandsEnabled", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR Hands", "VR \xE5\x8F\x8C\xE6\x89\x8B", "Enables the VR hand system. By default this uses the game's built-in hand mesh.", "", "Enable VR Gloves below only when you want separate GLB/SteamVR glove models.", "" },
         { "VrHandsGlovesEnabled", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR Gloves", "VR \xE6\x89\x8B\xE5\xA5\x97", "Uses separate GLB/SteamVR glove models instead of the game's built-in hand mesh.", "", "Requires VR Hands. Leave disabled to use the built-in hand mesh.", "" },
-        { "VrHandsGloveThumbMaxCurl", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR Glove Thumb Max Curl", "\x56\x52\x20\xE6\x89\x8B\xE5\xA5\x97\xE6\x8B\x87\xE6\x8C\x87\xE6\x9C\x80\xE5\xA4\xA7\xE5\xBC\xAF\xE6\x9B\xB2", "Caps how far the thumb can curl on the separate glove model.", "\xE9\x99\x90\xE5\x88\xB6\xE5\xAF\xB9\xE5\xBA\x94\xE6\x89\x8B\xE6\x8C\x87\xE6\x8F\xA1\xE6\x8B\xB3\xE6\x97\xB6\xE7\x9A\x84\xE6\x9C\x80\xE5\xA4\xA7\xE5\xBC\xAF\xE6\x9B\xB2\xE6\xAF\x94\xE4\xBE\x8B\xE3\x80\x82", "1.0 keeps the current motion; 0.75 limits it to 75% of the current maximum.", "\x31\x2E\x30\x20\xE4\xBF\x9D\xE6\x8C\x81\xE5\xBD\x93\xE5\x89\x8D\xE5\x8A\xA8\xE4\xBD\x9C\xEF\xBC\x8C\x30\x2E\x37\x35\x20\xE8\xA1\xA8\xE7\xA4\xBA\xE6\x9C\x80\xE5\xA4\x9A\xE5\xBC\xAF\xE5\x88\xB0\xE5\xBD\x93\xE5\x89\x8D\xE7\x9A\x84\x20\x37\x35\x25\xE3\x80\x82" },
-        { "VrHandsGloveIndexMaxCurl", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR Glove Index Max Curl", "\x56\x52\x20\xE6\x89\x8B\xE5\xA5\x97\xE9\xA3\x9F\xE6\x8C\x87\xE6\x9C\x80\xE5\xA4\xA7\xE5\xBC\xAF\xE6\x9B\xB2", "Caps how far the index finger can curl on the separate glove model.", "\xE9\x99\x90\xE5\x88\xB6\xE5\xAF\xB9\xE5\xBA\x94\xE6\x89\x8B\xE6\x8C\x87\xE6\x8F\xA1\xE6\x8B\xB3\xE6\x97\xB6\xE7\x9A\x84\xE6\x9C\x80\xE5\xA4\xA7\xE5\xBC\xAF\xE6\x9B\xB2\xE6\xAF\x94\xE4\xBE\x8B\xE3\x80\x82", "1.0 keeps the current motion; 0.75 limits it to 75% of the current maximum.", "\x31\x2E\x30\x20\xE4\xBF\x9D\xE6\x8C\x81\xE5\xBD\x93\xE5\x89\x8D\xE5\x8A\xA8\xE4\xBD\x9C\xEF\xBC\x8C\x30\x2E\x37\x35\x20\xE8\xA1\xA8\xE7\xA4\xBA\xE6\x9C\x80\xE5\xA4\x9A\xE5\xBC\xAF\xE5\x88\xB0\xE5\xBD\x93\xE5\x89\x8D\xE7\x9A\x84\x20\x37\x35\x25\xE3\x80\x82" },
-        { "VrHandsGloveMiddleMaxCurl", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR Glove Middle Max Curl", "\x56\x52\x20\xE6\x89\x8B\xE5\xA5\x97\xE4\xB8\xAD\xE6\x8C\x87\xE6\x9C\x80\xE5\xA4\xA7\xE5\xBC\xAF\xE6\x9B\xB2", "Caps how far the middle finger can curl on the separate glove model.", "\xE9\x99\x90\xE5\x88\xB6\xE5\xAF\xB9\xE5\xBA\x94\xE6\x89\x8B\xE6\x8C\x87\xE6\x8F\xA1\xE6\x8B\xB3\xE6\x97\xB6\xE7\x9A\x84\xE6\x9C\x80\xE5\xA4\xA7\xE5\xBC\xAF\xE6\x9B\xB2\xE6\xAF\x94\xE4\xBE\x8B\xE3\x80\x82", "1.0 keeps the current motion; 0.75 limits it to 75% of the current maximum.", "\x31\x2E\x30\x20\xE4\xBF\x9D\xE6\x8C\x81\xE5\xBD\x93\xE5\x89\x8D\xE5\x8A\xA8\xE4\xBD\x9C\xEF\xBC\x8C\x30\x2E\x37\x35\x20\xE8\xA1\xA8\xE7\xA4\xBA\xE6\x9C\x80\xE5\xA4\x9A\xE5\xBC\xAF\xE5\x88\xB0\xE5\xBD\x93\xE5\x89\x8D\xE7\x9A\x84\x20\x37\x35\x25\xE3\x80\x82" },
-        { "VrHandsGloveRingMaxCurl", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR Glove Ring Max Curl", "\x56\x52\x20\xE6\x89\x8B\xE5\xA5\x97\xE6\x97\xA0\xE5\x90\x8D\xE6\x8C\x87\xE6\x9C\x80\xE5\xA4\xA7\xE5\xBC\xAF\xE6\x9B\xB2", "Caps how far the ring finger can curl on the separate glove model.", "\xE9\x99\x90\xE5\x88\xB6\xE5\xAF\xB9\xE5\xBA\x94\xE6\x89\x8B\xE6\x8C\x87\xE6\x8F\xA1\xE6\x8B\xB3\xE6\x97\xB6\xE7\x9A\x84\xE6\x9C\x80\xE5\xA4\xA7\xE5\xBC\xAF\xE6\x9B\xB2\xE6\xAF\x94\xE4\xBE\x8B\xE3\x80\x82", "1.0 keeps the current motion; 0.75 limits it to 75% of the current maximum.", "\x31\x2E\x30\x20\xE4\xBF\x9D\xE6\x8C\x81\xE5\xBD\x93\xE5\x89\x8D\xE5\x8A\xA8\xE4\xBD\x9C\xEF\xBC\x8C\x30\x2E\x37\x35\x20\xE8\xA1\xA8\xE7\xA4\xBA\xE6\x9C\x80\xE5\xA4\x9A\xE5\xBC\xAF\xE5\x88\xB0\xE5\xBD\x93\xE5\x89\x8D\xE7\x9A\x84\x20\x37\x35\x25\xE3\x80\x82" },
-        { "VrHandsGlovePinkyMaxCurl", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "VR Glove Pinky Max Curl", "\x56\x52\x20\xE6\x89\x8B\xE5\xA5\x97\xE5\xB0\x8F\xE6\x8C\x87\xE6\x9C\x80\xE5\xA4\xA7\xE5\xBC\xAF\xE6\x9B\xB2", "Caps how far the pinky can curl on the separate glove model.", "\xE9\x99\x90\xE5\x88\xB6\xE5\xAF\xB9\xE5\xBA\x94\xE6\x89\x8B\xE6\x8C\x87\xE6\x8F\xA1\xE6\x8B\xB3\xE6\x97\xB6\xE7\x9A\x84\xE6\x9C\x80\xE5\xA4\xA7\xE5\xBC\xAF\xE6\x9B\xB2\xE6\xAF\x94\xE4\xBE\x8B\xE3\x80\x82", "1.0 keeps the current motion; 0.75 limits it to 75% of the current maximum.", "\x31\x2E\x30\x20\xE4\xBF\x9D\xE6\x8C\x81\xE5\xBD\x93\xE5\x89\x8D\xE5\x8A\xA8\xE4\xBD\x9C\xEF\xBC\x8C\x30\x2E\x37\x35\x20\xE8\xA1\xA8\xE7\xA4\xBA\xE6\x9C\x80\xE5\xA4\x9A\xE5\xBC\xAF\xE5\x88\xB0\xE5\xBD\x93\xE5\x89\x8D\xE7\x9A\x84\x20\x37\x35\x25\xE3\x80\x82" },
         { "MagazineInteractionEnabled", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Manual Reload", "\xE6\x89\x8B\xE5\x8A\xA8\xE6\x8D\xA2\xE5\xBC\xB9", "Enables physical magazine and shell reload interactions driven by VR hands.", "", "Requires VR Hands. Detachable magazines and shotguns use different physical reload flows.", "" },
         { "MagazineInteractionQuickReloadMode", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Quick Reload Mode", "\xE5\xBF\xAB\xE9\x80\x9F\xE6\x8D\xA2\xE5\xBC\xB9\xE6\xA8\xA1\xE5\xBC\x8F", "After the old magazine is removed, touching a spare magazine auto-attaches it to the off hand. Tactical reloads auto-run the bolt or slide after insertion.", "\xE6\x8B\x94\xE4\xB8\x8B\xE6\x97\xA7\xE5\xBC\xB9\xE5\x8C\xA3\xE5\x90\x8E\xEF\xBC\x8C\xE5\x89\xAF\xE6\x89\x8B\xE7\xA2\xB0\xE5\x88\xB0\xE5\xA4\x87\xE7\x94\xA8\xE5\xBC\xB9\xE5\x8C\xA3\xE4\xBC\x9A\xE8\x87\xAA\xE5\x8A\xA8\xE5\x90\xB8\xE9\x99\x84\xEF\xBC\x9B\xE6\x88\x98\xE6\x9C\xAF\xE6\x8D\xA2\xE5\xBC\xB9\xE6\x8F\x92\xE5\x85\xA5\xE5\x90\x8E\xE4\xBC\x9A\xE8\x87\xAA\xE5\x8A\xA8\xE6\x8B\x89\xE5\x8A\xA8\xE6\x9E\xAA\xE6\xA0\x93\xE6\x88\x96\xE6\xBB\x91\xE5\xA5\x97\xE3\x80\x82", "Use it when you want fewer grip-button steps during reloads.", "" },
         { "MagazineBoxDebugEnabled", "Hands / Reload", "\xE6\x89\x8B\xE9\x83\xA8 / \xE6\x8D\xA2\xE5\xBC\xB9", "Magazine Debug Boxes", "\xE5\xBC\xB9\xE5\x8C\xA3\xE8\xB0\x83\xE8\xAF\x95\xE6\xA1\x86", "Shows the magazine, socket, and pickup debug boxes used by manual reload.", "", "Enable only while tuning weapon bones or socket placement.", "" },
@@ -546,6 +536,8 @@ namespace
         int calibrationBoltActualDirection = 5;
         Vector calibrationBoltPullAxisLocal = { 0.0f, 0.0f, 1.0f };
         bool calibrationBoltPullAxisLocalValid = false;
+        std::string calibrationBoltPullFirstRunBlockedProfileKey;
+        bool calibrationBoltPullFirstRunSaveSkipped = false;
         std::string status; // Set by CfgLoad/CfgToggleOpen so it follows the current UI language.
         std::string configPath;
         std::vector<CfgOverlayLine> lines;
@@ -1408,15 +1400,9 @@ namespace
             return CfgIsEnabled(s, "MotionGesturesEnabled", true);
 
         const bool vrHandsEntryEnabled = CfgIsEnabled(s, "VrHandsEnabled", false);
-        const bool vrHandsGlovesEnabled =
-            vrHandsEntryEnabled && CfgIsEnabled(s, "VrHandsGlovesEnabled", false);
 
         if (std::strcmp(key, "VrHandsGlovesEnabled") == 0)
             return vrHandsEntryEnabled;
-
-        if (CfgStartsWith(key, "VrHandsGlove") &&
-            std::strcmp(key, "VrHandsGlovesEnabled") != 0)
-            return vrHandsGlovesEnabled;
 
         if (std::strcmp(key, "MagazineInteractionQuickReloadMode") == 0)
             return CfgIsEnabled(s, "VrHandsEnabled", false) &&
@@ -1703,6 +1689,16 @@ namespace
             return std::filesystem::path();
         return std::filesystem::path(CfgDefaultCustomGunsDir()) /
             (CfgCalibrationWeaponTypeName(snapshot) + "_" + profileKey + ".txt");
+    }
+
+    static bool CfgCalibrationCustomGunProfileExists(const MagazineInteractionCalibrationSnapshot& snapshot)
+    {
+        const std::filesystem::path path = CfgCalibrationCustomGunPath(snapshot);
+        if (path.empty())
+            return false;
+
+        std::error_code ec;
+        return std::filesystem::is_regular_file(path, ec);
     }
 
     static std::string CfgCalibrationBoneToken(
@@ -2078,6 +2074,62 @@ namespace
         return ageSeconds >= 0.0f && ageSeconds <= 1.5f;
     }
 
+    static bool CfgCalibrationBoltPullFirstRunBlockedForSnapshot(
+        CfgOverlayState& s,
+        const MagazineInteractionCalibrationSnapshot& snapshot,
+        bool latchMissingProfile)
+    {
+        const std::string profileKey = CfgLower(CfgCalibrationProfileKey(snapshot));
+        if (profileKey.empty())
+            return false;
+
+        if (s.calibrationBoltPullFirstRunBlockedProfileKey == profileKey)
+            return true;
+
+        if (!latchMissingProfile || CfgCalibrationCustomGunProfileExists(snapshot))
+            return false;
+
+        s.calibrationBoltPullFirstRunBlockedProfileKey = profileKey;
+        return true;
+    }
+
+    static bool CfgCalibrationBoltPullFirstRunBlocked(CfgOverlayState& s, bool latchMissingProfile)
+    {
+        MagazineInteractionCalibrationSnapshot snapshot{};
+        if (!CfgReadFreshCalibrationSnapshotForSave(snapshot))
+            return false;
+
+        return CfgCalibrationBoltPullFirstRunBlockedForSnapshot(s, snapshot, latchMissingProfile);
+    }
+
+    static const char* CfgBoltPullFirstRunPromptTitle(const CfgOverlayState& s)
+    {
+        return s.useChinese
+            ? "\xE9\xA6\x96\xE6\xAC\xA1\xE6\xA0\xA1\xE5\x87\x86\xE5\x85\x88\xE5\xAE\x9E\xE6\x8B\x89\xE6\x9E\xAA\xE6\xA0\x93"
+            : "Pull the bolt once before first direction tuning";
+    }
+
+    static const char* CfgBoltPullFirstRunPromptBody(const CfgOverlayState& s)
+    {
+        return s.useChinese
+            ? "\xE8\xBF\x99\xE6\x98\xAF\xE5\xBD\x93\xE5\x89\x8D\xE6\x9E\xAA\xE6\xA2\xB0\xE7\x9A\x84\xE9\xA6\x96\xE6\xAC\xA1\xE6\x8D\xA2\xE5\xBC\xB9\xE6\xA0\xA1\xE5\x87\x86\xE6\xB5\x81\xE7\xA8\x8B\xE3\x80\x82\xE8\xAF\xB7\xE5\x85\x88\xE4\xBF\x9D\xE5\xAD\x98\xE5\x89\x8D\xE9\x9D\xA2\xE6\xAD\xA5\xE9\xAA\xA4\xEF\xBC\x8C\xE7\x84\xB6\xE5\x90\x8E\xE5\x9B\x9E\xE5\x88\xB0\xE6\xB8\xB8\xE6\x88\x8F\xE9\x87\x8C\xE5\xAE\x9E\xE9\x99\x85\xE6\x8B\x89\xE4\xB8\x80\xE6\xAC\xA1\xE6\x9E\xAA\xE6\xA0\x93\xEF\xBC\x9B\xE5\x86\x8D\xE6\x89\x93\xE5\xBC\x80\xE6\xA0\xA1\xE5\x87\x86\xE7\xAC\xAC\x20\x36\x20\xE6\xAD\xA5\xE8\xAE\xBE\xE5\xAE\x9A\xE6\x8B\x89\xE5\x8A\xA8\xE6\x96\xB9\xE5\x90\x91\xE3\x80\x82\xE9\xA6\x96\xE6\xAC\xA1\xE8\xBF\x9B\xE5\x85\xA5\xE7\xAC\xAC\x20\x36\x20\xE6\xAD\xA5\xE4\xB8\x8D\xE4\xBC\x9A\xE5\x86\x99\xE5\x85\xA5\xE6\x9E\xAA\xE6\xA0\x93\xE6\x8B\x89\xE5\x8A\xA8\xE6\x96\xB9\xE5\x90\x91\xE3\x80\x82"
+            : "This is the first magazine calibration pass for the current weapon. Save the earlier steps first, return to the game and physically pull the bolt once, then reopen calibration step 6 to set the pull direction. The first visit to step 6 will not write bolt pull direction values.";
+    }
+
+    static const char* CfgBoltPullFirstRunStatusText(const CfgOverlayState& s)
+    {
+        return s.useChinese
+            ? "\xE9\xA6\x96\xE6\xAC\xA1\xE6\xA0\xA1\xE5\x87\x86\xE9\x9C\x80\xE5\x85\x88\xE5\xAE\x9E\xE9\x99\x85\xE6\x8B\x89\xE4\xB8\x80\xE6\xAC\xA1\xE6\x9E\xAA\xE6\xA0\x93\xEF\xBC\x9B\xE8\xAF\xB7\xE4\xBF\x9D\xE5\xAD\x98\xE5\x89\x8D\xE9\x9D\xA2\xE6\xAD\xA5\xE9\xAA\xA4\xE5\xB9\xB6\xE5\x9B\x9E\xE5\x88\xB0\xE6\xB8\xB8\xE6\x88\x8F\xE4\xB8\xAD\xE6\x8B\x89\xE6\xA0\x93\xE5\x90\x8E\xEF\xBC\x8C\xE5\x86\x8D\xE6\x9D\xA5\xE8\xAE\xBE\xE5\xAE\x9A\xE7\xAC\xAC\x20\x36\x20\xE6\xAD\xA5\xE3\x80\x82"
+            : "First-time calibration requires one real bolt pull first. Save the earlier steps, pull the bolt in-game, then return to step 6.";
+    }
+
+    static const char* CfgBoltPullFirstRunSaveSkippedText(const CfgOverlayState& s)
+    {
+        return s.useChinese
+            ? "\xE5\xB7\xB2\xE4\xBF\x9D\xE5\xAD\x98\xE5\xBD\x93\xE5\x89\x8D\xE6\xA0\xA1\xE5\x87\x86\xEF\xBC\x9B\xE9\xA6\x96\xE6\xAC\xA1\xE6\x9E\xAA\xE6\xA0\x93\xE6\x96\xB9\xE5\x90\x91\xE6\x9C\xAA\xE5\x86\x99\xE5\x85\xA5\xE3\x80\x82\xE8\xAF\xB7\xE5\x9B\x9E\xE5\x88\xB0\xE6\xB8\xB8\xE6\x88\x8F\xE5\xAE\x9E\xE9\x99\x85\xE6\x8B\x89\xE4\xB8\x80\xE6\xAC\xA1\xE6\x9E\xAA\xE6\xA0\x93\xE5\x90\x8E\xEF\xBC\x8C\xE5\x86\x8D\xE8\xBF\x94\xE5\x9B\x9E\xE7\xAC\xAC\x20\x36\x20\xE6\xAD\xA5\xE8\xAE\xBE\xE5\xAE\x9A\xE6\x96\xB9\xE5\x90\x91\xE3\x80\x82"
+            : "Saved current calibration; first-time bolt direction was not written. Pull the bolt in-game once, then return to step 6.";
+    }
+
     static Vector CfgClampBoltPullAxisLocal(const Vector& value)
     {
         Vector axis(
@@ -2153,6 +2205,7 @@ namespace
         if (profileKey.empty())
             return 0;
 
+        s.calibrationBoltPullFirstRunSaveSkipped = false;
         int savedCount = 0;
         std::vector<std::string> customGunLines;
         customGunLines.push_back("ProfileKey=" + profileKey);
@@ -2369,7 +2422,13 @@ namespace
                 &vrState->m_MagazineInteractionBoltGrabPaddingMetersProfileOverrides);
         }
 
-        if (g_Game && g_Game->m_VR && s.calibrationStep >= 5)
+        const bool boltPullFirstRunBlocked =
+            s.calibrationStep >= 5 &&
+            CfgCalibrationBoltPullFirstRunBlockedForSnapshot(s, snapshot, true);
+        if (boltPullFirstRunBlocked)
+            s.calibrationBoltPullFirstRunSaveSkipped = true;
+
+        if (g_Game && g_Game->m_VR && s.calibrationStep >= 5 && !boltPullFirstRunBlocked)
         {
             VR* vrState = g_Game->m_VR;
             Vector boltAxis = CfgCalibrationBoltPullAxisLocal(s);
@@ -2437,6 +2496,7 @@ namespace
             s.configPath = CfgDefaultConfigPath();
 
         CfgNormalizeVrHandsDependencies(s);
+        s.calibrationBoltPullFirstRunSaveSkipped = false;
         const int savedCalibrationOverrides = CfgSaveCalibrationProfileOverrides(s);
 
         try
@@ -2534,6 +2594,8 @@ namespace
         s.status = s.useChinese ? "\345\267\262\344\277\235\345\255\230 config.txt\357\274\214\347\216\260\346\234\211\347\203\255\345\212\240\350\275\275\351\200\273\350\276\221\344\274\232\350\207\252\345\212\250\347\224\237\346\225\210\343\200\202" : "Saved config.txt. Existing hot-reload logic will apply it.";
         if (savedCalibrationOverrides > 0)
             s.status += s.useChinese ? "\345\267\262\345\206\231\345\205\245 customguns \346\240\241\345\207\206\346\226\207\344\273\266\343\200\202" : " Saved current customguns profile file.";
+        if (s.calibrationBoltPullFirstRunSaveSkipped)
+            s.status = CfgBoltPullFirstRunSaveSkippedText(s);
         s.dirty = true;
     }
 
@@ -3242,7 +3304,9 @@ namespace
             vrState->m_MagazineInteractionBoltGrabPaddingMetersProfileOverrides[profileKey] =
                 std::clamp(grabPadding, 0.0f, 0.25f);
         }
-        if (step >= 5)
+        const bool boltPullFirstRunBlocked =
+            step >= 5 && CfgCalibrationBoltPullFirstRunBlocked(s, true);
+        if (step >= 5 && !boltPullFirstRunBlocked)
         {
             vrState->m_MagazineInteractionBoltPullAxisLocalProfileOverrides[profileKey] =
                 CfgCalibrationBoltPullAxisLocal(s);
@@ -3610,6 +3674,11 @@ namespace
         if (identityChanged)
         {
             s.calibrationBoltPullAxisLocalValid = false;
+            s.calibrationBoltPullFirstRunBlockedProfileKey.clear();
+            s.calibrationBoltPullFirstRunSaveSkipped = false;
+            const std::string profileKey = CfgLower(CfgCalibrationProfileKey(snapshot));
+            if (!profileKey.empty() && !CfgCalibrationCustomGunProfileExists(snapshot))
+                s.calibrationBoltPullFirstRunBlockedProfileKey = profileKey;
             s.calibrationSeenModelFingerprint = snapshot.modelFingerprint;
             s.calibrationSeenBoneSignature = snapshot.boneSignature;
             s.calibrationSeenEntityIndex = snapshot.entityIndex;
@@ -4359,6 +4428,39 @@ namespace
         constexpr int buttonH = 28;
         constexpr int gap = 8;
 
+        if (CfgCalibrationBoltPullFirstRunBlocked(s, true))
+        {
+            CfgGdiFill(g, panelX, panelY, panelW, panelH, { 18, 21, 28 });
+            CfgGdiFrame(g, panelX, panelY, panelW, panelH, { 92, 122, 170 }, 1);
+            CfgGdiText(
+                g,
+                labelX,
+                panelY + 14,
+                940,
+                32,
+                CfgBoltPullFirstRunPromptTitle(s),
+                g.boldFont,
+                { 238, 243, 248 });
+            CfgGdiTextWrap(
+                g,
+                labelX,
+                panelY + 58,
+                1080,
+                72,
+                CfgBoltPullFirstRunPromptBody(s),
+                g.normalFont,
+                { 194, 204, 222 });
+            CfgGdiButton(
+                g,
+                labelX,
+                panelY + 136,
+                210,
+                buttonH,
+                s.useChinese ? "\xE5\x85\x88\xE4\xBF\x9D\xE5\xAD\x98\xE5\x89\x8D\xE9\x9D\xA2\xE6\xAD\xA5\xE9\xAA\xA4" : "Save earlier steps first",
+                false);
+            return;
+        }
+
         const float pull = CfgFloatValue(s, "MagazineInteractionBoltPullDistanceMeters", 0.055f);
         const float ret = CfgFloatValue(s, "MagazineInteractionBoltReturnDistanceMeters", 0.018f);
         s.calibrationBoltDesiredDirection = std::clamp(s.calibrationBoltDesiredDirection, 0, 5);
@@ -4455,6 +4557,13 @@ namespace
         constexpr int gap = 8;
         if (mx < panelX || mx >= panelX + panelW || my < panelY || my >= panelY + panelH)
             return false;
+
+        if (CfgCalibrationBoltPullFirstRunBlocked(s, true))
+        {
+            s.status = CfgBoltPullFirstRunStatusText(s);
+            s.dirty = true;
+            return true;
+        }
 
         auto hit = [&](int index, int y, int width) -> bool
             {
@@ -5923,6 +6032,11 @@ namespace
                 s.panelMode = (s.panelMode == CfgPanelMode::MagazineCalibration)
                     ? CfgPanelMode::Config
                     : CfgPanelMode::MagazineCalibration;
+                if (!enteringCalibration)
+                {
+                    s.calibrationBoltPullFirstRunBlockedProfileKey.clear();
+                    s.calibrationBoltPullFirstRunSaveSkipped = false;
+                }
                 s.hoveredItem = -1;
                 s.calibrationSeenPublishSeq = 0;
                 s.status = (s.panelMode == CfgPanelMode::MagazineCalibration)
@@ -5944,6 +6058,8 @@ namespace
             }
             if (mx >= kCfgReloadX && mx <= kCfgReloadX + kCfgReloadW)
             {
+                s.calibrationBoltPullFirstRunBlockedProfileKey.clear();
+                s.calibrationBoltPullFirstRunSaveSkipped = false;
                 CfgLoad(s);
                 CfgApplyOverlayPlacement(s);
                 return;
@@ -5967,6 +6083,8 @@ namespace
                 s.visible = false;
                 s.hoverSelectionSuppressedUntilMs = 0;
                 s.hoveredItem = -1;
+                s.calibrationBoltPullFirstRunBlockedProfileKey.clear();
+                s.calibrationBoltPullFirstRunSaveSkipped = false;
                 CfgApplyCalibrationRuntimeState(s);
                 s.status = s.useChinese ? "\345\267\262\345\205\263\351\227\255\343\200\202\346\214\211 F8 \345\217\257\351\207\215\346\226\260\346\211\223\345\274\200\343\200\202" : "Closed. Press F8 to reopen.";
                 s.dirty = true;
@@ -6295,6 +6413,11 @@ namespace
                     CfgLoad(s);
                     CfgInvalidateFixedPlacement(s);
                     CfgApplyOverlayPlacement(s);
+                }
+                else
+                {
+                    s.calibrationBoltPullFirstRunBlockedProfileKey.clear();
+                    s.calibrationBoltPullFirstRunSaveSkipped = false;
                 }
                 const bool closedSourceGameUi = CfgCloseSourceGameUiIfCalibrationActive(s);
                 s.status = s.visible
