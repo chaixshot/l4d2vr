@@ -156,6 +156,7 @@ MagazineBoxDebugEnabled=true
 ViewmodelBoneLabelsEnabled=false
 MagazineInteractionEnabled=true
 MagazineInteractionQuickReloadMode=false
+MagazineInteractionUseButtonGripInput=true
 MagazineInteractionSuppressEmptyClipAutoReload=false
 MagazineInteractionShotgunShellsPerInsert=1
 MagazineInteractionThumbIndexCurlStart=0.62

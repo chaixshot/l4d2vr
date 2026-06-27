@@ -1464,6 +1464,7 @@ void VR::ParseConfigFile()
     if (!m_VrHandsEnabled && !m_NativeViewmodelHandsOnly)
         m_MagazineInteractionEnabled = false;
     m_MagazineInteractionQuickReloadMode = getBool("MagazineInteractionQuickReloadMode", m_MagazineInteractionQuickReloadMode);
+    m_MagazineInteractionUseButtonGripInput = getBool("MagazineInteractionUseButtonGripInput", m_MagazineInteractionUseButtonGripInput);
     m_MagazineInteractionSuppressEmptyClipAutoReload = getBool("MagazineInteractionSuppressEmptyClipAutoReload", m_MagazineInteractionSuppressEmptyClipAutoReload);
     m_MagazineInteractionShotgunShellsPerInsert = std::clamp(getInt("MagazineInteractionShotgunShellsPerInsert", m_MagazineInteractionShotgunShellsPerInsert), 1, 8);
     m_MagazineInteractionThumbIndexCurlStart = std::clamp(getFloat("MagazineInteractionThumbIndexCurlStart", m_MagazineInteractionThumbIndexCurlStart), 0.0f, 1.0f);

@@ -1211,9 +1211,10 @@ public:
 	Vector m_MagazineBoxDebugFallbackHalfExtentsMeters = { 0.025f, 0.095f, 0.018f };
 	Vector m_MagazineBoxDebugPaddingMeters = { 0.002f, 0.002f, 0.002f };
 	// Independent magazine interaction prototype. It consumes the current weapon magazine OBB and
-	// lets off-hand finger-curl gestures claim physical reload interactions before normal input.
+	// lets configured off-hand grip input claim physical reload interactions before normal input.
 	bool m_MagazineInteractionEnabled = false;
 	bool m_MagazineInteractionQuickReloadMode = false;
+	bool m_MagazineInteractionUseButtonGripInput = true;
 	bool m_MagazineInteractionSuppressEmptyClipAutoReload = false;
 	int m_MagazineInteractionShotgunShellsPerInsert = 1;
 	float m_MagazineInteractionThumbIndexCurlStart = 0.62f;
