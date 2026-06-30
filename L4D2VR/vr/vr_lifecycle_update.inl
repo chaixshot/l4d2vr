@@ -1558,8 +1558,9 @@ void VR::Update()
                     activeWeapon->GetWeaponID() != C_WeaponCSBase::WeaponID::NONE;
             }
 
+            const bool twoHandedGripPoseActive = IsVrHandsTwoHandedGripPoseActive();
             const bool nativeLeftHandFreezeEnabled =
-                m_NativeViewmodelHandsOnly;
+                m_NativeViewmodelHandsOnly && !twoHandedGripPoseActive;
             if (hasLocalSurvivorCharacter)
             {
                 if (!m_NativeViewmodelLeftHandFreezeHasSurvivorCharacter)
@@ -1577,6 +1578,20 @@ void VR::Update()
             }
 
             setNativeLeftHandFreezePlaneContextActive(nativeLeftHandFreezeEnabled && hasLocalPlayer);
+            if (!m_NativeViewmodelHandsOnly)
+            {
+                resetNativeLeftHandFreezeForMapChange();
+            }
+            else if (twoHandedGripPoseActive)
+            {
+                m_NativeViewmodelLeftHandFreezePending = false;
+                m_NativeViewmodelLeftHandFreezeDueTime = {};
+                if (hasLiveLocalPlayerWithWeapon)
+                {
+                    m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev = true;
+                    m_NativeViewmodelLeftHandFreezeReady.store(1u, std::memory_order_release);
+                }
+            }
             if (nativeLeftHandFreezeEnabled && hasLiveLocalPlayerWithWeapon)
             {
                 if (!m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev)

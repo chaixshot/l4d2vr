@@ -34,6 +34,7 @@ public:
         float modelScale,
         bool motionRangeWithoutController,
         bool rightUseViewmodelPose,
+        bool twoHandedViewmodelPose,
         bool leftHanded,
         bool allowControllerlessTestPose,
         bool debugLog,
@@ -64,6 +65,10 @@ public:
         const Vector& currentBoltBoxMins,
         const Vector& currentBoltBoxMaxs,
         bool currentBoltBoxUseViewmodelLayer,
+        const VrHandMatrix4* leftHandTargetBoxWorld,
+        const Vector& leftHandTargetBoxMins,
+        const Vector& leftHandTargetBoxMaxs,
+        bool leftHandTargetBoxUseViewmodelLayer,
         bool leftHandMagazineGripPose,
         const std::array<float, 5>& gloveFingerMaxCurl,
         VrHandDrawPass drawPass);
@@ -88,6 +93,10 @@ public:
         const Vector& currentBoltBoxMins,
         const Vector& currentBoltBoxMaxs,
         bool currentBoltBoxUseViewmodelLayer,
+        const VrHandMatrix4* leftHandTargetBoxWorld,
+        const Vector& leftHandTargetBoxMins,
+        const Vector& leftHandTargetBoxMaxs,
+        bool leftHandTargetBoxUseViewmodelLayer,
         VrHandDrawPass drawPass);
 
     bool ClearViewmodelOcclusionStencil(IDirect3DDevice9* device);
@@ -109,8 +118,32 @@ private:
         bool skeletonInitialized = false;
     };
 
+    struct ViewmodelPoseState
+    {
+        bool enabled = false;
+        int targetHandIndex = -1;
+        std::vector<VrHandMatrixRows3x4> palette;
+        bool paletteValid = false;
+        bool palmWorldValid = false;
+        bool anchorValid = false;
+        bool debugLogged = false;
+        bool debugMissingLogged = false;
+        std::string poseModel;
+        std::string anchorModel;
+        VrHandMatrix4 palmWorld{};
+        VrHandMatrix4 palmFromModelRoot{};
+        bool palmFromModelRootValid = false;
+        VrHandMatrix4 palmFromGloveWrist{};
+        VrHandMatrix4 gloveWristBindInverse{};
+    };
+
     bool EnsureAssetsLoaded(bool debugLog);
-    bool EnsureInitialized(vr::IVRInput* input, bool rightUseViewmodelPose, bool leftHanded, bool debugLog);
+    bool EnsureInitialized(
+        vr::IVRInput* input,
+        bool rightUseViewmodelPose,
+        bool twoHandedViewmodelPose,
+        bool leftHanded,
+        bool debugLog);
     bool ResolveSteamVrAssetPath(const char* fileName, std::string& outPath) const;
     bool EnsureStandaloneMagazineBoxLoaded(
         const Vector& mins,
@@ -133,6 +166,7 @@ private:
         vr::IVRInput* input,
         bool motionRangeWithoutController,
         bool rightUseViewmodelPose,
+        bool twoHandedViewmodelPose,
         bool leftHanded,
         bool leftHandMagazineGripPose,
         const std::array<float, 5>& gloveFingerMaxCurl,
@@ -143,6 +177,7 @@ private:
         float vrScale,
         float modelScale,
         bool rightUseViewmodelPose,
+        bool twoHandedViewmodelPose,
         bool leftHanded,
         float sceneLightScale,
         bool debugLog,
@@ -151,12 +186,14 @@ private:
         const Vector& rightHandPoseOffsetMeters,
         const Vector& rightHandPoseRotationOffsetDeg,
         VrHandDrawPass drawPass);
-    bool BuildRightViewmodelPalette(
+    bool BuildViewmodelPalette(
         const VrHandVmPose::Snapshot& snapshot,
+        int sourceSide,
         int targetHandIndex,
         const std::array<float, 5>& gloveFingerMaxCurl,
-        std::vector<VrHandMatrixRows3x4>& outPalette);
-    bool BuildRightViewmodelWorld(
+        ViewmodelPoseState& state);
+    bool BuildViewmodelWorld(
+        const ViewmodelPoseState& state,
         float sourceUnitsPerMeter,
         float modelScale,
         const Vector& localPositionOffsetMeters,
@@ -167,8 +204,11 @@ private:
         VrHandMatrix4& outWorld) const;
     void ReportErrorOnce(const std::string& error);
     void ReportWarningOnce(const std::string& warning);
+    static int ViewmodelPoseStateIndex(int sourceSide);
+    void ResetViewmodelPoseState(ViewmodelPoseState& state, bool enabled, int targetHandIndex);
 
     std::array<HandState, 2> m_Hands;
+    std::array<ViewmodelPoseState, 2> m_ViewmodelPoseStates;
     VrHandRendererD3D9 m_Renderer;
     std::unordered_set<std::string> m_ReportedErrors;
     std::unordered_set<std::string> m_ReportedWarnings;
@@ -180,24 +220,9 @@ private:
     bool m_Initialized = false;
     bool m_DebugInitializationLogged = false;
     bool m_DebugTestPoseLogged = false;
-    bool m_DebugRightViewmodelPoseLogged = false;
-    bool m_DebugRightViewmodelPoseMissingLogged = false;
-    bool m_RightViewmodelPoseWasEnabled = false;
-    int m_RightViewmodelPoseHandIndex = 1;
     bool m_LeftHandMagazineGripPoseWasEnabled = false;
-    std::vector<VrHandMatrixRows3x4> m_RightViewmodelPalette;
-    bool m_RightViewmodelPaletteValid = false;
-    bool m_RightViewmodelPalmWorldValid = false;
-    bool m_RightViewmodelAnchorValid = false;
     VrHandMeshAsset m_StandaloneMagazineBoxAsset;
     std::vector<VrHandMatrixRows3x4> m_StandaloneMagazineBoxPalette;
     std::string m_StandaloneMagazineBoxKey;
     std::unordered_set<std::string> m_StandaloneMagazineBoxDrawLoggedKeys;
-    std::string m_RightViewmodelPoseModel;
-    std::string m_RightViewmodelAnchorModel;
-    VrHandMatrix4 m_RightViewmodelPalmWorld{};
-    VrHandMatrix4 m_RightViewmodelPalmFromModelRoot{};
-    bool m_RightViewmodelPalmFromModelRootValid = false;
-    VrHandMatrix4 m_RightViewmodelPalmFromGloveWrist{};
-    VrHandMatrix4 m_RightViewmodelGloveWristBindInverse{};
 };

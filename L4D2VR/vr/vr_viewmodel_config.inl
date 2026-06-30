@@ -1456,6 +1456,8 @@ void VR::ParseConfigFile()
     m_VrHandsDebugLog = getBool("VrHandsDebugLog", m_VrHandsDebugLog);
     m_VrHandsModelScale = std::clamp(getFloat("VrHandsModelScale", m_VrHandsModelScale), 0.25f, 4.0f);
     m_VrHandsRightUseViewmodelPose = getBool("VrHandsRightUseViewmodelPose", m_VrHandsRightUseViewmodelPose);
+    m_VrHandsTwoHandedGripAlways = getBool("VrHandsTwoHandedGripAlways", m_VrHandsTwoHandedGripAlways);
+    m_VrHandsTwoHandedGripTargetBoxScale = std::clamp(getFloat("VrHandsTwoHandedGripTargetBoxScale", m_VrHandsTwoHandedGripTargetBoxScale), 0.25f, 8.0f);
     m_MagazineBoxDebugEnabled = getBool("MagazineBoxDebugEnabled", m_MagazineBoxDebugEnabled);
     m_ViewmodelBoneLabelsEnabled = getBool("ViewmodelBoneLabelsEnabled", m_ViewmodelBoneLabelsEnabled);
     m_MagazineBoxDebugFallbackHalfExtentsMeters = getVector3("MagazineBoxDebugFallbackHalfExtentsMeters", m_MagazineBoxDebugFallbackHalfExtentsMeters);

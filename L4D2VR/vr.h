@@ -1198,6 +1198,14 @@ public:
 	bool m_VrHandsGlovesFallbackLogged = false;
 	bool m_VrHandsMotionRangeWithoutController = false;
 	bool m_VrHandsRightUseViewmodelPose = false;
+	bool m_VrHandsTwoHandedGripAlways = false;
+	float m_VrHandsTwoHandedGripTargetBoxScale = 1.0f;
+	bool m_VrHandsTwoHandedGripActive = false;
+	int m_VrHandsTwoHandedGripWeaponId = 0;
+	bool IsVrHandsTwoHandedGripPoseActive() const
+	{
+		return m_VrHandsTwoHandedGripAlways || m_VrHandsTwoHandedGripActive;
+	}
 	bool m_VrHandsDebugLog = false;
 	float m_VrHandsModelScale = 1.0f;
 	std::unique_ptr<VrHandSystem> m_VrHands;

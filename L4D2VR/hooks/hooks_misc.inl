@@ -6113,7 +6113,13 @@ namespace
         const ModelRenderInfo_t& modelInfo,
         const void* pCustomBoneToWorld)
     {
-        if (!vr || !vr->m_VrHandsEnabled || !vr->m_VrHandsRightUseViewmodelPose)
+        const bool wantsViewmodelHandSnapshot =
+            vr &&
+            (vr->m_VrHandsEnabled ||
+                vr->m_NativeViewmodelHandsOnly ||
+                vr->m_VrHandsRightUseViewmodelPose ||
+                vr->IsVrHandsTwoHandedGripPoseActive());
+        if (!wantsViewmodelHandSnapshot)
             return;
         if (!drawState || !pCustomBoneToWorld || !HooksModelNameIsArmsOrHands(modelName))
             return;
@@ -6675,6 +6681,11 @@ namespace
     inline float HooksNativeViewmodelHandsOnlyResolveSideTrimDistance(VR* vr, float stableBoneLen, int side)
     {
         if (side == 1)
+            return std::clamp(
+                -HooksNativeViewmodelHandsOnlyResolveRightAnimationKeepDistance(vr),
+                -64.0f,
+                32.0f);
+        if (side == -1 && vr && vr->IsVrHandsTwoHandedGripPoseActive())
             return std::clamp(
                 -HooksNativeViewmodelHandsOnlyResolveRightAnimationKeepDistance(vr),
                 -64.0f,
@@ -7591,6 +7602,7 @@ namespace
     inline bool HooksNativeViewmodelHandsOnlyShouldHidePendingFreeze(VR* vr)
     {
         return vr &&
+            !vr->IsVrHandsTwoHandedGripPoseActive() &&
             vr->m_NativeViewmodelLeftHandFreezePending &&
             vr->m_NativeViewmodelLeftHandFreezeReady.load(std::memory_order_acquire) == 0u;
     }
@@ -10032,6 +10044,7 @@ namespace
         float* inOutWristPlaneWorld)
     {
         if (!vr || !captureBones || !currentBones || keepSide.side == 0 ||
+            vr->IsVrHandsTwoHandedGripPoseActive() ||
             vr->m_NativeViewmodelLeftHandFreezeReady.load(std::memory_order_acquire) == 0u)
         {
             return false;
@@ -11028,6 +11041,7 @@ namespace
     {
         return vr &&
             vr->m_NativeViewmodelHandsOnly &&
+            !vr->IsVrHandsTwoHandedGripPoseActive() &&
             vr->m_NativeViewmodelHandsOnlyFreezePoseLock &&
             vr->m_NativeViewmodelLeftHandFreezePending &&
             vr->m_NativeViewmodelLeftHandFreezeReady.load(std::memory_order_acquire) == 0u;
@@ -11037,6 +11051,7 @@ namespace
     {
         return vr &&
             vr->m_NativeViewmodelHandsOnly &&
+            !vr->IsVrHandsTwoHandedGripPoseActive() &&
             vr->m_NativeViewmodelHandsOnlyFreezePoseLock &&
             (vr->m_NativeViewmodelLeftHandFreezePending ||
                 vr->m_NativeViewmodelLeftHandFreezeReady.load(std::memory_order_acquire) != 0u);
@@ -11539,6 +11554,8 @@ namespace
             HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(vr);
         const bool useCanonicalFreezeLock =
             HooksNativeViewmodelHandsOnlyUseCanonicalFreezeLock(vr);
+        const bool keepSourceViewmodelAnimation =
+            keepSide.side == -1 && vr->IsVrHandsTwoHandedGripPoseActive();
         if (useFixedFreezePlaneLock)
         {
             if (useCanonicalFreezeLock)
@@ -11689,7 +11706,7 @@ namespace
             isolated[bone] = selected;
         }
 
-        if (!useTargetDelta)
+        if (!useTargetDelta && !keepSourceViewmodelAnimation)
         {
             useTargetDelta = HooksNativeViewmodelHandsOnlyTryBuildSideTargetDelta(
                 vr,
@@ -11749,7 +11766,7 @@ namespace
         }
 
         bool appliedFrozenPose = false;
-        if (haveTargetAnchor)
+        if (haveTargetAnchor && !keepSourceViewmodelAnimation)
         {
             appliedFrozenPose =
                 HooksNativeViewmodelHandsOnlyApplyFrozenSideHandPose(
@@ -11769,16 +11786,19 @@ namespace
                 inOutWristPlaneWorld);
         }
 
-        HooksNativeViewmodelHandsOnlyApplyOpenVRLeftFingerPose(
-            vr,
-            drawState,
-            boneIndex,
-            stride,
-            boneNames,
-            boneParents,
-            numBones,
-            keepSide,
-            isolated);
+        if (!keepSourceViewmodelAnimation)
+        {
+            HooksNativeViewmodelHandsOnlyApplyOpenVRLeftFingerPose(
+                vr,
+                drawState,
+                boneIndex,
+                stride,
+                boneNames,
+                boneParents,
+                numBones,
+                keepSide,
+                isolated);
+        }
 
         HooksNativeViewmodelHandsOnlyLogIsolationDebug(
             vr,
@@ -13436,7 +13456,8 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 if (m_VR->m_IsVREnabled && queueMode == 2 &&
 	(m_VR->m_QueuedViewmodelStabilize ||
 	 m_VR->m_ViewmodelDisableMoveBob ||
-	 (!m_VR->m_MouseModeEnabled && m_VR->m_VrHandsRightUseViewmodelPose)))
+	 (!m_VR->m_MouseModeEnabled &&
+	  (m_VR->m_VrHandsRightUseViewmodelPose || m_VR->IsVrHandsTwoHandedGripPoseActive()))))
 {
 	const bool isViewmodelClass = className &&
 		(std::strcmp(className, "CBaseViewModel") == 0 || std::strcmp(className, "C_BaseViewModel") == 0);

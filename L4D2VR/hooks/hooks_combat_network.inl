@@ -117,7 +117,8 @@ void __fastcall Hooks::dCalcViewModelView(void* ecx, void* edx, void* owner, con
 		// viewmodel bob/lag after the controller pose is supplied, which makes the
 		// visible weapon drift relative to the standalone glove during wrist rotation.
 		const bool forceControllerHardLock =
-			!m_VR->m_MouseModeEnabled && m_VR->m_VrHandsRightUseViewmodelPose;
+			!m_VR->m_MouseModeEnabled &&
+			(m_VR->m_VrHandsRightUseViewmodelPose || m_VR->IsVrHandsTwoHandedGripPoseActive());
 
 		// ------------------------------------------------------------
 		// Single-thread path (mat_queue_mode 0/1)
@@ -871,7 +872,7 @@ namespace
 	{
 		if (!vr || !vr->m_IsVREnabled || (!vr->m_BulletVisualsUseMuzzleSmoke && !vr->m_BulletVisualsUseViewmodelPose))
 			return false;
-		if (!vr->m_VrHandsRightUseViewmodelPose || vr->IsScopeActive())
+		if ((!vr->m_VrHandsRightUseViewmodelPose && !vr->IsVrHandsTwoHandedGripPoseActive()) || vr->IsScopeActive())
 			return false;
 
 		const QAngle oldAngles = angles;
