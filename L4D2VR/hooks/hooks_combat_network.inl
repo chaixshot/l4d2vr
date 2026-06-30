@@ -622,6 +622,11 @@ namespace
 		return right * offset.x + up * offset.y + direction * offset.z;
 	}
 
+	static inline bool SuppressGameLaserSightBeamForD3DAimLine(const VR* vr)
+	{
+		return vr && vr->m_IsVREnabled && vr->m_D3DAimLineOverlayEnabled;
+	}
+
 	static inline void UpdateLocalWorldLaserParticle(void* terrorPlayer)
 	{
 		if (!terrorPlayer || !Hooks::m_Game || !Hooks::m_Game->m_EngineClient || !Hooks::m_VR)
@@ -640,7 +645,7 @@ namespace
 			return;
 		}
 
-		if (!vr->m_IsVREnabled || !vr->m_GameLaserSightBeamEnabled)
+		if (!vr->m_IsVREnabled || !vr->m_GameLaserSightBeamEnabled || SuppressGameLaserSightBeamForD3DAimLine(vr))
 		{
 			ClearLocalWorldLaserParticle();
 			return;
@@ -1029,16 +1034,31 @@ void __fastcall Hooks::dUpdateLaserSight(void* ecx, void* edx)
 {
 	const bool hasVr = (m_VR != nullptr);
 	const bool vrEnabled = hasVr && m_VR->m_IsVREnabled;
+	const bool suppressGameLaserSightBeam = SuppressGameLaserSightBeamForD3DAimLine(m_VR);
 	const bool replacementEnabled = vrEnabled
+		&& !suppressGameLaserSightBeam
 		&& m_VR->m_GameLaserSightBeamEnabled
 		&& m_VR->m_GameLaserSightReplaceParticle;
 
+	bool isLocalPlayer = false;
 	bool skipOriginalForLocalPlayer = false;
-	if (replacementEnabled && m_Game && m_Game->m_EngineClient)
+	if ((replacementEnabled || suppressGameLaserSightBeam) && m_Game && m_Game->m_EngineClient)
 	{
 		const int localPlayerIndex = m_Game->m_EngineClient->GetLocalPlayer();
 		C_BaseEntity* localEntity = m_Game->GetClientEntity(localPlayerIndex);
-		skipOriginalForLocalPlayer = (localEntity != nullptr) && (reinterpret_cast<void*>(localEntity) == ecx);
+		isLocalPlayer = (localEntity != nullptr) && (reinterpret_cast<void*>(localEntity) == ecx);
+		skipOriginalForLocalPlayer = replacementEnabled && isLocalPlayer;
+	}
+
+	if (suppressGameLaserSightBeam)
+	{
+		if (isLocalPlayer)
+			ClearOriginalLocalLaserParticles(ecx);
+		else
+			hkUpdateLaserSight.fOriginal(ecx);
+
+		ClearLocalWorldLaserParticle();
+		return;
 	}
 
 	if (!replacementEnabled)

@@ -3345,6 +3345,7 @@ void VR::RenderDrawGameLaserSight(C_BasePlayer* localPlayer)
     const bool keepReplacementParticle = m_IsVREnabled
         && m_GameLaserSightBeamEnabled
         && m_GameLaserSightReplaceParticle
+        && !m_D3DAimLineOverlayEnabled
         && (localPlayer != nullptr);
 
     if (!keepReplacementParticle)
