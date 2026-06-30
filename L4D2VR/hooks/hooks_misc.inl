@@ -7367,6 +7367,7 @@ namespace
     }
 
     inline bool HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(VR* vr);
+    inline bool HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLockForSide(VR* vr, int side);
 
     inline bool HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
         VR* vr,
@@ -7534,7 +7535,7 @@ namespace
         if (!HooksNativeViewmodelHandsOnlyNormalizePlane(worldPlane))
             return false;
 
-        if (HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(vr))
+        if (HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLockForSide(vr, handSide))
         {
             HooksNativeViewmodelHandsOnlySideInfo sideInfo{};
             sideInfo.side = handSide;
@@ -10044,7 +10045,7 @@ namespace
         float* inOutWristPlaneWorld)
     {
         if (!vr || !captureBones || !currentBones || keepSide.side == 0 ||
-            vr->IsVrHandsTwoHandedGripPoseActive() ||
+            (keepSide.side < 0 && vr->IsVrHandsTwoHandedGripPoseActive()) ||
             vr->m_NativeViewmodelLeftHandFreezeReady.load(std::memory_order_acquire) == 0u)
         {
             return false;
@@ -10113,7 +10114,7 @@ namespace
                 float captureWristPlaneWorld[4]{};
                 const float* captureWristPlane = inOutWristPlaneWorld;
                 bool canonicalCapture = false;
-                if (HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(vr))
+                if (HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLockForSide(vr, keepSide.side))
                 {
                     canonicalCapture = HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
                         vr,
@@ -10249,7 +10250,7 @@ namespace
         if (inOutWristPlaneWorld)
         {
             bool fixedPlaneApplied = false;
-            if (HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(vr))
+            if (HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLockForSide(vr, keepSide.side))
             {
                 float lockedWorldPlane[4]{};
                 if (!HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
@@ -11051,10 +11052,17 @@ namespace
     {
         return vr &&
             vr->m_NativeViewmodelHandsOnly &&
-            !vr->IsVrHandsTwoHandedGripPoseActive() &&
             vr->m_NativeViewmodelHandsOnlyFreezePoseLock &&
             (vr->m_NativeViewmodelLeftHandFreezePending ||
                 vr->m_NativeViewmodelLeftHandFreezeReady.load(std::memory_order_acquire) != 0u);
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLockForSide(VR* vr, int side)
+    {
+        if (!HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(vr))
+            return false;
+
+        return !(side < 0 && vr && vr->IsVrHandsTwoHandedGripPoseActive());
     }
 
     struct HooksNativeViewmodelHandsOnlyFixedFreezePlaneLock
@@ -11229,7 +11237,7 @@ namespace
         float outPlane[4],
         const vr_vm_stabilize::Mat3x4* planeAnchor)
     {
-        if (!HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(vr) ||
+        if (!HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLockForSide(vr, keepSide.side) ||
             keepSide.side == 0 ||
             keepSide.hand < 0 ||
             keepSide.hand >= numBones ||
@@ -11551,7 +11559,7 @@ namespace
         };
 
         const bool useFixedFreezePlaneLock =
-            HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(vr);
+            HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLockForSide(vr, keepSide.side);
         const bool useCanonicalFreezeLock =
             HooksNativeViewmodelHandsOnlyUseCanonicalFreezeLock(vr);
         const bool keepSourceViewmodelAnimation =
@@ -12043,7 +12051,7 @@ namespace
         if (HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(vr))
         {
             float ignoredPlane[4]{};
-            if (hasLeft)
+            if (hasLeft && HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLockForSide(vr, leftInfo.side))
             {
                 HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
                     vr,
@@ -12054,7 +12062,7 @@ namespace
                     nullptr,
                     ignoredPlane);
             }
-            if (hasRight)
+            if (hasRight && HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLockForSide(vr, rightInfo.side))
             {
                 HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
                     vr,
@@ -12119,7 +12127,7 @@ namespace
                     hideSide.wristPlaneWorld[2],
                     hideSide.wristPlaneWorld[3],
                 };
-                if (HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(vr))
+                if (HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLockForSide(vr, hideSide.side))
                 {
                     if (!HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
                             vr,

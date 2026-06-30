@@ -7295,7 +7295,7 @@ bool VR::DrawVrHandsForEyeImmediate(
     Vector rightHandPoseRotationOffsetDeg = m_VrHandsRightPoseRotationOffsetDeg;
     const bool twoHandedGripPoseActive = IsVrHandsTwoHandedGripPoseActive();
     const bool vrHandsRightUseViewmodelPose =
-        m_VrHandsRightUseViewmodelPose || twoHandedGripPoseActive;
+        m_VrHandsRightUseViewmodelPose;
     if (m_LeftHanded && vrHandsRightUseViewmodelPose)
     {
         rightHandPoseOffsetMeters.x += m_VrHandsLeftHandedViewmodelPoseOffsetMeters.x;
