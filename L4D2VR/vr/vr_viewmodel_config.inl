@@ -1458,6 +1458,16 @@ void VR::ParseConfigFile()
     m_VrHandsRightUseViewmodelPose = getBool("VrHandsRightUseViewmodelPose", m_VrHandsRightUseViewmodelPose);
     m_VrHandsTwoHandedGripAlways = getBool("VrHandsTwoHandedGripAlways", m_VrHandsTwoHandedGripAlways);
     m_VrHandsTwoHandedGripTargetBoxScale = std::clamp(getFloat("VrHandsTwoHandedGripTargetBoxScale", m_VrHandsTwoHandedGripTargetBoxScale), 0.25f, 8.0f);
+    m_VrHandsTwoHandedAimEnabled = getBool("VrHandsTwoHandedAimEnabled", m_VrHandsTwoHandedAimEnabled);
+    m_VrHandsTwoHandedAimMountFriendly = getBool("VrHandsTwoHandedAimMountFriendly", m_VrHandsTwoHandedAimMountFriendly);
+    m_VrHandsVirtualStockEnabled = getBool("VrHandsVirtualStockEnabled", m_VrHandsVirtualStockEnabled);
+    m_VrHandsTwoHandedAimStrength = std::clamp(getFloat("VrHandsTwoHandedAimStrength", m_VrHandsTwoHandedAimStrength), 0.0f, 1.0f);
+    m_VrHandsTwoHandedAimSmoothingSeconds = std::clamp(getFloat("VrHandsTwoHandedAimSmoothingSeconds", m_VrHandsTwoHandedAimSmoothingSeconds), 0.0f, 0.25f);
+    m_VrHandsTwoHandedAimMinHandDistanceMeters = std::clamp(getFloat("VrHandsTwoHandedAimMinHandDistanceMeters", m_VrHandsTwoHandedAimMinHandDistanceMeters), 0.0f, 1.0f);
+    m_VrHandsTwoHandedAimMaxHandDistanceMeters = std::clamp(getFloat("VrHandsTwoHandedAimMaxHandDistanceMeters", m_VrHandsTwoHandedAimMaxHandDistanceMeters), 0.0f, 2.0f);
+    m_VrHandsTwoHandedAimOffhandOffsetMeters = getVector3("VrHandsTwoHandedAimOffhandOffsetMeters", m_VrHandsTwoHandedAimOffhandOffsetMeters);
+    m_VrHandsVirtualStockOffsetMeters = getVector3("VrHandsVirtualStockOffsetMeters", m_VrHandsVirtualStockOffsetMeters);
+    m_VrHandsVirtualStockStrength = std::clamp(getFloat("VrHandsVirtualStockStrength", m_VrHandsVirtualStockStrength), 0.0f, 1.0f);
     m_MagazineBoxDebugEnabled = getBool("MagazineBoxDebugEnabled", m_MagazineBoxDebugEnabled);
     m_ViewmodelBoneLabelsEnabled = getBool("ViewmodelBoneLabelsEnabled", m_ViewmodelBoneLabelsEnabled);
     m_MagazineBoxDebugFallbackHalfExtentsMeters = getVector3("MagazineBoxDebugFallbackHalfExtentsMeters", m_MagazineBoxDebugFallbackHalfExtentsMeters);

@@ -1199,7 +1199,20 @@ public:
 	bool m_VrHandsMotionRangeWithoutController = false;
 	bool m_VrHandsRightUseViewmodelPose = false;
 	bool m_VrHandsTwoHandedGripAlways = false;
-	float m_VrHandsTwoHandedGripTargetBoxScale = 1.0f;
+	float m_VrHandsTwoHandedGripTargetBoxScale = 2.0f;
+	bool m_VrHandsTwoHandedAimEnabled = true;
+	bool m_VrHandsTwoHandedAimMountFriendly = false;
+	bool m_VrHandsVirtualStockEnabled = false;
+	float m_VrHandsTwoHandedAimStrength = 1.0f;
+	float m_VrHandsTwoHandedAimSmoothingSeconds = 0.025f;
+	float m_VrHandsTwoHandedAimMinHandDistanceMeters = 0.12f;
+	float m_VrHandsTwoHandedAimMaxHandDistanceMeters = 0.85f;
+	Vector m_VrHandsTwoHandedAimOffhandOffsetMeters = { 0.12f, 0.0f, 0.0f };
+	Vector m_VrHandsVirtualStockOffsetMeters = { -0.28f, 0.16f, -0.12f };
+	float m_VrHandsVirtualStockStrength = 0.65f;
+	bool m_VrHandsTwoHandedAimSmoothingValid = false;
+	Vector m_VrHandsTwoHandedAimForwardSmoothed = { 1.0f, 0.0f, 0.0f };
+	Vector m_VrHandsTwoHandedAimUpSmoothed = { 0.0f, 0.0f, 1.0f };
 	bool m_VrHandsTwoHandedGripActive = false;
 	int m_VrHandsTwoHandedGripWeaponId = 0;
 	bool IsVrHandsTwoHandedGripPoseActive() const
@@ -3203,6 +3216,22 @@ public:
 	Vector GetLeftControllerAbsPos();
 	QAngle GetRightControllerAbsAngle();
 	Vector GetRightControllerAbsPos();
+	bool ResolvePavlovTwoHandedAimBasis(
+		const Vector& leftControllerPosAbs,
+		const Vector& rightControllerPosAbs,
+		const Vector& rightControllerForward,
+		const Vector& rightControllerRight,
+		const Vector& rightControllerUp,
+		const Vector& hmdPosAbs,
+		const Vector& hmdForward,
+		const Vector& hmdRight,
+		const Vector& hmdUp,
+		float sourceUnitsPerMeter,
+		Vector& outForward,
+		Vector& outRight,
+		Vector& outUp) const;
+	void ApplyPavlovTwoHandedAimSmoothing(Vector& forward, Vector& right, Vector& up);
+	void ResetPavlovTwoHandedAimSmoothing();
 	Vector GetRecommendedViewmodelAbsPos();
 	QAngle GetRecommendedViewmodelAbsAngle();
 	// Mouse-mode: compute the eye-center ray used for aiming (mouse pitch+yaw or HMD-based, optionally sensitivity-scaled).

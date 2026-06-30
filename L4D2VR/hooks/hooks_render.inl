@@ -1324,6 +1324,14 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				Vector vmUp = m_VR->m_ViewmodelUp;
 				Vector vmPosAbs = m_VR->GetRecommendedViewmodelAbsPos();
 				QAngle vmAngAbs = m_VR->GetRecommendedViewmodelAbsAngle();
+				Vector rightCtrlForward{};
+				Vector rightCtrlRight{};
+				Vector rightCtrlUp{};
+				QAngle::AngleVectors(rightCtrlAngAbs, &rightCtrlForward, &rightCtrlRight, &rightCtrlUp);
+				bool rightCtrlBasisValid =
+					VectorNormalize(rightCtrlForward) != 0.0f &&
+					VectorNormalize(rightCtrlRight) != 0.0f &&
+					VectorNormalize(rightCtrlUp) != 0.0f;
 
 				auto buildRenderControllerBasis = [&](const vr::TrackedDevicePose_t& pose, Vector& posLocal, Vector& ctrlF, Vector& ctrlR, Vector& ctrlU) -> bool
 				{
@@ -1389,11 +1397,40 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 						rightCtrlPosAbs = cameraAnchor - Vector(0, 0, 64) + (ctrlPosCorrected * vp.vrScale);
 						QAngle::VectorAngles(ctrlF, ctrlU, rightCtrlAngAbs);
+						rightCtrlForward = ctrlF;
+						rightCtrlRight = ctrlR;
+						rightCtrlUp = ctrlU;
+						rightCtrlBasisValid = true;
+					}
+				}
 
-					// Viewmodel basis from controller + per-weapon offsets.
-					vmForward = ctrlF;
-					vmRight = ctrlR;
-					vmUp = ctrlU;
+				if (rightCtrlBasisValid)
+				{
+					Vector aimForward = rightCtrlForward;
+					Vector aimRight = rightCtrlRight;
+					Vector aimUp = rightCtrlUp;
+					if (m_VR->ResolvePavlovTwoHandedAimBasis(
+							leftCtrlPosAbs,
+							rightCtrlPosAbs,
+							rightCtrlForward,
+							rightCtrlRight,
+							rightCtrlUp,
+							hmdPosAbs,
+							hmdForward,
+							hmdRight,
+							hmdUp,
+							vp.vrScale,
+							aimForward,
+							aimRight,
+							aimUp))
+					{
+						QAngle::VectorAngles(aimForward, aimUp, rightCtrlAngAbs);
+					}
+
+					// Viewmodel basis from effective weapon aim + per-weapon offsets.
+					vmForward = aimForward;
+					vmRight = aimRight;
+					vmUp = aimUp;
 					// Yaw offset
 					vmForward = VectorRotate(vmForward, vmUp, vp.viewmodelAngOffset.y);
 					vmRight = VectorRotate(vmRight, vmUp, vp.viewmodelAngOffset.y);
@@ -1408,8 +1445,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 						- (vmForward * vp.viewmodelPosOffset.x)
 						- (vmRight * vp.viewmodelPosOffset.y)
 						- (vmUp * vp.viewmodelPosOffset.z);
-						QAngle::VectorAngles(vmForward, vmUp, vmAngAbs);
-					}
+					QAngle::VectorAngles(vmForward, vmUp, vmAngAbs);
 				}
 
 				// Publish render-frame snapshot with a seqlock.

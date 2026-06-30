@@ -1,5 +1,263 @@
 static constexpr int kServerHookFallbackDefaultDelayMs = 250;
 
+namespace
+{
+    bool VrHandsAimIsFinite(const Vector& v)
+    {
+        return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+    }
+
+    float VrHandsAimDot(const Vector& a, const Vector& b)
+    {
+        return a.x * b.x + a.y * b.y + a.z * b.z;
+    }
+
+    Vector VrHandsAimCross(const Vector& a, const Vector& b)
+    {
+        return Vector(
+            a.y * b.z - a.z * b.y,
+            a.z * b.x - a.x * b.z,
+            a.x * b.y - a.y * b.x);
+    }
+
+    bool VrHandsAimNormalize(Vector& v)
+    {
+        if (!VrHandsAimIsFinite(v))
+            return false;
+
+        const float len = VectorLength(v);
+        if (!std::isfinite(len) || len <= 0.0001f)
+            return false;
+
+        v *= 1.0f / len;
+        return true;
+    }
+
+    Vector VrHandsAimNormalizedLerp(
+        const Vector& from,
+        const Vector& to,
+        float t,
+        const Vector& fallback)
+    {
+        t = std::clamp(t, 0.0f, 1.0f);
+        Vector result = from * (1.0f - t) + to * t;
+        if (!VrHandsAimNormalize(result))
+            result = fallback;
+        return result;
+    }
+
+    bool VrHandsAimBuildBasis(
+        const Vector& forwardIn,
+        const Vector& referenceUpIn,
+        const Vector& fallbackRightIn,
+        Vector& outForward,
+        Vector& outRight,
+        Vector& outUp)
+    {
+        Vector forward = forwardIn;
+        if (!VrHandsAimNormalize(forward))
+            return false;
+
+        Vector up = referenceUpIn - forward * VrHandsAimDot(referenceUpIn, forward);
+        if (!VrHandsAimNormalize(up))
+        {
+            Vector right = fallbackRightIn - forward * VrHandsAimDot(fallbackRightIn, forward);
+            if (!VrHandsAimNormalize(right))
+            {
+                const Vector worldUp(0.0f, 0.0f, 1.0f);
+                right = VrHandsAimCross(forward, worldUp);
+                if (!VrHandsAimNormalize(right))
+                {
+                    right = Vector(0.0f, -1.0f, 0.0f);
+                    if (!VrHandsAimNormalize(right))
+                        return false;
+                }
+            }
+
+            up = VrHandsAimCross(right, forward);
+            if (!VrHandsAimNormalize(up))
+                return false;
+        }
+
+        Vector right = VrHandsAimCross(forward, up);
+        if (!VrHandsAimNormalize(right))
+            return false;
+
+        up = VrHandsAimCross(right, forward);
+        if (!VrHandsAimNormalize(up))
+            return false;
+
+        outForward = forward;
+        outRight = right;
+        outUp = up;
+        return true;
+    }
+}
+
+bool VR::ResolvePavlovTwoHandedAimBasis(
+    const Vector& leftControllerPosAbs,
+    const Vector& rightControllerPosAbs,
+    const Vector& rightControllerForward,
+    const Vector& rightControllerRight,
+    const Vector& rightControllerUp,
+    const Vector& hmdPosAbs,
+    const Vector& hmdForward,
+    const Vector& hmdRight,
+    const Vector& hmdUp,
+    float sourceUnitsPerMeter,
+    Vector& outForward,
+    Vector& outRight,
+    Vector& outUp) const
+{
+    if (!IsVrHandsTwoHandedGripPoseActive() || !m_VrHandsTwoHandedAimEnabled || m_MouseModeEnabled)
+        return false;
+
+    if (!VrHandsAimIsFinite(leftControllerPosAbs) ||
+        !VrHandsAimIsFinite(rightControllerPosAbs) ||
+        !VrHandsAimIsFinite(rightControllerForward) ||
+        !VrHandsAimIsFinite(rightControllerRight) ||
+        !VrHandsAimIsFinite(rightControllerUp))
+    {
+        return false;
+    }
+
+    Vector baseForward = rightControllerForward;
+    Vector baseRight = rightControllerRight;
+    Vector baseUp = rightControllerUp;
+    if (!VrHandsAimBuildBasis(baseForward, baseUp, baseRight, baseForward, baseRight, baseUp))
+        return false;
+
+    const float scale = std::max(1.0f, std::fabs(sourceUnitsPerMeter));
+    const Vector rearGrip = rightControllerPosAbs;
+    Vector frontGrip = leftControllerPosAbs;
+    if (!m_VrHandsTwoHandedAimMountFriendly)
+    {
+        frontGrip += baseForward * (m_VrHandsTwoHandedAimOffhandOffsetMeters.x * scale);
+        frontGrip += baseRight * (m_VrHandsTwoHandedAimOffhandOffsetMeters.y * scale);
+        frontGrip += baseUp * (m_VrHandsTwoHandedAimOffhandOffsetMeters.z * scale);
+    }
+
+    Vector handDelta = frontGrip - rearGrip;
+    float handDistance = VectorLength(handDelta);
+    if (!std::isfinite(handDistance) || handDistance <= 0.01f * scale)
+        return false;
+
+    Vector twoHandForward = handDelta * (1.0f / handDistance);
+
+    const float maxDistance = std::max(0.0f, m_VrHandsTwoHandedAimMaxHandDistanceMeters) * scale;
+    if (maxDistance > 0.01f * scale && handDistance > maxDistance)
+    {
+        frontGrip = rearGrip + twoHandForward * maxDistance;
+        handDistance = maxDistance;
+    }
+
+    const float minDistance = std::max(0.0f, m_VrHandsTwoHandedAimMinHandDistanceMeters) * scale;
+    float distanceWeight = 1.0f;
+    if (minDistance > 0.01f * scale && handDistance < minDistance)
+        distanceWeight = std::clamp(handDistance / minDistance, 0.0f, 1.0f);
+
+    const float twoHandStrength =
+        std::clamp(m_VrHandsTwoHandedAimStrength, 0.0f, 1.0f) * distanceWeight;
+    Vector resolvedForward = VrHandsAimNormalizedLerp(
+        baseForward,
+        twoHandForward,
+        twoHandStrength,
+        baseForward);
+
+    if (m_VrHandsVirtualStockEnabled)
+    {
+        const Vector worldUp(0.0f, 0.0f, 1.0f);
+        Vector bodyForward = hmdForward;
+        bodyForward.z = 0.0f;
+        if (!VrHandsAimNormalize(bodyForward))
+        {
+            bodyForward = baseForward;
+            bodyForward.z = 0.0f;
+            if (!VrHandsAimNormalize(bodyForward))
+                bodyForward = Vector(1.0f, 0.0f, 0.0f);
+        }
+
+        Vector bodyRight = VrHandsAimCross(bodyForward, worldUp);
+        if (!VrHandsAimNormalize(bodyRight))
+        {
+            bodyRight = hmdRight;
+            bodyRight.z = 0.0f;
+            if (!VrHandsAimNormalize(bodyRight))
+                bodyRight = baseRight;
+        }
+
+        const float dominantSide = m_LeftHanded ? -1.0f : 1.0f;
+        Vector shoulder = hmdPosAbs;
+        shoulder += bodyForward * (m_VrHandsVirtualStockOffsetMeters.x * scale);
+        shoulder += bodyRight * (m_VrHandsVirtualStockOffsetMeters.y * dominantSide * scale);
+        shoulder += worldUp * (m_VrHandsVirtualStockOffsetMeters.z * scale);
+
+        Vector stockDirection = frontGrip - shoulder;
+        if (VrHandsAimNormalize(stockDirection))
+        {
+            resolvedForward = VrHandsAimNormalizedLerp(
+                resolvedForward,
+                stockDirection,
+                std::clamp(m_VrHandsVirtualStockStrength, 0.0f, 1.0f),
+                resolvedForward);
+        }
+    }
+
+    Vector referenceUp = baseUp;
+    if (m_VrHandsVirtualStockEnabled && !hmdUp.IsZero())
+        referenceUp = VrHandsAimNormalizedLerp(baseUp, hmdUp, 0.15f, baseUp);
+
+    return VrHandsAimBuildBasis(
+        resolvedForward,
+        referenceUp,
+        baseRight,
+        outForward,
+        outRight,
+        outUp);
+}
+
+void VR::ApplyPavlovTwoHandedAimSmoothing(Vector& forward, Vector& right, Vector& up)
+{
+    const float tau = std::clamp(m_VrHandsTwoHandedAimSmoothingSeconds, 0.0f, 0.25f);
+    if (tau <= 0.0001f)
+    {
+        m_VrHandsTwoHandedAimSmoothingValid = false;
+        return;
+    }
+
+    const float dt = std::clamp(m_LastFrameDuration, 0.0f, 0.1f);
+    const float alpha = (dt <= 0.0f) ? 1.0f : (1.0f - expf(-dt / tau));
+    if (!m_VrHandsTwoHandedAimSmoothingValid)
+    {
+        m_VrHandsTwoHandedAimForwardSmoothed = forward;
+        m_VrHandsTwoHandedAimUpSmoothed = up;
+        m_VrHandsTwoHandedAimSmoothingValid = true;
+        return;
+    }
+
+    Vector smoothedForward = VrHandsAimNormalizedLerp(
+        m_VrHandsTwoHandedAimForwardSmoothed,
+        forward,
+        alpha,
+        forward);
+    Vector smoothedUp = VrHandsAimNormalizedLerp(
+        m_VrHandsTwoHandedAimUpSmoothed,
+        up,
+        alpha,
+        up);
+
+    if (VrHandsAimBuildBasis(smoothedForward, smoothedUp, right, forward, right, up))
+    {
+        m_VrHandsTwoHandedAimForwardSmoothed = forward;
+        m_VrHandsTwoHandedAimUpSmoothed = up;
+    }
+}
+
+void VR::ResetPavlovTwoHandedAimSmoothing()
+{
+    m_VrHandsTwoHandedAimSmoothingValid = false;
+}
+
 void VR::UpdateTracking()
 {
     GetPoses();
@@ -925,6 +1183,37 @@ void VR::UpdateTracking()
         m_SpecialInfectedAutoAimDirection = m_RightControllerForward;
     }
 
+    Vector pavlovAimForward{};
+    Vector pavlovAimRight{};
+    Vector pavlovAimUp{};
+    if (ResolvePavlovTwoHandedAimBasis(
+            m_LeftControllerPosAbs,
+            m_RightControllerPosAbs,
+            m_RightControllerForward,
+            m_RightControllerRight,
+            m_RightControllerUp,
+            m_HmdPosAbs,
+            m_HmdForward,
+            m_HmdRight,
+            m_HmdUp,
+            m_VRScale,
+            pavlovAimForward,
+            pavlovAimRight,
+            pavlovAimUp))
+    {
+        ApplyPavlovTwoHandedAimSmoothing(pavlovAimForward, pavlovAimRight, pavlovAimUp);
+        m_RightControllerForward = pavlovAimForward;
+        m_RightControllerRight = pavlovAimRight;
+        m_RightControllerUp = pavlovAimUp;
+        m_RightControllerForwardUnforced = m_RightControllerForward;
+        if (!m_RightControllerForwardUnforced.IsZero())
+            m_LastUnforcedAimDirection = m_RightControllerForwardUnforced;
+    }
+    else
+    {
+        ResetPavlovTwoHandedAimSmoothing();
+    }
+
     // Update scope camera pose + look-through activation
     const bool forceScopeForThirdPersonFrontView = m_ThirdPersonFrontViewEnabled && m_IsThirdPersonCamera;
     const bool scopePosFromEyeInFrontView = forceScopeForThirdPersonFrontView && (localPlayer != nullptr);
@@ -1269,6 +1558,8 @@ void VR::UpdateTracking()
     }
 
     UpdateScopeAimLineState();
+
+    QAngle::VectorAngles(m_RightControllerForward, m_RightControllerUp, m_RightControllerAngAbs);
 
     if (m_RearMirrorEnabled || m_DesktopRearMirrorWindowEnabled)
     {
