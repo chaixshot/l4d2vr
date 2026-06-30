@@ -11986,8 +11986,12 @@ namespace
         std::vector<HooksNativeViewmodelHandsOnlyClipSet>& outClipSets)
     {
         outClipSets.clear();
-        if (vr && !HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(vr))
+        if (vr &&
+            !vr->IsVrHandsTwoHandedGripPoseActive() &&
+            !HooksNativeViewmodelHandsOnlyShouldUseFixedFreezePlaneLock(vr))
+        {
             HooksNativeViewmodelHandsOnlyResetFixedFreezePlaneLocks(vr);
+        }
         if (!vr || !vr->m_NativeViewmodelHandsOnly || vr->m_HideArms || !drawState || !pCustomBoneToWorld)
             return false;
 

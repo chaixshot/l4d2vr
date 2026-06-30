@@ -1561,6 +1561,8 @@ void VR::Update()
             const bool twoHandedGripPoseActive = IsVrHandsTwoHandedGripPoseActive();
             const bool nativeLeftHandFreezeEnabled =
                 m_NativeViewmodelHandsOnly && !twoHandedGripPoseActive;
+            const bool nativeHandsOnlyFreezePlaneContextEnabled =
+                m_NativeViewmodelHandsOnly;
             if (hasLocalSurvivorCharacter)
             {
                 if (!m_NativeViewmodelLeftHandFreezeHasSurvivorCharacter)
@@ -1577,7 +1579,7 @@ void VR::Update()
                 }
             }
 
-            setNativeLeftHandFreezePlaneContextActive(nativeLeftHandFreezeEnabled && hasLocalPlayer);
+            setNativeLeftHandFreezePlaneContextActive(nativeHandsOnlyFreezePlaneContextEnabled && hasLocalPlayer);
             if (!m_NativeViewmodelHandsOnly)
             {
                 resetNativeLeftHandFreezeForMapChange();
