@@ -1375,7 +1375,12 @@ static inline T ReadNetvar(const void* base, int ofs)
 
 static inline bool HandleValid(int h)
 {
-	return (h != 0 && h != -1);
+	const unsigned int handle = static_cast<unsigned int>(h);
+	if (handle == 0u || handle == 0xFFFFFFFFu)
+		return false;
+
+	const unsigned int entityIndex = handle & 0x0FFFu;
+	return entityIndex > 0u && entityIndex < 2048u;
 }
 
 static inline bool IsPlayerDoingUseOrReviveAction(const C_BasePlayer* player)

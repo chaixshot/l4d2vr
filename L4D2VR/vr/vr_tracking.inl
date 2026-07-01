@@ -387,7 +387,15 @@ void VR::UpdateTracking()
     const bool isObserver = (teamNum == 1) || (lifeState != 0);
     const int obsMode = *reinterpret_cast<const int*>(base + kObserverModeOffset);
     const int obsTarget = *reinterpret_cast<const int*>(base + kObserverTargetOffset);
-    auto handleValid = [](int h) { return (h != 0 && h != -1); };
+    auto handleValid = [](int h)
+        {
+            const unsigned int handle = static_cast<unsigned int>(h);
+            if (handle == 0u || handle == 0xFFFFFFFFu)
+                return false;
+
+            const unsigned int entityIndex = handle & 0x0FFFu;
+            return entityIndex > 0u && entityIndex < 2048u;
+        };
 
     C_BasePlayer* viewPlayer = localPlayer;
     bool inEyeObserver = false;
