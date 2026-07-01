@@ -233,13 +233,76 @@ namespace
         virtual int Init() = 0;
         virtual void Shutdown() = 0;
         virtual int AllocateDLLIdentifier() = 0;
-        virtual void RegisterConCommand(SourceConCommandBase* pCommandBase) = 0;
-        virtual void UnregisterConCommand(SourceConCommandBase* pCommandBase) = 0;
+        virtual void RegisterConCommand(void* pCommandBase) = 0;
+        virtual void UnregisterConCommand(void* pCommandBase) = 0;
         virtual void UnregisterConCommands(int id) = 0;
         virtual const char* GetCommandLineValue(const char* pVariableName) = 0;
         virtual SourceConCommandBase* FindCommandBase(const char* name) = 0;
         virtual const SourceConCommandBase* FindCommandBase(const char* name) const = 0;
         virtual SourceConVar* FindVar(const char* varName) = 0;
+    };
+
+    class SourceCCommand;
+
+    class SourceRegisteredConCommandBase
+    {
+    public:
+        virtual ~SourceRegisteredConCommandBase() = default;
+        virtual bool IsCommand() const { return true; }
+        virtual bool IsFlagSet(int flag) const { return (m_nFlags & flag) != 0; }
+        virtual void AddFlags(int flags) { m_nFlags |= flags; }
+        virtual void RemoveFlags(int flags) { m_nFlags &= ~flags; }
+        virtual int GetFlags() const { return m_nFlags; }
+        virtual const char* GetName() const { return m_pszName; }
+        virtual const char* GetHelpText() const { return m_pszHelpString ? m_pszHelpString : ""; }
+        virtual bool IsRegistered() const { return m_bRegistered; }
+        virtual int GetDLLIdentifier() const { return 0; }
+
+    protected:
+        virtual void Create(const char* name, const char* helpString = nullptr, int flags = 0)
+        {
+            m_pszName = name;
+            m_pszHelpString = helpString;
+            m_nFlags = flags;
+        }
+
+        virtual void Init() {}
+
+    public:
+        SourceRegisteredConCommandBase* m_pNext = nullptr;
+        bool m_bRegistered = false;
+        char m_PaddingRegistered[3] = {};
+        const char* m_pszName = nullptr;
+        const char* m_pszHelpString = nullptr;
+        int m_nFlags = 0;
+    };
+
+    class SourceRegisteredConCommand : public SourceRegisteredConCommandBase
+    {
+    public:
+        using Callback = void(__cdecl*)(const SourceCCommand&);
+
+        SourceRegisteredConCommand(const char* name, Callback callback, const char* helpString, int flags)
+            : m_Callback(callback)
+        {
+            Create(name, helpString, flags);
+        }
+
+        bool IsCommand() const override { return true; }
+        virtual int AutoCompleteSuggest(const char*, void*) { return 0; }
+        virtual bool CanAutoComplete() { return false; }
+        virtual void Dispatch(const SourceCCommand& command)
+        {
+            if (m_Callback)
+                m_Callback(command);
+        }
+
+    private:
+        Callback m_Callback = nullptr;
+        void* m_CompletionCallback = nullptr;
+        bool m_HasCompletionCallback = false;
+        bool m_UsingNewCommandCallback = true;
+        bool m_UsingCommandCallbackInterface = false;
     };
 
     struct SourceRecvTable;
@@ -392,6 +455,57 @@ static void* TryInterfaceNoError(const char* dllname, const char* interfacename)
     return CreateInterface(interfacename, &returnCode);
 }
 
+namespace
+{
+    constexpr int kFcvarServerCanExecute = (1 << 28);
+    constexpr char kL4D2VRServerAckCommandName[] = "l4d2vr_server_ack";
+
+    void __cdecl OnL4D2VRServerAckCommand(const SourceCCommand&)
+    {
+        const bool wasKnown = Hooks::s_ServerUnderstandsVR;
+        Hooks::s_ServerUnderstandsVR = true;
+
+        if (g_Game && g_Game->m_VR)
+        {
+            VR* vr = g_Game->m_VR;
+            vr->m_ServerHookFallbackPending = false;
+            vr->m_ServerHookFallbackForcedNonVRServerMovement = false;
+            vr->m_ServerHookFallbackCheckTime = {};
+            vr->m_ForceNonVRServerMovement = vr->m_ConfigForceNonVRServerMovement;
+        }
+
+        if (!wasKnown)
+            Game::logMsg("[VR][ServerAck] dedicated server plugin acknowledged VR usercmd support");
+    }
+
+    SourceRegisteredConCommand g_L4D2VRServerAckCommand(
+        kL4D2VRServerAckCommandName,
+        &OnL4D2VRServerAckCommand,
+        "Accepts L4D2VR dedicated server plugin acknowledgement.",
+        kFcvarServerCanExecute);
+
+    bool g_L4D2VRServerAckCommandRegistered = false;
+
+    void RegisterL4D2VRServerAckCommand(void* cvarIface)
+    {
+        if (!cvarIface || g_L4D2VRServerAckCommandRegistered)
+            return;
+
+        SourceICvar* cvar = reinterpret_cast<SourceICvar*>(cvarIface);
+        __try
+        {
+            if (!cvar->FindCommandBase(kL4D2VRServerAckCommandName))
+                cvar->RegisterConCommand(&g_L4D2VRServerAckCommand);
+            g_L4D2VRServerAckCommandRegistered = true;
+            Game::logMsg("[VR][ServerAck] registered %s client command", kL4D2VRServerAckCommandName);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            Game::logMsg("[VR][ServerAck] failed to register %s client command", kL4D2VRServerAckCommandName);
+        }
+    }
+}
+
 // === Game Constructor ===
 Game::Game()
 {
@@ -423,6 +537,7 @@ Game::Game()
         m_Cvar = TryInterfaceNoError("vstdlib.dll", "VEngineCvar006");
     if (!m_Cvar)
         m_Cvar = TryInterfaceNoError("vstdlib.dll", "VEngineCvar004");
+    RegisterL4D2VRServerAckCommand(m_Cvar);
 
     m_Offsets = new Offsets();
     m_VR = new VR(this);
