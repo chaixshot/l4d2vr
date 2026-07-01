@@ -1983,23 +1983,20 @@ int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 		return true;
 		};
 
-	if (to->weaponselect == 0 && to->weaponsubtype == 0)
+	const int extraFlags = m_VR->m_Roomscale1To1PhysicalCrouchActive ? kVrExtraFlagCrouched : 0;
+	Vector teleportTarget{};
+	if (m_VR->ConsumeTeleportServerTarget(teleportTarget))
 	{
-		const int extraFlags = m_VR->m_Roomscale1To1PhysicalCrouchActive ? kVrExtraFlagCrouched : 0;
-		Vector teleportTarget{};
-		if (m_VR->ConsumeTeleportServerTarget(teleportTarget))
+		writeExtraCommand(kVrExtraTypeTeleport, extraFlags, teleportTarget, 1.0f, 1.0f);
+	}
+	else if (to->weaponselect == 0 && to->weaponsubtype == 0)
+	{
+		Vector roomscaleWorldDelta{};
+		Vector roomscaleVisualWorldDelta{};
+		if (m_VR->ConsumeRoomscale1To1ServerMoveDelta(roomscaleWorldDelta, roomscaleVisualWorldDelta))
 		{
-			writeExtraCommand(kVrExtraTypeTeleport, extraFlags, teleportTarget, 1.0f, 1.0f);
-		}
-		else
-		{
-			Vector roomscaleWorldDelta{};
-			Vector roomscaleVisualWorldDelta{};
-			if (m_VR->ConsumeRoomscale1To1ServerMoveDelta(roomscaleWorldDelta, roomscaleVisualWorldDelta))
-			{
-				roomscaleWorldDelta.z = 0.0f;
-				writeExtraCommand(kVrExtraTypeRoomscale, extraFlags, roomscaleWorldDelta, 10.0f, 1.0f);
-			}
+			roomscaleWorldDelta.z = 0.0f;
+			writeExtraCommand(kVrExtraTypeRoomscale, extraFlags, roomscaleWorldDelta, 10.0f, 1.0f);
 		}
 	}
 
