@@ -3216,6 +3216,7 @@ public:
 	Vector GetLeftControllerAbsPos();
 	QAngle GetRightControllerAbsAngle();
 	Vector GetRightControllerAbsPos();
+	Vector GetRightControllerViewmodelAbsPos();
 	bool ResolvePavlovTwoHandedAimBasis(
 		const Vector& leftControllerPosAbs,
 		const Vector& rightControllerPosAbs,

@@ -1432,6 +1432,32 @@ Vector VR::GetRightControllerAbsPos()
 }
 
 
+Vector VR::GetRightControllerViewmodelAbsPos()
+{
+    if (t_UseRenderFrameSnapshot)
+    {
+        auto& cache = vr_render_snapshot_cache_roomscale::TLS();
+        if (vr_render_snapshot_cache_roomscale::Get(this, cache))
+        {
+            Vector forward{}, right{}, up{};
+            QAngle::AngleVectors(cache.vmAng, &forward, &right, &up);
+            if (!forward.IsZero() && !right.IsZero() && !up.IsZero())
+            {
+                VectorNormalize(forward);
+                VectorNormalize(right);
+                VectorNormalize(up);
+                return cache.vmPos
+                    + (forward * m_ViewmodelPosOffset.x)
+                    + (right * m_ViewmodelPosOffset.y)
+                    + (up * m_ViewmodelPosOffset.z);
+            }
+        }
+    }
+
+    return m_RightControllerPosAbs;
+}
+
+
 Vector VR::GetRecommendedViewmodelAbsPos()
 {
     if (t_UseRenderFrameSnapshot)
@@ -1441,7 +1467,7 @@ Vector VR::GetRecommendedViewmodelAbsPos()
             return cache.vmPos;
     }
 
-    Vector viewmodelPos = GetRightControllerAbsPos();
+    Vector viewmodelPos = GetRightControllerViewmodelAbsPos();
     if (m_MouseModeEnabled)
     {
         const Vector& anchor = IsMouseModeScopeActive() ? m_MouseModeScopedViewmodelAnchorOffset : m_MouseModeViewmodelAnchorOffset;

@@ -1318,6 +1318,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				Vector leftCtrlPosAbs = m_VR->m_LeftControllerPosAbs;
 				QAngle leftCtrlAngAbs = m_VR->m_LeftControllerAngAbs;
 				Vector rightCtrlPosAbs = m_VR->m_RightControllerPosAbs;
+				Vector rightCtrlViewmodelPosAbs = rightCtrlPosAbs;
 				QAngle rightCtrlAngAbs = m_VR->m_RightControllerAngAbs;
 				Vector vmForward = m_VR->m_ViewmodelForward;
 				Vector vmRight = m_VR->m_ViewmodelRight;
@@ -1396,6 +1397,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 						ctrlU = VectorRotate(ctrlU, ctrlR, -45.0);
 
 						rightCtrlPosAbs = cameraAnchor - Vector(0, 0, 64) + (ctrlPosCorrected * vp.vrScale);
+						rightCtrlViewmodelPosAbs = rightCtrlPosAbs;
 						QAngle::VectorAngles(ctrlF, ctrlU, rightCtrlAngAbs);
 						rightCtrlForward = ctrlF;
 						rightCtrlRight = ctrlR;
@@ -1441,7 +1443,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 					vmRight = VectorRotate(vmRight, vmForward, vp.viewmodelAngOffset.z);
 					vmUp = VectorRotate(vmUp, vmForward, vp.viewmodelAngOffset.z);
 
-					vmPosAbs = rightCtrlPosAbs
+					vmPosAbs = rightCtrlViewmodelPosAbs
 						- (vmForward * vp.viewmodelPosOffset.x)
 						- (vmRight * vp.viewmodelPosOffset.y)
 						- (vmUp * vp.viewmodelPosOffset.z);

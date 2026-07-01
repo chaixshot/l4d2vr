@@ -583,7 +583,7 @@ namespace
 			return false;
 
 		VectorNormalize(direction);
-		start = vr->GetRightControllerAbsPos() + direction * 2.0f;
+		start = vr->GetRightControllerViewmodelAbsPos() + direction * 2.0f;
         if (vr->m_ForceNonVRServerMovement && vr->m_HasNonVRAimSolution)
             end = vr->m_NonVRAimHitPoint;
         else
@@ -922,6 +922,25 @@ namespace
 		return false;
 	}
 
+	static inline bool TryBuildLocalAimLineBulletVisualRay(VR* vr, Vector& origin, QAngle& angles)
+	{
+		if (!vr || !vr->m_IsVREnabled || vr->m_MouseModeEnabled || vr->IsScopeActive())
+			return false;
+
+		if (vr->m_HasAimLine && !vr->m_HasThrowArc)
+		{
+			const Vector start = vr->m_AimLineStart;
+			const Vector end = vr->m_AimLineEnd;
+			if (IsFiniteVector(start) && IsFiniteVector(end) && !(end - start).IsZero())
+			{
+				origin = start;
+				return BuildAnglesToTarget(origin, end, angles);
+			}
+		}
+
+		return false;
+	}
+
 	static inline bool ApplyLocalViewmodelBulletVisualPose(VR* vr, Vector& origin, QAngle& angles)
 	{
 		if (!vr || !vr->m_IsVREnabled || (!vr->m_BulletVisualsUseMuzzleSmoke && !vr->m_BulletVisualsUseViewmodelPose))
@@ -1136,7 +1155,9 @@ int Hooks::dServerFireTerrorBullets(int playerId, const Vector& vecOrigin, const
 	if (m_VR->m_IsVREnabled && playerId == m_Game->m_EngineClient->GetLocalPlayer())
 	{
 		const bool scopeActive = m_VR->IsScopeActive();
-		vecNewOrigin = m_VR->m_MouseModeEnabled ? GetMouseModeGunOriginAbs(m_VR) : m_VR->GetRightControllerAbsPos();
+		vecNewOrigin = m_VR->m_MouseModeEnabled ? GetMouseModeGunOriginAbs(m_VR) : m_VR->GetRightControllerViewmodelAbsPos();
+		if (!scopeActive)
+			TryBuildLocalAimLineBulletVisualRay(m_VR, vecNewOrigin, vecNewAngles);
 
 		// ForceNonVRServerMovement: aim the *visual* bullet line to the solved hit point (H)
 		// so what you see matches what the remote non-VR server will hit.
@@ -1277,9 +1298,13 @@ int Hooks::dClientFireTerrorBullets(
 				}
 				else
 				{
-					vecNewOrigin = m_VR->GetRightControllerAbsPos();
+					vecNewOrigin = m_VR->GetRightControllerViewmodelAbsPos();
 
-					if (BuildAnglesToAimLineTarget(m_VR, vecNewOrigin, vecNewAngles))
+					if (TryBuildLocalAimLineBulletVisualRay(m_VR, vecNewOrigin, vecNewAngles))
+					{
+						// Local bullet FX ray is the already-projected viewmodel aim line.
+					}
+					else if (BuildAnglesToAimLineTarget(m_VR, vecNewOrigin, vecNewAngles))
 					{
 						// Aim-line target already includes the viewmodel-layer equivalent ray.
 					}
@@ -1318,7 +1343,9 @@ int Hooks::dClientFireTerrorBullets(
 				}
 				else
 				{
-					vecNewOrigin = m_VR->m_MouseModeEnabled ? GetMouseModeGunOriginAbs(m_VR) : m_VR->GetRightControllerAbsPos();
+					vecNewOrigin = m_VR->m_MouseModeEnabled ? GetMouseModeGunOriginAbs(m_VR) : m_VR->GetRightControllerViewmodelAbsPos();
+					if (!m_VR->m_MouseModeEnabled)
+						TryBuildLocalAimLineBulletVisualRay(m_VR, vecNewOrigin, vecNewAngles);
 				}
 
 				// 开关决定：要不要把 angles 替换成“控制器纯角度/汇聚角度”
@@ -1434,11 +1461,11 @@ int Hooks::dClientFireTerrorBullets(
 
 
 
-		const Vector predictedHitOrigin = vecNewOrigin;
-		const QAngle predictedHitAngles = vecNewAngles;
 		const bool viewmodelBulletPoseApplied = ApplyLocalViewmodelBulletVisualPose(m_VR, vecNewOrigin, vecNewAngles);
 		if (viewmodelBulletPoseApplied && !scopeActive && m_VR->m_HasAimLine && !m_VR->m_HasThrowArc)
 			BuildAnglesToTarget(vecNewOrigin, m_VR->m_AimLineEnd, vecNewAngles);
+		const Vector predictedHitOrigin = vecNewOrigin;
+		const QAngle predictedHitAngles = vecNewAngles;
 
 		if (m_VR->m_IsVREnabled && m_Game && m_Game->m_EngineClient
 			&& playerId == m_Game->m_EngineClient->GetLocalPlayer())
@@ -2085,7 +2112,9 @@ int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 		}
 	}
 
-	Vector controllerPos = m_VR->GetRightControllerAbsPos();
+	Vector controllerPos = m_VR->GetRightControllerViewmodelAbsPos();
+	if (m_VR->m_HasAimLine && !m_VR->m_HasThrowArc && IsFiniteVector(m_VR->m_AimLineStart))
+		controllerPos = m_VR->m_AimLineStart;
 	QAngle controllerAngles = m_VR->GetRightControllerAbsAngle();
 	if (m_Game && !m_Game->m_IsMeleeWeaponActive)
 	{

@@ -1167,7 +1167,7 @@ void VR::UpdateNonVRAimSolution(C_BasePlayer* localPlayer, bool forceFresh, bool
     // In queued render + view smoothing, the rendered controller pose may differ from the
     // update-thread controller pose. Always use the same source as the aiming laser so
     // the non-VR server aim solution stays consistent with what the player sees.
-    const Vector controllerPosAbs = GetRightControllerAbsPos();
+    const Vector controllerPosAbs = GetRightControllerViewmodelAbsPos();
 
     Vector originBase = controllerPosAbs;
     // Keep non-3P codepath identical to legacy behavior; only use the new render-center delta in 3P.
@@ -1297,7 +1297,7 @@ bool VR::UpdateFriendlyFireAimHit(C_BasePlayer* localPlayer)
         if (m_IsThirdPersonCamera && !m_RightControllerForwardUnforced.IsZero())
             gunDir = m_RightControllerForwardUnforced;
 
-        gunOrigin = m_RightControllerPosAbs;
+        gunOrigin = GetRightControllerViewmodelAbsPos();
         if (useMouse)
         {
             const Vector& anchor = IsMouseModeScopeActive() ? m_MouseModeScopedViewmodelAnchorOffset : m_MouseModeViewmodelAnchorOffset;
@@ -1732,7 +1732,7 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
     //  - Normal mode: controller forward (prefer render snapshot in queued mode).
     //  - Mouse mode (scheme B): start at the viewmodel anchor, but steer the ray to converge
     //    to the eye-center ray at MouseModeAimConvergeDistance.
-    const Vector controllerPosAbs = GetRightControllerAbsPos();
+    const Vector controllerPosAbs = GetRightControllerViewmodelAbsPos();
     const QAngle controllerAngAbs = GetRightControllerAbsAngle();
     Vector controllerForward{}, controllerRight{}, controllerUp{};
     QAngle::AngleVectors(controllerAngAbs, &controllerForward, &controllerRight, &controllerUp);
@@ -3182,7 +3182,7 @@ bool VR::BuildRenderAimLineSegment(C_BasePlayer* localPlayer, Vector& start, Vec
         return !((end - start).IsZero());
     }
 
-    Vector originBase = GetRightControllerAbsPos();
+    Vector originBase = GetRightControllerViewmodelAbsPos();
     Vector dir{};
 
     if (frontViewEyeAim || frontViewControllerEyeOrigin)
