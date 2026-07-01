@@ -596,6 +596,13 @@ static bool ApplyServerTeleportMove(Server_BaseEntity* serverPlayer, IServerUnkn
 	if (!Hooks::m_Game->m_EngineClient || Hooks::m_Game->m_EngineClient->GetLocalPlayer() != playerIndex)
 		return false;
 
+	if (Hooks::s_ServerUnderstandsVR &&
+		Hooks::m_VR->m_EncodeVRUsercmd &&
+		!Hooks::m_VR->m_ForceNonVRServerMovement)
+	{
+		return false;
+	}
+
 	if (Hooks::m_VR->m_PlayerControlledBySI ||
 		Hooks::m_VR->m_UsingMountedGunPrev ||
 		Hooks::m_VR->m_RenderPlayerIncap.load(std::memory_order_relaxed) != 0 ||
