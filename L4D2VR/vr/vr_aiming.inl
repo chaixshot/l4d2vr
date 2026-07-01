@@ -1835,6 +1835,7 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
                 direction = formattedDirection;
             }
         }
+        m_LastAimDirection = direction;
 
         m_AimLineHitsFriendly = false;
         m_HasAimConvergePoint = false;
@@ -1868,6 +1869,7 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
             }
         }
     }
+    m_LastAimDirection = direction;
 
     if (m_ForceNonVRServerMovement && m_HasNonVRAimSolution)
     {

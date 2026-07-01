@@ -887,12 +887,39 @@ namespace
 		return true;
 	}
 
+	static inline bool BuildAnglesFromDirection(Vector direction, QAngle& angles)
+	{
+		if (direction.IsZero())
+			return false;
+
+		VectorNormalize(direction);
+		QAngle ang;
+		QAngle::VectorAngles(direction, ang);
+		NormalizeAndClampViewAngles(ang);
+		angles = ang;
+		return true;
+	}
+
 	static inline bool BuildAnglesToAimLineTarget(VR* vr, const Vector& origin, QAngle& angles)
 	{
 		if (!vr || !vr->m_IsVREnabled || vr->m_ForceNonVRServerMovement || !vr->m_HasAimLine || vr->m_HasThrowArc)
 			return false;
 
 		return BuildAnglesToTarget(origin, vr->m_AimLineEnd, angles);
+	}
+
+	static inline bool BuildAnglesToEncodedServerAim(VR* vr, const Vector& origin, QAngle& angles)
+	{
+		if (!vr || !vr->m_IsVREnabled || vr->m_ForceNonVRServerMovement)
+			return false;
+
+		if (vr->m_HasAimLine && !vr->m_HasThrowArc && BuildAnglesToTarget(origin, vr->m_AimLineEnd, angles))
+			return true;
+
+		if (vr->m_HasThrowArc && BuildAnglesFromDirection(vr->m_LastAimDirection, angles))
+			return true;
+
+		return false;
 	}
 
 	static inline bool ApplyLocalViewmodelBulletVisualPose(VR* vr, Vector& origin, QAngle& angles)
@@ -2058,7 +2085,15 @@ int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 		}
 	}
 
+	Vector controllerPos = m_VR->GetRightControllerAbsPos();
 	QAngle controllerAngles = m_VR->GetRightControllerAbsAngle();
+	if (m_Game && !m_Game->m_IsMeleeWeaponActive)
+	{
+		QAngle serverAimAngles = controllerAngles;
+		if (BuildAnglesToEncodedServerAim(m_VR, controllerPos, serverAimAngles))
+			controllerAngles = serverAimAngles;
+	}
+
 	to->mousedx = (int)(controllerAngles.x * 10.0f); // Strip off 2nd decimal to save bits.
 	to->mousedy = (int)(controllerAngles.y * 10.0f);
 	int rollEncoding = (((int)controllerAngles.z + 180) / 2 * 10000000);
@@ -2106,7 +2141,6 @@ int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 		to->command_number *= -1; // Signal to server that melee swing in motion
 	}
 
-	Vector controllerPos = m_VR->GetRightControllerAbsPos();
 	float xAngleOrig = to->viewangles.x; // 备份
 
 	to->viewangles.z = controllerPos.x;
