@@ -1563,34 +1563,52 @@ float __fastcall Hooks::dProcessUsercmds(void* ecx, void* edx, edict_t* player,
 				Vector finalMeleeDirection = VectorRotate(finalForward, finalRight, 50.0f);
 				VectorNormalize(finalMeleeDirection);
 
+				const float swingDot = std::clamp(DotProduct(initialMeleeDirection, finalMeleeDirection), -1.0f, 1.0f);
 				Vector pivot;
 				CrossProduct(initialMeleeDirection, finalMeleeDirection, pivot);
-				VectorNormalize(pivot);
-
-				float swingAngle = acosf(DotProduct(initialMeleeDirection, finalMeleeDirection)) * 180.0f / 3.14159265f;
-
-				m_Game->m_Hooks->hkGetPrimaryAttackActivity.fOriginal(curWep, meleeWepInfo); // Needed to call TestMeleeSwingCollision
-
-				m_Game->m_PerformingMelee = true;
-
-				Vector traceDirection = initialMeleeDirection;
-				int numTraces = 10;
-				float traceAngle = swingAngle / numTraces;
-				bool confirmedMeleeCollision = false;
-				for (int i = 0; i < numTraces; ++i)
+				bool canTraceSwing = true;
+				if (VectorNormalize(pivot) <= 0.0001f)
 				{
-					traceDirection = VectorRotate(traceDirection, pivot, traceAngle);
-					const int entitiesHitBefore = curWep->entitiesHitThisSwing;
-					const int collisionResult = m_Game->m_Hooks->hkTestMeleeSwingCollisionServer.fOriginal(curWep, traceDirection);
-					const int entitiesHitAfter = curWep->entitiesHitThisSwing;
-					if (collisionResult != 0 || entitiesHitAfter > entitiesHitBefore)
-						confirmedMeleeCollision = true;
+					if (swingDot > -0.999f)
+					{
+						canTraceSwing = false;
+					}
+					else
+					{
+						pivot = initialUp;
+						canTraceSwing = VectorNormalize(pivot) > 0.0001f;
+					}
 				}
 
-				m_Game->m_PerformingMelee = false;
+				float swingAngle = acosf(swingDot) * 180.0f / 3.14159265f;
+				if (!std::isfinite(swingAngle) || swingAngle <= 0.01f)
+					canTraceSwing = false;
 
-				if (confirmedMeleeCollision && m_VR && index == m_Game->m_EngineClient->GetLocalPlayer())
-					m_VR->NotifyMeleeHitConfirmed(0);
+				if (canTraceSwing)
+				{
+					m_Game->m_Hooks->hkGetPrimaryAttackActivity.fOriginal(curWep, meleeWepInfo); // Needed to call TestMeleeSwingCollision
+
+					m_Game->m_PerformingMelee = true;
+
+					Vector traceDirection = initialMeleeDirection;
+					int numTraces = 10;
+					float traceAngle = swingAngle / numTraces;
+					bool confirmedMeleeCollision = false;
+					for (int i = 0; i < numTraces; ++i)
+					{
+						traceDirection = VectorRotate(traceDirection, pivot, traceAngle);
+						const int entitiesHitBefore = curWep->entitiesHitThisSwing;
+						const int collisionResult = m_Game->m_Hooks->hkTestMeleeSwingCollisionServer.fOriginal(curWep, traceDirection);
+						const int entitiesHitAfter = curWep->entitiesHitThisSwing;
+						if (collisionResult != 0 || entitiesHitAfter > entitiesHitBefore)
+							confirmedMeleeCollision = true;
+					}
+
+					m_Game->m_PerformingMelee = false;
+
+					if (confirmedMeleeCollision && m_VR && index == m_Game->m_EngineClient->GetLocalPlayer())
+						m_VR->NotifyMeleeHitConfirmed(0);
+				}
 			}
 		}
 	}
