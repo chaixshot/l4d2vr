@@ -762,6 +762,107 @@ namespace
         return (ca << 24) | (cr << 16) | (cg << 8) | cb;
     }
 
+    static inline float VR_ProjectionTanHalfX(float fov)
+    {
+        return std::tan(DEG2RAD(std::clamp(fov, 1.0f, 179.0f) * 0.5f));
+    }
+
+    static inline float VR_ResolveProjectionAspect(float configuredAspect, uint32_t width, uint32_t height)
+    {
+        if (std::isfinite(configuredAspect) && configuredAspect > 0.01f)
+            return configuredAspect;
+        if (height > 0)
+            return static_cast<float>(width) / static_cast<float>(height);
+        return 1.0f;
+    }
+
+    static inline bool VR_ResolveAimLineViewFrame(
+        const VR* vr,
+        Vector& outViewOrigin,
+        Vector& outForward,
+        Vector& outRight,
+        Vector& outUp)
+    {
+        if (!vr)
+            return false;
+
+        VR* mutableVr = const_cast<VR*>(vr);
+        const Vector viewAngles = mutableVr->GetViewAngle();
+        const Vector viewLeft = mutableVr->GetViewOriginLeft();
+        const Vector viewRight = mutableVr->GetViewOriginRight();
+
+        QAngle eyeAngles(viewAngles.x, viewAngles.y, viewAngles.z);
+        QAngle::AngleVectors(eyeAngles, &outForward, &outRight, &outUp);
+        if (outForward.IsZero() || outRight.IsZero() || outUp.IsZero())
+            return false;
+
+        VectorNormalize(outForward);
+        VectorNormalize(outRight);
+        VectorNormalize(outUp);
+
+        outViewOrigin = (viewLeft + viewRight) * 0.5f;
+        return std::isfinite(outViewOrigin.x) &&
+            std::isfinite(outViewOrigin.y) &&
+            std::isfinite(outViewOrigin.z);
+    }
+
+    static inline bool VR_FormatViewmodelPointToWorldProjection(const VR* vr, const Vector& viewmodelPoint, Vector& outWorldProjectionPoint)
+    {
+        if (!vr)
+            return false;
+
+        const float worldFov = (vr->m_Fov > 0.001f) ? vr->m_Fov : 90.0f;
+        const float viewmodelFov = worldFov;
+        const float worldAspect = VR_ResolveProjectionAspect(vr->m_Aspect, vr->m_RenderWidth, vr->m_RenderHeight);
+        const float viewmodelAspect = (vr->m_RenderHeight > 0)
+            ? (static_cast<float>(vr->m_RenderWidth) / static_cast<float>(vr->m_RenderHeight))
+            : worldAspect;
+
+        const float worldTanX = VR_ProjectionTanHalfX(worldFov);
+        const float viewmodelTanX = VR_ProjectionTanHalfX(viewmodelFov);
+        if (!(worldTanX > 0.0001f) || !(viewmodelTanX > 0.0001f))
+            return false;
+
+        const float worldTanY = worldTanX / std::max(worldAspect, 0.01f);
+        const float viewmodelTanY = viewmodelTanX / std::max(viewmodelAspect, 0.01f);
+        if (!(worldTanY > 0.0001f) || !(viewmodelTanY > 0.0001f))
+            return false;
+
+        Vector viewOrigin{}, forward{}, right{}, up{};
+        if (!VR_ResolveAimLineViewFrame(vr, viewOrigin, forward, right, up))
+            return false;
+
+        const Vector delta = viewmodelPoint - viewOrigin;
+        const float viewX = DotProduct(delta, right);
+        const float viewY = DotProduct(delta, up);
+        const float viewZ = DotProduct(delta, forward);
+        if (!std::isfinite(viewX) || !std::isfinite(viewY) || !std::isfinite(viewZ))
+            return false;
+
+        outWorldProjectionPoint =
+            viewOrigin +
+            right * (viewX * (worldTanX / viewmodelTanX)) +
+            up * (viewY * (worldTanY / viewmodelTanY)) +
+            forward * viewZ;
+        return true;
+    }
+
+    static inline bool VR_FormatAimLineSegmentToViewmodelLayer(const VR* vr, Vector& start, Vector& end)
+    {
+        Vector formattedStart{};
+        Vector formattedEnd{};
+        if (!VR_FormatViewmodelPointToWorldProjection(vr, start, formattedStart) ||
+            !VR_FormatViewmodelPointToWorldProjection(vr, end, formattedEnd) ||
+            (formattedEnd - formattedStart).IsZero())
+        {
+            return false;
+        }
+
+        start = formattedStart;
+        end = formattedEnd;
+        return true;
+    }
+
     static inline bool VR_ProjectAimLinePointToView(
         const CViewSetup& view,
         const Vector& forward,
@@ -1223,6 +1324,9 @@ bool VR::UpdateFriendlyFireAimHit(C_BasePlayer* localPlayer)
 
     Vector gunStart = gunOriginBase + gunDir * 2.0f;
     Vector gunEnd = gunStart + gunDir * 8192.0f;
+    if (!m_ForceNonVRServerMovement)
+        VR_FormatAimLineSegmentToViewmodelLayer(this, gunStart, gunEnd);
+
     // Friendly-fire guard: optional hull radius around the aim rays (meters -> Source units via VRScale).
     // This makes the check more conservative, helping with bullet spread, latency, and near-misses.
     //
@@ -1721,6 +1825,17 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
 
     if (isThrowable)
     {
+        Vector throwEnd = origin + direction * 8192.0f;
+        if (!m_ForceNonVRServerMovement && VR_FormatAimLineSegmentToViewmodelLayer(this, origin, throwEnd))
+        {
+            Vector formattedDirection = throwEnd - origin;
+            if (!formattedDirection.IsZero())
+            {
+                VectorNormalize(formattedDirection);
+                direction = formattedDirection;
+            }
+        }
+
         m_AimLineHitsFriendly = false;
         m_HasAimConvergePoint = false;
         UpdateAimTeammateHudTarget(localPlayer, Vector{}, Vector{}, false);
@@ -1728,7 +1843,7 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
         // Match the VR-aware throw path: that server route now resolves throwable aim
         // from the controller pose. ForceNonVRServerMovement already used this source.
         Vector pitchSource = direction;
-        if ((useMouse || frontViewEyeAim) && !eyeDir.IsZero())
+        if (m_ForceNonVRServerMovement && (useMouse || frontViewEyeAim) && !eyeDir.IsZero())
             pitchSource = eyeDir;
 
         DrawThrowArc(origin, direction, pitchSource);
@@ -1738,6 +1853,21 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
     const float maxDistance = 8192.0f;
     Vector target = origin + direction * maxDistance;
 
+    if (!m_ForceNonVRServerMovement)
+    {
+        // Treat the aim line as a viewmodel-layer ray. Convert it to the world
+        // projection equivalent before any traces or caches consume it, so
+        // visible line, hit/landing decisions, and bullet FX share one ray.
+        if (VR_FormatAimLineSegmentToViewmodelLayer(this, origin, target))
+        {
+            Vector formattedDirection = target - origin;
+            if (!formattedDirection.IsZero())
+            {
+                VectorNormalize(formattedDirection);
+                direction = formattedDirection;
+            }
+        }
+    }
 
     if (m_ForceNonVRServerMovement && m_HasNonVRAimSolution)
     {
@@ -3121,6 +3251,7 @@ bool VR::BuildRenderAimLineSegment(C_BasePlayer* localPlayer, Vector& start, Vec
         // In third-person, avoid using the update-thread converge point here (it may be in a different phase);
         // draw a pure controller ray so the line always stays attached to the hand.
         end = start + dir * maxDistance;
+        VR_FormatAimLineSegmentToViewmodelLayer(this, start, end);
     }
 
     return !((end - start).IsZero());

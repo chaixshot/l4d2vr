@@ -873,6 +873,28 @@ namespace
 		return true;
 	}
 
+	static inline bool BuildAnglesToTarget(const Vector& origin, const Vector& target, QAngle& angles)
+	{
+		Vector to = target - origin;
+		if (to.IsZero())
+			return false;
+
+		VectorNormalize(to);
+		QAngle ang;
+		QAngle::VectorAngles(to, ang);
+		NormalizeAndClampViewAngles(ang);
+		angles = ang;
+		return true;
+	}
+
+	static inline bool BuildAnglesToAimLineTarget(VR* vr, const Vector& origin, QAngle& angles)
+	{
+		if (!vr || !vr->m_IsVREnabled || vr->m_ForceNonVRServerMovement || !vr->m_HasAimLine || vr->m_HasThrowArc)
+			return false;
+
+		return BuildAnglesToTarget(origin, vr->m_AimLineEnd, angles);
+	}
+
 	static inline bool ApplyLocalViewmodelBulletVisualPose(VR* vr, Vector& origin, QAngle& angles)
 	{
 		if (!vr || !vr->m_IsVREnabled || (!vr->m_BulletVisualsUseMuzzleSmoke && !vr->m_BulletVisualsUseViewmodelPose))
@@ -1112,6 +1134,10 @@ int Hooks::dServerFireTerrorBullets(int playerId, const Vector& vecOrigin, const
 			vecNewOrigin = m_VR->GetScopeCameraAbsPos();
 			vecNewAngles = m_VR->GetScopeCameraAbsAngle();
 		}
+		else if (BuildAnglesToAimLineTarget(m_VR, vecNewOrigin, vecNewAngles))
+		{
+			// Aim-line target already includes the viewmodel-layer equivalent ray.
+		}
 		// Third-person convergence
 		else if (m_VR->IsThirdPersonCameraActive() && m_VR->m_HasAimConvergePoint)
 		{
@@ -1209,21 +1235,28 @@ int Hooks::dClientFireTerrorBullets(
 				{
 					vecNewOrigin = GetMouseModeGunOriginAbs(m_VR);
 
-					const Vector target = (m_VR->IsThirdPersonCameraActive() && m_VR->m_HasAimConvergePoint)
-						? m_VR->m_AimConvergePoint
-						: GetMouseModeDefaultTargetAbs(m_VR);
+					if (!BuildAnglesToAimLineTarget(m_VR, vecNewOrigin, vecNewAngles))
+					{
+						const Vector target = (m_VR->IsThirdPersonCameraActive() && m_VR->m_HasAimConvergePoint)
+							? m_VR->m_AimConvergePoint
+							: GetMouseModeDefaultTargetAbs(m_VR);
 
-					QAngle ang;
-					if (GetMouseModeAimAnglesToTarget(m_VR, vecNewOrigin, target, ang))
-						vecNewAngles = ang;
-					else
-						vecNewAngles = GetMouseModeFallbackAimAngles(m_VR);
+						QAngle ang;
+						if (GetMouseModeAimAnglesToTarget(m_VR, vecNewOrigin, target, ang))
+							vecNewAngles = ang;
+						else
+							vecNewAngles = GetMouseModeFallbackAimAngles(m_VR);
+					}
 				}
 				else
 				{
 					vecNewOrigin = m_VR->GetRightControllerAbsPos();
 
-					if (m_VR->IsThirdPersonCameraActive() && m_VR->m_HasAimConvergePoint)
+					if (BuildAnglesToAimLineTarget(m_VR, vecNewOrigin, vecNewAngles))
+					{
+						// Aim-line target already includes the viewmodel-layer equivalent ray.
+					}
+					else if (m_VR->IsThirdPersonCameraActive() && m_VR->m_HasAimConvergePoint)
 					{
 						Vector to = m_VR->m_AimConvergePoint - vecNewOrigin;
 						if (!to.IsZero())
@@ -1376,7 +1409,9 @@ int Hooks::dClientFireTerrorBullets(
 
 		const Vector predictedHitOrigin = vecNewOrigin;
 		const QAngle predictedHitAngles = vecNewAngles;
-		ApplyLocalViewmodelBulletVisualPose(m_VR, vecNewOrigin, vecNewAngles);
+		const bool viewmodelBulletPoseApplied = ApplyLocalViewmodelBulletVisualPose(m_VR, vecNewOrigin, vecNewAngles);
+		if (viewmodelBulletPoseApplied && !scopeActive && m_VR->m_HasAimLine && !m_VR->m_HasThrowArc)
+			BuildAnglesToTarget(vecNewOrigin, m_VR->m_AimLineEnd, vecNewAngles);
 
 		if (m_VR->m_IsVREnabled && m_Game && m_Game->m_EngineClient
 			&& playerId == m_Game->m_EngineClient->GetLocalPlayer())
@@ -1413,6 +1448,11 @@ int Hooks::dClientFireTerrorBullets(
 
 		return original(playerId, vecNewOrigin, vecNewAngles, a4, a5, a6, a7);
 	}
+
+	const auto original = hkClientFireTerrorBullets.fOriginal;
+	if (!original)
+		return 0;
+	return original(playerId, vecOrigin, vecAngles, a4, a5, a6, a7);
 }
 
 
