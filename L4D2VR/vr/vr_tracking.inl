@@ -109,7 +109,7 @@ bool VR::ResolvePavlovTwoHandedAimBasis(
     Vector& outRight,
     Vector& outUp) const
 {
-    if (!IsVrHandsTwoHandedGripPoseActive() || !m_VrHandsTwoHandedAimEnabled || m_MouseModeEnabled)
+    if (!IsVrHandsTwoHandedGripPoseActive() || m_MouseModeEnabled)
         return false;
 
     if (!VrHandsAimIsFinite(leftControllerPosAbs) ||

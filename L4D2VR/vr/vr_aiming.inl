@@ -947,6 +947,87 @@ namespace
             && VR_ProjectAimLinePointToView(view, forward, right, up, end, tanHalfFovX, tanHalfFovY, x1, y1, d1);
     }
 
+    static inline bool VR_IsFiniteVector3(const Vector& v)
+    {
+        return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+    }
+
+    static inline uint32_t VR_HashU32(uint32_t v)
+    {
+        v ^= v >> 16;
+        v *= 0x7feb352du;
+        v ^= v >> 15;
+        v *= 0x846ca68bu;
+        v ^= v >> 16;
+        return v;
+    }
+
+    static inline float VR_HashUnitFloat(uint32_t v)
+    {
+        return static_cast<float>(VR_HashU32(v) & 0x00FFFFFFu) / static_cast<float>(0x01000000u);
+    }
+
+    static inline bool VR_IsRealBulletSpreadWeaponId(C_WeaponCSBase::WeaponID id)
+    {
+        switch (id)
+        {
+        case C_WeaponCSBase::PISTOL:
+        case C_WeaponCSBase::MAGNUM:
+        case C_WeaponCSBase::UZI:
+        case C_WeaponCSBase::PUMPSHOTGUN:
+        case C_WeaponCSBase::AUTOSHOTGUN:
+        case C_WeaponCSBase::M16A1:
+        case C_WeaponCSBase::HUNTING_RIFLE:
+        case C_WeaponCSBase::MAC10:
+        case C_WeaponCSBase::SHOTGUN_CHROME:
+        case C_WeaponCSBase::SCAR:
+        case C_WeaponCSBase::SNIPER_MILITARY:
+        case C_WeaponCSBase::SPAS:
+        case C_WeaponCSBase::AK47:
+        case C_WeaponCSBase::MP5:
+        case C_WeaponCSBase::SG552:
+        case C_WeaponCSBase::AWP:
+        case C_WeaponCSBase::SCOUT:
+        case C_WeaponCSBase::M60:
+        case C_WeaponCSBase::MACHINEGUN:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    static inline bool VR_BuildSpreadDirectionFromAngles(
+        const QAngle& centerAngles,
+        float spreadDegrees,
+        float theta,
+        Vector& outDirection)
+    {
+        outDirection = Vector{ 0.0f, 0.0f, 0.0f };
+
+        QAngle normalized(centerAngles.x, centerAngles.y, centerAngles.z);
+        NormalizeAndClampViewAngles(normalized);
+        Vector forward{}, right{}, up{};
+        QAngle::AngleVectors(normalized, &forward, &right, &up);
+        if (forward.IsZero() || right.IsZero() || up.IsZero())
+            return false;
+        if (!VR_IsFiniteVector3(forward) || !VR_IsFiniteVector3(right) || !VR_IsFiniteVector3(up))
+            return false;
+
+        VectorNormalize(forward);
+        VectorNormalize(right);
+        VectorNormalize(up);
+
+        const float spreadRad = DEG2RAD(std::clamp(spreadDegrees, 0.0f, 45.0f));
+        const Vector radial = right * std::cos(theta) + up * std::sin(theta);
+        Vector direction = forward * std::cos(spreadRad) + radial * std::sin(spreadRad);
+        if (direction.IsZero() || !VR_IsFiniteVector3(direction))
+            return false;
+
+        VectorNormalize(direction);
+        outDirection = direction;
+        return true;
+    }
+
 }
 
 bool VR::IsUsingMountedGun(const C_BasePlayer* localPlayer) const
@@ -1679,6 +1760,7 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
         && m_ScopeWeaponIsFirearm;
     if (!ShouldShowAimLine(activeWeapon))
     {
+        ClearVrHandsRealBulletSpreadAimLine();
         m_LastAimDirection = Vector{ 0.0f, 0.0f, 0.0f };
         m_HasAimLine = false;
         m_HasAimConvergePoint = false;
@@ -1869,6 +1951,8 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
             }
         }
     }
+    if (ApplyVrHandsRealBulletSpreadAimLine(activeWeapon, origin, direction))
+        target = origin + direction * maxDistance;
     m_LastAimDirection = direction;
 
     if (m_ForceNonVRServerMovement && m_HasNonVRAimSolution)
@@ -2275,6 +2359,222 @@ bool VR::IsWeaponLaserSightActive(C_WeaponCSBase* weapon) const
     if (!VR_TryReadI32(reinterpret_cast<const unsigned char*>(weapon), kUpgradeBitVecOffset, bitVec))
         return false;
     return (bitVec & kLaserSightBit) != 0;
+}
+
+bool VR::IsVrHandsRealBulletSpreadWeapon(C_WeaponCSBase* weapon) const
+{
+    return weapon && VR_IsRealBulletSpreadWeaponId(weapon->GetWeaponID());
+}
+
+void VR::ClearVrHandsRealBulletSpreadAimLine()
+{
+    m_VrHandsRealBulletSpreadAimDirection = Vector{ 0.0f, 0.0f, 0.0f };
+    m_VrHandsRealBulletSpreadAimHoldUntil = {};
+}
+
+bool VR::ApplyVrHandsRealBulletSpreadAimLine(C_WeaponCSBase* weapon, const Vector& origin, Vector& direction)
+{
+    (void)origin;
+
+    if (!m_VrHandsRealBulletSpreadEnabled || !IsVrHandsRealBulletSpreadWeapon(weapon))
+    {
+        ClearVrHandsRealBulletSpreadAimLine();
+        return false;
+    }
+
+    if (m_MouseModeEnabled || IsScopeActive())
+    {
+        ClearVrHandsRealBulletSpreadAimLine();
+        return false;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (m_VrHandsRealBulletSpreadAimHoldUntil.time_since_epoch().count() == 0 ||
+        now > m_VrHandsRealBulletSpreadAimHoldUntil)
+    {
+        ClearVrHandsRealBulletSpreadAimLine();
+        return false;
+    }
+
+    const int weaponId = static_cast<int>(weapon->GetWeaponID());
+    if (weaponId != m_VrHandsRealBulletSpreadLastWeaponId)
+    {
+        ClearVrHandsRealBulletSpreadAimLine();
+        return false;
+    }
+
+    if (m_VrHandsRealBulletSpreadAimDirection.IsZero() ||
+        !VR_IsFiniteVector3(m_VrHandsRealBulletSpreadAimDirection))
+    {
+        ClearVrHandsRealBulletSpreadAimLine();
+        return false;
+    }
+
+    direction = m_VrHandsRealBulletSpreadAimDirection;
+    VectorNormalize(direction);
+    return true;
+}
+
+bool VR::ApplyVrHandsRealBulletSpreadAimAngles(C_WeaponCSBase* weapon, QAngle& angles)
+{
+    const float originalRoll = angles.z;
+    Vector direction{}, right{}, up{};
+    QAngle::AngleVectors(angles, &direction, &right, &up);
+    if (direction.IsZero())
+        return false;
+
+    if (!ApplyVrHandsRealBulletSpreadAimLine(weapon, Vector{}, direction))
+        return false;
+
+    QAngle spreadAngles{};
+    QAngle::VectorAngles(direction, spreadAngles);
+    NormalizeAndClampViewAngles(spreadAngles);
+    spreadAngles.z = originalRoll;
+    angles = spreadAngles;
+    return true;
+}
+
+bool VR::ApplyVrHandsRealBulletSpreadServerViewAngles(
+    C_BasePlayer* localPlayer,
+    C_WeaponCSBase* weapon,
+    QAngle& angles)
+{
+    Vector direction{}, right{}, up{};
+    QAngle::AngleVectors(angles, &direction, &right, &up);
+    if (direction.IsZero())
+        return false;
+
+    if (!ApplyVrHandsRealBulletSpreadAimLine(weapon, Vector{}, direction))
+        return false;
+
+    if (localPlayer && m_HasAimLine && !m_HasThrowArc && VR_IsFiniteVector3(m_AimLineEnd))
+    {
+        const Vector eye = localPlayer->EyePosition();
+        Vector toTarget = m_AimLineEnd - eye;
+        if (!toTarget.IsZero() && VR_IsFiniteVector3(toTarget))
+        {
+            VectorNormalize(toTarget);
+            QAngle serverAngles{};
+            QAngle::VectorAngles(toTarget, serverAngles);
+            NormalizeAndClampViewAngles(serverAngles);
+            angles = serverAngles;
+            return true;
+        }
+    }
+
+    QAngle spreadAngles{};
+    QAngle::VectorAngles(direction, spreadAngles);
+    NormalizeAndClampViewAngles(spreadAngles);
+    angles = spreadAngles;
+    return true;
+}
+
+bool VR::NotifyVrHandsRealBulletSpreadClientShot(
+    C_BasePlayer* localPlayer,
+    C_WeaponCSBase* weapon,
+    const Vector& origin,
+    QAngle& angles,
+    float fireSpreadArgument)
+{
+    (void)origin;
+
+    if (!m_IsVREnabled || !m_VrHandsRealBulletSpreadEnabled || !localPlayer ||
+        !IsVrHandsRealBulletSpreadWeapon(weapon) || m_MouseModeEnabled || IsScopeActive() ||
+        (!m_VrHandsEnabled && !m_NativeViewmodelHandsOnly))
+    {
+        ClearVrHandsRealBulletSpreadAimLine();
+        m_VrHandsRealBulletSpreadBurstShotCount = 0;
+        m_VrHandsRealBulletSpreadLastWeaponId = 0;
+        m_VrHandsRealBulletSpreadLastShotAt = {};
+        return false;
+    }
+
+    constexpr float kSingleHandScale = 1.30f;
+    constexpr float kTwoHandedScale = 0.30f;
+    constexpr float kContinuousWindowSeconds = 0.42f;
+    constexpr float kTwoPi = 6.28318530717958647692f;
+    constexpr float kGoldenAngle = 2.39996322972865332f;
+
+    const auto now = std::chrono::steady_clock::now();
+    const int weaponId = static_cast<int>(weapon->GetWeaponID());
+    const bool sameWeapon = weaponId == m_VrHandsRealBulletSpreadLastWeaponId;
+    const bool hadPreviousShot = m_VrHandsRealBulletSpreadLastShotAt.time_since_epoch().count() != 0;
+    const float secondsSinceLastShot = hadPreviousShot
+        ? std::chrono::duration<float>(now - m_VrHandsRealBulletSpreadLastShotAt).count()
+        : 999.0f;
+    const bool continuousFire =
+        sameWeapon &&
+        secondsSinceLastShot >= 0.0f &&
+        secondsSinceLastShot <= kContinuousWindowSeconds;
+
+    if (continuousFire)
+    {
+        ++m_VrHandsRealBulletSpreadBurstShotCount;
+    }
+    else
+    {
+        m_VrHandsRealBulletSpreadBurstShotCount = 0;
+        ++m_VrHandsRealBulletSpreadBurstSeed;
+    }
+
+    m_VrHandsRealBulletSpreadLastShotAt = now;
+    m_VrHandsRealBulletSpreadLastWeaponId = weaponId;
+
+    const bool twoHanded = IsVrHandsTwoHandedGripPoseActive();
+    const float spreadScale = twoHanded ? kTwoHandedScale : (continuousFire ? kSingleHandScale : 1.0f);
+    if (!twoHanded && !continuousFire)
+    {
+        ClearVrHandsRealBulletSpreadAimLine();
+        return false;
+    }
+
+    float baseSpreadDegrees = 0.0f;
+    if (const EffectiveAttackRangeWeaponData* data = GetEffectiveAttackRangeWeaponData(weapon))
+    {
+        const float scriptSpread = GetEffectiveAttackRangeSpreadDegrees(localPlayer, weapon, *data);
+        if (std::isfinite(scriptSpread) && scriptSpread > 0.0f)
+            baseSpreadDegrees = std::max(baseSpreadDegrees, scriptSpread);
+    }
+
+    if (std::isfinite(fireSpreadArgument) && fireSpreadArgument > 0.0f && fireSpreadArgument <= 45.0f)
+        baseSpreadDegrees = std::max(baseSpreadDegrees, fireSpreadArgument);
+
+    if (baseSpreadDegrees <= 0.001f)
+    {
+        ClearVrHandsRealBulletSpreadAimLine();
+        return false;
+    }
+
+    const int shotIndex = std::max(0, m_VrHandsRealBulletSpreadBurstShotCount);
+    const uint32_t seed =
+        VR_HashU32(static_cast<uint32_t>(weaponId) * 0x9e3779b9u) ^
+        VR_HashU32(m_VrHandsRealBulletSpreadBurstSeed * 0x85ebca6bu) ^
+        VR_HashU32(static_cast<uint32_t>(shotIndex + 1) * 0xc2b2ae35u);
+
+    const float burstAngle = VR_HashUnitFloat(seed) * kTwoPi;
+    const float theta = burstAngle + kGoldenAngle * static_cast<float>(shotIndex + 1);
+    const float radiusBase = twoHanded
+        ? 0.65f
+        : std::clamp(0.45f + 0.08f * static_cast<float>(shotIndex), 0.45f, 1.0f);
+    const float radiusJitter = 0.85f + 0.15f * VR_HashUnitFloat(seed ^ 0xA511E9B3u);
+    const float simulatedSpreadDegrees = std::clamp(baseSpreadDegrees * spreadScale * radiusBase * radiusJitter, 0.0f, 45.0f);
+
+    Vector spreadDirection{};
+    if (!VR_BuildSpreadDirectionFromAngles(angles, simulatedSpreadDegrees, theta, spreadDirection))
+    {
+        ClearVrHandsRealBulletSpreadAimLine();
+        return false;
+    }
+
+    QAngle spreadAngles{};
+    QAngle::VectorAngles(spreadDirection, spreadAngles);
+    NormalizeAndClampViewAngles(spreadAngles);
+
+    angles = spreadAngles;
+    m_VrHandsRealBulletSpreadAimDirection = spreadDirection;
+    m_VrHandsRealBulletSpreadAimHoldUntil = now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<float>(twoHanded ? 0.16f : 0.22f));
+    return true;
 }
 
 bool VR::IsEffectiveAttackRangeTarget(const C_BaseEntity* entity) const
@@ -3865,6 +4165,14 @@ void VR::TriggerWeaponFireHaptics(int weaponId, bool leftHand)
     const WeaponHapticsProfile profile = GetWeaponHapticsProfile(weaponId);
     const bool physicalLeftHand = IsGameplayHandLeftPhysical(leftHand);
     TriggerPhysicalHandHapticPulse(physicalLeftHand, profile.durationSeconds, profile.frequency, profile.amplitude);
+    if (IsVrHandsTwoHandedGripPoseActive())
+    {
+        TriggerPhysicalHandHapticPulse(
+            !physicalLeftHand,
+            profile.durationSeconds,
+            profile.frequency,
+            profile.amplitude * 0.70f);
+    }
 }
 
 void VR::TriggerMeleeSwingHaptics(bool leftHand)

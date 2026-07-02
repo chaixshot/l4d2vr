@@ -4253,18 +4253,16 @@ namespace
         return CalibrationPreviewModelBoundsUsable(outMins, outMaxs);
     }
 
-    inline bool HooksVrHandsTwoHandedGripCanSampleWeaponBoneName(const std::string& lowerName)
+    inline int HooksVrHandsTwoHandedGripWeaponBoneNameScore(const std::string& lowerName)
     {
         if (lowerName.empty())
-            return true;
+            return 0;
 
-        if (HooksViewmodelBoneLabelHasWeaponToken(lowerName) ||
+        const bool explicitWeaponBone =
             MagazineInteractionNameContains(lowerName, "valvebiped.weapon") ||
             MagazineInteractionNameContains(lowerName, "weapon_bone") ||
-            MagazineInteractionNameContains(lowerName, "def_weapon"))
-        {
-            return true;
-        }
+            MagazineInteractionNameContains(lowerName, "def_weapon") ||
+            MagazineInteractionNameContains(lowerName, "v_weapon");
 
         static const char* kRejectTokens[] =
         {
@@ -4282,18 +4280,181 @@ namespace
             "camera",
             "attach",
             "attachment",
-            "muzzle",
             "shell",
-            "eject"
+            "eject",
+            "hair",
+            "head",
+            "face",
+            "eye",
+            "neck",
+            "spine",
+            "pelvis",
+            "leg",
+            "thigh",
+            "calf",
+            "foot",
+            "toe",
+            "skirt",
+            "cloth",
+            "dress",
+            "breast",
+            "tail",
+            "wing",
+            "jiggle",
+            "physics",
+            "phys",
+            "pony",
+            "character"
         };
 
-        for (const char* token : kRejectTokens)
+        if (!explicitWeaponBone)
         {
-            if (MagazineInteractionNameContains(lowerName, token))
-                return false;
+            for (const char* token : kRejectTokens)
+            {
+                if (MagazineInteractionNameContains(lowerName, token))
+                    return 0;
+            }
         }
 
-        return true;
+        int score = explicitWeaponBone ? 2000 : 0;
+        if (HooksViewmodelBoneLabelHasWeaponToken(lowerName))
+            score = std::max(score, 900);
+
+        static const char* kWeaponPartTokens[] =
+        {
+            "barrel",
+            "muzzle",
+            "stock",
+            "receiver",
+            "foregrip",
+            "grip",
+            "handle",
+            "rail",
+            "scope",
+            "sight",
+            "trigger",
+            "bolt",
+            "slide",
+            "pump",
+            "charging",
+            "charger",
+            "magazine",
+            "clip",
+            "rifle",
+            "shotgun",
+            "pistol",
+            "smg",
+            "gun"
+        };
+        for (const char* token : kWeaponPartTokens)
+        {
+            if (MagazineInteractionNameContains(lowerName, token))
+                score = std::max(score, 700);
+        }
+
+        return score;
+    }
+
+    inline bool HooksVrHandsTwoHandedGripCanSampleWeaponBoneName(const std::string& lowerName)
+    {
+        return HooksVrHandsTwoHandedGripWeaponBoneNameScore(lowerName) > 0;
+    }
+
+    inline bool HooksVrHandsTwoHandedGripFinalizeLocalBounds(
+        const std::vector<Vector>& points,
+        const Vector& padding,
+        float sourceUnitsPerMeter,
+        Vector& outMins,
+        Vector& outMaxs,
+        int& outSampleCount)
+    {
+        outSampleCount = 0;
+        if (points.empty())
+            return false;
+
+        const float scale = (std::isfinite(sourceUnitsPerMeter) && sourceUnitsPerMeter > 0.001f)
+            ? sourceUnitsPerMeter
+            : 43.2f;
+        const float maxSpan = std::clamp(2.45f * scale, 84.0f, 126.0f);
+        Vector rawMins(FLT_MAX, FLT_MAX, FLT_MAX);
+        Vector rawMaxs(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+        for (const Vector& point : points)
+            HooksAccumulateBounds(rawMins, rawMaxs, point);
+
+        if (rawMins.x != FLT_MAX)
+        {
+            const Vector rawPaddedMins = rawMins - padding;
+            const Vector rawPaddedMaxs = rawMaxs + padding;
+            const Vector rawSpan = rawPaddedMaxs - rawPaddedMins;
+            if (rawSpan.x <= maxSpan && rawSpan.y <= maxSpan && rawSpan.z <= maxSpan &&
+                CalibrationPreviewModelBoundsUsable(rawPaddedMins, rawPaddedMaxs))
+            {
+                outMins = rawPaddedMins;
+                outMaxs = rawPaddedMaxs;
+                outSampleCount = static_cast<int>(points.size());
+                return true;
+            }
+        }
+
+        const float clusterRadius = std::clamp(1.35f * scale, 44.0f, 72.0f);
+        const float keepRadius = std::clamp(2.05f * scale, 68.0f, 104.0f);
+        const float clusterRadiusSqr = clusterRadius * clusterRadius;
+        const float keepRadiusSqr = keepRadius * keepRadius;
+
+        size_t bestIndex = 0u;
+        int bestNeighbors = -1;
+        float bestDistanceSum = FLT_MAX;
+        for (size_t i = 0u; i < points.size(); ++i)
+        {
+            int neighbors = 0;
+            float distanceSum = 0.0f;
+            for (size_t j = 0u; j < points.size(); ++j)
+            {
+                const Vector delta = points[j] - points[i];
+                const float distanceSqr = delta.LengthSqr();
+                if (distanceSqr <= clusterRadiusSqr)
+                {
+                    ++neighbors;
+                    distanceSum += distanceSqr;
+                }
+            }
+            if (neighbors > bestNeighbors ||
+                (neighbors == bestNeighbors && distanceSum < bestDistanceSum))
+            {
+                bestIndex = i;
+                bestNeighbors = neighbors;
+                bestDistanceSum = distanceSum;
+            }
+        }
+
+        const Vector anchor = points[bestIndex];
+        Vector mins(FLT_MAX, FLT_MAX, FLT_MAX);
+        Vector maxs(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+        for (const Vector& point : points)
+        {
+            const Vector delta = point - anchor;
+            if (points.size() > 2u && delta.LengthSqr() > keepRadiusSqr)
+                continue;
+
+            HooksAccumulateBounds(mins, maxs, point);
+            ++outSampleCount;
+        }
+
+        if (outSampleCount <= 0 || mins.x == FLT_MAX)
+            return false;
+
+        outMins = mins - padding;
+        outMaxs = maxs + padding;
+
+        const Vector center = (outMins + outMaxs) * 0.5f;
+        Vector half = (outMaxs - outMins) * 0.5f;
+        half.x = std::min(half.x, maxSpan * 0.5f);
+        half.y = std::min(half.y, maxSpan * 0.5f);
+        half.z = std::min(half.z, maxSpan * 0.5f);
+        outMins = center - half;
+        outMaxs = center + half;
+
+        return CalibrationPreviewModelBoundsUsable(outMins, outMaxs);
     }
 
     inline bool BuildVrHandsTwoHandedGripWeaponBoxLocalBoundsFromHitboxes(
@@ -4305,6 +4466,7 @@ namespace
         int numBones,
         const vr_vm_stabilize::Mat3x4& modelWorld,
         const Vector& padding,
+        float sourceUnitsPerMeter,
         Vector& outMins,
         Vector& outMaxs,
         int& outSampleCount)
@@ -4351,9 +4513,8 @@ namespace
 
         for (int stride : kHitboxStrideCandidates)
         {
-            int sampleCount = 0;
-            Vector candidateMins(FLT_MAX, FLT_MAX, FLT_MAX);
-            Vector candidateMaxs(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+            std::vector<Vector> candidatePoints;
+            candidatePoints.reserve(64u);
 
             for (int set = firstSet; set < endSet; ++set)
             {
@@ -4427,18 +4588,29 @@ namespace
                                 {
                                     continue;
                                 }
-                                HooksAccumulateBounds(candidateMins, candidateMaxs, modelLocal);
+                                candidatePoints.push_back(modelLocal);
                             }
                         }
                     }
-                    ++sampleCount;
                 }
             }
 
-            if (sampleCount <= 0 || candidateMins.x == FLT_MAX)
+            if (candidatePoints.empty())
                 continue;
-            if (!CalibrationPreviewModelBoundsUsable(candidateMins, candidateMaxs))
+
+            Vector candidateMins(0.0f, 0.0f, 0.0f);
+            Vector candidateMaxs(0.0f, 0.0f, 0.0f);
+            int sampleCount = 0;
+            if (!HooksVrHandsTwoHandedGripFinalizeLocalBounds(
+                    candidatePoints,
+                    padding,
+                    sourceUnitsPerMeter,
+                    candidateMins,
+                    candidateMaxs,
+                    sampleCount))
+            {
                 continue;
+            }
             if (sampleCount > bestCount)
             {
                 bestCount = sampleCount;
@@ -4462,6 +4634,7 @@ namespace
         int numBones,
         const vr_vm_stabilize::Mat3x4& modelWorld,
         const Vector& padding,
+        float sourceUnitsPerMeter,
         Vector& outMins,
         Vector& outMaxs,
         int& outSampleCount)
@@ -4470,8 +4643,8 @@ namespace
         if (!sourceBones || numBones <= 0)
             return false;
 
-        Vector mins(FLT_MAX, FLT_MAX, FLT_MAX);
-        Vector maxs(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+        std::vector<Vector> candidatePoints;
+        candidatePoints.reserve(static_cast<size_t>(std::min(numBones, 128)));
         for (int bone = 0; bone < numBones; ++bone)
         {
             const std::string lowerBoneName =
@@ -4490,16 +4663,19 @@ namespace
             {
                 continue;
             }
-            HooksAccumulateBounds(mins, maxs, modelLocal);
-            ++outSampleCount;
+            candidatePoints.push_back(modelLocal);
         }
 
-        if (outSampleCount <= 0 || mins.x == FLT_MAX)
+        if (candidatePoints.empty())
             return false;
 
-        outMins = mins - padding;
-        outMaxs = maxs + padding;
-        return CalibrationPreviewModelBoundsUsable(outMins, outMaxs);
+        return HooksVrHandsTwoHandedGripFinalizeLocalBounds(
+            candidatePoints,
+            padding,
+            sourceUnitsPerMeter,
+            outMins,
+            outMaxs,
+            outSampleCount);
     }
 
     inline bool BuildVrHandsTwoHandedGripWeaponBoxLocalBounds(
@@ -4537,6 +4713,7 @@ namespace
             numBones,
             modelWorld,
             padding,
+            scale,
             outMins,
             outMaxs,
             outSampleCount);
@@ -4549,6 +4726,7 @@ namespace
                 numBones,
                 modelWorld,
                 padding,
+                scale,
                 outMins,
                 outMaxs,
                 outSampleCount);
@@ -5485,12 +5663,13 @@ namespace
             vr->m_MagazineInteractionEnabled ||
             vr->m_MagazineBoxDebugEnabled ||
             calibrationOverlayActive;
-        const bool wantsTwoHandedGripWeaponBox =
+        const bool wantsVrHandsMagazineExclusionBox =
             vr->m_IsVREnabled &&
             (vr->m_VrHandsEnabled || vr->m_NativeViewmodelHandsOnly);
+        constexpr bool wantsTwoHandedGripWeaponBox = false;
         const bool wantsMagazineBox =
             wantsMagazineInteractionBox ||
-            wantsTwoHandedGripWeaponBox;
+            wantsVrHandsMagazineExclusionBox;
         if (!wantsMagazineBox)
             return;
         const bool logMagazineBoxDiagnostics = ShouldLogMagazineBoxDiagnostics(vr);

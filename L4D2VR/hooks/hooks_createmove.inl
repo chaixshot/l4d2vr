@@ -440,6 +440,16 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			// ForceNonVRServerMovement: prefer the eye-based solve (what the server will actually trace).
 			if (m_VR->m_HasNonVRAimSolution)
 				aim = m_VR->m_NonVRAimAngles;
+			const bool attackDownForRealSpread = (cmd->buttons & (1 << 0)) != 0;
+			if (attackDownForRealSpread && localPlayerForAutoActions)
+			{
+				C_WeaponCSBase* activeWeaponForSpread =
+					reinterpret_cast<C_WeaponCSBase*>(localPlayerForAutoActions->GetActiveWeapon());
+				m_VR->ApplyVrHandsRealBulletSpreadServerViewAngles(
+					localPlayerForAutoActions,
+					activeWeaponForSpread,
+					aim);
+			}
 			// 简单夹角，避免异常值
 			if (aim.x > 89.f)  aim.x = 89.f;
 			if (aim.x < -89.f) aim.x = -89.f;

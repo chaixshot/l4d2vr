@@ -1198,9 +1198,8 @@ public:
 	bool m_VrHandsGlovesFallbackLogged = false;
 	bool m_VrHandsMotionRangeWithoutController = false;
 	bool m_VrHandsRightUseViewmodelPose = false;
-	bool m_VrHandsTwoHandedGripAlways = false;
-	float m_VrHandsTwoHandedGripTargetBoxScale = 2.0f;
-	bool m_VrHandsTwoHandedAimEnabled = true;
+	float m_VrHandsTwoHandedGripTargetBoxScale = 1.0f;
+	bool m_VrHandsRealBulletSpreadEnabled = false;
 	bool m_VrHandsTwoHandedAimMountFriendly = false;
 	bool m_VrHandsVirtualStockEnabled = false;
 	float m_VrHandsTwoHandedAimStrength = 1.0f;
@@ -1217,8 +1216,14 @@ public:
 	int m_VrHandsTwoHandedGripWeaponId = 0;
 	bool IsVrHandsTwoHandedGripPoseActive() const
 	{
-		return m_VrHandsTwoHandedGripAlways || m_VrHandsTwoHandedGripActive;
+		return m_VrHandsTwoHandedGripActive;
 	}
+	Vector m_VrHandsRealBulletSpreadAimDirection = { 0.0f, 0.0f, 0.0f };
+	std::chrono::steady_clock::time_point m_VrHandsRealBulletSpreadAimHoldUntil{};
+	std::chrono::steady_clock::time_point m_VrHandsRealBulletSpreadLastShotAt{};
+	int m_VrHandsRealBulletSpreadLastWeaponId = 0;
+	int m_VrHandsRealBulletSpreadBurstShotCount = 0;
+	uint32_t m_VrHandsRealBulletSpreadBurstSeed = 0;
 	bool m_VrHandsDebugLog = false;
 	float m_VrHandsModelScale = 1.0f;
 	std::unique_ptr<VrHandSystem> m_VrHands;
@@ -3447,6 +3452,12 @@ public:
 	bool ShouldShowAimLine(C_WeaponCSBase* weapon) const;
 	bool IsThrowableWeapon(C_WeaponCSBase* weapon) const;
 	bool ShouldDrawAimLine(C_WeaponCSBase* weapon) const;
+	bool IsVrHandsRealBulletSpreadWeapon(C_WeaponCSBase* weapon) const;
+	void ClearVrHandsRealBulletSpreadAimLine();
+	bool ApplyVrHandsRealBulletSpreadAimLine(C_WeaponCSBase* weapon, const Vector& origin, Vector& direction);
+	bool ApplyVrHandsRealBulletSpreadAimAngles(C_WeaponCSBase* weapon, QAngle& angles);
+	bool ApplyVrHandsRealBulletSpreadServerViewAngles(C_BasePlayer* localPlayer, C_WeaponCSBase* weapon, QAngle& angles);
+	bool NotifyVrHandsRealBulletSpreadClientShot(C_BasePlayer* localPlayer, C_WeaponCSBase* weapon, const Vector& origin, QAngle& angles, float fireSpreadArgument);
 	bool IsWeaponLaserSightActive(C_WeaponCSBase* weapon) const;
 	float CalculateThrowArcDistance(const Vector& pitchSource, bool* clampedToMax = nullptr) const;
 	void DrawAimLine(const Vector& start, const Vector& end);

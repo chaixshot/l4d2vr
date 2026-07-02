@@ -1456,9 +1456,8 @@ void VR::ParseConfigFile()
     m_VrHandsDebugLog = getBool("VrHandsDebugLog", m_VrHandsDebugLog);
     m_VrHandsModelScale = std::clamp(getFloat("VrHandsModelScale", m_VrHandsModelScale), 0.25f, 4.0f);
     m_VrHandsRightUseViewmodelPose = getBool("VrHandsRightUseViewmodelPose", m_VrHandsRightUseViewmodelPose);
-    m_VrHandsTwoHandedGripAlways = getBool("VrHandsTwoHandedGripAlways", m_VrHandsTwoHandedGripAlways);
     m_VrHandsTwoHandedGripTargetBoxScale = std::clamp(getFloat("VrHandsTwoHandedGripTargetBoxScale", m_VrHandsTwoHandedGripTargetBoxScale), 0.25f, 8.0f);
-    m_VrHandsTwoHandedAimEnabled = getBool("VrHandsTwoHandedAimEnabled", m_VrHandsTwoHandedAimEnabled);
+    m_VrHandsRealBulletSpreadEnabled = getBool("VrHandsRealBulletSpreadEnabled", m_VrHandsRealBulletSpreadEnabled);
     m_VrHandsTwoHandedAimMountFriendly = getBool("VrHandsTwoHandedAimMountFriendly", m_VrHandsTwoHandedAimMountFriendly);
     m_VrHandsVirtualStockEnabled = getBool("VrHandsVirtualStockEnabled", m_VrHandsVirtualStockEnabled);
     m_VrHandsTwoHandedAimStrength = std::clamp(getFloat("VrHandsTwoHandedAimStrength", m_VrHandsTwoHandedAimStrength), 0.0f, 1.0f);

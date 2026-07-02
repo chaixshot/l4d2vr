@@ -1464,6 +1464,9 @@ int Hooks::dClientFireTerrorBullets(
 		const bool viewmodelBulletPoseApplied = ApplyLocalViewmodelBulletVisualPose(m_VR, vecNewOrigin, vecNewAngles);
 		if (viewmodelBulletPoseApplied && !scopeActive && m_VR->m_HasAimLine && !m_VR->m_HasThrowArc)
 			BuildAnglesToTarget(vecNewOrigin, m_VR->m_AimLineEnd, vecNewAngles);
+		C_BasePlayer* localPlayerForSpread = (m_Game != nullptr) ? (C_BasePlayer*)m_Game->GetClientEntity(playerId) : nullptr;
+		C_WeaponCSBase* activeWeaponForSpread = localPlayerForSpread ? (C_WeaponCSBase*)localPlayerForSpread->GetActiveWeapon() : nullptr;
+		m_VR->NotifyVrHandsRealBulletSpreadClientShot(localPlayerForSpread, activeWeaponForSpread, vecNewOrigin, vecNewAngles, a7);
 		const Vector predictedHitOrigin = vecNewOrigin;
 		const QAngle predictedHitAngles = vecNewAngles;
 
@@ -2121,6 +2124,15 @@ int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 		QAngle serverAimAngles = controllerAngles;
 		if (BuildAnglesToEncodedServerAim(m_VR, controllerPos, serverAimAngles))
 			controllerAngles = serverAimAngles;
+	}
+	if (to && (to->buttons & (1 << 0)) != 0 && m_Game && m_Game->m_EngineClient)
+	{
+		const int lpIdx = m_Game->m_EngineClient->GetLocalPlayer();
+		C_BasePlayer* localPlayer = (lpIdx > 0) ? reinterpret_cast<C_BasePlayer*>(m_Game->GetClientEntity(lpIdx)) : nullptr;
+		C_WeaponCSBase* activeWeaponForSpread = localPlayer
+			? reinterpret_cast<C_WeaponCSBase*>(localPlayer->GetActiveWeapon())
+			: nullptr;
+		m_VR->ApplyVrHandsRealBulletSpreadAimAngles(activeWeaponForSpread, controllerAngles);
 	}
 
 	to->mousedx = (int)(controllerAngles.x * 10.0f); // Strip off 2nd decimal to save bits.
