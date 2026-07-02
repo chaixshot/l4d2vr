@@ -4,7 +4,6 @@
 #include "sdk.h"
 #include "vr_hand_system.h"
 #include "vr_hand_math.h"
-#include "vr_hand_vm_pose.h"
 
 #include <d3d9.h>
 #include <d3d9_vr.h>
@@ -117,87 +116,6 @@ namespace
         for (int finger = 0; finger < 5; ++finger)
             outCurls[static_cast<size_t>(finger)] = std::clamp(summary.flFingerCurl[finger], 0.0f, 1.0f);
 
-        return true;
-    }
-
-    constexpr std::uint32_t kVrHandsLeftTargetDebugBoxMaxAgeMs = 500u;
-    constexpr float kVrHandsLeftTargetDebugBoxHalfExtentMeters = 0.05f;
-
-    int FindVrHandsSnapshotBoneIndex(const VrHandVmPose::Snapshot& snapshot, const char* boneName)
-    {
-        if (!boneName || boneName[0] == '\0')
-            return -1;
-
-        const size_t maxBones = std::min(snapshot.boneNames.size(), snapshot.boneWorldMatrices.size());
-        for (size_t i = 0; i < maxBones; ++i)
-        {
-            if (snapshot.boneNames[i] == boneName)
-                return static_cast<int>(i);
-        }
-        return -1;
-    }
-
-    bool TryBuildLeftHandTargetDebugBox(
-        float sourceUnitsPerMeter,
-        float targetBoxScale,
-        VrHandMatrix4& outWorld,
-        Vector& outMins,
-        Vector& outMaxs)
-    {
-        VrHandVmPose::Snapshot snapshot{};
-        if (!VrHandVmPose::GetLatest(snapshot, kVrHandsLeftTargetDebugBoxMaxAgeMs))
-            return false;
-
-        static const char* kLeftMiddleFingerBones[] =
-        {
-            "ValveBiped.Bip01_L_Finger2",
-            "ValveBiped.Bip01_L_Finger21",
-            "ValveBiped.Bip01_L_Finger22",
-        };
-
-        int orientationBone = -1;
-        Vector center(0.0f, 0.0f, 0.0f);
-        int centerBoneCount = 0;
-        for (const char* boneName : kLeftMiddleFingerBones)
-        {
-            const int bone = FindVrHandsSnapshotBoneIndex(snapshot, boneName);
-            if (bone < 0 || bone >= static_cast<int>(snapshot.boneWorldMatrices.size()))
-                continue;
-
-            if (orientationBone < 0)
-                orientationBone = bone;
-
-            const VrHandMatrix4& boneWorld = snapshot.boneWorldMatrices[static_cast<size_t>(bone)];
-            center += Vector(
-                VrHandMath::Get(boneWorld, 0, 3),
-                VrHandMath::Get(boneWorld, 1, 3),
-                VrHandMath::Get(boneWorld, 2, 3));
-            ++centerBoneCount;
-        }
-
-        if (orientationBone >= 0 && centerBoneCount > 0)
-        {
-            center *= 1.0f / static_cast<float>(centerBoneCount);
-            outWorld = snapshot.boneWorldMatrices[static_cast<size_t>(orientationBone)];
-            VrHandMath::Set(outWorld, 0, 3, center.x);
-            VrHandMath::Set(outWorld, 1, 3, center.y);
-            VrHandMath::Set(outWorld, 2, 3, center.z);
-        }
-        else
-        {
-            const int handBone = FindVrHandsSnapshotBoneIndex(snapshot, "ValveBiped.Bip01_L_Hand");
-            if (handBone < 0)
-                return false;
-            outWorld = snapshot.boneWorldMatrices[static_cast<size_t>(handBone)];
-        }
-
-        const float halfExtent = std::max(
-            0.1f,
-            kVrHandsLeftTargetDebugBoxHalfExtentMeters *
-                std::clamp(targetBoxScale, 0.25f, 8.0f) *
-                sourceUnitsPerMeter);
-        outMins = Vector(-halfExtent, -halfExtent, -halfExtent);
-        outMaxs = Vector(halfExtent, halfExtent, halfExtent);
         return true;
     }
 
@@ -2093,6 +2011,36 @@ namespace
             MagazineInteractionWeaponUsesShotgunShells(weaponId);
     }
 
+    bool VrHandsWeaponSupportsTwoHandedGrip(C_WeaponCSBase::WeaponID weaponId)
+    {
+        switch (weaponId)
+        {
+        case C_WeaponCSBase::WeaponID::PISTOL:
+        case C_WeaponCSBase::WeaponID::UZI:
+        case C_WeaponCSBase::WeaponID::PUMPSHOTGUN:
+        case C_WeaponCSBase::WeaponID::AUTOSHOTGUN:
+        case C_WeaponCSBase::WeaponID::M16A1:
+        case C_WeaponCSBase::WeaponID::HUNTING_RIFLE:
+        case C_WeaponCSBase::WeaponID::MAC10:
+        case C_WeaponCSBase::WeaponID::SHOTGUN_CHROME:
+        case C_WeaponCSBase::WeaponID::SCAR:
+        case C_WeaponCSBase::WeaponID::SNIPER_MILITARY:
+        case C_WeaponCSBase::WeaponID::SPAS:
+        case C_WeaponCSBase::WeaponID::GRENADE_LAUNCHER:
+        case C_WeaponCSBase::WeaponID::AK47:
+        case C_WeaponCSBase::WeaponID::MAGNUM:
+        case C_WeaponCSBase::WeaponID::MP5:
+        case C_WeaponCSBase::WeaponID::SG552:
+        case C_WeaponCSBase::WeaponID::AWP:
+        case C_WeaponCSBase::WeaponID::SCOUT:
+        case C_WeaponCSBase::WeaponID::M60:
+        case C_WeaponCSBase::WeaponID::MACHINEGUN:
+            return true;
+        default:
+            return false;
+        }
+    }
+
     bool MagazineInteractionClearDetachableClientReloadState(C_WeaponCSBase* clientWeapon)
     {
         if (!clientWeapon)
@@ -2939,7 +2887,8 @@ void VR::PublishMagazineInteractionBox(
 {
     if (!m_MagazineInteractionEnabled &&
         !m_MagazineBoxDebugEnabled &&
-        !m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed))
+        !m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed) &&
+        !(m_IsVREnabled && (m_VrHandsEnabled || m_NativeViewmodelHandsOnly)))
     {
         return;
     }
@@ -3018,6 +2967,39 @@ void VR::PublishMagazineInteractionBoltBox(
     snapshot.publishSeq = ++m_MagazineInteractionBoltPublishSeq;
     m_MagazineInteractionBoltBox = snapshot;
     m_MagazineInteractionBoltBoxValid = true;
+}
+
+void VR::PublishVrHandsTwoHandedGripWeaponBox(
+    const Vector& origin,
+    const Vector& axisX,
+    const Vector& axisY,
+    const Vector& axisZ,
+    const Vector& mins,
+    const Vector& maxs,
+    uint32_t frameSeq,
+    int entityIndex,
+    const char* modelName)
+{
+    if (!m_IsVREnabled || (!m_VrHandsEnabled && !m_NativeViewmodelHandsOnly))
+        return;
+
+    MagazineInteractionBoxSnapshot snapshot{};
+    snapshot.origin = origin;
+    snapshot.axisX = MagazineInteractionNormalizeAxis(axisX, Vector(1.0f, 0.0f, 0.0f));
+    snapshot.axisY = MagazineInteractionNormalizeAxis(axisY, Vector(0.0f, 1.0f, 0.0f));
+    snapshot.axisZ = MagazineInteractionNormalizeAxis(axisZ, Vector(0.0f, 0.0f, 1.0f));
+    snapshot.mins = mins;
+    snapshot.maxs = maxs;
+    snapshot.frameSeq = frameSeq;
+    snapshot.entityIndex = entityIndex;
+    snapshot.boneIndex = -1;
+    snapshot.modelName = modelName ? modelName : "";
+    snapshot.publishedAt = std::chrono::steady_clock::now();
+
+    std::lock_guard<std::mutex> lock(m_VrHandsTwoHandedGripWeaponBoxMutex);
+    snapshot.publishSeq = ++m_VrHandsTwoHandedGripWeaponBoxPublishSeq;
+    m_VrHandsTwoHandedGripWeaponBox = snapshot;
+    m_VrHandsTwoHandedGripWeaponBoxValid = true;
 }
 
 void VR::PublishMagazineInteractionNativeLeftWristAnchor(
@@ -3151,6 +3133,15 @@ bool VR::GetMagazineInteractionBoltBox(MagazineInteractionBoxSnapshot& outSnapsh
     if (!m_MagazineInteractionBoltBoxValid)
         return false;
     outSnapshot = m_MagazineInteractionBoltBox;
+    return true;
+}
+
+bool VR::GetVrHandsTwoHandedGripWeaponBox(MagazineInteractionBoxSnapshot& outSnapshot) const
+{
+    std::lock_guard<std::mutex> lock(m_VrHandsTwoHandedGripWeaponBoxMutex);
+    if (!m_VrHandsTwoHandedGripWeaponBoxValid)
+        return false;
+    outSnapshot = m_VrHandsTwoHandedGripWeaponBox;
     return true;
 }
 
@@ -5120,16 +5111,19 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         hasActiveWeapon ? static_cast<int>(activeWeaponId) : 0,
         std::memory_order_relaxed);
 
-    if (!m_MagazineInteractionEnabled ||
-        !m_IsVREnabled ||
-        (!m_VrHandsEnabled && !m_NativeViewmodelHandsOnly) ||
-        !hasActiveWeapon)
+    const bool vrHandsInteractionAvailable =
+        m_IsVREnabled &&
+        (m_VrHandsEnabled || m_NativeViewmodelHandsOnly) &&
+        hasActiveWeapon;
+    const int activeWeaponIdInt = static_cast<int>(activeWeaponId);
+
+    if (!vrHandsInteractionAvailable)
     {
         if (m_VrHandsTwoHandedGripActive)
         {
             m_VrHandsTwoHandedGripActive = false;
             m_VrHandsTwoHandedGripWeaponId = 0;
-            Game::logMsg("[VR][Hands] two-hand grip released because physical reload input became unavailable");
+            Game::logMsg("[VR][Hands] two-hand grip released because VR hands input became unavailable");
         }
         CancelMagazineInteractionManual();
         return false;
@@ -5147,11 +5141,9 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         (IsMagazineInteractionServerHookActive(static_cast<int>(activeWeaponId)) ||
             IsMagazineInteractionAnyServerHookActive());
 
-    const int activeWeaponIdInt = static_cast<int>(activeWeaponId);
     const bool twoHandedGripRuntimeAllowed =
         !m_VrHandsTwoHandedGripAlways &&
-        activeWeaponUsesPhysicalReload &&
-        (m_VrHandsEnabled || m_NativeViewmodelHandsOnly);
+        VrHandsWeaponSupportsTwoHandedGrip(activeWeaponId);
     if (m_VrHandsTwoHandedGripActive &&
         (!twoHandedGripRuntimeAllowed || m_VrHandsTwoHandedGripWeaponId != activeWeaponIdInt))
     {
@@ -5164,43 +5156,27 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         m_VrHandsTwoHandedGripWeaponId = 0;
     }
 
-    auto buildTwoHandedGripTargetBox = [&](MagazineInteractionBoxSnapshot& outBox) -> bool
+    auto boxFreshForActiveWeapon = [&](const MagazineInteractionBoxSnapshot& box) -> bool
     {
-        VrHandMatrix4 targetWorld{};
-        Vector targetMins(0.0f, 0.0f, 0.0f);
-        Vector targetMaxs(0.0f, 0.0f, 0.0f);
-        if (!TryBuildLeftHandTargetDebugBox(
-                m_VRScale,
-                m_VrHandsTwoHandedGripTargetBoxScale,
-                targetWorld,
-                targetMins,
-                targetMaxs) ||
-            !MagazineInteractionMatrixLooksRenderable(targetWorld))
+        if (!MagazineInteractionPublishedBoxMatchesWeapon(box, activeWeaponId))
+            return false;
+        const float ageSeconds = std::chrono::duration<float>(now - box.publishedAt).count();
+        return ageSeconds >= -0.01f && ageSeconds <= std::max(0.02f, m_MagazineInteractionStaleSeconds);
+    };
+
+    auto leftHandTouchesTwoHandedGripWeapon = [&](float& outDistance) -> bool
+    {
+        outDistance = FLT_MAX;
+        MagazineInteractionBoxSnapshot weaponBox{};
+        if (!GetVrHandsTwoHandedGripWeaponBox(weaponBox) ||
+            !boxFreshForActiveWeapon(weaponBox) ||
+            !MagazineInteractionMatrixLooksRenderable(MagazineInteractionBuildBoxWorld(weaponBox)))
         {
             return false;
         }
 
-        outBox = MagazineInteractionBoxSnapshot{};
-        outBox.origin = MagazineInteractionMatrixOrigin(targetWorld);
-        outBox.axisX = MagazineInteractionMatrixAxis(targetWorld, 0);
-        outBox.axisY = MagazineInteractionMatrixAxis(targetWorld, 1);
-        outBox.axisZ = MagazineInteractionMatrixAxis(targetWorld, 2);
-        outBox.mins = targetMins;
-        outBox.maxs = targetMaxs;
-        outBox.modelName = "two_hand_left_target";
-        outBox.publishedAt = now;
-        return true;
-    };
-
-    auto leftHandTouchesTwoHandedGripTarget = [&](float& outDistance) -> bool
-    {
-        outDistance = FLT_MAX;
-        MagazineInteractionBoxSnapshot targetBox{};
-        if (!buildTwoHandedGripTargetBox(targetBox))
-            return false;
-
         outDistance = MagazineInteractionNearestLeftHandProbeDistanceSourceUnits(
-            targetBox,
+            weaponBox,
             m_LeftControllerPosAbs,
             m_LeftControllerAngAbs,
             m_VRScale,
@@ -5208,24 +5184,13 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         return outDistance <= 0.0f;
     };
 
-    auto leftHandTouchesOldMagazineForGripPriority = [&]() -> bool
+    auto leftHandTouchesMagazineForGripExclusion = [&]() -> bool
     {
-        if (!MagazineInteractionWeaponUsesDetachableMagazine(activeWeaponId))
-            return false;
-
-        const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, activeClip);
-        if (maxClip > 0 && activeClip >= maxClip)
-            return false;
-
         MagazineInteractionBoxSnapshot box{};
-        if (!GetMagazineInteractionBox(box))
+        if (!GetMagazineInteractionBox(box) || !boxFreshForActiveWeapon(box))
             return false;
 
-        const float ageSeconds = std::chrono::duration<float>(now - box.publishedAt).count();
-        if (ageSeconds > std::max(0.02f, m_MagazineInteractionStaleSeconds))
-            return false;
-
-        MagazineInteractionBoxSnapshot oldMagazineTouchBox = box;
+        MagazineInteractionBoxSnapshot magazineTouchBox = box;
         if (!activeWeaponUsesShotgunShells)
         {
             MagazineInteractionBoxSnapshot rebasedBox{};
@@ -5236,18 +5201,18 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                     rebasedBox,
                     rebasedWorld))
             {
-                oldMagazineTouchBox = rebasedBox;
+                magazineTouchBox = rebasedBox;
             }
         }
 
-        const float grabPadding = std::max(0.0f, m_MagazineInteractionGrabPaddingMeters) * m_VRScale;
+        const float exclusionPadding = std::max(0.0f, 0.006f * m_VRScale);
         const float distance = MagazineInteractionNearestLeftHandProbeDistanceSourceUnits(
-            oldMagazineTouchBox,
+            magazineTouchBox,
             m_LeftControllerPosAbs,
             m_LeftControllerAngAbs,
             m_VRScale,
             this);
-        return distance <= grabPadding;
+        return distance <= exclusionPadding;
     };
 
     if (leftGripJustPressed && twoHandedGripRuntimeAllowed && m_VrHandsTwoHandedGripActive)
@@ -5267,10 +5232,10 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         twoHandedGripRuntimeAllowed &&
         !IsMagazineInteractionManualActive() &&
         !m_MagazineInteractionLeftHandHolding &&
-        !leftHandTouchesOldMagazineForGripPriority())
+        !leftHandTouchesMagazineForGripExclusion())
     {
-        float twoHandTargetDistance = FLT_MAX;
-        if (leftHandTouchesTwoHandedGripTarget(twoHandTargetDistance))
+        float twoHandWeaponDistance = FLT_MAX;
+        if (leftHandTouchesTwoHandedGripWeapon(twoHandWeaponDistance))
         {
             m_VrHandsTwoHandedGripActive = true;
             m_VrHandsTwoHandedGripWeaponId = activeWeaponIdInt;
@@ -5278,11 +5243,17 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 m_MagazineInteractionSuppressLeftInputUntilRelease = true;
             triggerMagazineInteractionHaptic(0.020f, 95.0f, 0.32f, 2);
             Game::logMsg(
-                "[VR][Hands] two-hand grip toggled on weaponId=%d targetDistance=%.2f",
+                "[VR][Hands] two-hand grip toggled on weaponId=%d weaponDistance=%.2f",
                 activeWeaponIdInt,
-                twoHandTargetDistance);
+                twoHandWeaponDistance);
             return false;
         }
+    }
+
+    if (!m_MagazineInteractionEnabled || !activeWeaponUsesPhysicalReload)
+    {
+        CancelMagazineInteractionManual();
+        return false;
     }
 
     auto readClientAmmoForDirectClipSettlement = [&](int& ammoType, int& reserve, int& reserveOffset) -> bool
@@ -7274,16 +7245,24 @@ bool VR::DrawVrHandsForEyeImmediate(
                 std::max(0.0f, MagazineInteractionResolveBoltGrabPaddingMeters(this)) * m_VRScale);
         }
     }
-    if (drawLeftHandTargetDebugBox &&
-        TryBuildLeftHandTargetDebugBox(
-            m_VRScale,
-            m_VrHandsTwoHandedGripTargetBoxScale,
-            leftHandTargetBoxWorld,
-            leftHandTargetBoxMins,
-            leftHandTargetBoxMaxs) &&
-        MagazineInteractionMatrixLooksRenderable(leftHandTargetBoxWorld))
+    if (drawLeftHandTargetDebugBox)
     {
-        leftHandTargetBoxWorldPtr = &leftHandTargetBoxWorld;
+        MagazineInteractionBoxSnapshot weaponDebugBox{};
+        if (GetVrHandsTwoHandedGripWeaponBox(weaponDebugBox))
+        {
+            const float ageSeconds = std::chrono::duration<float>(
+                std::chrono::steady_clock::now() - weaponDebugBox.publishedAt).count();
+            if (ageSeconds <= std::max(0.02f, m_MagazineInteractionStaleSeconds))
+            {
+                leftHandTargetBoxWorld = MagazineInteractionBuildBoxWorld(weaponDebugBox);
+                if (MagazineInteractionMatrixLooksRenderable(leftHandTargetBoxWorld))
+                {
+                    leftHandTargetBoxMins = weaponDebugBox.mins;
+                    leftHandTargetBoxMaxs = weaponDebugBox.maxs;
+                    leftHandTargetBoxWorldPtr = &leftHandTargetBoxWorld;
+                }
+            }
+        }
     }
     const Vector leftControllerPosition = GetLeftControllerAbsPos();
     const QAngle leftControllerAngles = GetLeftControllerAbsAngle();

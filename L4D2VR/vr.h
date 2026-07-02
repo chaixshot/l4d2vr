@@ -1319,18 +1319,22 @@ public:
 	float m_MagazineInteractionStaleSeconds = 0.20f;
 	mutable std::mutex m_MagazineInteractionBoxMutex;
 	mutable std::mutex m_MagazineInteractionBoltBoxMutex;
+	mutable std::mutex m_VrHandsTwoHandedGripWeaponBoxMutex;
 	mutable std::mutex m_MagazineInteractionPoseMutex;
 	mutable std::mutex m_MagazineInteractionHandAnchorMutex;
 	MagazineInteractionBoxSnapshot m_MagazineInteractionBox{};
 	MagazineInteractionBoxSnapshot m_MagazineInteractionBoltBox{};
+	MagazineInteractionBoxSnapshot m_VrHandsTwoHandedGripWeaponBox{};
 	MagazineInteractionBoxSnapshot m_MagazineInteractionShotgunStableCaptureBox{};
 	bool m_MagazineInteractionBoxValid = false;
 	bool m_MagazineInteractionBoltBoxValid = false;
+	bool m_VrHandsTwoHandedGripWeaponBoxValid = false;
 	VrHandMatrix4 m_MagazineInteractionNativeLeftWristWorld{};
 	bool m_MagazineInteractionNativeLeftWristValid = false;
 	std::chrono::steady_clock::time_point m_MagazineInteractionNativeLeftWristPublishedAt{};
 	uint32_t m_MagazineInteractionPublishSeq = 0;
 	uint32_t m_MagazineInteractionBoltPublishSeq = 0;
+	uint32_t m_VrHandsTwoHandedGripWeaponBoxPublishSeq = 0;
 	bool m_MagazineInteractionLeftHandHolding = false;
 	bool m_MagazineInteractionReloadTriggered = false;
 	bool m_MagazineInteractionReloadCommandPending = false;
@@ -3097,6 +3101,16 @@ public:
 		int entityIndex,
 		int boneIndex,
 		const char* modelName);
+	void PublishVrHandsTwoHandedGripWeaponBox(
+		const Vector& origin,
+		const Vector& axisX,
+		const Vector& axisY,
+		const Vector& axisZ,
+		const Vector& mins,
+		const Vector& maxs,
+		uint32_t frameSeq,
+		int entityIndex,
+		const char* modelName);
 	void PublishMagazineInteractionNativeLeftWristAnchor(
 		const Vector& origin,
 		const Vector& axisX,
@@ -3119,6 +3133,7 @@ public:
 		const std::vector<MagazineInteractionCalibrationBone>& bones);
 	bool GetMagazineInteractionBox(MagazineInteractionBoxSnapshot& outSnapshot) const;
 	bool GetMagazineInteractionBoltBox(MagazineInteractionBoxSnapshot& outSnapshot) const;
+	bool GetVrHandsTwoHandedGripWeaponBox(MagazineInteractionBoxSnapshot& outSnapshot) const;
 	bool GetMagazineInteractionNativeLeftWristAnchor(VrHandMatrix4& outWorld) const;
 	bool HasFreshMagazineInteractionDebugBoxWork() const;
 	bool GetMagazineInteractionCalibrationSnapshot(MagazineInteractionCalibrationSnapshot& outSnapshot) const;

@@ -2920,6 +2920,25 @@ namespace
             matrix.m[2][clampedAxis]);
     }
 
+    inline bool HooksMatrixLooksUsable(const vr_vm_stabilize::Mat3x4& matrix)
+    {
+        for (int row = 0; row < 3; ++row)
+        {
+            for (int col = 0; col < 4; ++col)
+            {
+                if (!std::isfinite(matrix.m[row][col]))
+                    return false;
+            }
+        }
+        const Vector origin = vr_vm_stabilize::GetOrigin(matrix);
+        return std::isfinite(origin.x) &&
+            std::isfinite(origin.y) &&
+            std::isfinite(origin.z) &&
+            HooksMatrixAxis(matrix, 0).LengthSqr() > 0.000001f &&
+            HooksMatrixAxis(matrix, 1).LengthSqr() > 0.000001f &&
+            HooksMatrixAxis(matrix, 2).LengthSqr() > 0.000001f;
+    }
+
     inline void HooksSetMatrixAxis(vr_vm_stabilize::Mat3x4& matrix, int axis, const Vector& value)
     {
         const int clampedAxis = std::clamp(axis, 0, 2);
@@ -4234,6 +4253,313 @@ namespace
         return CalibrationPreviewModelBoundsUsable(outMins, outMaxs);
     }
 
+    inline bool HooksVrHandsTwoHandedGripCanSampleWeaponBoneName(const std::string& lowerName)
+    {
+        if (lowerName.empty())
+            return true;
+
+        if (HooksViewmodelBoneLabelHasWeaponToken(lowerName) ||
+            MagazineInteractionNameContains(lowerName, "valvebiped.weapon") ||
+            MagazineInteractionNameContains(lowerName, "weapon_bone") ||
+            MagazineInteractionNameContains(lowerName, "def_weapon"))
+        {
+            return true;
+        }
+
+        static const char* kRejectTokens[] =
+        {
+            "finger",
+            "thumb",
+            "hand",
+            "upperarm",
+            "forearm",
+            "wrist",
+            "bip01",
+            "valvebiped",
+            "helper",
+            "hlp",
+            "ik",
+            "camera",
+            "attach",
+            "attachment",
+            "muzzle",
+            "shell",
+            "eject"
+        };
+
+        for (const char* token : kRejectTokens)
+        {
+            if (MagazineInteractionNameContains(lowerName, token))
+                return false;
+        }
+
+        return true;
+    }
+
+    inline bool BuildVrHandsTwoHandedGripWeaponBoxLocalBoundsFromHitboxes(
+        void* drawState,
+        int requestedHitboxSet,
+        int numBonesOffset,
+        const std::vector<std::string>& boneNames,
+        const vr_vm_stabilize::Mat3x4* sourceBones,
+        int numBones,
+        const vr_vm_stabilize::Mat3x4& modelWorld,
+        const Vector& padding,
+        Vector& outMins,
+        Vector& outMaxs,
+        int& outSampleCount)
+    {
+        outSampleCount = 0;
+        if (!drawState || !sourceBones || numBones <= 0)
+            return false;
+
+        const uint8_t* studioHdr = nullptr;
+        if (!vr_vm_stabilize::TryGetStudioHdrFromDrawState(drawState, studioHdr) || !studioHdr)
+            return false;
+
+        int studioLength = 0;
+        vr_vm_stabilize::SafeRead(studioHdr + 0x4C, studioLength);
+
+        int numHitboxSets = 0;
+        int hitboxSetIndex = 0;
+        const int hitboxSetsOffset = (numBonesOffset > 0) ? (numBonesOffset + 16) : 0xAC;
+        const int hitboxSetIndexOffset = hitboxSetsOffset + 4;
+        if (!vr_vm_stabilize::SafeRead(studioHdr + hitboxSetsOffset, numHitboxSets) ||
+            !vr_vm_stabilize::SafeRead(studioHdr + hitboxSetIndexOffset, hitboxSetIndex))
+        {
+            return false;
+        }
+        if (numHitboxSets <= 0 || numHitboxSets > 64 || hitboxSetIndex <= 0 || hitboxSetIndex > 0x200000)
+            return false;
+        if (studioLength > 0 &&
+            (hitboxSetIndex >= studioLength ||
+                hitboxSetIndex + numHitboxSets * 12 > studioLength))
+        {
+            return false;
+        }
+
+        const int firstSet =
+            (requestedHitboxSet >= 0 && requestedHitboxSet < numHitboxSets) ? requestedHitboxSet : 0;
+        const int endSet =
+            (requestedHitboxSet >= 0 && requestedHitboxSet < numHitboxSets) ? (requestedHitboxSet + 1) : numHitboxSets;
+
+        static constexpr int kHitboxSetStride = 12;
+        static constexpr int kHitboxStrideCandidates[] = { 68, 72, 64, 80, 88 };
+        int bestCount = 0;
+        Vector bestMins(0.0f, 0.0f, 0.0f);
+        Vector bestMaxs(0.0f, 0.0f, 0.0f);
+
+        for (int stride : kHitboxStrideCandidates)
+        {
+            int sampleCount = 0;
+            Vector candidateMins(FLT_MAX, FLT_MAX, FLT_MAX);
+            Vector candidateMaxs(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+
+            for (int set = firstSet; set < endSet; ++set)
+            {
+                const size_t setOffset = static_cast<size_t>(hitboxSetIndex) +
+                    static_cast<size_t>(set) * static_cast<size_t>(kHitboxSetStride);
+                if (studioLength > 0 && setOffset + kHitboxSetStride > static_cast<size_t>(studioLength))
+                    continue;
+
+                const uint8_t* setBase = studioHdr + setOffset;
+                int numHitboxes = 0;
+                int hitboxIndex = 0;
+                if (!vr_vm_stabilize::SafeRead(setBase + 4, numHitboxes) ||
+                    !vr_vm_stabilize::SafeRead(setBase + 8, hitboxIndex))
+                {
+                    continue;
+                }
+                if (numHitboxes <= 0 || numHitboxes > 512 || hitboxIndex <= 0 || hitboxIndex > 0x200000)
+                    continue;
+
+                for (int hitbox = 0; hitbox < numHitboxes; ++hitbox)
+                {
+                    const size_t hitboxOffset = setOffset + static_cast<size_t>(hitboxIndex) +
+                        static_cast<size_t>(hitbox) * static_cast<size_t>(stride);
+                    if (studioLength > 0 && hitboxOffset + 32 > static_cast<size_t>(studioLength))
+                        continue;
+
+                    const uint8_t* hitboxBase = studioHdr + hitboxOffset;
+                    int hitboxBone = -1;
+                    Vector bbMin;
+                    Vector bbMax;
+                    if (!vr_vm_stabilize::SafeRead(hitboxBase + 0, hitboxBone) ||
+                        !vr_vm_stabilize::SafeRead(hitboxBase + 8, bbMin) ||
+                        !vr_vm_stabilize::SafeRead(hitboxBase + 20, bbMax))
+                    {
+                        continue;
+                    }
+                    if (hitboxBone < 0 || hitboxBone >= numBones)
+                        continue;
+                    const std::string lowerBoneName =
+                        hitboxBone < static_cast<int>(boneNames.size())
+                        ? vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(hitboxBone)])
+                        : std::string();
+                    if (!HooksVrHandsTwoHandedGripCanSampleWeaponBoneName(lowerBoneName))
+                        continue;
+                    if (!HooksVectorComponentsAreFinite(bbMin) || !HooksVectorComponentsAreFinite(bbMax))
+                        continue;
+                    if (bbMax.x <= bbMin.x || bbMax.y <= bbMin.y || bbMax.z <= bbMin.z)
+                        continue;
+                    const Vector span = bbMax - bbMin;
+                    if (span.x > 192.0f || span.y > 192.0f || span.z > 192.0f)
+                        continue;
+
+                    vr_vm_stabilize::Mat3x4 hitboxBoneWorld{};
+                    if (!vr_vm_stabilize::SafeRead(sourceBones + hitboxBone, hitboxBoneWorld))
+                        continue;
+
+                    for (int z = 0; z <= 1; ++z)
+                    {
+                        for (int y = 0; y <= 1; ++y)
+                        {
+                            for (int x = 0; x <= 1; ++x)
+                            {
+                                const Vector hitboxLocal(
+                                    x ? bbMax.x : bbMin.x,
+                                    y ? bbMax.y : bbMin.y,
+                                    z ? bbMax.z : bbMin.z);
+                                const Vector world = HooksTransformPoint(hitboxBoneWorld, hitboxLocal);
+                                const Vector modelLocal = HooksInverseTransformPoint(modelWorld, world);
+                                if (!HooksVectorComponentsAreFinite(modelLocal) ||
+                                    modelLocal.LengthSqr() > (260.0f * 260.0f))
+                                {
+                                    continue;
+                                }
+                                HooksAccumulateBounds(candidateMins, candidateMaxs, modelLocal);
+                            }
+                        }
+                    }
+                    ++sampleCount;
+                }
+            }
+
+            if (sampleCount <= 0 || candidateMins.x == FLT_MAX)
+                continue;
+            if (!CalibrationPreviewModelBoundsUsable(candidateMins, candidateMaxs))
+                continue;
+            if (sampleCount > bestCount)
+            {
+                bestCount = sampleCount;
+                bestMins = candidateMins;
+                bestMaxs = candidateMaxs;
+            }
+        }
+
+        if (bestCount <= 0)
+            return false;
+
+        outMins = bestMins - padding;
+        outMaxs = bestMaxs + padding;
+        outSampleCount = bestCount;
+        return CalibrationPreviewModelBoundsUsable(outMins, outMaxs);
+    }
+
+    inline bool BuildVrHandsTwoHandedGripWeaponBoxLocalBoundsFromBones(
+        const std::vector<std::string>& boneNames,
+        const vr_vm_stabilize::Mat3x4* sourceBones,
+        int numBones,
+        const vr_vm_stabilize::Mat3x4& modelWorld,
+        const Vector& padding,
+        Vector& outMins,
+        Vector& outMaxs,
+        int& outSampleCount)
+    {
+        outSampleCount = 0;
+        if (!sourceBones || numBones <= 0)
+            return false;
+
+        Vector mins(FLT_MAX, FLT_MAX, FLT_MAX);
+        Vector maxs(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+        for (int bone = 0; bone < numBones; ++bone)
+        {
+            const std::string lowerBoneName =
+                bone < static_cast<int>(boneNames.size())
+                ? vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(bone)])
+                : std::string();
+            if (!HooksVrHandsTwoHandedGripCanSampleWeaponBoneName(lowerBoneName))
+                continue;
+
+            vr_vm_stabilize::Mat3x4 boneWorld{};
+            if (!vr_vm_stabilize::SafeRead(sourceBones + bone, boneWorld))
+                continue;
+            const Vector modelLocal = HooksInverseTransformPoint(modelWorld, vr_vm_stabilize::GetOrigin(boneWorld));
+            if (!HooksVectorComponentsAreFinite(modelLocal) ||
+                modelLocal.LengthSqr() > (220.0f * 220.0f))
+            {
+                continue;
+            }
+            HooksAccumulateBounds(mins, maxs, modelLocal);
+            ++outSampleCount;
+        }
+
+        if (outSampleCount <= 0 || mins.x == FLT_MAX)
+            return false;
+
+        outMins = mins - padding;
+        outMaxs = maxs + padding;
+        return CalibrationPreviewModelBoundsUsable(outMins, outMaxs);
+    }
+
+    inline bool BuildVrHandsTwoHandedGripWeaponBoxLocalBounds(
+        void* drawState,
+        int hitboxSet,
+        int numBonesOffset,
+        const std::vector<std::string>& boneNames,
+        const vr_vm_stabilize::Mat3x4* sourceBones,
+        int numBones,
+        const vr_vm_stabilize::Mat3x4& modelWorld,
+        float scale,
+        float touchPaddingScale,
+        Vector& outMins,
+        Vector& outMaxs,
+        int& outSampleCount,
+        const char*& outBoundsSource)
+    {
+        const float clampedTouchPaddingScale = std::clamp(touchPaddingScale, 0.25f, 8.0f);
+        const Vector padding(
+            std::max(0.12f, 0.006f * scale * clampedTouchPaddingScale),
+            std::max(0.12f, 0.006f * scale * clampedTouchPaddingScale),
+            std::max(0.12f, 0.006f * scale * clampedTouchPaddingScale));
+        const Vector fallbackHalf(
+            std::max(1.20f, 0.040f * scale),
+            std::max(1.20f, 0.040f * scale),
+            std::max(1.20f, 0.040f * scale));
+
+        outBoundsSource = "hitbox";
+        bool hasBounds = BuildVrHandsTwoHandedGripWeaponBoxLocalBoundsFromHitboxes(
+            drawState,
+            hitboxSet,
+            numBonesOffset,
+            boneNames,
+            sourceBones,
+            numBones,
+            modelWorld,
+            padding,
+            outMins,
+            outMaxs,
+            outSampleCount);
+        if (!hasBounds)
+        {
+            outBoundsSource = "bones";
+            hasBounds = BuildVrHandsTwoHandedGripWeaponBoxLocalBoundsFromBones(
+                boneNames,
+                sourceBones,
+                numBones,
+                modelWorld,
+                padding,
+                outMins,
+                outMaxs,
+                outSampleCount);
+        }
+        if (!hasBounds)
+            return false;
+
+        CalibrationBoneHighlightEnsureMinimumSpan(outMins, outMaxs, fallbackHalf);
+        return CalibrationPreviewModelBoundsUsable(outMins, outMaxs);
+    }
+
     inline void DrawCalibrationBoneLinkLines(
         IVDebugOverlay* overlay,
         const std::vector<int>& boneParents,
@@ -5155,10 +5481,16 @@ namespace
 
         const bool calibrationOverlayActive =
             vr->m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed);
-        const bool wantsMagazineBox =
+        const bool wantsMagazineInteractionBox =
             vr->m_MagazineInteractionEnabled ||
             vr->m_MagazineBoxDebugEnabled ||
             calibrationOverlayActive;
+        const bool wantsTwoHandedGripWeaponBox =
+            vr->m_IsVREnabled &&
+            (vr->m_VrHandsEnabled || vr->m_NativeViewmodelHandsOnly);
+        const bool wantsMagazineBox =
+            wantsMagazineInteractionBox ||
+            wantsTwoHandedGripWeaponBox;
         if (!wantsMagazineBox)
             return;
         const bool logMagazineBoxDiagnostics = ShouldLogMagazineBoxDiagnostics(vr);
@@ -5237,6 +5569,75 @@ namespace
             HooksBuildMagazineInteractionProfileKey(modelFingerprint, boneSignature);
         vr->m_MagazineInteractionCurrentModelFingerprint.store(modelFingerprint, std::memory_order_relaxed);
         vr->m_MagazineInteractionCurrentBoneSignature.store(boneSignature, std::memory_order_relaxed);
+
+        const auto* sourceBones = reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pCustomBoneToWorld);
+        const uint32_t frameSeq = vr->m_RenderFrameSeq.load(std::memory_order_relaxed);
+        if (frameSeq != 0)
+        {
+            static std::mutex s_drawMutex;
+            static std::unordered_map<std::string, uint32_t> s_lastDrawSeq;
+            const std::string key = std::to_string(entityIndex) + "|" + lowerModel;
+            std::lock_guard<std::mutex> lock(s_drawMutex);
+            uint32_t& lastSeq = s_lastDrawSeq[key];
+            if (lastSeq == frameSeq)
+                return;
+            lastSeq = frameSeq;
+        }
+
+        vr_vm_stabilize::Mat3x4 modelWorld{};
+        bool modelBasisValid =
+            pModelToWorld != nullptr &&
+            vr_vm_stabilize::SafeRead(
+                reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pModelToWorld),
+                modelWorld);
+
+        vr_vm_stabilize::Mat3x4 weaponBoxWorld = modelWorld;
+        bool weaponBoxWorldValid = modelBasisValid && HooksMatrixLooksUsable(weaponBoxWorld);
+        if (!weaponBoxWorldValid)
+        {
+            vr_vm_stabilize::Mat3x4 rootWorld{};
+            if (vr_vm_stabilize::SafeRead(sourceBones, rootWorld) && HooksMatrixLooksUsable(rootWorld))
+            {
+                weaponBoxWorld = rootWorld;
+                weaponBoxWorldValid = true;
+            }
+        }
+
+        if (wantsTwoHandedGripWeaponBox && weaponBoxWorldValid)
+        {
+            Vector weaponBoxMins(0.0f, 0.0f, 0.0f);
+            Vector weaponBoxMaxs(0.0f, 0.0f, 0.0f);
+            int weaponBoxSampleCount = 0;
+            const char* weaponBoxBoundsSource = "none";
+            const float scale = (std::isfinite(vr->m_VRScale) && vr->m_VRScale > 0.001f) ? vr->m_VRScale : 43.2f;
+            if (BuildVrHandsTwoHandedGripWeaponBoxLocalBounds(
+                    drawState,
+                    hitboxSet,
+                    numBonesOffset,
+                    boneNames,
+                    sourceBones,
+                    numBones,
+                    weaponBoxWorld,
+                    scale,
+                    vr->m_VrHandsTwoHandedGripTargetBoxScale,
+                    weaponBoxMins,
+                    weaponBoxMaxs,
+                    weaponBoxSampleCount,
+                    weaponBoxBoundsSource))
+            {
+                vr->PublishVrHandsTwoHandedGripWeaponBox(
+                    Vector(weaponBoxWorld.m[0][3], weaponBoxWorld.m[1][3], weaponBoxWorld.m[2][3]),
+                    Vector(weaponBoxWorld.m[0][0], weaponBoxWorld.m[1][0], weaponBoxWorld.m[2][0]),
+                    Vector(weaponBoxWorld.m[0][1], weaponBoxWorld.m[1][1], weaponBoxWorld.m[2][1]),
+                    Vector(weaponBoxWorld.m[0][2], weaponBoxWorld.m[1][2], weaponBoxWorld.m[2][2]),
+                    weaponBoxMins,
+                    weaponBoxMaxs,
+                    frameSeq,
+                    entityIndex,
+                    modelName.c_str());
+            }
+        }
+
         if (inferredModelWeaponId > 0 &&
             currentMagazineInteractionWeaponId > 0 &&
             inferredModelWeaponId != currentMagazineInteractionWeaponId)
@@ -5335,7 +5736,6 @@ namespace
             return;
         }
 
-        const auto* sourceBones = reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pCustomBoneToWorld);
         vr_vm_stabilize::Mat3x4 magazineWorld{};
         if (!vr_vm_stabilize::SafeRead(sourceBones + magazineBone, magazineWorld))
             return;
@@ -5351,19 +5751,6 @@ namespace
             MagazineInteractionNameIsLegacyValveBipedClip(lowerMagazineBoneName) ||
             (magazineInteractionIsShotgun &&
                 MagazineInteractionShotgunShellBoneUsesStockProfileAxes(lowerMagazineBoneName));
-
-        const uint32_t frameSeq = vr->m_RenderFrameSeq.load(std::memory_order_relaxed);
-        if (frameSeq != 0)
-        {
-            static std::mutex s_drawMutex;
-            static std::unordered_map<std::string, uint32_t> s_lastDrawSeq;
-            const std::string key = std::to_string(entityIndex) + "|" + lowerModel;
-            std::lock_guard<std::mutex> lock(s_drawMutex);
-            uint32_t& lastSeq = s_lastDrawSeq[key];
-            if (lastSeq == frameSeq)
-                return;
-            lastSeq = frameSeq;
-        }
 
         const Vector fallbackHalf(
             std::max(0.001f, vr->m_MagazineBoxDebugFallbackHalfExtentsMeters.x) * vr->m_VRScale,
@@ -5574,13 +5961,6 @@ namespace
                 }
             }
         }
-
-        vr_vm_stabilize::Mat3x4 modelWorld{};
-        bool modelBasisValid =
-            pModelToWorld != nullptr &&
-            vr_vm_stabilize::SafeRead(
-                reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pModelToWorld),
-                modelWorld);
 
         if (magazineInteractionIsShotgun)
         {

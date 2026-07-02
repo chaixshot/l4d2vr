@@ -464,14 +464,16 @@ void VR::ProcessInput()
         (originMatchesRole(jumpActionData.activeOrigin, gameplayLeftRole) ||
             jumpActionData.activeOrigin == vr::k_ulInvalidInputValueHandle);
 
-    const bool magazineInteractionInputEnabled =
-        m_MagazineInteractionEnabled &&
+    const bool vrHandsGripInputEnabled =
         localPlayer &&
         !isObserverOrIdle &&
         (m_VrHandsEnabled || m_NativeViewmodelHandsOnly);
+    const bool magazineInteractionInputEnabled =
+        m_MagazineInteractionEnabled &&
+        vrHandsGripInputEnabled;
     const bool magazineButtonGripInput =
-        magazineInteractionInputEnabled &&
-        m_MagazineInteractionUseButtonGripInput;
+        vrHandsGripInputEnabled &&
+        (!magazineInteractionInputEnabled || m_MagazineInteractionUseButtonGripInput);
     const bool magazineFingerCurlInput =
         magazineInteractionInputEnabled &&
         !m_MagazineInteractionUseButtonGripInput;
