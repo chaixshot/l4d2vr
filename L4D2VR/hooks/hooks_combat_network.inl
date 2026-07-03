@@ -2140,44 +2140,7 @@ int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 	int rollEncoding = (((int)controllerAngles.z + 180) / 2 * 10000000);
 	to->command_number += rollEncoding;
 
-	static bool s_vrMeleeSwingArmed = true;
-	static std::chrono::steady_clock::time_point s_vrMeleeSwingHoldUntil{};
-	const auto meleeNow = std::chrono::steady_clock::now();
-	const Vector relativeControllerVelocity =
-		m_VR->m_RightControllerPose.TrackedDeviceVel - m_VR->m_HmdPose.TrackedDeviceVel;
-	const float controllerSpeed = (float)VectorLength(relativeControllerVelocity);
-	constexpr float kVrMeleeSwingTriggerSpeed = 1.1f;
-	constexpr float kVrMeleeSwingReleaseSpeed = 0.65f;
-	constexpr float kVrMeleeSwingHoldSeconds = 0.18f;
-
-	if (!m_Game->m_IsMeleeWeaponActive)
-	{
-		s_vrMeleeSwingArmed = true;
-		s_vrMeleeSwingHoldUntil = {};
-	}
-	else
-	{
-		const bool aboveTrigger = controllerSpeed > kVrMeleeSwingTriggerSpeed;
-		const bool belowRelease = controllerSpeed < kVrMeleeSwingReleaseSpeed;
-
-		if (belowRelease && meleeNow >= s_vrMeleeSwingHoldUntil)
-			s_vrMeleeSwingArmed = true;
-
-		if (aboveTrigger && s_vrMeleeSwingArmed)
-		{
-			s_vrMeleeSwingArmed = false;
-			s_vrMeleeSwingHoldUntil = meleeNow + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-				std::chrono::duration<float>(kVrMeleeSwingHoldSeconds));
-		}
-		else if (!s_vrMeleeSwingArmed && !belowRelease)
-		{
-			s_vrMeleeSwingHoldUntil = meleeNow + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-				std::chrono::duration<float>(kVrMeleeSwingHoldSeconds));
-		}
-	}
-
-	if (m_Game->m_IsMeleeWeaponActive &&
-		(!s_vrMeleeSwingArmed || meleeNow < s_vrMeleeSwingHoldUntil))
+	if (VectorLength(m_VR->m_RightControllerPose.TrackedDeviceVel) > 1.1f)
 	{
 		to->command_number *= -1; // Signal to server that melee swing in motion
 	}
