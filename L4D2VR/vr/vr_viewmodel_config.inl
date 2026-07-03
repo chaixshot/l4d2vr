@@ -2956,6 +2956,7 @@ void VR::ParseConfigFile()
 
     // Mouse mode (desktop-style aiming while staying in VR rendering)
     m_MouseModeEnabled = getBool("MouseModeEnabled", m_MouseModeEnabled);
+    m_SystemMouseInputSuppressAfterMapLoad = getBool("SystemMouseInputSuppressAfterMapLoad", m_SystemMouseInputSuppressAfterMapLoad);
     m_MouseModeAimFromHmd = getBool("MouseModeAimFromHmd", m_MouseModeAimFromHmd);
     m_MouseModeHmdAimSensitivity = std::clamp(getFloat("MouseModeHmdAimSensitivity", m_MouseModeHmdAimSensitivity), 0.0f, 3.0f);
     m_MouseModeYawSensitivity = getFloat("MouseModeYawSensitivity", m_MouseModeYawSensitivity);

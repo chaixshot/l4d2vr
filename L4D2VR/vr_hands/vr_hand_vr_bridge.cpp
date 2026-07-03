@@ -2155,7 +2155,6 @@ namespace
     {
         switch (weaponId)
         {
-        case C_WeaponCSBase::WeaponID::PISTOL:
         case C_WeaponCSBase::WeaponID::UZI:
         case C_WeaponCSBase::WeaponID::PUMPSHOTGUN:
         case C_WeaponCSBase::WeaponID::AUTOSHOTGUN:
@@ -2168,7 +2167,6 @@ namespace
         case C_WeaponCSBase::WeaponID::SPAS:
         case C_WeaponCSBase::WeaponID::GRENADE_LAUNCHER:
         case C_WeaponCSBase::WeaponID::AK47:
-        case C_WeaponCSBase::WeaponID::MAGNUM:
         case C_WeaponCSBase::WeaponID::MP5:
         case C_WeaponCSBase::WeaponID::SG552:
         case C_WeaponCSBase::WeaponID::AWP:
@@ -3347,9 +3345,6 @@ bool VR::GetMagazineInteractionCalibrationSnapshot(MagazineInteractionCalibratio
 
 bool VR::IsMagazineInteractionLeftHandActive() const
 {
-    if (m_VrHandsTwoHandedGripActive)
-        return true;
-
     if (m_MagazineInteractionShotgunShellMode &&
         m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine &&
         m_MagazineInteractionShotgunShellsLoadedThisSession > 0)
@@ -4375,7 +4370,11 @@ bool VR::GetNativeViewmodelLeftHandOpenVRFingerCurls(std::array<float, 5>& outCu
     return true;
 }
 
-bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown, bool leftGripJustPressed)
+bool VR::UpdateMagazineInteraction(
+    C_BasePlayer* localPlayer,
+    bool leftGripDown,
+    bool leftGripJustPressed,
+    bool allowGameplayInputOnTwoHandedGripRelease)
 {
     const auto now = std::chrono::steady_clock::now();
     const bool magazineInteractionPhysicalLeftHand = IsGameplayHandLeftPhysical(true);
@@ -5408,24 +5407,62 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         return outDistance <= 0.0f;
     };
 
-    if (!twoHandedGripRuntimeAllowed)
+    auto nativeReloadSuppressWindowActiveForWeapon = [&]() -> bool
+    {
+        if (m_MagazineInteractionNativeReloadSuppressUntil.time_since_epoch().count() == 0 ||
+            now > m_MagazineInteractionNativeReloadSuppressUntil)
+        {
+            return false;
+        }
+        return m_MagazineInteractionNativeReloadSuppressWeaponId == 0 ||
+            m_MagazineInteractionNativeReloadSuppressWeaponId == static_cast<int>(activeWeaponId);
+    };
+
+    const bool manualReloadOwnsOffhandInput =
+        IsMagazineInteractionManualActive() ||
+        nativeReloadSuppressWindowActiveForWeapon();
+
+    auto releaseMountFriendlyGrip = [&](const char* reason, bool feedback)
+    {
+        clearMountFriendlyGripContact();
+        m_VrHandsTwoHandedGripActive = false;
+        m_VrHandsTwoHandedGripWeaponId = 0;
+        if (feedback)
+            triggerMagazineInteractionHaptic(0.018f, 85.0f, 0.28f, 2);
+        Game::logMsg(
+            "[VR][Hands] mount-friendly two-hand grip released reason=%s weaponId=%d",
+            (reason && reason[0] != '\0') ? reason : "unknown",
+            activeWeaponIdInt);
+    };
+
+    if (!twoHandedGripRuntimeAllowed || manualReloadOwnsOffhandInput)
         clearMountFriendlyGripContact();
 
-    if (m_VrHandsTwoHandedAimMountFriendly && twoHandedGripRuntimeAllowed)
+    if (m_VrHandsTwoHandedAimMountFriendly && manualReloadOwnsOffhandInput)
     {
+        if (m_VrHandsTwoHandedGripActive)
+            releaseMountFriendlyGrip("manual-reload", false);
+    }
+    else if (m_VrHandsTwoHandedAimMountFriendly && twoHandedGripRuntimeAllowed)
+    {
+        if (m_VrHandsTwoHandedGripActive)
+        {
+            if (leftGripJustPressed)
+            {
+                if (leftGripDown && !allowGameplayInputOnTwoHandedGripRelease)
+                    m_MagazineInteractionSuppressLeftInputUntilRelease = true;
+                releaseMountFriendlyGrip("grip", true);
+                return false;
+            }
+
+            m_VrHandsTwoHandedMountFriendlyGripContact = true;
+            return false;
+        }
+
         const bool magazineExclusion = leftHandTouchesMagazineForGripExclusion();
         if (magazineExclusion)
         {
             clearMountFriendlyGripContact();
-            if (m_VrHandsTwoHandedGripActive)
-            {
-                m_VrHandsTwoHandedGripActive = false;
-                m_VrHandsTwoHandedGripWeaponId = 0;
-                triggerMagazineInteractionHaptic(0.012f, 70.0f, 0.18f, 1);
-                Game::logMsg(
-                    "[VR][Hands] mount-friendly two-hand grip released for magazine exclusion weaponId=%d",
-                    activeWeaponIdInt);
-            }
         }
         else
         {
@@ -5462,20 +5499,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             else
             {
                 clearMountFriendlyGripContact();
-                if (m_VrHandsTwoHandedGripActive)
-                {
-                    m_VrHandsTwoHandedGripActive = false;
-                    m_VrHandsTwoHandedGripWeaponId = 0;
-                    triggerMagazineInteractionHaptic(0.012f, 70.0f, 0.18f, 1);
-                    Game::logMsg(
-                        "[VR][Hands] mount-friendly two-hand grip auto released weaponId=%d",
-                        activeWeaponIdInt);
-                    return false;
-                }
             }
-
-            if (m_VrHandsTwoHandedGripActive)
-                return false;
         }
     }
     else
@@ -5486,7 +5510,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         {
             m_VrHandsTwoHandedGripActive = false;
             m_VrHandsTwoHandedGripWeaponId = 0;
-            if (leftGripDown)
+            if (leftGripDown && !allowGameplayInputOnTwoHandedGripRelease)
                 m_MagazineInteractionSuppressLeftInputUntilRelease = true;
             triggerMagazineInteractionHaptic(0.018f, 85.0f, 0.28f, 2);
             Game::logMsg(
@@ -5793,14 +5817,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         return wroteClientClip;
     };
 
-    const bool nativeReloadSuppressWindowActive =
-        m_MagazineInteractionNativeReloadSuppressUntil.time_since_epoch().count() != 0 &&
-        now <= m_MagazineInteractionNativeReloadSuppressUntil;
-    const bool nativeReloadSuppressMatchesActiveWeapon =
-        m_MagazineInteractionNativeReloadSuppressWeaponId == 0 ||
-        m_MagazineInteractionNativeReloadSuppressWeaponId == static_cast<int>(activeWeaponId);
-    if (nativeReloadSuppressWindowActive &&
-        nativeReloadSuppressMatchesActiveWeapon)
+    if (nativeReloadSuppressWindowActiveForWeapon())
     {
         clearNativeClientReloadState("native-reload-suppress-window");
         if (m_Game)
@@ -5835,6 +5852,25 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             quickReloadWeaponMatches)
         {
             suppressNativeReloadPlayback(1.15f, reason);
+        }
+    };
+
+    auto suppressRegularPhysicalReloadNativeTail = [&](const char* reason)
+    {
+        const auto sessionWeaponId =
+            static_cast<C_WeaponCSBase::WeaponID>(m_MagazineInteractionWeaponId);
+        const bool sessionWeaponMatchesActive =
+            m_MagazineInteractionWeaponId != 0 &&
+            m_MagazineInteractionWeaponId == static_cast<int>(activeWeaponId);
+        const bool detachableWeaponMatches =
+            MagazineInteractionWeaponUsesDetachableMagazine(activeWeaponId) ||
+            MagazineInteractionWeaponUsesDetachableMagazine(sessionWeaponId) ||
+            sessionWeaponMatchesActive;
+        if (!m_MagazineInteractionQuickReloadMode &&
+            !m_MagazineInteractionShotgunShellMode &&
+            detachableWeaponMatches)
+        {
+            suppressNativeReloadPlayback(0.85f, reason);
         }
     };
 
@@ -6270,6 +6306,7 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                     clipUpdated ? 1 : 0);
                 const bool suppressLeftInputUntilRelease = leftGripDown;
                 suppressQuickReloadNativeTail("quick-reload-early-bolt-backend-complete");
+                suppressRegularPhysicalReloadNativeTail("regular-reload-early-bolt-backend-complete");
                 CancelMagazineInteractionManual();
                 if (suppressLeftInputUntilRelease)
                     m_MagazineInteractionSuppressLeftInputUntilRelease = true;
@@ -6291,6 +6328,9 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
                 m_MagazineInteractionStartClip,
                 maxClip,
                 clipUpdated ? 1 : 0);
+
+            suppressRegularPhysicalReloadNativeTail(
+                clipUpdated ? "regular-reload-clip-updated" : "regular-reload-backend-timeout");
 
             if (!beginBoltStage(activeWeaponId, clipUpdated ? "clip-updated" : "backend-timeout"))
             {

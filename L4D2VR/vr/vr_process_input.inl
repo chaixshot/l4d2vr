@@ -73,7 +73,7 @@ void VR::ProcessInput()
         m_PrimaryAttackDown = false;
         m_MagazineInteractionThumbIndexCurlDownPrev = false;
         m_MagazineInteractionThreeFingerCurlDownPrev = false;
-        (void)UpdateMagazineInteraction(nullptr, false, false);
+        (void)UpdateMagazineInteraction(nullptr, false, false, false);
         CancelMagazineInteractionManual();
         CancelTeleportTargeting();
         return;
@@ -495,6 +495,14 @@ void VR::ProcessInput()
         (reloadFromLeftHand && reloadJustPressed) ||
         (crouchFromLeftHand && crouchJustPressed) ||
         (jumpFromLeftHand && jumpJustPressed);
+    const bool magazineButtonGripJustPressedFromReload = reloadFromLeftHand && reloadJustPressed;
+    const bool magazineButtonGripJustPressedFromOther =
+        (crouchFromLeftHand && crouchJustPressed) ||
+        (jumpFromLeftHand && jumpJustPressed);
+    const bool allowGameplayInputOnTwoHandedGripRelease =
+        magazineButtonGripInput &&
+        magazineButtonGripJustPressedFromReload &&
+        !magazineButtonGripJustPressedFromOther;
     const bool thumbIndexWasDown = m_MagazineInteractionThumbIndexCurlDownPrev;
     const bool threeFingerWasDown = m_MagazineInteractionThreeFingerCurlDownPrev;
     const float thumbIndexCurlStart = std::clamp(m_MagazineInteractionThumbIndexCurlStart, 0.0f, 1.0f);
@@ -536,7 +544,8 @@ void VR::ProcessInput()
     const bool magazineInteractionReloadPulse = UpdateMagazineInteraction(
         localPlayer,
         magazineGripDown,
-        magazineGripJustPressed);
+        magazineGripJustPressed,
+        allowGameplayInputOnTwoHandedGripRelease);
     if (IsMagazineInteractionLeftHandActive())
     {
         if (reloadFromLeftHand)

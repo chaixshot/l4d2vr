@@ -17,6 +17,108 @@ namespace
         { 0x9b, 0x3a, 0xf1, 0x1a, 0xc3, 0x8c, 0x18, 0xb5 }
     };
 
+    constexpr UINT kSystemMouseInputSuppressQuitMessage = WM_APP + 0x4D53;
+    std::atomic<long> g_SystemMouseInputSuppressActive{ 0 };
+    std::atomic<long> g_SystemMouseInputSuppressStop{ 0 };
+    std::atomic<DWORD> g_SystemMouseInputSuppressProcessId{ 0 };
+    std::atomic<DWORD> g_SystemMouseInputSuppressThreadId{ 0 };
+    HANDLE g_SystemMouseInputSuppressThreadHandle = nullptr;
+    std::mutex g_SystemMouseInputSuppressThreadMutex;
+
+    inline bool SystemMouseInputSuppressForegroundIsCurrentProcess()
+    {
+        const DWORD processId = g_SystemMouseInputSuppressProcessId.load(std::memory_order_acquire);
+        if (processId == 0)
+            return false;
+
+        HWND foreground = GetForegroundWindow();
+        if (!foreground)
+            return false;
+
+        for (HWND hwnd = foreground; hwnd != nullptr; hwnd = GetWindow(hwnd, GW_OWNER))
+        {
+            DWORD foregroundProcessId = 0;
+            GetWindowThreadProcessId(hwnd, &foregroundProcessId);
+            if (foregroundProcessId == processId)
+                return true;
+        }
+
+        return false;
+    }
+
+    LRESULT CALLBACK SystemMouseInputSuppressLowLevelProc(int code, WPARAM wParam, LPARAM lParam)
+    {
+        if (code == HC_ACTION &&
+            g_SystemMouseInputSuppressActive.load(std::memory_order_acquire) != 0 &&
+            SystemMouseInputSuppressForegroundIsCurrentProcess())
+        {
+            return 1;
+        }
+
+        return CallNextHookEx(nullptr, code, wParam, lParam);
+    }
+
+    DWORD WINAPI SystemMouseInputSuppressThreadMain(LPVOID)
+    {
+        const DWORD threadId = GetCurrentThreadId();
+        g_SystemMouseInputSuppressThreadId.store(threadId, std::memory_order_release);
+
+        MSG msg{};
+        PeekMessageA(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
+
+        HMODULE module = nullptr;
+        GetModuleHandleExA(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCSTR>(&SystemMouseInputSuppressLowLevelProc),
+            &module);
+
+        HHOOK hook = SetWindowsHookExA(WH_MOUSE_LL, SystemMouseInputSuppressLowLevelProc, module, 0);
+        if (!hook)
+        {
+            Game::logMsg("[ERROR] Failed to install system mouse suppression hook, error=%lu", GetLastError());
+        }
+        else
+        {
+            Game::logMsg("[VR][MouseSuppress] low-level mouse hook installed");
+        }
+
+        while (g_SystemMouseInputSuppressStop.load(std::memory_order_acquire) == 0)
+        {
+            const BOOL gotMessage = GetMessageA(&msg, nullptr, 0, 0);
+            if (gotMessage <= 0)
+                break;
+            if (msg.message == kSystemMouseInputSuppressQuitMessage)
+                break;
+        }
+
+        if (hook)
+            UnhookWindowsHookEx(hook);
+
+        g_SystemMouseInputSuppressActive.store(0, std::memory_order_release);
+        g_SystemMouseInputSuppressThreadId.store(0, std::memory_order_release);
+        return 0;
+    }
+
+    inline void EnsureSystemMouseInputSuppressThreadStarted()
+    {
+        std::lock_guard<std::mutex> lock(g_SystemMouseInputSuppressThreadMutex);
+        if (g_SystemMouseInputSuppressThreadHandle)
+            return;
+
+        g_SystemMouseInputSuppressStop.store(0, std::memory_order_release);
+        g_SystemMouseInputSuppressProcessId.store(GetCurrentProcessId(), std::memory_order_release);
+
+        DWORD threadId = 0;
+        HANDLE handle = CreateThread(nullptr, 0, SystemMouseInputSuppressThreadMain, nullptr, 0, &threadId);
+        if (!handle)
+        {
+            Game::logMsg("[ERROR] Failed to create system mouse suppression hook thread, error=%lu", GetLastError());
+            return;
+        }
+
+        g_SystemMouseInputSuppressThreadHandle = handle;
+    }
+
     class SourceRenderCompletionFunctor final : public CFunctor
     {
     public:
@@ -1335,6 +1437,50 @@ void VR::UpdateAutoFlashlight(C_BasePlayer* localPlayer)
     }
 }
 
+void VR::UpdateSystemMouseInputSuppression(bool inGame, bool hasLocalPlayer)
+{
+    const bool active =
+        m_SystemMouseInputSuppressAfterMapLoad &&
+        m_IsVREnabled &&
+        inGame &&
+        hasLocalPlayer;
+
+    if (active)
+        EnsureSystemMouseInputSuppressThreadStarted();
+
+    g_SystemMouseInputSuppressActive.store(active ? 1 : 0, std::memory_order_release);
+
+    if (m_SystemMouseInputSuppressActive != active)
+    {
+        m_SystemMouseInputSuppressActive = active;
+        Game::logMsg("[VR][MouseSuppress] %s inGame=%d localPlayer=%d",
+            active ? "active" : "inactive",
+            inGame ? 1 : 0,
+            hasLocalPlayer ? 1 : 0);
+    }
+}
+
+extern "C" void __cdecl L4D2VR_ShutdownSystemMouseInputSuppression()
+{
+    g_SystemMouseInputSuppressActive.store(0, std::memory_order_release);
+    g_SystemMouseInputSuppressStop.store(1, std::memory_order_release);
+
+    HANDLE handle = nullptr;
+    DWORD threadId = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_SystemMouseInputSuppressThreadMutex);
+        handle = g_SystemMouseInputSuppressThreadHandle;
+        g_SystemMouseInputSuppressThreadHandle = nullptr;
+        threadId = g_SystemMouseInputSuppressThreadId.load(std::memory_order_acquire);
+    }
+
+    if (threadId != 0)
+        PostThreadMessageA(threadId, kSystemMouseInputSuppressQuitMessage, 0, 0);
+
+    if (handle)
+        CloseHandle(handle);
+}
+
 void VR::Update()
 {
     if (!m_IsInitialized || !g_Game)
@@ -1350,6 +1496,14 @@ void VR::Update()
     const bool inGameAtUpdateStart = m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame();
     const bool returnedToMainMenu = s_WasInGameLastUpdate && !inGameAtUpdateStart;
     s_WasInGameLastUpdate = inGameAtUpdateStart;
+
+    bool hasLocalPlayerAtUpdateStart = false;
+    if (inGameAtUpdateStart && m_Game->m_EngineClient)
+    {
+        const int playerIndex = m_Game->m_EngineClient->GetLocalPlayer();
+        hasLocalPlayerAtUpdateStart = playerIndex > 0 && m_Game->GetClientEntity(playerIndex) != nullptr;
+    }
+    UpdateSystemMouseInputSuppression(inGameAtUpdateStart, hasLocalPlayerAtUpdateStart);
 
     if (m_VrRecommendedVideoSettingsEnabled &&
         (m_VrRecommendedVideoSettingsApplyPending || returnedToMainMenu))

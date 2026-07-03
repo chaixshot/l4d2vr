@@ -1069,6 +1069,11 @@ public:
 	//  - Aim line starts at the anchored viewmodel point, but converges to the mouse-aim ray
 	//    at MouseModeAimConvergeDistance (scheme B).
 	bool m_MouseModeEnabled = false;
+	// System-level mouse suppression while playing in a loaded map.
+	// This installs a Win32 low-level mouse hook and eats mouse movement/buttons/wheel
+	// before Source sees them. It intentionally does not rely on CUserCmd filtering.
+	bool m_SystemMouseInputSuppressAfterMapLoad = false;
+	bool m_SystemMouseInputSuppressActive = false;
 	// Mouse-mode aiming source.
 	// If false (default): aim direction is driven by the accumulated mouse pitch + body yaw (m_RotationOffset).
 	// If true:            aim direction follows the HMD center ray (view direction), while the aim line origin
@@ -3154,7 +3159,11 @@ public:
 	void UpdateNativeViewmodelLeftHandOpenVRFingerCurls();
 	bool GetNativeViewmodelLeftHandOpenVRFingerCurls(std::array<float, 5>& outCurls) const;
 	bool ReadMagazineInteractionFingerCurls(std::array<float, 5>& outCurls);
-	bool UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown, bool leftGripJustPressed);
+	bool UpdateMagazineInteraction(
+		C_BasePlayer* localPlayer,
+		bool leftGripDown,
+		bool leftGripJustPressed,
+		bool allowGameplayInputOnTwoHandedGripRelease);
 	void MarkMagazineInteractionReloadCommandIssued();
 	bool IsMagazineInteractionReloadCommandActive() const;
 	bool ShouldSuppressMagazineInteractionEmptyClipAutoReload(C_BasePlayer* localPlayer) const;
@@ -3266,6 +3275,7 @@ public:
 	QAngle GetRecommendedViewmodelAbsAngle();
 	// Mouse-mode: compute the eye-center ray used for aiming (mouse pitch+yaw or HMD-based, optionally sensitivity-scaled).
 	void GetMouseModeEyeRay(Vector& eyeDirOut, QAngle* eyeAngOut = nullptr);
+	void UpdateSystemMouseInputSuppression(bool inGame, bool hasLocalPlayer);
 	void UpdateTracking();
 	void UpdateMotionGestures(C_BasePlayer* localPlayer);
 	void UpdateAutoFlashlight(C_BasePlayer* localPlayer);

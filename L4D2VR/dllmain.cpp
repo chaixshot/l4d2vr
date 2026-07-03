@@ -23,6 +23,8 @@
 #include "hooks.h"
 #include "sdk.h"
 
+extern "C" void __cdecl L4D2VR_ShutdownSystemMouseInputSuppression();
+
 namespace
 {
     constexpr wchar_t kDesiredVrWindowTitle[] = L"Left 4 Dead 2 VR - Vulkan";
@@ -2682,6 +2684,7 @@ BOOL APIENTRY DllMain(HMODULE hModule,
     case DLL_THREAD_DETACH:
         break;
     case DLL_PROCESS_DETACH:
+        L4D2VR_ShutdownSystemMouseInputSuppression();
         Game::UninstallVertexFormatWarningFilter();
         break;
     }

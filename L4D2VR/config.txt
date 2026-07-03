@@ -332,6 +332,7 @@ ScopeStabilizationDCutoff=1.0
 
 
 MouseModeEnabled=false
+SystemMouseInputSuppressAfterMapLoad=false
 MouseModeYawSensitivity=0.01
 MouseModePitchSensitivity=0.01
 MouseModeViewmodelAnchorOffset=0.42,0.0,-0.28
