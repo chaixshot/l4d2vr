@@ -40,6 +40,7 @@ QueuedSubmitWaitMs=1
 QueuedSubmitUseRenderPoseToken=true
 QueuedRenderPoseWaitMs=0
 QueuedRenderPoseRelaxPercent=0
+QueuedRenderPoseFromTracking=false
 QueuedRenderMaxFpsSmart=true
 QueuedRenderMaxFps=0
 QueuedRenderMaxFramesAhead=1

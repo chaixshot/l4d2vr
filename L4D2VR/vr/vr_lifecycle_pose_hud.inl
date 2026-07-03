@@ -50,6 +50,11 @@ void VR::PoseWaiterThreadMain()
 {
     // Detached thread. Runs only when mat_queue_mode!=0 (m_PoseWaiterEnabled).
     // This keeps WaitGetPoses() off the queued render thread, preserving mat_queue_mode throughput.
+    SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+
+    uint32_t poseWaiterSuccessCount = 0;
+    uint32_t poseWaiterErrorCount = 0;
+    DWORD poseWaiterLastLogMs = GetTickCount();
     while (true)
     {
         if (!m_PoseWaiterEnabled.load(std::memory_order_acquire) || !m_Compositor)
@@ -61,7 +66,11 @@ void VR::PoseWaiterThreadMain()
         std::array<vr::TrackedDevicePose_t, vr::k_unMaxTrackedDeviceCount> poses{};
         vr::EVRCompositorError result = m_Compositor->WaitGetPoses(poses.data(), vr::k_unMaxTrackedDeviceCount, NULL, 0);
         if (result != vr::VRCompositorError_None)
+        {
+            ++poseWaiterErrorCount;
             continue;
+        }
+        ++poseWaiterSuccessCount;
 
         // Publish snapshot.
         m_PoseWaiterSeq.fetch_add(1, std::memory_order_acq_rel); // odd
@@ -69,6 +78,28 @@ void VR::PoseWaiterThreadMain()
         m_PoseWaiterSeq.fetch_add(1, std::memory_order_release); // even
         if (m_PoseWaiterEvent)
             SetEvent(m_PoseWaiterEvent);
+
+        if (m_RenderPipelineDebugLog)
+        {
+            const DWORD nowMs = GetTickCount();
+            const DWORD elapsedMs = nowMs - poseWaiterLastLogMs;
+            if (elapsedMs >= 1000u)
+            {
+                const float hmdHz = GetHmdDisplayFrequencyHz();
+                const double successHz = (double)poseWaiterSuccessCount * 1000.0 / (double)std::max<DWORD>(elapsedMs, 1u);
+                Game::logMsg("[VR][PoseWaiter] tid=%lu hmdHz=%.1f successHz=%.1f success=%u errors=%u seq=%u enabled=%d",
+                    GetCurrentThreadId(),
+                    hmdHz,
+                    successHz,
+                    poseWaiterSuccessCount,
+                    poseWaiterErrorCount,
+                    m_PoseWaiterSeq.load(std::memory_order_acquire),
+                    m_PoseWaiterEnabled.load(std::memory_order_acquire) ? 1 : 0);
+                poseWaiterSuccessCount = 0;
+                poseWaiterErrorCount = 0;
+                poseWaiterLastLogMs = nowMs;
+            }
+        }
     }
 }
 

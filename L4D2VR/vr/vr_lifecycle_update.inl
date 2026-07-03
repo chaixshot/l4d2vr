@@ -26,7 +26,8 @@ namespace
             uint32_t markerId,
             uint32_t renderPoseToken,
             uint32_t renderFrameSeq,
-            bool allowDuplicatePoseSubmit)
+            bool allowDuplicatePoseSubmit,
+            const vr::HmdMatrix34_t* renderHmdPose)
             : m_VR(vr),
             m_Epoch(epoch),
             m_MarkerId(markerId),
@@ -34,6 +35,11 @@ namespace
             m_RenderFrameSeq(renderFrameSeq),
             m_AllowDuplicatePoseSubmit(allowDuplicatePoseSubmit)
         {
+            if (renderHmdPose)
+            {
+                m_RenderHmdPose = *renderHmdPose;
+                m_RenderHmdPoseValid = true;
+            }
         }
 
         int AddRef() override
@@ -63,7 +69,8 @@ namespace
                 m_RenderFrameSeq,
                 m_AllowDuplicatePoseSubmit,
                 "source-queue",
-                m_MarkerId);
+                m_MarkerId,
+                m_RenderHmdPoseValid ? &m_RenderHmdPose : nullptr);
         }
 
     private:
@@ -74,6 +81,8 @@ namespace
         uint32_t m_RenderPoseToken = 0;
         uint32_t m_RenderFrameSeq = 0;
         bool m_AllowDuplicatePoseSubmit = false;
+        vr::HmdMatrix34_t m_RenderHmdPose{};
+        bool m_RenderHmdPoseValid = false;
     };
 
     class VrHandsQueuedDrawFunctor final : public CFunctor
@@ -701,6 +710,10 @@ namespace
         vr->m_RenderedNewFrame.store(false, std::memory_order_release);
         vr->m_RenderCompletedPoseToken.store(0, std::memory_order_release);
         vr->m_RenderCompletedDuplicatePoseFrameId.store(0, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> poseLock(vr->m_RenderCompletedHmdPoseMutex);
+            vr->m_RenderCompletedHmdPoseValid = false;
+        }
         vr->m_ReShadeVRCompatResolvedFrameId.store(0, std::memory_order_release);
         vr->m_ReShadeVRCompatPendingRenderReady.store(0, std::memory_order_release);
         vr->m_ReShadeVRCompatPendingRenderPoseToken.store(0, std::memory_order_release);
@@ -1394,6 +1407,10 @@ void VR::Update()
             m_LastSubmittedFrameId.store(completedFrameId, std::memory_order_release);
             m_RenderCompletedPoseToken.store(0, std::memory_order_release);
             m_RenderCompletedDuplicatePoseFrameId.store(0, std::memory_order_release);
+            {
+                std::lock_guard<std::mutex> poseLock(m_RenderCompletedHmdPoseMutex);
+                m_RenderCompletedHmdPoseValid = false;
+            }
             m_ReShadeVRCompatPendingRenderReady.store(0, std::memory_order_release);
             m_ReShadeVRCompatPendingRenderPoseToken.store(0, std::memory_order_release);
             m_ReShadeVRCompatPendingRenderFrameSeq.store(0, std::memory_order_release);
@@ -2150,6 +2167,10 @@ void VR::InvalidateSourceRenderQueueMarkers()
     m_SourceRenderQueueMarkerEpoch.fetch_add(1, std::memory_order_acq_rel);
     m_SourceRenderQueueMarkerQueuedId.store(0, std::memory_order_release);
     m_SourceRenderQueueMarkerCompletedId.store(0, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> poseLock(m_RenderCompletedHmdPoseMutex);
+        m_RenderCompletedHmdPoseValid = false;
+    }
 }
 
 bool VR::QueueVrHandsDrawForEye(
@@ -2244,7 +2265,8 @@ bool VR::QueueSourceRenderCompletionMarker(
     IMatRenderContext* renderContext,
     uint32_t renderPoseToken,
     uint32_t renderFrameSeq,
-    bool allowDuplicatePoseSubmit)
+    bool allowDuplicatePoseSubmit,
+    const vr::HmdMatrix34_t* renderHmdPose)
 {
     if (!renderContext)
         return false;
@@ -2316,7 +2338,8 @@ bool VR::QueueSourceRenderCompletionMarker(
         markerId,
         renderPoseToken,
         renderFrameSeq,
-        allowDuplicatePoseSubmit));
+        allowDuplicatePoseSubmit,
+        renderHmdPose));
 
     if (sourceMarkerDebugLog)
     {
@@ -2356,7 +2379,8 @@ void VR::PublishRenderCompletedFrame(
     uint32_t renderFrameSeq,
     bool allowDuplicatePoseSubmit,
     const char* sourceTag,
-    uint32_t sourceQueueMarkerId)
+    uint32_t sourceQueueMarkerId,
+    const vr::HmdMatrix34_t* renderHmdPose)
 {
     if (renderPoseToken == 0)
         renderPoseToken = m_SubmitPoseToken.load(std::memory_order_acquire);
@@ -2364,6 +2388,18 @@ void VR::PublishRenderCompletedFrame(
     const uint32_t completedFrameId = m_RenderCompletedFrameId.fetch_add(1, std::memory_order_acq_rel) + 1;
     m_RenderCompletedPoseToken.store(renderPoseToken, std::memory_order_release);
     m_RenderCompletedDuplicatePoseFrameId.store(allowDuplicatePoseSubmit ? completedFrameId : 0u, std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> poseLock(m_RenderCompletedHmdPoseMutex);
+        if (renderHmdPose)
+        {
+            m_RenderCompletedHmdPose = *renderHmdPose;
+            m_RenderCompletedHmdPoseValid = true;
+        }
+        else
+        {
+            m_RenderCompletedHmdPoseValid = false;
+        }
+    }
     if (sourceQueueMarkerId != 0)
         m_SourceRenderQueueMarkerCompletedId.store(sourceQueueMarkerId, std::memory_order_release);
     m_RenderedNewFrame.store(true, std::memory_order_release);
@@ -2800,6 +2836,22 @@ void VR::SubmitVRTextures()
             timingDataSubmitted = true;
         };
 
+    vr::HmdMatrix34_t completedRenderHmdPose{};
+    bool useRenderPoseTextureSubmit = false;
+    if (queued &&
+        sceneReadyForStaleResubmit &&
+        m_QueuedRenderPoseFromTracking &&
+        m_QueuedSubmitUseRenderPoseToken &&
+        !m_ReShadeVRCompat)
+    {
+        std::lock_guard<std::mutex> poseLock(m_RenderCompletedHmdPoseMutex);
+        if (m_RenderCompletedHmdPoseValid)
+        {
+            completedRenderHmdPose = m_RenderCompletedHmdPose;
+            useRenderPoseTextureSubmit = true;
+        }
+    }
+
     auto submitEye = [&](vr::EVREye eye, vr::Texture_t* texture, const vr::VRTextureBounds_t* bounds)
         {
             if (!texture || !texture->handle)
@@ -2808,7 +2860,40 @@ void VR::SubmitVRTextures()
             ensureTimingData();
 
             std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
-            vr::EVRCompositorError submitError = m_Compositor->Submit(eye, texture, bounds, vr::Submit_Default);
+            vr::VRTextureWithPose_t textureWithPose{};
+            const vr::Texture_t* submitTexture = texture;
+            vr::EVRSubmitFlags submitFlags = vr::Submit_Default;
+            if (useRenderPoseTextureSubmit)
+            {
+                textureWithPose.handle = texture->handle;
+                textureWithPose.eType = texture->eType;
+                textureWithPose.eColorSpace = texture->eColorSpace;
+                textureWithPose.mDeviceToAbsoluteTracking = completedRenderHmdPose;
+                submitTexture = &textureWithPose;
+                submitFlags = vr::Submit_TextureWithPose;
+            }
+
+            vr::EVRCompositorError submitError = m_Compositor->Submit(eye, submitTexture, bounds, submitFlags);
+            if (submitError != vr::VRCompositorError_None &&
+                useRenderPoseTextureSubmit &&
+                submitError != vr::VRCompositorError_AlreadySubmitted)
+            {
+                if (m_RenderPipelineDebugLog)
+                {
+                    static std::chrono::steady_clock::time_point s_lastTextureWithPoseFallbackLog{};
+                    if (!ShouldThrottle(s_lastTextureWithPoseFallbackLog, m_RenderPipelineDebugLogHz))
+                    {
+                        Game::logMsg("[VR][Queued][TextureWithPoseFallback] tid=%lu eye=%d err=%d renderPose=%u completed=%u submitted=%u",
+                            GetCurrentThreadId(),
+                            static_cast<int>(eye),
+                            static_cast<int>(submitError),
+                            m_RenderCompletedPoseToken.load(std::memory_order_acquire),
+                            m_RenderCompletedFrameId.load(std::memory_order_acquire),
+                            m_LastSubmittedFrameId.load(std::memory_order_acquire));
+                    }
+                }
+                submitError = m_Compositor->Submit(eye, texture, bounds, vr::Submit_Default);
+            }
             if (submitError != vr::VRCompositorError_None)
             {
                 if (queued && submitError == vr::VRCompositorError_AlreadySubmitted)

@@ -464,6 +464,10 @@ public:
 	// Percentage of repeated-pose render frames allowed to bypass the strict fresh-pose wait and submit.
 	// 0 = fully strict; 100 = submit every repeated pose.
 	int m_QueuedRenderPoseRelaxPercent = 20;
+	// Experimental: in queued full-sync mode, render from a non-blocking tracking prediction instead
+	// of waiting for a fresh WaitGetPoses snapshot, then submit that pose via VRTextureWithPose_t.
+	bool m_QueuedRenderPoseFromTracking = false;
+	std::atomic<uint32_t> m_QueuedRenderPoseFromTrackingSeq{ 0 };
 
 	// Queued rendering: optional render-thread FPS cap, expressed as a percentage of the HMD refresh rate.
 	// 0 = unlimited, 100 = match HMD refresh, 80 = 80% of HMD refresh, etc.
@@ -846,6 +850,9 @@ public:
 	std::atomic<uint32_t> m_RenderCompletedFrameId{ 0 };
 	std::atomic<uint32_t> m_RenderCompletedPoseToken{ 0 };
 	std::atomic<uint32_t> m_RenderCompletedDuplicatePoseFrameId{ 0 };
+	std::mutex m_RenderCompletedHmdPoseMutex;
+	vr::HmdMatrix34_t m_RenderCompletedHmdPose{};
+	bool m_RenderCompletedHmdPoseValid = false;
 	std::atomic<uint32_t> m_LastSubmittedFrameId{ 0 };
 	HANDLE m_RenderFrameReadyEvent = NULL;
 	// Source queued-render completion marker. Each full stereo render appends a tiny
@@ -3207,8 +3214,8 @@ public:
 	void HandleMissingRenderContext(const char* location);
 	void SubmitVRTextures();
 	void InvalidateSourceRenderQueueMarkers();
-	bool QueueSourceRenderCompletionMarker(IMatRenderContext* renderContext, uint32_t renderPoseToken, uint32_t renderFrameSeq, bool allowDuplicatePoseSubmit);
-	void PublishRenderCompletedFrame(uint32_t renderPoseToken, uint32_t renderFrameSeq, bool allowDuplicatePoseSubmit, const char* sourceTag, uint32_t sourceQueueMarkerId = 0);
+	bool QueueSourceRenderCompletionMarker(IMatRenderContext* renderContext, uint32_t renderPoseToken, uint32_t renderFrameSeq, bool allowDuplicatePoseSubmit, const vr::HmdMatrix34_t* renderHmdPose = nullptr);
+	void PublishRenderCompletedFrame(uint32_t renderPoseToken, uint32_t renderFrameSeq, bool allowDuplicatePoseSubmit, const char* sourceTag, uint32_t sourceQueueMarkerId = 0, const vr::HmdMatrix34_t* renderHmdPose = nullptr);
 	void LogCompositorError(const char* action, vr::EVRCompositorError error);
 	void RepositionOverlays();
 	void UpdateHudLiftGestureState(bool inGame);

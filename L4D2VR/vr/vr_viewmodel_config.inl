@@ -2717,6 +2717,7 @@ void VR::ParseConfigFile()
     // 0 = fully strict pose-token submit. Higher values periodically bypass the strict fresh-pose
     // wait and allow a new rendered frame from the same WaitGetPoses() snapshot to submit.
     m_QueuedRenderPoseRelaxPercent = std::clamp(getInt("QueuedRenderPoseRelaxPercent", m_QueuedRenderPoseRelaxPercent), 0, 100);
+    m_QueuedRenderPoseFromTracking = getBool("QueuedRenderPoseFromTracking", m_QueuedRenderPoseFromTracking);
     // Multicore rendering: present-side wait budget (ms) for a fresh dRenderView frame before submit.
     // 0 = no wait (max FPS, can increase stale-frame submits), 1~3 = usually best balance.
     m_QueuedSubmitWaitMs = std::clamp(getInt("QueuedSubmitWaitMs", m_QueuedSubmitWaitMs), 0, 20);
