@@ -1214,6 +1214,8 @@ public:
 	Vector m_VrHandsTwoHandedAimUpSmoothed = { 0.0f, 0.0f, 1.0f };
 	bool m_VrHandsTwoHandedGripActive = false;
 	int m_VrHandsTwoHandedGripWeaponId = 0;
+	std::chrono::steady_clock::time_point m_VrHandsTwoHandedMountFriendlyGripEnteredAt{};
+	bool m_VrHandsTwoHandedMountFriendlyGripContact = false;
 	bool IsVrHandsTwoHandedGripPoseActive() const
 	{
 		return m_VrHandsTwoHandedGripActive;

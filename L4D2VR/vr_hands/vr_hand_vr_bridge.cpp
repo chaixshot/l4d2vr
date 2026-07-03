@@ -28,6 +28,10 @@ namespace
 
     std::string MagazineInteractionPrepareConsoleSoundSample(const std::string& rawSample);
     std::string MagazineInteractionPrepareSoundSamplePath(const std::string& rawSample);
+    bool MagazineInteractionReprojectScenePointToViewmodelLayer(
+        const VR* vr,
+        const Vector& scenePoint,
+        Vector& outViewmodelPoint);
     bool MagazineInteractionPlaySyntheticSound(
         VR* vr,
         const std::string& rawSample,
@@ -198,6 +202,60 @@ namespace
                 sourceUnitsPerMeter);
         outMins = Vector(-halfExtent, -halfExtent, -halfExtent);
         outMaxs = Vector(halfExtent, halfExtent, halfExtent);
+        return true;
+    }
+
+    bool TryBuildMountFriendlyTwoHandedGripBox(
+        const VR* vr,
+        float sourceUnitsPerMeter,
+        const std::chrono::steady_clock::time_point& now,
+        MagazineInteractionBoxSnapshot& outBox)
+    {
+        if (!vr ||
+            !(sourceUnitsPerMeter > 0.001f) ||
+            !std::isfinite(sourceUnitsPerMeter))
+        {
+            return false;
+        }
+
+        Vector forward = VrHandMath::Normalize(vr->m_RightControllerForward);
+        Vector right = VrHandMath::Normalize(vr->m_RightControllerRight);
+        Vector up = VrHandMath::Normalize(vr->m_RightControllerUp);
+        if (forward.IsZero() || right.IsZero() || up.IsZero())
+        {
+            QAngle::AngleVectors(vr->m_RightControllerAngAbs, &forward, &right, &up);
+            forward = VrHandMath::Normalize(forward);
+            right = VrHandMath::Normalize(right);
+            up = VrHandMath::Normalize(up);
+            if (forward.IsZero() || right.IsZero() || up.IsZero())
+                return false;
+        }
+
+        Vector viewmodelOrigin{};
+        if (!MagazineInteractionReprojectScenePointToViewmodelLayer(
+                vr,
+                vr->m_RightControllerPosAbs,
+                viewmodelOrigin))
+        {
+            return false;
+        }
+
+        constexpr float kLengthMeters = 0.50f;
+        constexpr float kWidthMeters = 0.20f;
+        constexpr float kHeightMeters = 0.20f;
+        const float halfLength = 0.5f * kLengthMeters * sourceUnitsPerMeter;
+        const float halfWidth = 0.5f * kWidthMeters * sourceUnitsPerMeter;
+        const float halfHeight = 0.5f * kHeightMeters * sourceUnitsPerMeter;
+
+        outBox = MagazineInteractionBoxSnapshot{};
+        outBox.origin = viewmodelOrigin + forward * halfLength;
+        outBox.axisX = right;
+        outBox.axisY = up;
+        outBox.axisZ = forward;
+        outBox.mins = Vector(-halfWidth, -halfHeight, -halfLength);
+        outBox.maxs = Vector(halfWidth, halfHeight, halfLength);
+        outBox.modelName = "two_hand_mount_friendly_target";
+        outBox.publishedAt = now;
         return true;
     }
 
@@ -5205,6 +5263,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         {
             m_VrHandsTwoHandedGripActive = false;
             m_VrHandsTwoHandedGripWeaponId = 0;
+            m_VrHandsTwoHandedMountFriendlyGripEnteredAt = {};
+            m_VrHandsTwoHandedMountFriendlyGripContact = false;
             Game::logMsg("[VR][Hands] two-hand grip released because VR hands input became unavailable");
         }
         CancelMagazineInteractionManual();
@@ -5235,6 +5295,8 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
             activeWeaponIdInt);
         m_VrHandsTwoHandedGripActive = false;
         m_VrHandsTwoHandedGripWeaponId = 0;
+        m_VrHandsTwoHandedMountFriendlyGripEnteredAt = {};
+        m_VrHandsTwoHandedMountFriendlyGripContact = false;
     }
 
     auto boxFreshForActiveWeapon = [&](const MagazineInteractionBoxSnapshot& box) -> bool
@@ -5324,38 +5386,135 @@ bool VR::UpdateMagazineInteraction(C_BasePlayer* localPlayer, bool leftGripDown,
         return distance <= exclusionPadding;
     };
 
-    if (leftGripJustPressed && twoHandedGripRuntimeAllowed && m_VrHandsTwoHandedGripActive)
+    auto clearMountFriendlyGripContact = [&]()
     {
-        m_VrHandsTwoHandedGripActive = false;
-        m_VrHandsTwoHandedGripWeaponId = 0;
-        if (leftGripDown)
-            m_MagazineInteractionSuppressLeftInputUntilRelease = true;
-        triggerMagazineInteractionHaptic(0.018f, 85.0f, 0.28f, 2);
-        Game::logMsg(
-            "[VR][Hands] two-hand grip toggled off weaponId=%d",
-            activeWeaponIdInt);
-        return false;
-    }
+        m_VrHandsTwoHandedMountFriendlyGripEnteredAt = {};
+        m_VrHandsTwoHandedMountFriendlyGripContact = false;
+    };
 
-    if (leftGripJustPressed &&
-        twoHandedGripRuntimeAllowed &&
-        !IsMagazineInteractionManualActive() &&
-        !m_MagazineInteractionLeftHandHolding &&
-        !leftHandTouchesMagazineForGripExclusion())
+    auto leftHandTouchesMountFriendlyGripBox = [&](float& outDistance) -> bool
     {
-        float twoHandTargetDistance = FLT_MAX;
-        if (leftHandTouchesTwoHandedGripTarget(twoHandTargetDistance))
+        outDistance = FLT_MAX;
+        MagazineInteractionBoxSnapshot stockBox{};
+        if (!TryBuildMountFriendlyTwoHandedGripBox(this, m_VRScale, now, stockBox))
+            return false;
+
+        outDistance = MagazineInteractionNearestLeftHandProbeDistanceSourceUnits(
+            stockBox,
+            m_LeftControllerPosAbs,
+            m_LeftControllerAngAbs,
+            m_VRScale,
+            this);
+        return outDistance <= 0.0f;
+    };
+
+    if (!twoHandedGripRuntimeAllowed)
+        clearMountFriendlyGripContact();
+
+    if (m_VrHandsTwoHandedAimMountFriendly && twoHandedGripRuntimeAllowed)
+    {
+        const bool magazineExclusion = leftHandTouchesMagazineForGripExclusion();
+        if (magazineExclusion)
         {
-            m_VrHandsTwoHandedGripActive = true;
-            m_VrHandsTwoHandedGripWeaponId = activeWeaponIdInt;
+            clearMountFriendlyGripContact();
+            if (m_VrHandsTwoHandedGripActive)
+            {
+                m_VrHandsTwoHandedGripActive = false;
+                m_VrHandsTwoHandedGripWeaponId = 0;
+                triggerMagazineInteractionHaptic(0.012f, 70.0f, 0.18f, 1);
+                Game::logMsg(
+                    "[VR][Hands] mount-friendly two-hand grip released for magazine exclusion weaponId=%d",
+                    activeWeaponIdInt);
+            }
+        }
+        else
+        {
+            float stockDistance = FLT_MAX;
+            const bool touchesStockRegion = leftHandTouchesMountFriendlyGripBox(stockDistance);
+            if (touchesStockRegion)
+            {
+                if (!m_VrHandsTwoHandedMountFriendlyGripContact)
+                {
+                    m_VrHandsTwoHandedMountFriendlyGripContact = true;
+                    m_VrHandsTwoHandedMountFriendlyGripEnteredAt = now;
+                    triggerMagazineInteractionHaptic(0.008f, 55.0f, 0.10f, 1);
+                }
+
+                if (!m_VrHandsTwoHandedGripActive &&
+                    m_VrHandsTwoHandedMountFriendlyGripEnteredAt.time_since_epoch().count() != 0)
+                {
+                    const float dwellSeconds = std::chrono::duration<float>(
+                        now - m_VrHandsTwoHandedMountFriendlyGripEnteredAt).count();
+                    if (dwellSeconds >= 0.5f)
+                    {
+                        m_VrHandsTwoHandedGripActive = true;
+                        m_VrHandsTwoHandedGripWeaponId = activeWeaponIdInt;
+                        triggerMagazineInteractionHaptic(0.020f, 95.0f, 0.32f, 2);
+                        Game::logMsg(
+                            "[VR][Hands] mount-friendly two-hand grip auto enabled weaponId=%d stockDistance=%.2f dwell=%.2f",
+                            activeWeaponIdInt,
+                            stockDistance,
+                            dwellSeconds);
+                        return false;
+                    }
+                }
+            }
+            else
+            {
+                clearMountFriendlyGripContact();
+                if (m_VrHandsTwoHandedGripActive)
+                {
+                    m_VrHandsTwoHandedGripActive = false;
+                    m_VrHandsTwoHandedGripWeaponId = 0;
+                    triggerMagazineInteractionHaptic(0.012f, 70.0f, 0.18f, 1);
+                    Game::logMsg(
+                        "[VR][Hands] mount-friendly two-hand grip auto released weaponId=%d",
+                        activeWeaponIdInt);
+                    return false;
+                }
+            }
+
+            if (m_VrHandsTwoHandedGripActive)
+                return false;
+        }
+    }
+    else
+    {
+        clearMountFriendlyGripContact();
+
+        if (leftGripJustPressed && twoHandedGripRuntimeAllowed && m_VrHandsTwoHandedGripActive)
+        {
+            m_VrHandsTwoHandedGripActive = false;
+            m_VrHandsTwoHandedGripWeaponId = 0;
             if (leftGripDown)
                 m_MagazineInteractionSuppressLeftInputUntilRelease = true;
-            triggerMagazineInteractionHaptic(0.020f, 95.0f, 0.32f, 2);
+            triggerMagazineInteractionHaptic(0.018f, 85.0f, 0.28f, 2);
             Game::logMsg(
-                "[VR][Hands] two-hand grip toggled on weaponId=%d targetDistance=%.2f",
-                activeWeaponIdInt,
-                twoHandTargetDistance);
+                "[VR][Hands] two-hand grip toggled off weaponId=%d",
+                activeWeaponIdInt);
             return false;
+        }
+
+        if (leftGripJustPressed &&
+            twoHandedGripRuntimeAllowed &&
+            !IsMagazineInteractionManualActive() &&
+            !m_MagazineInteractionLeftHandHolding &&
+            !leftHandTouchesMagazineForGripExclusion())
+        {
+            float twoHandTargetDistance = FLT_MAX;
+            if (leftHandTouchesTwoHandedGripTarget(twoHandTargetDistance))
+            {
+                m_VrHandsTwoHandedGripActive = true;
+                m_VrHandsTwoHandedGripWeaponId = activeWeaponIdInt;
+                if (leftGripDown)
+                    m_MagazineInteractionSuppressLeftInputUntilRelease = true;
+                triggerMagazineInteractionHaptic(0.020f, 95.0f, 0.32f, 2);
+                Game::logMsg(
+                    "[VR][Hands] two-hand grip toggled on weaponId=%d targetDistance=%.2f",
+                    activeWeaponIdInt,
+                    twoHandTargetDistance);
+                return false;
+            }
         }
     }
 
@@ -7248,7 +7407,7 @@ bool VR::DrawVrHandsForEyeImmediate(
         const VrHandMatrix4* leftHandTargetBoxWorldPtr = nullptr;
         Vector leftHandTargetBoxMins(0.0f, 0.0f, 0.0f);
         Vector leftHandTargetBoxMaxs(0.0f, 0.0f, 0.0f);
-        const bool leftHandTargetBoxUseViewmodelLayer = true;
+        bool leftHandTargetBoxUseViewmodelLayer = true;
     if (drawMagazineDebugBoxes &&
         (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
             m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine) &&
@@ -7356,15 +7515,35 @@ bool VR::DrawVrHandsForEyeImmediate(
     }
     if (drawLeftHandTargetDebugBox)
     {
-        if (TryBuildLeftHandTargetDebugBox(
-                m_VRScale,
-                m_VrHandsTwoHandedGripTargetBoxScale,
-                leftHandTargetBoxWorld,
-                leftHandTargetBoxMins,
-                leftHandTargetBoxMaxs) &&
-            MagazineInteractionMatrixLooksRenderable(leftHandTargetBoxWorld))
+        if (m_VrHandsTwoHandedAimMountFriendly)
+        {
+            MagazineInteractionBoxSnapshot stockBox{};
+            if (TryBuildMountFriendlyTwoHandedGripBox(
+                    this,
+                    m_VRScale,
+                    std::chrono::steady_clock::now(),
+                    stockBox))
+            {
+                leftHandTargetBoxWorld = MagazineInteractionBuildBoxWorld(stockBox);
+                if (MagazineInteractionMatrixLooksRenderable(leftHandTargetBoxWorld))
+                {
+                    leftHandTargetBoxWorldPtr = &leftHandTargetBoxWorld;
+                    leftHandTargetBoxMins = stockBox.mins;
+                    leftHandTargetBoxMaxs = stockBox.maxs;
+                    leftHandTargetBoxUseViewmodelLayer = true;
+                }
+            }
+        }
+        else if (TryBuildLeftHandTargetDebugBox(
+                    m_VRScale,
+                    m_VrHandsTwoHandedGripTargetBoxScale,
+                    leftHandTargetBoxWorld,
+                    leftHandTargetBoxMins,
+                    leftHandTargetBoxMaxs) &&
+                MagazineInteractionMatrixLooksRenderable(leftHandTargetBoxWorld))
         {
             leftHandTargetBoxWorldPtr = &leftHandTargetBoxWorld;
+            leftHandTargetBoxUseViewmodelLayer = true;
         }
     }
     const Vector leftControllerPosition = GetLeftControllerAbsPos();
