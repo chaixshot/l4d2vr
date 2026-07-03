@@ -21,13 +21,12 @@ bool VR::ShouldUseRoomscale1To1ServerMove() const
         m_Game->m_Offsets->CBaseEntity_GetAbsOrigin_Server.address &&
         m_Game->m_Offsets->CBaseEntity_SetOrigin_Server.address;
 
-    const bool canSendDedicatedServerMove = m_EncodeVRUsercmd && !m_ForceNonVRServerMovement;
-
     return m_IsVREnabled &&
         m_Roomscale1To1Movement &&
         m_Roomscale1To1ServerMove &&
+        Hooks::s_ServerUnderstandsVR &&
         !m_ForceNonVRServerMovement &&
-        (Hooks::s_ServerUnderstandsVR || hasServerEntityMove || canSendDedicatedServerMove);
+        hasServerEntityMove;
 }
 
 namespace
@@ -431,11 +430,10 @@ bool VR::ShouldUseTeleportServerMove() const
         m_Game->m_Offsets->CBaseEntity_GetAbsOrigin_Server.address &&
         m_Game->m_Offsets->CBaseEntity_SetOrigin_Server.address;
 
-    const bool canSendDedicatedServerMove = m_EncodeVRUsercmd && !m_ForceNonVRServerMovement;
-
     return m_IsVREnabled &&
+        Hooks::s_ServerUnderstandsVR &&
         !m_ForceNonVRServerMovement &&
-        (Hooks::s_ServerUnderstandsVR || hasServerEntityMove || canSendDedicatedServerMove);
+        hasServerEntityMove;
 }
 
 void VR::BeginTeleportTargeting()

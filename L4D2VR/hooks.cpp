@@ -605,11 +605,11 @@ static bool ApplyServerTeleportMove(Server_BaseEntity* serverPlayer, IServerUnkn
 		return false;
 	}
 
-	Vector requestedTarget{};
-	if (!Hooks::m_VR->ConsumeTeleportServerTarget(requestedTarget))
+	if (!Hooks::m_VR->ShouldUseTeleportServerMove())
 		return false;
 
-	if (!Hooks::m_VR->ShouldUseTeleportServerMove())
+	Vector requestedTarget{};
+	if (!Hooks::m_VR->ConsumeTeleportServerTarget(requestedTarget))
 		return false;
 
 	Vector start{};
