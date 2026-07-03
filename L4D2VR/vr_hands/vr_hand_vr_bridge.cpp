@@ -5264,7 +5264,8 @@ bool VR::UpdateMagazineInteraction(
             m_VrHandsTwoHandedGripWeaponId = 0;
             m_VrHandsTwoHandedMountFriendlyGripEnteredAt = {};
             m_VrHandsTwoHandedMountFriendlyGripContact = false;
-            Game::logMsg("[VR][Hands] two-hand grip released because VR hands input became unavailable");
+            if (m_VrHandsDebugLog)
+                Game::logMsg("[VR][Hands] two-hand grip released because VR hands input became unavailable");
         }
         CancelMagazineInteractionManual();
         return false;
@@ -5287,11 +5288,14 @@ bool VR::UpdateMagazineInteraction(
     if (m_VrHandsTwoHandedGripActive &&
         (!twoHandedGripRuntimeAllowed || m_VrHandsTwoHandedGripWeaponId != activeWeaponIdInt))
     {
-        Game::logMsg(
-            "[VR][Hands] two-hand grip released weaponChanged=%d oldWeapon=%d newWeapon=%d",
-            (m_VrHandsTwoHandedGripWeaponId != activeWeaponIdInt) ? 1 : 0,
-            m_VrHandsTwoHandedGripWeaponId,
-            activeWeaponIdInt);
+        if (m_VrHandsDebugLog)
+        {
+            Game::logMsg(
+                "[VR][Hands] two-hand grip released weaponChanged=%d oldWeapon=%d newWeapon=%d",
+                (m_VrHandsTwoHandedGripWeaponId != activeWeaponIdInt) ? 1 : 0,
+                m_VrHandsTwoHandedGripWeaponId,
+                activeWeaponIdInt);
+        }
         m_VrHandsTwoHandedGripActive = false;
         m_VrHandsTwoHandedGripWeaponId = 0;
         m_VrHandsTwoHandedMountFriendlyGripEnteredAt = {};
@@ -5429,10 +5433,13 @@ bool VR::UpdateMagazineInteraction(
         m_VrHandsTwoHandedGripWeaponId = 0;
         if (feedback)
             triggerMagazineInteractionHaptic(0.018f, 85.0f, 0.28f, 2);
-        Game::logMsg(
-            "[VR][Hands] mount-friendly two-hand grip released reason=%s weaponId=%d",
-            (reason && reason[0] != '\0') ? reason : "unknown",
-            activeWeaponIdInt);
+        if (m_VrHandsDebugLog)
+        {
+            Game::logMsg(
+                "[VR][Hands] mount-friendly two-hand grip released reason=%s weaponId=%d",
+                (reason && reason[0] != '\0') ? reason : "unknown",
+                activeWeaponIdInt);
+        }
     };
 
     if (!twoHandedGripRuntimeAllowed || manualReloadOwnsOffhandInput)
@@ -5487,11 +5494,14 @@ bool VR::UpdateMagazineInteraction(
                         m_VrHandsTwoHandedGripActive = true;
                         m_VrHandsTwoHandedGripWeaponId = activeWeaponIdInt;
                         triggerMagazineInteractionHaptic(0.020f, 95.0f, 0.32f, 2);
-                        Game::logMsg(
-                            "[VR][Hands] mount-friendly two-hand grip auto enabled weaponId=%d stockDistance=%.2f dwell=%.2f",
-                            activeWeaponIdInt,
-                            stockDistance,
-                            dwellSeconds);
+                        if (m_VrHandsDebugLog)
+                        {
+                            Game::logMsg(
+                                "[VR][Hands] mount-friendly two-hand grip auto enabled weaponId=%d stockDistance=%.2f dwell=%.2f",
+                                activeWeaponIdInt,
+                                stockDistance,
+                                dwellSeconds);
+                        }
                         return false;
                     }
                 }
@@ -5513,9 +5523,12 @@ bool VR::UpdateMagazineInteraction(
             if (leftGripDown && !allowGameplayInputOnTwoHandedGripRelease)
                 m_MagazineInteractionSuppressLeftInputUntilRelease = true;
             triggerMagazineInteractionHaptic(0.018f, 85.0f, 0.28f, 2);
-            Game::logMsg(
-                "[VR][Hands] two-hand grip toggled off weaponId=%d",
-                activeWeaponIdInt);
+            if (m_VrHandsDebugLog)
+            {
+                Game::logMsg(
+                    "[VR][Hands] two-hand grip toggled off weaponId=%d",
+                    activeWeaponIdInt);
+            }
             return false;
         }
 
@@ -5533,10 +5546,13 @@ bool VR::UpdateMagazineInteraction(
                 if (leftGripDown)
                     m_MagazineInteractionSuppressLeftInputUntilRelease = true;
                 triggerMagazineInteractionHaptic(0.020f, 95.0f, 0.32f, 2);
-                Game::logMsg(
-                    "[VR][Hands] two-hand grip toggled on weaponId=%d targetDistance=%.2f",
-                    activeWeaponIdInt,
-                    twoHandTargetDistance);
+                if (m_VrHandsDebugLog)
+                {
+                    Game::logMsg(
+                        "[VR][Hands] two-hand grip toggled on weaponId=%d targetDistance=%.2f",
+                        activeWeaponIdInt,
+                        twoHandTargetDistance);
+                }
                 return false;
             }
         }
