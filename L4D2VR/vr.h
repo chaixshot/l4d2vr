@@ -465,9 +465,25 @@ public:
 	// 0 = fully strict; 100 = submit every repeated pose.
 	int m_QueuedRenderPoseRelaxPercent = 20;
 	// Experimental: in queued full-sync mode, render from a non-blocking tracking prediction instead
-	// of waiting for a fresh WaitGetPoses snapshot, then submit that pose via VRTextureWithPose_t.
+	// of waiting for a fresh WaitGetPoses snapshot.
 	bool m_QueuedRenderPoseFromTracking = false;
 	std::atomic<uint32_t> m_QueuedRenderPoseFromTrackingSeq{ 0 };
+	std::atomic<int> m_CachedTrackingUniverseOrigin{ static_cast<int>(vr::TrackingUniverseStanding) };
+	inline vr::ETrackingUniverseOrigin GetCachedTrackingUniverseOrigin() const
+	{
+		const int origin = m_CachedTrackingUniverseOrigin.load(std::memory_order_acquire);
+		if (origin < static_cast<int>(vr::TrackingUniverseSeated) ||
+			origin > static_cast<int>(vr::TrackingUniverseRawAndUncalibrated))
+			return vr::TrackingUniverseStanding;
+		return static_cast<vr::ETrackingUniverseOrigin>(origin);
+	}
+	inline float GetQueuedTrackingPredictionSeconds() const
+	{
+		float hz = m_HmdDisplayFrequencyHz.load(std::memory_order_relaxed);
+		if (!(hz > 1.0f))
+			hz = 90.0f;
+		return std::clamp(1.0f / hz, 0.0f, 0.030f);
+	}
 
 	// Queued rendering: optional render-thread FPS cap, expressed as a percentage of the HMD refresh rate.
 	// 0 = unlimited, 100 = match HMD refresh, 80 = 80% of HMD refresh, etc.

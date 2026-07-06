@@ -2980,7 +2980,6 @@ void VR::SubmitVRTextures()
             if (!m_CompositorExplicitTiming || timingDataSubmitted)
                 return;
 
-            std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
             vr::EVRCompositorError timingError = m_Compositor->SubmitExplicitTimingData();
             if (timingError != vr::VRCompositorError_None)
             {
@@ -3013,18 +3012,25 @@ void VR::SubmitVRTextures()
 
             ensureTimingData();
 
-            std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
+            vr::Texture_t textureCopy{};
             vr::VRTextureWithPose_t textureWithPose{};
-            const vr::Texture_t* submitTexture = texture;
+            const vr::Texture_t* submitTexture = &textureCopy;
             vr::EVRSubmitFlags submitFlags = vr::Submit_Default;
-            if (useRenderPoseTextureSubmit)
             {
-                textureWithPose.handle = texture->handle;
-                textureWithPose.eType = texture->eType;
-                textureWithPose.eColorSpace = texture->eColorSpace;
-                textureWithPose.mDeviceToAbsoluteTracking = completedRenderHmdPose;
-                submitTexture = &textureWithPose;
-                submitFlags = vr::Submit_TextureWithPose;
+                std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
+                if (!texture->handle)
+                    return false;
+
+                textureCopy = *texture;
+                if (useRenderPoseTextureSubmit)
+                {
+                    textureWithPose.handle = textureCopy.handle;
+                    textureWithPose.eType = textureCopy.eType;
+                    textureWithPose.eColorSpace = textureCopy.eColorSpace;
+                    textureWithPose.mDeviceToAbsoluteTracking = completedRenderHmdPose;
+                    submitTexture = &textureWithPose;
+                    submitFlags = vr::Submit_TextureWithPose;
+                }
             }
 
             vr::EVRCompositorError submitError = m_Compositor->Submit(eye, submitTexture, bounds, submitFlags);
@@ -3046,7 +3052,7 @@ void VR::SubmitVRTextures()
                             m_LastSubmittedFrameId.load(std::memory_order_acquire));
                     }
                 }
-                submitError = m_Compositor->Submit(eye, texture, bounds, vr::Submit_Default);
+                submitError = m_Compositor->Submit(eye, &textureCopy, bounds, vr::Submit_Default);
             }
             if (submitError != vr::VRCompositorError_None)
             {

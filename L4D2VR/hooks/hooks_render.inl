@@ -878,23 +878,21 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		{
 			std::array<vr::TrackedDevicePose_t, vr::k_unMaxTrackedDeviceCount> renderPoses{};
 
-			// In queued mode, avoid calling into OpenVR every render call if we can.
-			// Prefer the pose waiter snapshot (WaitGetPoses on a dedicated thread), fallback to a
-			// non-blocking VRSystem prediction for early frames. When explicitly requested, full-sync
-			// render frames can use a non-blocking tracking prediction and submit it via VRTextureWithPose_t.
+			// In queued mode, avoid blocking on WaitGetPoses in the render hook.
+			// Prefer explicit non-blocking tracking prediction when requested; otherwise read the
+			// pose waiter snapshot (WaitGetPoses on a dedicated thread).
 			uint32_t poseSeq = 0;
 			const bool useTrackingRenderPose =
 				(queueMode != 0) &&
 				m_VR->m_QueuedRenderPoseFromTracking &&
 				m_VR->m_QueuedSubmitUseRenderPoseToken &&
 				m_VR->m_System &&
-				m_VR->m_Compositor &&
 				!m_VR->m_ReShadeVRCompat;
 			bool havePoses = false;
 			if (useTrackingRenderPose)
 			{
-				const vr::ETrackingUniverseOrigin trackingOrigin = m_VR->m_Compositor->GetTrackingSpace();
-				float predicted = m_VR->m_Compositor->GetFrameTimeRemaining();
+				const vr::ETrackingUniverseOrigin trackingOrigin = m_VR->GetCachedTrackingUniverseOrigin();
+				float predicted = m_VR->GetQueuedTrackingPredictionSeconds();
 				if (!(predicted >= 0.0f && predicted <= 0.5f))
 					predicted = 0.0f;
 				m_VR->m_System->GetDeviceToAbsoluteTrackingPose(trackingOrigin, predicted, renderPoses.data(), vr::k_unMaxTrackedDeviceCount);
@@ -1247,10 +1245,10 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 			if (!havePoses)
 			{
-				if (m_VR->m_System && m_VR->m_Compositor)
+				if (m_VR->m_System)
 				{
-					const vr::ETrackingUniverseOrigin trackingOrigin = m_VR->m_Compositor->GetTrackingSpace();
-					float predicted = m_VR->m_Compositor->GetFrameTimeRemaining();
+					const vr::ETrackingUniverseOrigin trackingOrigin = m_VR->GetCachedTrackingUniverseOrigin();
+					float predicted = m_VR->GetQueuedTrackingPredictionSeconds();
 					if (!(predicted >= 0.0f && predicted <= 0.5f))
 						predicted = 0.0f;
 					m_VR->m_System->GetDeviceToAbsoluteTrackingPose(trackingOrigin, predicted, renderPoses.data(), vr::k_unMaxTrackedDeviceCount);

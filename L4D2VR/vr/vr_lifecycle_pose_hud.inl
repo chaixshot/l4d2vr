@@ -63,6 +63,9 @@ void VR::PoseWaiterThreadMain()
             continue;
         }
 
+        const vr::ETrackingUniverseOrigin trackingOrigin = m_Compositor->GetTrackingSpace();
+        m_CachedTrackingUniverseOrigin.store(static_cast<int>(trackingOrigin), std::memory_order_release);
+
         std::array<vr::TrackedDevicePose_t, vr::k_unMaxTrackedDeviceCount> poses{};
         vr::EVRCompositorError result = m_Compositor->WaitGetPoses(poses.data(), vr::k_unMaxTrackedDeviceCount, NULL, 0);
         if (result != vr::VRCompositorError_None)
@@ -136,8 +139,9 @@ bool VR::UpdatePosesAndActions()
         else
         {
             // Fallback (early frames before waiter publishes): non-blocking VRSystem prediction.
-            const vr::ETrackingUniverseOrigin trackingOrigin = m_Compositor ? m_Compositor->GetTrackingSpace() : vr::TrackingUniverseStanding;
-            float predicted = m_Compositor ? m_Compositor->GetFrameTimeRemaining() : 0.0f;
+            const vr::ETrackingUniverseOrigin trackingOrigin = m_Compositor ? m_Compositor->GetTrackingSpace() : GetCachedTrackingUniverseOrigin();
+            m_CachedTrackingUniverseOrigin.store(static_cast<int>(trackingOrigin), std::memory_order_release);
+            float predicted = m_Compositor ? m_Compositor->GetFrameTimeRemaining() : GetQueuedTrackingPredictionSeconds();
             if (!(predicted >= 0.0f && predicted <= 0.5f))
                 predicted = 0.0f;
             m_System->GetDeviceToAbsoluteTrackingPose(trackingOrigin, predicted, m_Poses, vr::k_unMaxTrackedDeviceCount);
