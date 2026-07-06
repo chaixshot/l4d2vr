@@ -1260,6 +1260,15 @@ void VR::UpdateNonVRAimSolution(C_BasePlayer* localPlayer, bool forceFresh, bool
 
     const float maxDistance = 8192.0f;
     Vector target = origin + direction * maxDistance;
+    if (VR_FormatAimLineSegmentToViewmodelLayer(this, origin, target))
+    {
+        Vector formattedDirection = target - origin;
+        if (!formattedDirection.IsZero())
+        {
+            VectorNormalize(formattedDirection);
+            direction = formattedDirection;
+        }
+    }
 
     // 1) Controller ray -> P
     CGameTrace traceP;
@@ -1405,8 +1414,7 @@ bool VR::UpdateFriendlyFireAimHit(C_BasePlayer* localPlayer)
 
     Vector gunStart = gunOriginBase + gunDir * 2.0f;
     Vector gunEnd = gunStart + gunDir * 8192.0f;
-    if (!m_ForceNonVRServerMovement)
-        VR_FormatAimLineSegmentToViewmodelLayer(this, gunStart, gunEnd);
+    VR_FormatAimLineSegmentToViewmodelLayer(this, gunStart, gunEnd);
 
     // Friendly-fire guard: optional hull radius around the aim rays (meters -> Source units via VRScale).
     // This makes the check more conservative, helping with bullet spread, latency, and near-misses.
@@ -1736,7 +1744,7 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
             if (enabled)
                 VR::t_UseRenderFrameSnapshot = prev;
         }
-    } tlsGuard(queueMode != 0 && !m_ForceNonVRServerMovement);
+    } tlsGuard(queueMode != 0);
 
     const bool queued = (queueMode != 0);
     const bool scopeOverlayNeedsDebugAimLine = ShouldRenderScope();
@@ -1908,7 +1916,7 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
     if (isThrowable)
     {
         Vector throwEnd = origin + direction * 8192.0f;
-        if (!m_ForceNonVRServerMovement && VR_FormatAimLineSegmentToViewmodelLayer(this, origin, throwEnd))
+        if (VR_FormatAimLineSegmentToViewmodelLayer(this, origin, throwEnd))
         {
             Vector formattedDirection = throwEnd - origin;
             if (!formattedDirection.IsZero())
@@ -1936,19 +1944,15 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
     const float maxDistance = 8192.0f;
     Vector target = origin + direction * maxDistance;
 
-    if (!m_ForceNonVRServerMovement)
+    // Treat the aim line as a viewmodel-layer ray in every server mode. Remote
+    // non-VR servers still get a separate eye-ray solve below for cmd->viewangles.
+    if (VR_FormatAimLineSegmentToViewmodelLayer(this, origin, target))
     {
-        // Treat the aim line as a viewmodel-layer ray. Convert it to the world
-        // projection equivalent before any traces or caches consume it, so
-        // visible line, hit/landing decisions, and bullet FX share one ray.
-        if (VR_FormatAimLineSegmentToViewmodelLayer(this, origin, target))
+        Vector formattedDirection = target - origin;
+        if (!formattedDirection.IsZero())
         {
-            Vector formattedDirection = target - origin;
-            if (!formattedDirection.IsZero())
-            {
-                VectorNormalize(formattedDirection);
-                direction = formattedDirection;
-            }
+            VectorNormalize(formattedDirection);
+            direction = formattedDirection;
         }
     }
     if (ApplyVrHandsRealBulletSpreadAimLine(activeWeapon, origin, direction))
@@ -3543,6 +3547,9 @@ bool VR::BuildRenderAimLineSegment(C_BasePlayer* localPlayer, Vector& start, Vec
     start = originBase + dir * 2.0f;
 
     const float maxDistance = 8192.0f;
+    Vector visualEnd = start + dir * maxDistance;
+    VR_FormatAimLineSegmentToViewmodelLayer(this, start, visualEnd);
+
     if (m_ForceNonVRServerMovement && m_HasNonVRAimSolution)
     {
         // Keep queued-render aim-line target authoritative in 3P as well.
@@ -3552,8 +3559,7 @@ bool VR::BuildRenderAimLineSegment(C_BasePlayer* localPlayer, Vector& start, Vec
     {
         // In third-person, avoid using the update-thread converge point here (it may be in a different phase);
         // draw a pure controller ray so the line always stays attached to the hand.
-        end = start + dir * maxDistance;
-        VR_FormatAimLineSegmentToViewmodelLayer(this, start, end);
+        end = visualEnd;
     }
 
     return !((end - start).IsZero());
