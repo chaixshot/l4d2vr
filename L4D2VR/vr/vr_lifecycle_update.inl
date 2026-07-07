@@ -1750,7 +1750,7 @@ void VR::Update()
                 }
             }
 
-            setNativeLeftHandFreezePlaneContextActive(nativeHandsOnlyFreezePlaneContextEnabled && hasLocalPlayer);
+            setNativeLeftHandFreezePlaneContextActive(nativeHandsOnlyFreezePlaneContextEnabled && hasLiveLocalPlayerWithWeapon);
             if (!m_NativeViewmodelHandsOnly)
             {
                 resetNativeLeftHandFreezeForMapChange();

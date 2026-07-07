@@ -7931,6 +7931,7 @@ namespace
     inline bool HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
         VR* vr,
         const HooksNativeViewmodelHandsOnlySideInfo& keepSide,
+        const std::string& lowerModel,
         const vr_vm_stabilize::Mat3x4* sourceBones,
         int numBones,
         vr_vm_stabilize::Mat3x4* outTargetAnchor,
@@ -8134,6 +8135,7 @@ namespace
             if (!HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
                     vr,
                     sideInfo,
+                    lowerModel,
                     bones,
                     numBones,
                     nullptr,
@@ -9855,29 +9857,52 @@ namespace
             std::ifstream existing(path, std::ios::in);
             std::string line;
             bool inSection = false;
-            bool keepSection = false;
+            std::vector<std::string> sectionLines;
+            std::string sectionSide;
+            std::string sectionModel;
+            auto flushSection = [&]()
+                {
+                    if (!inSection || sectionLines.empty())
+                        return;
+
+                    const bool replaceSection =
+                        sectionSide == replaceSide &&
+                        sectionModel == lowerModel;
+                    if (!replaceSection)
+                    {
+                        for (const std::string& sectionLine : sectionLines)
+                            preserved << sectionLine << "\n";
+                    }
+                };
             while (std::getline(existing, line))
             {
                 if (line.rfind("side|", 0) == 0)
                 {
+                    flushSection();
                     inSection = true;
-                    keepSection = (line != replaceSide);
-                    if (keepSection)
-                        preserved << line << "\n";
+                    sectionLines.clear();
+                    sectionSide = line;
+                    sectionModel.clear();
+                    sectionLines.push_back(line);
                     continue;
                 }
 
                 if (!inSection)
                     continue;
 
-                if (keepSection)
-                    preserved << line << "\n";
+                sectionLines.push_back(line);
+                if (line.rfind("model|", 0) == 0)
+                    sectionModel = line.substr(6);
                 if (line == "end")
                 {
+                    flushSection();
                     inSection = false;
-                    keepSection = false;
+                    sectionLines.clear();
+                    sectionSide.clear();
+                    sectionModel.clear();
                 }
             }
+            flushSection();
         }
 
         const std::string section =
@@ -9949,6 +9974,7 @@ namespace
 
         bool inSection = false;
         bool foundSection = false;
+        bool sectionModelAccepted = false;
         bool haveNumBones = false;
         bool haveSignature = false;
         bool haveFrozenAnchor = false;
@@ -9966,6 +9992,27 @@ namespace
         std::vector<vr_vm_stabilize::Mat3x4> frozenLocalBones(
             static_cast<size_t>(numBones),
             vr_vm_stabilize::Mat3x4{});
+        auto resetCandidate = [&]()
+            {
+                sectionModelAccepted = false;
+                haveNumBones = false;
+                haveSignature = false;
+                haveFrozenAnchor = false;
+                haveWristPlaneLocal = false;
+                haveWristPlaneWorld = false;
+                wristPlaneValid = false;
+                fileNumBones = 0;
+                fileHandBone = -1;
+                fileAnchorBone = -1;
+                fileSignature = 0;
+                memset(loadedWristPlaneLocal, 0, sizeof(loadedWristPlaneLocal));
+                memset(loadedWristPlaneWorld, 0, sizeof(loadedWristPlaneWorld));
+                loadedFrozenAnchor = targetAnchor;
+                freezeMask.assign(static_cast<size_t>(numBones), 0u);
+                frozenLocalBones.assign(
+                    static_cast<size_t>(numBones),
+                    vr_vm_stabilize::Mat3x4{});
+            };
 
         std::string line;
         while (std::getline(input, line))
@@ -9975,23 +10022,40 @@ namespace
 
             if (line.rfind("side|", 0) == 0)
             {
-                if (foundSection && inSection)
+                if (foundSection)
                     break;
                 inSection = (line == wantedSide);
-                foundSection = inSection;
-                if (foundSection && outFoundSideSection)
-                    *outFoundSideSection = true;
+                if (inSection)
+                    resetCandidate();
                 continue;
             }
 
             if (!inSection)
                 continue;
             if (line == "end")
-                break;
+            {
+                if (sectionModelAccepted)
+                    break;
+                inSection = false;
+                continue;
+            }
 
             const std::vector<std::string> fields =
                 HooksNativeViewmodelHandsOnlySplitPipeLine(line);
             if (fields.empty())
+                continue;
+
+            if (fields[0] == "model" && fields.size() >= 2u)
+            {
+                sectionModelAccepted = (fields[1] == lowerModel);
+                foundSection = sectionModelAccepted;
+                if (foundSection && outFoundSideSection)
+                    *outFoundSideSection = true;
+                if (!sectionModelAccepted)
+                    inSection = false;
+                continue;
+            }
+            if (!sectionModelAccepted)
                 continue;
 
             if (fields[0] == "boneLayoutSignature" && fields.size() >= 2u)
@@ -10636,6 +10700,7 @@ namespace
         const bool cacheMatches =
             cache.valid &&
             cache.owner == vr &&
+            cache.modelName == lowerModel &&
             cache.boneLayoutSignature == boneLayoutSignature &&
             cache.generation == generation &&
             cache.side == keepSide.side &&
@@ -10678,6 +10743,7 @@ namespace
                     canonicalCapture = HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
                         vr,
                         keepSide,
+                        lowerModel,
                         captureBones,
                         numBones,
                         &captureTargetAnchor,
@@ -10815,6 +10881,7 @@ namespace
                 if (!HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
                         vr,
                         keepSide,
+                        lowerModel,
                         captureBones,
                         numBones,
                         nullptr,
@@ -11627,6 +11694,7 @@ namespace
     struct HooksNativeViewmodelHandsOnlyFixedFreezePlaneLock
     {
         VR* owner = nullptr;
+        std::string modelName;
         uint32_t generation = 0;
         int numBones = 0;
         int side = 0;
@@ -11647,6 +11715,7 @@ namespace
         void Reset()
         {
             owner = nullptr;
+            modelName.clear();
             generation = 0;
             numBones = 0;
             side = 0;
@@ -11706,11 +11775,13 @@ namespace
         VR* vr,
         int side,
         const HooksNativeViewmodelHandsOnlySideInfo& keepSide,
+        const std::string& lowerModel,
         int numBones,
         uint32_t generation)
     {
         if (!state.valid ||
             state.owner != vr ||
+            state.modelName != lowerModel ||
             state.generation != generation ||
             state.side != side ||
             !HooksNativeViewmodelHandsOnlyMatrixFinite(state.targetAnchor) ||
@@ -11747,9 +11818,6 @@ namespace
                 0.0001f);
         if (!configMatches)
             return false;
-
-        if (vr && vr->m_NativeViewmodelLeftHandFreezeReady.load(std::memory_order_acquire) != 0u)
-            return true;
 
         return state.numBones == numBones &&
             state.hand == keepSide.hand &&
@@ -11789,6 +11857,7 @@ namespace
     inline bool HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
         VR* vr,
         const HooksNativeViewmodelHandsOnlySideInfo& keepSide,
+        const std::string& lowerModel,
         const vr_vm_stabilize::Mat3x4* sourceBones,
         int numBones,
         vr_vm_stabilize::Mat3x4* outTargetAnchor,
@@ -11820,6 +11889,7 @@ namespace
                 vr,
                 keepSide.side,
                 keepSide,
+                lowerModel,
                 numBones,
                 generation))
         {
@@ -11896,6 +11966,7 @@ namespace
             }
 
             state.owner = vr;
+            state.modelName = lowerModel;
             state.generation = generation;
             state.numBones = numBones;
             state.side = keepSide.side;
@@ -12130,6 +12201,7 @@ namespace
                 useTargetDelta = HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
                     vr,
                     keepSide,
+                    lowerModel,
                     sourceBones,
                     numBones,
                     &targetAnchor,
@@ -12210,6 +12282,7 @@ namespace
                 if (HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
                         vr,
                         keepSide,
+                        lowerModel,
                         sourceBones,
                         numBones,
                         nullptr,
@@ -12311,6 +12384,7 @@ namespace
             if (HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
                     vr,
                     keepSide,
+                    lowerModel,
                     sourceBones,
                     numBones,
                     nullptr,
@@ -12615,6 +12689,7 @@ namespace
                 HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
                     vr,
                     leftInfo,
+                    lowerModel,
                     bones,
                     numBones,
                     nullptr,
@@ -12626,6 +12701,7 @@ namespace
                 HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
                     vr,
                     rightInfo,
+                    lowerModel,
                     bones,
                     numBones,
                     nullptr,
@@ -12691,6 +12767,7 @@ namespace
                     if (!HooksNativeViewmodelHandsOnlyTryResolveFixedFreezePlaneLock(
                             vr,
                             hideSide,
+                            lowerModel,
                             bones,
                             numBones,
                             nullptr,
