@@ -15,16 +15,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	static thread_local bool s_vrSharedCenterValid = false;
 	static thread_local Vector s_vrSharedCenterOrigin{};
 	static thread_local Vector s_vrSharedEyeOrigin{};
-	struct SharedStereoCenterSnapshot
-	{
-		bool valid = false;
-		uint32_t renderFrameSeq = 0;
-		Vector centerOrigin{};
-		Vector leftEyeOrigin{};
-		Vector rightEyeOrigin{};
-	};
-	static std::mutex s_vrSharedCenterGlobalMutex;
-	static SharedStereoCenterSnapshot s_vrSharedCenterGlobal{};
 
 	auto rtNameContainsI = [](const char* haystack, const char* needle) -> bool
 		{
@@ -62,63 +52,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			if (isWaterReflectionRenderTarget(texture))
 				return "water";
 			return nullptr;
-		};
-
-	auto readSharedStereoCenterGlobal = [&]() -> SharedStereoCenterSnapshot
-		{
-			std::lock_guard<std::mutex> lock(s_vrSharedCenterGlobalMutex);
-			return s_vrSharedCenterGlobal;
-		};
-
-	auto publishSharedStereoCenterGlobal = [&](uint32_t renderFrameSeq, const Vector& centerOrigin,
-		const Vector& leftEyeOrigin, const Vector& rightEyeOrigin)
-		{
-			std::lock_guard<std::mutex> lock(s_vrSharedCenterGlobalMutex);
-			s_vrSharedCenterGlobal.valid = true;
-			s_vrSharedCenterGlobal.renderFrameSeq = renderFrameSeq;
-			s_vrSharedCenterGlobal.centerOrigin = centerOrigin;
-			s_vrSharedCenterGlobal.leftEyeOrigin = leftEyeOrigin;
-			s_vrSharedCenterGlobal.rightEyeOrigin = rightEyeOrigin;
-		};
-
-	auto tryCenterSharedStereoRenderTarget = [&](CViewSetup& view, CViewSetup& hud, const char* reason) -> bool
-		{
-			if (!m_VR || !reason || std::strcmp(reason, "water") != 0)
-				return false;
-
-			const SharedStereoCenterSnapshot shared = readSharedStereoCenterGlobal();
-			if (!shared.valid || shared.renderFrameSeq == 0)
-				return false;
-
-			const uint32_t currentFrameSeq = m_VR->m_RenderFrameSeq.load(std::memory_order_acquire);
-			if (currentFrameSeq == 0 || static_cast<int32_t>(currentFrameSeq - shared.renderFrameSeq) > 2)
-				return false;
-
-			const float leftDistSq = (view.origin - shared.leftEyeOrigin).LengthSqr();
-			const float rightDistSq = (view.origin - shared.rightEyeOrigin).LengthSqr();
-			const Vector& sourceEyeOrigin = (rightDistSq < leftDistSq) ? shared.rightEyeOrigin : shared.leftEyeOrigin;
-			const Vector eyeToCenter = shared.centerOrigin - sourceEyeOrigin;
-			view.origin += eyeToCenter;
-			hud.origin += eyeToCenter;
-
-			if (m_VR->m_RenderPipelineDebugLog)
-			{
-				static thread_local std::chrono::steady_clock::time_point s_lastSharedTopLog{};
-				if (!ShouldThrottleLog(s_lastSharedTopLog, m_VR->m_RenderPipelineDebugLogHz))
-				{
-					Game::logMsg("[VR][RenderView][SharedRTTopCenter] reason=%s tid=%lu frameSeq=%u currentSeq=%u eye=%s delta=(%.3f %.3f %.3f) setup=%dx%d clear=0x%X draw=0x%X",
-						reason,
-						GetCurrentThreadId(),
-						shared.renderFrameSeq,
-						currentFrameSeq,
-						(rightDistSq < leftDistSq) ? "right" : "left",
-						eyeToCenter.x, eyeToCenter.y, eyeToCenter.z,
-						view.width, view.height,
-						nClearFlags, whatToDraw);
-				}
-			}
-
-			return true;
 		};
 
 	if (s_originalRenderViewDepth > 0)
@@ -163,9 +96,9 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			const char* sharedRtReason = classifySharedStereoRenderTarget(nestedRt);
 			if (sharedRtReason != nullptr)
 			{
+				const Vector eyeToCenter = s_vrSharedCenterOrigin - s_vrSharedEyeOrigin;
 				CViewSetup sharedView = setup;
 				CViewSetup sharedHud = hudViewSetup;
-				const Vector eyeToCenter = s_vrSharedCenterOrigin - s_vrSharedEyeOrigin;
 				sharedView.origin += eyeToCenter;
 				sharedHud.origin += eyeToCenter;
 
@@ -452,18 +385,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 	if (passThroughReason != nullptr)
 	{
-		const char* sharedRtReason = classifySharedStereoRenderTarget(renderContextStateGuard.rt);
-		if (sharedRtReason != nullptr)
-		{
-			CViewSetup sharedView = setup;
-			CViewSetup sharedHud = hudViewSetup;
-			if (tryCenterSharedStereoRenderTarget(sharedView, sharedHud, sharedRtReason))
-			{
-				callOriginalRenderView(sharedView, sharedHud, nClearFlags, whatToDraw);
-				return;
-			}
-		}
-
 		if (m_VR->m_RenderPipelineDebugLog)
 		{
 			static thread_local std::chrono::steady_clock::time_point s_lastOffscreenPassLog{};
@@ -2428,11 +2349,6 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		(leftEyeView.origin.x + rightEyeView.origin.x) * 0.5f,
 		(leftEyeView.origin.y + rightEyeView.origin.y) * 0.5f,
 		(leftEyeView.origin.z + rightEyeView.origin.z) * 0.5f);
-	publishSharedStereoCenterGlobal(
-		m_VR->m_RenderFrameSeq.load(std::memory_order_acquire),
-		sharedCenterOrigin,
-		leftEyeView.origin,
-		rightEyeView.origin);
 
 	auto renderEyeScene = [&](int eyeIndex, ITexture* eyeTexture, LPDIRECT3DSURFACE9 reshadeSurface,
 		CViewSetup& eyeView, CViewSetup& eyeHud, bool drawPreViewLaser)
