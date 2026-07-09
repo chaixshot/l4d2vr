@@ -1397,36 +1397,36 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 					VectorNormalize(rightCtrlUp) != 0.0f;
 
 				auto buildRenderControllerBasis = [&](const vr::TrackedDevicePose_t& pose, Vector& posLocal, Vector& ctrlF, Vector& ctrlR, Vector& ctrlU) -> bool
-				{
-					if (!pose.bPoseIsValid)
-						return false;
-
-					const vr::HmdMatrix34_t& mat = pose.mDeviceToAbsoluteTracking;
-					posLocal.x = -mat.m[2][3];
-					posLocal.y = -mat.m[0][3];
-					posLocal.z = mat.m[1][3];
-
-					// Build the controller basis directly from the OpenVR pose matrix.
-					// The old queued path converted matrix -> Euler -> basis every render frame.
-					// Near Source QAngle singularities, tiny runtime pose noise can become large
-					// yaw/roll flips, which moves the viewmodel even when the controller is still.
-					ctrlF = Vector(mat.m[2][2], mat.m[0][2], -mat.m[1][2]);
-					ctrlR = Vector(-mat.m[2][0], -mat.m[0][0], mat.m[1][0]);
-					ctrlU = Vector(-mat.m[2][1], -mat.m[0][1], mat.m[1][1]);
-
-					if (VectorNormalize(ctrlF) == 0.0f || VectorNormalize(ctrlR) == 0.0f || VectorNormalize(ctrlU) == 0.0f)
-						return false;
-
-					if (std::fabs(extrapRot) > 0.0001f)
 					{
-						const Vector worldUp(0.0f, 0.0f, 1.0f);
-						ctrlF = VectorRotate(ctrlF, worldUp, extrapRot);
-						ctrlR = VectorRotate(ctrlR, worldUp, extrapRot);
-						ctrlU = VectorRotate(ctrlU, worldUp, extrapRot);
-					}
+						if (!pose.bPoseIsValid)
+							return false;
 
-					return true;
-				};
+						const vr::HmdMatrix34_t& mat = pose.mDeviceToAbsoluteTracking;
+						posLocal.x = -mat.m[2][3];
+						posLocal.y = -mat.m[0][3];
+						posLocal.z = mat.m[1][3];
+
+						// Build the controller basis directly from the OpenVR pose matrix.
+						// The old queued path converted matrix -> Euler -> basis every render frame.
+						// Near Source QAngle singularities, tiny runtime pose noise can become large
+						// yaw/roll flips, which moves the viewmodel even when the controller is still.
+						ctrlF = Vector(mat.m[2][2], mat.m[0][2], -mat.m[1][2]);
+						ctrlR = Vector(-mat.m[2][0], -mat.m[0][0], mat.m[1][0]);
+						ctrlU = Vector(-mat.m[2][1], -mat.m[0][1], mat.m[1][1]);
+
+						if (VectorNormalize(ctrlF) == 0.0f || VectorNormalize(ctrlR) == 0.0f || VectorNormalize(ctrlU) == 0.0f)
+							return false;
+
+						if (std::fabs(extrapRot) > 0.0001f)
+						{
+							const Vector worldUp(0.0f, 0.0f, 1.0f);
+							ctrlF = VectorRotate(ctrlF, worldUp, extrapRot);
+							ctrlR = VectorRotate(ctrlR, worldUp, extrapRot);
+							ctrlU = VectorRotate(ctrlU, worldUp, extrapRot);
+						}
+
+						return true;
+					};
 
 				if (leftIdx != vr::k_unTrackedDeviceIndexInvalid && leftIdx < vr::k_unMaxTrackedDeviceCount && renderPoses[leftIdx].bPoseIsValid)
 				{
@@ -1474,19 +1474,19 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 					Vector aimRight = rightCtrlRight;
 					Vector aimUp = rightCtrlUp;
 					if (m_VR->ResolvePavlovTwoHandedAimBasis(
-							leftCtrlPosAbs,
-							rightCtrlPosAbs,
-							rightCtrlForward,
-							rightCtrlRight,
-							rightCtrlUp,
-							hmdPosAbs,
-							hmdForward,
-							hmdRight,
-							hmdUp,
-							vp.vrScale,
-							aimForward,
-							aimRight,
-							aimUp))
+						leftCtrlPosAbs,
+						rightCtrlPosAbs,
+						rightCtrlForward,
+						rightCtrlRight,
+						rightCtrlUp,
+						hmdPosAbs,
+						hmdForward,
+						hmdRight,
+						hmdUp,
+						vp.vrScale,
+						aimForward,
+						aimRight,
+						aimUp))
 					{
 						QAngle::VectorAngles(aimForward, aimUp, rightCtrlAngAbs);
 					}

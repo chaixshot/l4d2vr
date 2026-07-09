@@ -82,20 +82,27 @@ namespace dxvk {
             const UINT eyeHeight = static_cast<UINT>(vr->m_RenderHeight);
             const UINT oldWidth = params->BackBufferWidth;
             const UINT oldHeight = params->BackBufferHeight;
+            const D3DMULTISAMPLE_TYPE oldMultiSampleType = params->MultiSampleType;
+            const DWORD oldMultiSampleQuality = params->MultiSampleQuality;
 
             params->BackBufferWidth = eyeWidth;
             params->BackBufferHeight = eyeHeight;
+            params->MultiSampleType = D3DMULTISAMPLE_NONE;
+            params->MultiSampleQuality = 0;
 
             if (!params->Windowed && fullscreenMode) {
                 fullscreenMode->Width = eyeWidth;
                 fullscreenMode->Height = eyeHeight;
             }
 
-            const bool changed = oldWidth != eyeWidth || oldHeight != eyeHeight;
+            const bool sizeChanged = oldWidth != eyeWidth || oldHeight != eyeHeight;
+            const bool msaaChanged = oldMultiSampleType != D3DMULTISAMPLE_NONE || oldMultiSampleQuality != 0;
+            const bool changed = sizeChanged || msaaChanged;
             if (changed) {
                 Logger::info(str::format(
-                    "L4D2VR forcing reset backbuffer to VR eye size: ",
-                    oldWidth, "x", oldHeight, " -> ", eyeWidth, "x", eyeHeight));
+                    "L4D2VR forcing reset backbuffer to VR eye submit-compatible settings: ",
+                    oldWidth, "x", oldHeight, " msaa=", static_cast<UINT>(oldMultiSampleType), "/", oldMultiSampleQuality,
+                    " -> ", eyeWidth, "x", eyeHeight, " msaa=0/0"));
             }
 
             return changed;
@@ -1387,9 +1394,10 @@ namespace dxvk {
 
     HRESULT STDMETHODCALLTYPE D3D9DeviceEx::Reset(D3DPRESENT_PARAMETERS* pPresentationParameters) {
         // Source applies video settings through IDirect3DDevice9::Reset. Keep the
-        // implicit swapchain locked to the VR eye size across resets; otherwise a
-        // user-selected desktop resolution leaves viewport, HUD capture, menu overlay,
-        // and desktop mirror paths disagreeing about the active backbuffer size.
+        // implicit swapchain locked to the VR eye size and non-MSAA across resets;
+        // otherwise a user-selected desktop resolution or MSAA backbuffer leaves
+        // viewport, HUD capture, menu overlay, and desktop mirror paths disagreeing
+        // about the active backbuffer or unable to export it as an OpenVR texture.
         VR* vr = (g_Game != nullptr) ? g_Game->m_VR : nullptr;
         if (vr) {
             vr->ReleaseVRRenderTargetsForDeviceReset();

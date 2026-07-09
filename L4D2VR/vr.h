@@ -276,7 +276,7 @@ public:
 	Vector m_SetupOriginToHMD = { 0,0,0 };
 
 	float m_HeightOffset = 0.0;
-	static constexpr uint32_t kResetPositionStableFramesRequired = 3;
+	static constexpr uint32_t kResetPositionStableFramesRequired = 8;
 	std::atomic<uint32_t> m_ResetPositionStableFrames{ 0 };
 	std::atomic<uint32_t> m_ResetPositionDeferredPending{ 0 };
 	bool m_ResetPositionStableEyeZValid = false;
@@ -469,6 +469,7 @@ public:
 	bool m_QueuedRenderPoseFromTracking = false;
 	std::atomic<uint32_t> m_QueuedRenderPoseFromTrackingSeq{ 0 };
 	std::atomic<int> m_CachedTrackingUniverseOrigin{ static_cast<int>(vr::TrackingUniverseStanding) };
+	std::atomic<int> m_CachedTrackingPredictionUsec{ 0 };
 	inline vr::ETrackingUniverseOrigin GetCachedTrackingUniverseOrigin() const
 	{
 		const int origin = m_CachedTrackingUniverseOrigin.load(std::memory_order_acquire);
@@ -477,12 +478,19 @@ public:
 			return vr::TrackingUniverseStanding;
 		return static_cast<vr::ETrackingUniverseOrigin>(origin);
 	}
+	inline void CacheQueuedTrackingPredictionSeconds(float seconds)
+	{
+		if (!(seconds >= 0.0f && seconds <= 0.5f))
+			seconds = 0.0f;
+		const int usec = static_cast<int>(seconds * 1000000.0f + 0.5f);
+		m_CachedTrackingPredictionUsec.store(usec, std::memory_order_release);
+	}
 	inline float GetQueuedTrackingPredictionSeconds() const
 	{
-		float hz = m_HmdDisplayFrequencyHz.load(std::memory_order_relaxed);
-		if (!(hz > 1.0f))
-			hz = 90.0f;
-		return std::clamp(1.0f / hz, 0.0f, 0.030f);
+		const int usec = m_CachedTrackingPredictionUsec.load(std::memory_order_acquire);
+		if (usec <= 0)
+			return 0.0f;
+		return std::clamp(static_cast<float>(usec) / 1000000.0f, 0.0f, 0.030f);
 	}
 
 	// Queued rendering: optional render-thread FPS cap, expressed as a percentage of the HMD refresh rate.
