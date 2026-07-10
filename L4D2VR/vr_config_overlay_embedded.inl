@@ -592,6 +592,7 @@ namespace
         uint32_t hoverSelectionSuppressedUntilMs = 0;
         std::string componentEditKey;
         int componentEditIndex = 0;
+        std::unordered_map<std::string, int> componentEditIndexByKey;
         bool keyboardActive = false;
         std::string keyboardEditKey;
         vr::VROverlayHandle_t keyboardEventHandle = vr::k_ulOverlayHandleInvalid;
@@ -1098,8 +1099,11 @@ namespace
             return 0;
         if (s.componentEditKey != spec.key)
         {
+            auto it = s.componentEditIndexByKey.find(spec.key);
+            const int index = (it == s.componentEditIndexByKey.end()) ? 0 : it->second;
+            
             s.componentEditKey = spec.key;
-            s.componentEditIndex = 0;
+            s.componentEditIndex = index;
         }
         s.componentEditIndex = (std::clamp)(s.componentEditIndex, 0, count - 1);
         return s.componentEditIndex;
@@ -1110,8 +1114,7 @@ namespace
         const int count = CfgComponentCount(spec);
         if (count <= 0)
             return;
-        s.componentEditKey = spec.key;
-        s.componentEditIndex = (std::clamp)(index, 0, count - 1);
+        s.componentEditIndexByKey[spec.key] = (std::clamp)(index, 0, count - 1);
         s.dirty = true;
     }
 
@@ -1146,6 +1149,7 @@ namespace
             next = CfgClampFloatToSpec(spec, next);
 
         values[(size_t)index] = next;
+        s.componentEditIndexByKey[spec.key] = index;
         const std::string value = CfgFormatComponentValues(spec, values);
         const float formatStep = CfgComponentFormatStep(spec, index, next);
         s.values[spec.key] = value;
@@ -4956,7 +4960,7 @@ namespace
                 if (CfgIsComponentEditable(spec))
                 {
                     const int count = CfgComponentCount(spec);
-                    const int activeIndex = selected ? CfgSelectedComponentIndex(s, spec) : (s.componentEditKey == spec.key ? (std::clamp)(s.componentEditIndex, 0, (std::max)(0, count - 1)) : 0);
+                    const int activeIndex = CfgSelectedComponentIndex(s, spec);
                     for (int i = 0; i < count; ++i)
                     {
                         const int bx = kCfgComponentX + i * (kCfgComponentButtonW + kCfgComponentGap);
