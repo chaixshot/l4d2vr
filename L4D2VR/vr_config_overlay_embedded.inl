@@ -1568,6 +1568,30 @@ namespace
         s.dirty = true;
     }
 
+    static void CfgScrollBy(CfgOverlayState& s, int delta)
+    {
+        const int total = (int)s.visibleSpecIndexes.size();
+        if (total <= 0)
+        {
+            s.scroll = 0;
+            return;
+        }
+
+        const int nextScroll = (std::clamp)(s.scroll + delta, 0, (std::max)(0, total - kCfgOverlayRowsVisible));
+        if (nextScroll == s.scroll)
+            return;
+
+        s.scroll = nextScroll;
+
+        // Make the selected column stay at top or bottom while pass the selecting column
+        if (s.selected < s.scroll)
+            s.selected = s.scroll;
+        else if (s.selected >= s.scroll + kCfgOverlayRowsVisible)
+            s.selected = s.scroll + kCfgOverlayRowsVisible - 1;
+
+        s.dirty = true;
+    }
+
     static void CfgPageSelection(CfgOverlayState& s, int dir)
     {
         const int total = (int)s.visibleSpecIndexes.size();
@@ -6406,7 +6430,7 @@ namespace
                     else
                     {
                         CfgSuppressHoverSelectionAfterScroll(s);
-                        CfgMoveSelection(s, (ydelta > 0.0f) ? -3 : 3);
+                        CfgScrollBy(s, (ydelta > 0.0f) ? -1 : 1); // Scroll the column by 1
                     }
                 }
                 break;
