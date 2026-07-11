@@ -1547,11 +1547,15 @@ namespace
         }
 
         s.selected = (std::clamp)(s.selected, 0, total - 1);
-        if (s.selected < s.scroll)
-            s.scroll = s.selected;
-        if (s.selected >= s.scroll + kCfgOverlayRowsVisible)
-            s.scroll = s.selected - kCfgOverlayRowsVisible + 1;
-        s.scroll = (std::clamp)(s.scroll, 0, (std::max)(0, total - 1));
+
+        if (!CfgIsSelectableRow(s, s.selected))
+        {
+            if (s.selected < s.scroll)
+                s.scroll = s.selected;
+            if (s.selected >= s.scroll + kCfgOverlayRowsVisible)
+                s.scroll = s.selected - kCfgOverlayRowsVisible + 1;
+            s.scroll = (std::clamp)(s.scroll, 0, (std::max)(0, total - 1));
+        }
     }
 
     static void CfgMoveSelection(CfgOverlayState& s, int delta)
@@ -4889,11 +4893,14 @@ namespace
         CfgGdiText(g, 40, 112, 520, 36, s.useChinese ? "\xE6\x96\x87\xE6\x9C\xAC\xE9\xA1\xB9\xEF\xBC\x9A\xE7\x82\xB9\xE2\x80\x9C\xE7\xBC\x96\xE8\xBE\x91\xE2\x80\x9D\xE6\x89\x93\xE5\xBC\x80 VR \xE9\x94\xAE\xE7\x9B\x98\xEF\xBC\x9BVec3/\xE9\xA2\x9C\xE8\x89\xB2\xEF\xBC\x9A\xE5\x85\x88\xE9\x80\x89\xE5\x88\x86\xE9\x87\x8F\xEF\xBC\x8C\xE5\x86\x8D\xE6\x8C\x89 -/+\xE3\x80\x82" : "Text rows: Edit opens VR keyboard. Vec3/Color: select component then -/+.", g.normalFont, { 112, 125, 145 });
 
         const int total = (int)s.visibleSpecIndexes.size();
-        if (s.selected < s.scroll)
-            s.scroll = s.selected;
-        if (s.selected >= s.scroll + kCfgOverlayRowsVisible)
-            s.scroll = s.selected - kCfgOverlayRowsVisible + 1;
-        s.scroll = (std::clamp)(s.scroll, 0, (std::max)(0, total - 1));
+        if (!CfgIsSelectableRow(s, s.selected))
+        {
+            if (s.selected < s.scroll)
+                s.scroll = s.selected;
+            if (s.selected >= s.scroll + kCfgOverlayRowsVisible)
+                s.scroll = s.selected - kCfgOverlayRowsVisible + 1;
+            s.scroll = (std::clamp)(s.scroll, 0, (std::max)(0, total - 1));
+        }
 
         int y = kCfgRowsY;
         int lastDrawnItem = s.scroll;
