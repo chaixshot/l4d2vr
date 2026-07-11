@@ -1106,6 +1106,7 @@ namespace
             s.componentEditIndex = index;
         }
         s.componentEditIndex = (std::clamp)(s.componentEditIndex, 0, count - 1);
+        s.componentEditIndexByKey[spec.key] = s.componentEditIndex;
         return s.componentEditIndex;
     }
 
@@ -1114,7 +1115,9 @@ namespace
         const int count = CfgComponentCount(spec);
         if (count <= 0)
             return;
-        s.componentEditIndexByKey[spec.key] = (std::clamp)(index, 0, count - 1);
+        s.componentEditKey = spec.key;
+        s.componentEditIndex = (std::clamp)(index, 0, count - 1);
+        s.componentEditIndexByKey[s.componentEditKey] = s.componentEditIndex;
         s.dirty = true;
     }
 
