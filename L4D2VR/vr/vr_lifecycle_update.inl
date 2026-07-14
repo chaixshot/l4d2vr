@@ -1657,16 +1657,14 @@ void VR::Update()
 
         // Scope lens GPU post-process is delayed until after the eye submit in queued rendering.
         // This keeps the processed overlay texture from racing Source's material queue.
-        if (!IsSourceRenderQueueBusy() &&
-            m_QueuedScopeLensPostProcessPending.load(std::memory_order_acquire) != 0u)
+        if (m_QueuedScopeLensPostProcessPending.load(std::memory_order_acquire) != 0u)
         {
             float lensHz = GetHmdDisplayFrequencyHz();
             if (!std::isfinite(lensHz) || lensHz <= 1.0f)
                 lensHz = 90.0f;
             lensHz = std::clamp(lensHz, 1.0f, 240.0f);
 
-            if (!ShouldThrottle(m_LastScopeLensPostProcessTime, lensHz) &&
-                m_QueuedScopeLensPostProcessPending.exchange(0u, std::memory_order_acq_rel) != 0u)
+            if (m_QueuedScopeLensPostProcessPending.exchange(0u, std::memory_order_acq_rel) != 0u)
             {
                 const bool scopeLensOk = ApplyScopeLensPostProcess();
                 if (m_RenderPipelineDebugLog)
@@ -1954,20 +1952,7 @@ void VR::Update()
     PumpSpeechToTextResults();
     if (!m_TextToSpeechEnabled && !m_SpeechToTextSendVoiceEnabled)
         ShutdownTextToSpeechServer();
-    // Kill-indicator texture creation/upload is raw D3D9 work. In queued mode it
-    // must not interleave with Source's stereo/water/shadow command construction.
-    // Hold the same 0->1 producer gate used by Present and defer the update while
-    // a queued render generation is still owned by Source.
-    if (m_Game && m_Game->GetMatQueueMode() != 0)
-    {
-        std::lock_guard<std::recursive_mutex> sourceRenderConsumerGate(m_SourceRenderConsumerGate);
-        if (!IsSourceRenderQueueBusy())
-            UpdateKillIndicatorOverlays();
-    }
-    else
-    {
-        UpdateKillIndicatorOverlays();
-    }
+    UpdateKillIndicatorOverlays();
     UpdateDamageFeedback();
 
 
@@ -2911,36 +2896,6 @@ void VR::SubmitVRTextures()
     if (inGame && !hasLocalPlayer)
         renderedNewFrame = false;
 
-    const bool sourceQueueBusy = queued && sceneReadyForStaleResubmit && IsSourceRenderQueueBusy();
-    const bool stableEyeOnlySubmit =
-        sourceQueueBusy &&
-        !m_ReShadeVRCompat &&
-        m_QueuedEyeSubmitIsolationReady.load(std::memory_order_acquire);
-
-    // Raw eye textures and auxiliary HUD/scope RTs are unsafe while Source is active.
-    // A completed dedicated eye snapshot is different: it is immutable under
-    // m_TextureMutex and can be submitted without waiting for an idle gap. When no such
-    // snapshot exists, keep reprojecting the compositor's previous frame.
-    if (sourceQueueBusy && !stableEyeOnlySubmit)
-    {
-        if (m_RenderPipelineDebugLog)
-        {
-            static std::chrono::steady_clock::time_point s_lastBusySubmitSkipLog{};
-            if (!ShouldThrottle(s_lastBusySubmitSkipLog, m_RenderPipelineDebugLogHz))
-            {
-                Game::logMsg("[VR][Queued][SubmitSkipNoStableSnapshot] tid=%lu build=%u queuedMarker=%u completedMarker=%u completed=%u submitted=%u renderedNew=%d",
-                    GetCurrentThreadId(),
-                    m_SourceRenderQueueBuildCount.load(std::memory_order_acquire),
-                    m_SourceRenderQueueMarkerQueuedId.load(std::memory_order_acquire),
-                    m_SourceRenderQueueMarkerCompletedId.load(std::memory_order_acquire),
-                    m_RenderCompletedFrameId.load(std::memory_order_acquire),
-                    m_LastSubmittedFrameId.load(std::memory_order_acquire),
-                    renderedNewFrame ? 1 : 0);
-            }
-        }
-        return;
-    }
-
     if (!inGame && renderedNewFrame)
     {
         // A render can complete on the old map after the engine has already returned to
@@ -3592,41 +3547,6 @@ void VR::SubmitVRTextures()
             stageOverlayTextureBind(overlay, &m_VKRearMirror.m_VRTexture, m_D9RearMirrorSurface);
         };
 
-    //     ֡û       ݣ    ߲˵ /Overlay ·
-    // Take only a short classification snapshot here. Holding this gate while the
-    // CPU builds the HUD and uploads its dynamic textures would serialize the next
-    // Source RenderView behind all of that work and recreate the main-thread spike.
-    bool sourceQueueBusyBeforeOverlays = false;
-    if (queued && sceneReadyForStaleResubmit)
-    {
-        std::lock_guard<std::recursive_mutex> sourceRenderConsumerGate(m_SourceRenderConsumerGate);
-        sourceQueueBusyBeforeOverlays = IsSourceRenderQueueBusy();
-    }
-    const bool stableEyeOnlyBeforeOverlays =
-        (stableEyeOnlySubmit || sourceQueueBusyBeforeOverlays) &&
-        !m_ReShadeVRCompat &&
-        m_QueuedEyeSubmitIsolationReady.load(std::memory_order_acquire);
-
-    if (sourceQueueBusyBeforeOverlays && !stableEyeOnlyBeforeOverlays)
-        return;
-
-    if (stableEyeOnlyBeforeOverlays)
-    {
-        // Source may currently be mutating HUD/scope/rear-mirror RTs and the next
-        // frame's overlay inputs. Leave those compositor layers unchanged and submit
-        // only the immutable eye snapshot from the last completed stereo marker.
-        submitStereoPair(&m_VKLeftEye.m_VRTexture, leftEyeSubmitBounds,
-            &m_VKRightEye.m_VRTexture, rightEyeSubmitBounds);
-        if (successfulSubmit)
-        {
-            m_HasSubmittedSceneFrame = true;
-            std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
-            if (m_RenderCompletedFrameId.load(std::memory_order_acquire) == submitSnapshotFrameId)
-                m_RenderedNewFrame.store(false, std::memory_order_release);
-        }
-        return;
-    }
-
     if (!renderedNewFrame)
     {
         // In mat_queue_mode!=0 (queued/multicore), the render thread can lag behind the submit thread.
@@ -3935,49 +3855,8 @@ void VR::SubmitVRTextures()
         UpdateDesktopRearMirrorWindow(false);
     }
 
-    // Dynamic intent/hand HUD uploads and their TransferSurface commands are complete
-    // before the final queue gate. Their OpenVR texture binds join the same batch as
-    // HUD/scope/rear-mirror and the stereo Submit calls.
+    // Upload and bind dynamic intent/hand HUD textures on every fresh frame.
     UpdateHandHudOverlays(&pendingOverlayTextureBinds);
-
-    // Close the 0->1 producer race only for the final bind/submit critical section.
-    // If Source became active while the CPU prepared overlays, discard those mutable
-    // layer updates and submit only the immutable completed eye snapshot.
-    std::unique_lock<std::recursive_mutex> finalSourceRenderConsumerGate;
-    bool sourceQueueBusyAtSubmit = false;
-    if (queued)
-    {
-        finalSourceRenderConsumerGate = std::unique_lock<std::recursive_mutex>(m_SourceRenderConsumerGate);
-        sourceQueueBusyAtSubmit = sceneReadyForStaleResubmit && IsSourceRenderQueueBusy();
-    }
-
-    if (sourceQueueBusyAtSubmit)
-    {
-        bool discardedIntentSenseBind = false;
-        for (size_t i = 0; i < pendingOverlayTextureBinds.count; ++i)
-        {
-            if (pendingOverlayTextureBinds.binds[i].overlay == m_SpecialInfectedIntentSenseHudHandle)
-            {
-                discardedIntentSenseBind = true;
-                break;
-            }
-        }
-        pendingOverlayTextureBinds.Clear();
-        if (discardedIntentSenseBind)
-        {
-            // Staging is provisional. UpdateHandHudOverlays advances the intent ring
-            // and revision optimistically, so force the same revision to upload again
-            // after a busy-frame discard instead of leaving the old OpenVR texture bound.
-            m_LastSpecialInfectedIntentSenseHudRevisionDrawn = 0;
-            m_LastSpecialInfectedIntentSenseHudVisible = false;
-            m_LastSpecialInfectedIntentSenseHudUploadTime = {};
-        }
-        if (m_ReShadeVRCompat ||
-            !m_QueuedEyeSubmitIsolationReady.load(std::memory_order_acquire))
-        {
-            return;
-        }
-    }
 
     submitStereoPair(&m_VKLeftEye.m_VRTexture, leftEyeSubmitBounds,
         &m_VKRightEye.m_VRTexture, rightEyeSubmitBounds);

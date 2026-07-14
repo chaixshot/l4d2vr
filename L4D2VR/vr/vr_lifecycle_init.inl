@@ -1234,6 +1234,11 @@ void VR::UpdateAutoMatQueueMode()
         m_Game->SetConVarFloat("mat_motion_blur_percent_of_screen_max", 0.0f);
         m_Game->SetConVarFloat("mat_motion_blur_rotation_intensity", 0.0f);
         m_Game->SetConVarFloat("mat_motion_blur_falling_intensity", 0.0f);
+        // Source normally reuses one refraction/frame-buffer copy per engine frame.
+        // Both VR eyes render under the same gpGlobals->framecount, so the right eye can
+        // otherwise sample the left eye's copy in water, refractive particles and heat haze.
+        m_Game->SetConVarInt("r_updaterefracttexture", 1);
+        m_Game->SetConVarInt("r_unlimitedrefract", 1);
         m_MainMenuOneShotVisualCvarsInjected = true;
     }
 
