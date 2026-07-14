@@ -1018,6 +1018,10 @@ namespace dxvk {
       return m_multithread.AcquireLock();
     }
 
+    D3D9DeviceLock LockDeviceExclusive() {
+      return m_multithread.AcquireExclusiveLock();
+    }
+
     const D3D9Options* GetOptions() const {
       return &m_d3d9Options;
     }

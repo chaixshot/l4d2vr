@@ -82,7 +82,7 @@ namespace dxvk {
       if (unlikely(pSurface == nullptr))
         return D3DERR_INVALIDCALL;
 
-      D3D9DeviceLock lock = m_device->LockDevice();
+      D3D9DeviceLock lock = m_device->LockDeviceExclusive();
 
       auto* tex = static_cast<D3D9Surface*>(pSurface)->GetCommonTexture();
       const auto& image = tex->GetImage();
@@ -106,7 +106,7 @@ namespace dxvk {
     }
 
     HRESULT STDMETHODCALLTYPE LockDevice() {
-      m_lock = m_device->LockDevice();
+      m_lock = m_device->LockDeviceExclusive();
       return D3D_OK;
     }
 
@@ -120,7 +120,7 @@ namespace dxvk {
       // then take the queue's native external-synchronization gate. Once acquired,
       // the device lock can be released: Source may record the next frame, but DXVK's
       // submit thread cannot touch VkQueue until OpenVR has submitted the stereo pair.
-      D3D9DeviceLock lock = m_device->LockDevice();
+      D3D9DeviceLock lock = m_device->LockDeviceExclusive();
       m_device->Flush();
       m_device->SynchronizeCsThread(DxvkCsThread::SynchronizeAll);
       m_device->GetDXVKDevice()->lockSubmission();
@@ -156,7 +156,7 @@ namespace dxvk {
       // thread is active. DXVK's D3D9 command chunk is device-owned mutable state, so
       // flushing/synchronizing without the same device lock used by draw calls can race
       // DrawIndexedPrimitive and leave m_csChunk null/moved.
-      D3D9DeviceLock lock = m_device->LockDevice();
+      D3D9DeviceLock lock = m_device->LockDeviceExclusive();
 
       m_device->Flush();
       // Not clear if we need all here, perhaps...

@@ -866,6 +866,10 @@ namespace dxvk {
             if (!device || !vr || !vr->m_D9HUDSurface || !VrShouldCompositeNativeHudToDesktop(vr))
                 return;
 
+            D3D9DeviceLock queuedDesktopTransaction;
+            if (vr->m_Game && vr->m_Game->GetMatQueueMode() != 0 && !vr->m_ReShadeVRCompat)
+                queuedDesktopTransaction = device->LockDeviceExclusive();
+
             if (vr->m_NativeDesktopHudPainted.exchange(false, std::memory_order_acq_rel))
                 return;
 
@@ -893,6 +897,10 @@ namespace dxvk {
             HWND presentWindowOverride) {
             if (!device || !vr || !vr->m_DesktopMirrorEnabled)
                 return;
+
+            D3D9DeviceLock queuedDesktopTransaction;
+            if (vr->m_Game && vr->m_Game->GetMatQueueMode() != 0 && !vr->m_ReShadeVRCompat)
+                queuedDesktopTransaction = device->LockDeviceExclusive();
 
             IDirect3DSurface9* source = nullptr;
             if (vr->m_DesktopMirrorHidePluginOverlays && vr->m_D9DesktopMirrorSurface)
@@ -5190,11 +5198,11 @@ namespace dxvk {
             VR* vr = g_Game->m_VR;
             const bool inGame = (g_Game->m_EngineClient && g_Game->m_EngineClient->IsInGame());
             const bool queued = (g_Game->GetMatQueueMode() != 0);
-            // Source's queued material worker, our raw D3D9 helpers and OpenVR all use
-            // the same DXVK/Vulkan device queue. ReShade is not the only path that needs
-            // real D3D9 serialization.
+            // ReShade injects work outside the transactions known to the VR bridge, so
+            // it retains the conservative all-call lock. Normal queued Source rendering
+            // uses the activity gate plus scoped exclusive plugin/Present transactions.
             g_l4d2vrForceDeviceLock.store(
-                vr->m_ReShadeVRCompat || vr->m_AutoMatQueueMode || queued,
+                vr->m_ReShadeVRCompat,
                 std::memory_order_release);
             queuedSourceRenderBusy = inGame && queued && vr->IsSourceRenderQueueBusy();
             const uint32_t renderThreadId = vr->m_RenderThreadId.load(std::memory_order_acquire);
@@ -5298,6 +5306,15 @@ namespace dxvk {
 
         HRESULT result = D3D_OK;
         if (!suspendInactiveQueuedReShadePresent) {
+            D3D9DeviceLock queuedPresentLock;
+            if (g_Game && g_Game->m_VR &&
+                g_Game->GetMatQueueMode() != 0 &&
+                !g_Game->m_VR->m_ReShadeVRCompat) {
+                // Swapchain Present is outside Source's material call queue. Drain
+                // already-active Source calls and isolate only this transaction rather
+                // than making every draw in the rendered frame contend on one spinlock.
+                queuedPresentLock = LockDeviceExclusive();
+            }
             result = m_implicitSwapchain->Present(
                 pSourceRect,
                 pDestRect,
@@ -5377,7 +5394,7 @@ namespace dxvk {
                 // Only the short raw-D3D postwork owns texture lifecycle state. Never
                 // carry this mutex, the consumer gate or a device lock into VR::Update/pose waits.
                 std::lock_guard<TextureStateMutex> postWorkTextureLock(postPresentVR->m_TextureMutex);
-                D3D9DeviceLock postWorkDeviceLock = LockDevice();
+                D3D9DeviceLock postWorkDeviceLock = LockDeviceExclusive();
                 const uint32_t completedFrameId = postPresentVR->m_RenderCompletedFrameId.load(std::memory_order_acquire);
                 const uint32_t resolvedFrameId = postPresentVR->m_ReShadeVRCompatResolvedFrameId.load(std::memory_order_acquire);
                 const bool needsResolve = deferredEyeSubmitResolve &&

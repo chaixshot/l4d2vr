@@ -216,11 +216,10 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	};
 	RenderContextStateGuard renderContextStateGuard(rndrContext);
 	const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
-	// DXVK and OpenVR share the Vulkan graphics queue. In queued Source rendering,
-	// Present/plugin D3D work and compositor submission must use the same real device
-	// lock as the material worker; the ReShade flag alone is not an ownership policy.
-	L4D2VR_D3D9_SetForceDeviceLock(
-		(queueMode != 0 || m_VR->m_AutoMatQueueMode || m_VR->m_ReShadeVRCompat) ? 1 : 0);
+	// Normal queued rendering uses DXVK's lightweight activity gate and takes an
+	// exclusive lock only for Present/plugin transactions. ReShade injects work
+	// outside those known windows, so it retains the conservative all-call lock.
+	L4D2VR_D3D9_SetForceDeviceLock(m_VR->m_ReShadeVRCompat ? 1 : 0);
 	struct SourceRenderQueueBuildScope
 	{
 		VR* vr = nullptr;

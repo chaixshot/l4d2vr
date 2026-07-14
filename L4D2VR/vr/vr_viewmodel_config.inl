@@ -2766,15 +2766,10 @@ void VR::ParseConfigFile()
     // post-Present idle wait that includes ReShade's desktop backbuffer work.
     const bool oldReShadeVRCompat = m_ReShadeVRCompat;
     m_ReShadeVRCompat = getBool("ReShadeVRCompat", m_ReShadeVRCompat);
-    // AutoMatQueueMode can switch Source to mat_queue_mode 2 after config loading.
-    // A live queued mode (or work still retiring from it) must keep DXVK's real
-    // device lock enabled even when the config is reloaded mid-map.
-    const bool keepQueuedDeviceLock =
-        m_ReShadeVRCompat ||
-        m_AutoMatQueueMode ||
-        (m_Game && m_Game->GetMatQueueMode() != 0) ||
-        IsSourceRenderQueueBusy();
-    L4D2VR_D3D9_SetForceDeviceLock(keepQueuedDeviceLock ? 1 : 0);
+    // ReShade injects D3D work outside Source's known producer windows and therefore
+    // retains the conservative all-call lock. Normal queued rendering uses DXVK's
+    // scoped exclusive transactions instead of locking every draw call.
+    L4D2VR_D3D9_SetForceDeviceLock(m_ReShadeVRCompat ? 1 : 0);
     if (oldReShadeVRCompat != m_ReShadeVRCompat)
     {
         m_ReShadeVRCompatResolvedFrameId.store(0, std::memory_order_release);
