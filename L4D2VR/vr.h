@@ -40,6 +40,7 @@ class C_BasePlayer;
 class C_WeaponCSBase;
 
 bool L4D2VR_ApplyRecommendedVideoSettings();
+extern "C" void L4D2VR_D3D9_SetForceDeviceLock(int enabled);
 class CUserCmd;
 struct IDirect3DDevice9;
 struct IDirect3DTexture9;
@@ -84,6 +85,38 @@ struct SharedTextureHolder
 };
 
 using TextureStateMutex = std::recursive_mutex;
+
+struct PendingOverlayTextureBind
+{
+	vr::VROverlayHandle_t overlay = vr::k_ulOverlayHandleInvalid;
+	const vr::Texture_t* texture = nullptr;
+	IDirect3DSurface9* surface = nullptr;
+	bool hideOnFailure = false;
+};
+
+struct PendingOverlayTextureBindBatch
+{
+	static constexpr size_t kCapacity = 8;
+	std::array<PendingOverlayTextureBind, kCapacity> binds{};
+	size_t count = 0;
+
+	bool Stage(
+		vr::VROverlayHandle_t overlay,
+		const vr::Texture_t* texture,
+		IDirect3DSurface9* surface = nullptr,
+		bool hideOnFailure = false)
+	{
+		if (!texture || count >= binds.size())
+			return false;
+		binds[count++] = { overlay, texture, surface, hideOnFailure };
+		return true;
+	}
+
+	void Clear()
+	{
+		count = 0;
+	}
+};
 
 struct CustomActionBinding
 {
@@ -886,6 +919,34 @@ public:
 	std::atomic<uint32_t> m_SourceRenderQueueMarkerEpoch{ 1 };
 	std::atomic<uint32_t> m_SourceRenderQueueMarkerQueuedId{ 0 };
 	std::atomic<uint32_t> m_SourceRenderQueueMarkerCompletedId{ 0 };
+	// Independent top-level water/offscreen RenderView passes do not publish stereo
+	// frames, but their queued D3D work must still block raw Present-side postwork.
+	std::atomic<uint32_t> m_SourceRenderQueueAuxPendingCount{ 0 };
+	std::atomic<bool> m_SourceRenderQueueOwnershipUncertain{ false };
+	// A completed queued stereo pair is copied into dedicated submit RTs before its
+	// completion marker is published. Source may then render the next frame into the
+	// raw eye RTs while OpenVR consumes this stable snapshot.
+	std::atomic<bool> m_QueuedEyeSubmitIsolationReady{ false };
+	// The marker id alone cannot describe ownership while dRenderView is still building
+	// a queued frame: the marker is appended only at the end of the command stream. Keep
+	// the producer phase visible to Present so it cannot touch the single-buffered eye
+	// textures in that gap.
+	std::atomic<uint32_t> m_SourceRenderQueueBuildCount{ 0 };
+	// Couples producer 0->1 transitions with Present's final idle recheck. Present
+	// holds this only across auxiliary overlay consumption, never across pose waits.
+	mutable std::recursive_mutex m_SourceRenderConsumerGate;
+	inline bool IsSourceRenderQueueBusy() const
+	{
+		if (m_SourceRenderQueueBuildCount.load(std::memory_order_acquire) != 0)
+			return true;
+		if (m_SourceRenderQueueAuxPendingCount.load(std::memory_order_acquire) != 0)
+			return true;
+		if (m_SourceRenderQueueOwnershipUncertain.load(std::memory_order_acquire))
+			return true;
+
+		return m_SourceRenderQueueMarkerQueuedId.load(std::memory_order_acquire) !=
+			m_SourceRenderQueueMarkerCompletedId.load(std::memory_order_acquire);
+	}
 	// Present-side wait budget (ms) for a fresh rendered frame in mat_queue_mode!=0.
 	// 0 disables waiting. Used as an upper bound by adaptive submit-wait logic.
 	int m_QueuedSubmitWaitMs = 0;
@@ -1936,6 +1997,8 @@ public:
 	// scenes make the queued render worker lag behind.
 	mutable std::recursive_mutex m_ReShadeVRCompatSurfaceMutex;
 	std::atomic<uint32_t> m_ReShadeVRCompatResolvedFrameId{ 0 };
+	// Raw D3D overlays must be composited into a submit snapshot at most once.
+	std::atomic<uint32_t> m_PostPresentSubmitOverlayFrameId{ 0 };
 	// In Source queued rendering, RenderView can return before MaterialSystem::EndFrame
 	// has flushed all D3D work. ReShadeVRCompat resolves eye RTs after Present, so only
 	// publish a completed stereo frame after EndFrame has finished.
@@ -3246,9 +3309,16 @@ public:
 	void LogVAS(const char* tag);
 	void HandleMissingRenderContext(const char* location);
 	void SubmitVRTextures();
+	vr::EVROverlayError SetOverlayTextureSynchronized(
+		vr::IVROverlay* overlay,
+		vr::VROverlayHandle_t overlayHandle,
+		const vr::Texture_t* texture,
+		bool producerPrepared);
 	void InvalidateSourceRenderQueueMarkers();
+	bool QueueSourceRenderOwnershipReleaseMarker(IMatRenderContext* renderContext);
 	bool QueueSourceRenderCompletionMarker(IMatRenderContext* renderContext, uint32_t renderPoseToken, uint32_t renderFrameSeq, bool allowDuplicatePoseSubmit, const vr::HmdMatrix34_t* renderHmdPose = nullptr);
-	void PublishRenderCompletedFrame(uint32_t renderPoseToken, uint32_t renderFrameSeq, bool allowDuplicatePoseSubmit, const char* sourceTag, uint32_t sourceQueueMarkerId = 0, const vr::HmdMatrix34_t* renderHmdPose = nullptr);
+	void PublishSourceQueueCompletedFrame(uint32_t sourceQueueEpoch, uint32_t renderPoseToken, uint32_t renderFrameSeq, bool allowDuplicatePoseSubmit, uint32_t sourceQueueMarkerId, const vr::HmdMatrix34_t* renderHmdPose = nullptr);
+	uint32_t PublishRenderCompletedFrame(uint32_t renderPoseToken, uint32_t renderFrameSeq, bool allowDuplicatePoseSubmit, const char* sourceTag, uint32_t sourceQueueMarkerId = 0, const vr::HmdMatrix34_t* renderHmdPose = nullptr);
 	void LogCompositorError(const char* action, vr::EVRCompositorError error);
 	void RepositionOverlays();
 	void UpdateHudLiftGestureState(bool inGame);
@@ -3258,7 +3328,7 @@ public:
 	bool IsQueuedHudFresh() const;
 	void UpdateRearMirrorOverlayTransform();
 	void UpdateScopeOverlayTransform();
-	void UpdateHandHudOverlays();
+	void UpdateHandHudOverlays(PendingOverlayTextureBindBatch* pendingTextureBinds = nullptr);
 	void DestroyHandHudWorldQuadTextures();
 	void GetPoses();
 	bool UpdatePosesAndActions();
@@ -3461,7 +3531,7 @@ public:
 	void PublishQueuedProjectedItemLabels(int eyeIndex, std::vector<QueuedProjectedItemLabelDraw> draws);
 	void ClearQueuedProjectedItemLabelEye(int eyeIndex);
 	void ClearQueuedProjectedItemLabels();
-	void DrawQueuedProjectedItemLabelsToSurface(IDirect3DDevice9* device, int eyeIndex, IDirect3DSurface9* target);
+	void DrawQueuedProjectedItemLabelsToSurface(IDirect3DDevice9* device, int eyeIndex, IDirect3DSurface9* target, bool manageScene = true);
 	void PumpDesktopCompanionWindows();
 	void UpdateDesktopRearMirrorWindow(bool visible);
 	void UpdateDesktopIntentSenseHudWindow(const uint8_t* rgba, int width, int height, bool visible);
@@ -3472,7 +3542,7 @@ public:
 	void MaybeLogKillIndicatorStats(std::chrono::steady_clock::time_point now);
 	void DestroyKillIndicatorOverlay(ActiveKillIndicator& indicator);
 	bool EnsureKillIndicatorOverlaySlot(int slotIndex);
-	int AcquireKillIndicatorOverlaySlot() const;
+	int AcquireKillIndicatorOverlaySlot(int materialIndex) const;
 	int FindReusableKillIndicatorIndex(bool preferNonKill) const;
 	void AddOrRecycleKillIndicator(const Vector& worldPos, bool killConfirmed, bool headshot, std::chrono::steady_clock::time_point now, bool preferNonKill);
 	bool BuildKillIndicatorOverlayPixels(IMaterial* material, std::vector<uint8_t>& outPixels, uint32_t& outWidth, uint32_t& outHeight, uint32_t preferredFrameIndex = UINT32_MAX, bool* outUsedDecodedFrames = nullptr);

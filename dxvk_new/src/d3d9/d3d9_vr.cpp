@@ -115,6 +115,42 @@ namespace dxvk {
       return D3D_OK;
     }
 
+    HRESULT STDMETHODCALLTYPE LockSubmissionQueue() {
+      // Drain DXVK's CPU command stream while no other D3D9 call can append to it,
+      // then take the queue's native external-synchronization gate. Once acquired,
+      // the device lock can be released: Source may record the next frame, but DXVK's
+      // submit thread cannot touch VkQueue until OpenVR has submitted the stereo pair.
+      D3D9DeviceLock lock = m_device->LockDevice();
+      m_device->Flush();
+      m_device->SynchronizeCsThread(DxvkCsThread::SynchronizeAll);
+      m_device->GetDXVKDevice()->lockSubmission();
+      return D3D_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE LockPreparedSubmissionQueue() {
+      // The producer has already flushed and synchronized the D3D9 command stream
+      // before publishing this texture generation. Only serialize native VkQueue
+      // access here; doing another CS-thread drain on every VR submit defeats queued
+      // rendering and puts the render-thread backlog on the Present thread.
+      m_device->GetDXVKDevice()->lockSubmission();
+      return D3D_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE DrawQueuedEyeSubmitOverlays(VR* vr) {
+      if (unlikely(vr == nullptr))
+        return D3DERR_INVALIDCALL;
+
+      // The caller owns the VR texture mutex and the recursive D3D9 device lock.
+      // Keep these draws in the same copy -> decorate -> transition transaction.
+      m_device->DrawQueuedEyeSubmitOverlays(vr);
+      return D3D_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE UnlockSubmissionQueue() {
+      m_device->GetDXVKDevice()->unlockSubmission();
+      return D3D_OK;
+    }
+
     HRESULT STDMETHODCALLTYPE WaitDeviceIdle() {
       // This can be called from the VR/Present path while Source's queued material
       // thread is active. DXVK's D3D9 command chunk is device-owned mutable state, so
