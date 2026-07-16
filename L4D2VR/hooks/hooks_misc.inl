@@ -2848,6 +2848,69 @@ namespace
         up = VectorRotate(up, forward, angleOffset.z);
     }
 
+    inline void PublishViewmodelAutoGripAimPose(
+        VR* vr,
+        const vr_vm_stabilize::Mat3x4& drawDelta)
+    {
+        if (!vr)
+            return;
+
+        // DrawModelExecute is the point where the final AutoGrip rigid delta is
+        // known. Use the matching render-frame controller snapshot so the ray
+        // starts exactly where the legacy aim line would have started, then move
+        // that ray by the same delta as the visible gun.
+        struct RenderSnapshotTLSGuard
+        {
+            bool previous = false;
+            RenderSnapshotTLSGuard()
+            {
+                previous = VR::t_UseRenderFrameSnapshot;
+                VR::t_UseRenderFrameSnapshot = true;
+            }
+            ~RenderSnapshotTLSGuard()
+            {
+                VR::t_UseRenderFrameSnapshot = previous;
+            }
+        } snapshotGuard;
+
+        Vector baseDirection{};
+        QAngle::AngleVectors(vr->GetRightControllerAbsAngle(), &baseDirection, nullptr, nullptr);
+        if (baseDirection.IsZero() || VectorNormalize(baseDirection) == 0.0f)
+            return;
+
+        const Vector baseStart = vr->GetRightControllerViewmodelAbsPos() + baseDirection * 2.0f;
+        const Vector correctedStart = HooksTransformPoint(drawDelta, baseStart);
+        Vector correctedDirection = HooksTransformVector(drawDelta, baseDirection);
+        if (correctedDirection.IsZero() || VectorNormalize(correctedDirection) == 0.0f ||
+            !HooksViewmodelAutoGripVectorFinite(correctedStart) ||
+            !HooksViewmodelAutoGripVectorFinite(correctedDirection))
+        {
+            return;
+        }
+
+        const uint32_t adjustKeyHash =
+            vr->m_ViewmodelAutoGripCurrentAdjustKeyHash.load(std::memory_order_acquire);
+        if (adjustKeyHash == 0u)
+            return;
+
+        uint32_t seq = vr->m_ViewmodelAutoGripAimPoseSeq.load(std::memory_order_relaxed);
+        if (seq & 1u)
+            ++seq;
+        const uint32_t odd = seq + 1u;
+        const uint32_t even = odd + 1u;
+
+        vr->m_ViewmodelAutoGripAimPoseSeq.store(odd, std::memory_order_release);
+        vr->m_ViewmodelAutoGripAimPosX.store(correctedStart.x, std::memory_order_relaxed);
+        vr->m_ViewmodelAutoGripAimPosY.store(correctedStart.y, std::memory_order_relaxed);
+        vr->m_ViewmodelAutoGripAimPosZ.store(correctedStart.z, std::memory_order_relaxed);
+        vr->m_ViewmodelAutoGripAimDirX.store(correctedDirection.x, std::memory_order_relaxed);
+        vr->m_ViewmodelAutoGripAimDirY.store(correctedDirection.y, std::memory_order_relaxed);
+        vr->m_ViewmodelAutoGripAimDirZ.store(correctedDirection.z, std::memory_order_relaxed);
+        vr->m_ViewmodelAutoGripAimPoseTickMs.store(GetTickCount(), std::memory_order_relaxed);
+        vr->m_ViewmodelAutoGripAimPoseAdjustKeyHash.store(adjustKeyHash, std::memory_order_relaxed);
+        vr->m_ViewmodelAutoGripAimPoseSeq.store(even, std::memory_order_release);
+    }
+
     inline float HooksViewmodelAutoGripWrapAngle(float angle)
     {
         angle -= 360.0f * std::floor((angle + 180.0f) / 360.0f);
@@ -2979,19 +3042,23 @@ namespace
             return false;
         }
 
-        const int rightHand = HooksViewmodelAutoGripFindBone(
-            boneNames,
-            { "valvebiped.bip01_r_hand", "bip01_r_hand", "r_hand", "hand_r" });
-        if (rightHand < 0 || rightHand >= numBones)
-            return false;
-
         const int leftHand = HooksViewmodelAutoGripFindBone(
             boneNames,
             { "valvebiped.bip01_l_hand", "bip01_l_hand", "l_hand", "hand_l" });
-        const bool containsBothHands = leftHand >= 0 && leftHand < numBones;
+        const int rightHand = HooksViewmodelAutoGripFindBone(
+            boneNames,
+            { "valvebiped.bip01_r_hand", "bip01_r_hand", "r_hand", "hand_r" });
+        const bool hasLeftHand = leftHand >= 0 && leftHand < numBones;
+        const bool hasRightHand = rightHand >= 0 && rightHand < numBones;
+        const bool twoHandGripActive = vr->IsVrHandsTwoHandedGripPoseActive();
+        if (!hasRightHand && !(twoHandGripActive && hasLeftHand))
+            return false;
 
-        int rightBranchRoot = rightHand;
-        if (containsBothHands)
+        const bool containsBothHands = hasLeftHand && hasRightHand;
+        const bool moveWholeCompanion = !containsBothHands || twoHandGripActive;
+
+        int rightBranchRoot = hasRightHand ? rightHand : -1;
+        if (containsBothHands && !twoHandGripActive)
         {
             for (int guard = 0; guard < numBones; ++guard)
             {
@@ -3027,7 +3094,7 @@ namespace
             pBonesToWorldFinal,
             static_cast<size_t>(numBones) * sizeof(vr_vm_stabilize::Mat3x4));
 
-        if (containsBothHands)
+        if (containsBothHands && !twoHandGripActive)
         {
             for (int bone = 0; bone < numBones; ++bone)
             {
@@ -3044,9 +3111,10 @@ namespace
         }
         pBonesToWorldFinal = alignedBones;
 
-        // A single-right-hand companion can safely move its entity root as well. For a combined
-        // two-hand model, only move the right branch so the left controller-owned hand stays put.
-        if (!containsBothHands)
+        // Outside two-hand grip, preserve the controller-owned left branch. Once two-hand grip
+        // is active, move the complete companion so the visible left hand stays attached to the
+        // AutoGrip-corrected weapon; a left-only companion is accepted only in that state.
+        if (moveWholeCompanion)
         {
             QAngle targetAngles{};
             if (!HooksViewmodelAutoGripMatrixAngles(targetEntity, targetAngles))
@@ -3082,7 +3150,11 @@ namespace
                     "[VR][AutoGrip] companion model=\"%s\" fp=%08x mode=%s root=%d bones=%d",
                     modelName.c_str(),
                     companion.weaponFingerprint,
-                    containsBothHands ? "right-branch" : "whole-model",
+                    (containsBothHands && !twoHandGripActive)
+                        ? "right-branch"
+                        : (twoHandGripActive && hasLeftHand)
+                            ? "two-hand-whole-model"
+                            : "whole-model",
                     rightBranchRoot,
                     numBones);
             }
@@ -3527,6 +3599,13 @@ namespace
             drawInfoStorage.pModelToWorld = reinterpret_cast<const matrix3x4_t*>(stableModelToWorld);
         }
         pDrawInfo = &drawInfoStorage;
+
+        // Reaching this point means AutoGrip has successfully solved and applied
+        // the main weapon model (arms/hands returned through the companion path
+        // above). Queued DrawModelExecute does not reliably expose CBaseViewModel's
+        // client class, so class-gating here would silently discard every corrected
+        // ray and fall back to the old controller line.
+        PublishViewmodelAutoGripAimPose(vr, drawDelta);
 
         vr_vm_stabilize::Mat3x4 localCorrection{};
         vr_vm_stabilize::Mul(baseInverse, finalEntity, localCorrection);

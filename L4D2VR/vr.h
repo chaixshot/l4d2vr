@@ -657,6 +657,17 @@ public:
 	std::atomic<uint32_t> m_ViewmodelAutoGripCurrentAdjustKeyHash{ 0u };
 	std::atomic<uint64_t> m_ViewmodelAutoGripManualClearRequest{ 0u };
 	std::atomic<uint64_t> m_ViewmodelAutoGripManualClearCompleted{ 0u };
+	// Exact controller aim ray after applying the same rigid draw delta as the
+	// local CBaseViewModel. This avoids relying on inconsistent MOD muzzle bones.
+	std::atomic<uint32_t> m_ViewmodelAutoGripAimPoseSeq{ 0u };
+	std::atomic<uint32_t> m_ViewmodelAutoGripAimPoseTickMs{ 0u };
+	std::atomic<uint32_t> m_ViewmodelAutoGripAimPoseAdjustKeyHash{ 0u };
+	std::atomic<float> m_ViewmodelAutoGripAimPosX{ 0.0f };
+	std::atomic<float> m_ViewmodelAutoGripAimPosY{ 0.0f };
+	std::atomic<float> m_ViewmodelAutoGripAimPosZ{ 0.0f };
+	std::atomic<float> m_ViewmodelAutoGripAimDirX{ 0.0f };
+	std::atomic<float> m_ViewmodelAutoGripAimDirY{ 0.0f };
+	std::atomic<float> m_ViewmodelAutoGripAimDirZ{ 0.0f };
 
 	bool m_AdjustingViewmodel = false;
 	std::string m_AdjustingKey;

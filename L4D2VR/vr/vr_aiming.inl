@@ -863,6 +863,65 @@ namespace
         return true;
     }
 
+    static inline bool VR_TryGetAutoGripAimLinePose(
+        const VR* vr,
+        Vector& outOrigin,
+        Vector& outDirection)
+    {
+        if (!vr || !vr->m_IsVREnabled || !vr->m_ViewmodelAutoGripAlignEnabled ||
+            vr->m_MouseModeEnabled || vr->m_IsThirdPersonCamera)
+        {
+            return false;
+        }
+
+        const uint32_t currentAdjustKeyHash =
+            vr->m_ViewmodelAutoGripCurrentAdjustKeyHash.load(std::memory_order_acquire);
+        if (currentAdjustKeyHash == 0u)
+            return false;
+
+        for (int attempt = 0; attempt < 3; ++attempt)
+        {
+            const uint32_t s1 = vr->m_ViewmodelAutoGripAimPoseSeq.load(std::memory_order_acquire);
+            if (s1 == 0u)
+                return false;
+            if (s1 & 1u)
+                continue;
+
+            const Vector origin(
+                vr->m_ViewmodelAutoGripAimPosX.load(std::memory_order_relaxed),
+                vr->m_ViewmodelAutoGripAimPosY.load(std::memory_order_relaxed),
+                vr->m_ViewmodelAutoGripAimPosZ.load(std::memory_order_relaxed));
+            Vector direction(
+                vr->m_ViewmodelAutoGripAimDirX.load(std::memory_order_relaxed),
+                vr->m_ViewmodelAutoGripAimDirY.load(std::memory_order_relaxed),
+                vr->m_ViewmodelAutoGripAimDirZ.load(std::memory_order_relaxed));
+            const uint32_t tick = vr->m_ViewmodelAutoGripAimPoseTickMs.load(std::memory_order_relaxed);
+            const uint32_t poseAdjustKeyHash =
+                vr->m_ViewmodelAutoGripAimPoseAdjustKeyHash.load(std::memory_order_relaxed);
+
+            const uint32_t s2 = vr->m_ViewmodelAutoGripAimPoseSeq.load(std::memory_order_acquire);
+            if (s1 != s2 || (s2 & 1u))
+                continue;
+
+            if (poseAdjustKeyHash != currentAdjustKeyHash ||
+                (GetTickCount() - tick) > 250u ||
+                !std::isfinite(origin.x) || !std::isfinite(origin.y) || !std::isfinite(origin.z) ||
+                !std::isfinite(direction.x) || !std::isfinite(direction.y) || !std::isfinite(direction.z))
+            {
+                return false;
+            }
+
+            if (direction.IsZero() || VectorNormalize(direction) == 0.0f)
+                return false;
+
+            outOrigin = origin;
+            outDirection = direction;
+            return true;
+        }
+
+        return false;
+    }
+
     static inline bool VR_ProjectAimLinePointToView(
         const CViewSetup& view,
         const Vector& forward,
@@ -1229,10 +1288,19 @@ void VR::UpdateNonVRAimSolution(C_BasePlayer* localPlayer, bool forceFresh, bool
         return;
     }
 
-    // Use the same controller direction/origin rules as UpdateAimingLaser.
+    // Use the same corrected-gun/controller direction and origin rules as UpdateAimingLaser.
     Vector direction = m_RightControllerForward;
     if (m_IsThirdPersonCamera && !m_RightControllerForwardUnforced.IsZero())
         direction = m_RightControllerForwardUnforced;
+
+    C_BaseCombatWeapon* activeWeapon = localPlayer->GetActiveWeapon();
+    Vector autoGripAimOrigin{};
+    Vector autoGripAimDirection{};
+    const bool useAutoGripAimPose = activeWeapon &&
+        !IsThrowableWeapon(static_cast<C_WeaponCSBase*>(activeWeapon)) &&
+        VR_TryGetAutoGripAimLinePose(this, autoGripAimOrigin, autoGripAimDirection);
+    if (useAutoGripAimPose)
+        direction = autoGripAimDirection;
 
     if (direction.IsZero())
         direction = m_LastAimDirection.IsZero() ? m_LastUnforcedAimDirection : m_LastAimDirection;
@@ -1248,15 +1316,17 @@ void VR::UpdateNonVRAimSolution(C_BasePlayer* localPlayer, bool forceFresh, bool
     // In queued render + view smoothing, the rendered controller pose may differ from the
     // update-thread controller pose. Always use the same source as the aiming laser so
     // the non-VR server aim solution stays consistent with what the player sees.
-    const Vector controllerPosAbs = GetRightControllerViewmodelAbsPos();
-
-    Vector originBase = controllerPosAbs;
+    Vector originBase = useAutoGripAimPose
+        ? autoGripAimOrigin
+        : GetRightControllerViewmodelAbsPos();
     // Keep non-3P codepath identical to legacy behavior; only use the new render-center delta in 3P.
     Vector camDelta = GetAimRenderCameraDelta();
-    if (m_IsThirdPersonCamera && camDelta.LengthSqr() > (5.0f * 5.0f))
+    if (!useAutoGripAimPose && m_IsThirdPersonCamera && camDelta.LengthSqr() > (5.0f * 5.0f))
         originBase += camDelta;
 
-    Vector origin = originBase + direction * 2.0f;
+    // The cached pose is already the controller start (including its historical
+    // two-unit offset) transformed by AutoGrip's exact draw delta.
+    Vector origin = useAutoGripAimPose ? originBase : originBase + direction * 2.0f;
 
     const float maxDistance = 8192.0f;
     Vector target = origin + direction * maxDistance;
@@ -1274,7 +1344,6 @@ void VR::UpdateNonVRAimSolution(C_BasePlayer* localPlayer, bool forceFresh, bool
     CGameTrace traceP;
     Ray_t rayP;
     // Skip self + mounted gun use entity + active weapon so the ray doesn't collide with your own gun/turret.
-    C_BaseCombatWeapon* activeWeapon = localPlayer->GetActiveWeapon();
     IHandleEntity* safeActiveWeapon = VR_GetSafeTraceSkipEntity(entityList, reinterpret_cast<IHandleEntity*>(activeWeapon));
     CTraceFilterSkipThreeEntities tracefilterThree((IHandleEntity*)localPlayer, safeMountedUseEnt, safeActiveWeapon, 0);
     CTraceFilter* pTraceFilter = static_cast<CTraceFilter*>(&tracefilterThree);
@@ -1819,7 +1888,7 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
     }
 
     // Aim direction:
-    //  - Normal mode: controller forward (prefer render snapshot in queued mode).
+    //  - Normal mode: AutoGrip-corrected controller ray when available, otherwise controller forward.
     //  - Mouse mode (scheme B): start at the viewmodel anchor, but steer the ray to converge
     //    to the eye-center ray at MouseModeAimConvergeDistance.
     const Vector controllerPosAbs = GetRightControllerViewmodelAbsPos();
@@ -1827,8 +1896,14 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
     Vector controllerForward{}, controllerRight{}, controllerUp{};
     QAngle::AngleVectors(controllerAngAbs, &controllerForward, &controllerRight, &controllerUp);
 
-    Vector direction = controllerForward;
-    if (m_IsThirdPersonCamera && !m_RightControllerForwardUnforced.IsZero())
+    Vector autoGripAimOrigin{};
+    Vector autoGripAimDirection{};
+    const bool useAutoGripAimPose = !isThrowable && !useMouse &&
+        !frontViewEyeAim && !frontViewControllerEyeOrigin &&
+        VR_TryGetAutoGripAimLinePose(this, autoGripAimOrigin, autoGripAimDirection);
+
+    Vector direction = useAutoGripAimPose ? autoGripAimDirection : controllerForward;
+    if (!useAutoGripAimPose && m_IsThirdPersonCamera && !m_RightControllerForwardUnforced.IsZero())
         direction = m_RightControllerForwardUnforced;
 
     if (frontViewEyeAim)
@@ -1890,10 +1965,10 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
     }
     VectorNormalize(direction);
 
-    // Aim line origin is controller-based. In third-person the rendered camera is offset behind the player,
-    // so we translate the controller position into the rendered-camera frame.
+    // AutoGrip's cached origin is the legacy controller-ray start after receiving
+    // the exact same rigid correction as the gun. Other modes keep their old anchors.
     // We key off the actual camera delta (not just the boolean) to avoid cases where 3P detection flickers.
-    Vector originBase = controllerPosAbs;
+    Vector originBase = useAutoGripAimPose ? autoGripAimOrigin : controllerPosAbs;
     if (frontViewEyeAim || frontViewControllerEyeOrigin)
     {
         originBase = localPlayer->EyePosition();
@@ -1908,10 +1983,11 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
     }
     // Keep non-3P codepath identical to legacy behavior; only use the new render-center delta in 3P.
     Vector camDelta = GetAimRenderCameraDelta();
-    if (!frontViewEyeAim && !frontViewControllerEyeOrigin && m_IsThirdPersonCamera && camDelta.LengthSqr() > (5.0f * 5.0f))
+    if (!useAutoGripAimPose && !frontViewEyeAim && !frontViewControllerEyeOrigin &&
+        m_IsThirdPersonCamera && camDelta.LengthSqr() > (5.0f * 5.0f))
         originBase += camDelta;
 
-    Vector origin = originBase + direction * 2.0f;
+    Vector origin = useAutoGripAimPose ? originBase : originBase + direction * 2.0f;
 
     if (isThrowable)
     {
@@ -3488,6 +3564,10 @@ bool VR::BuildRenderAimLineSegment(C_BasePlayer* localPlayer, Vector& start, Vec
 
     Vector originBase = GetRightControllerViewmodelAbsPos();
     Vector dir{};
+    Vector autoGripAimOrigin{};
+    Vector autoGripAimDirection{};
+    const bool useAutoGripAimPose = !frontViewEyeAim && !frontViewControllerEyeOrigin &&
+        VR_TryGetAutoGripAimLinePose(this, autoGripAimOrigin, autoGripAimDirection);
 
     if (frontViewEyeAim || frontViewControllerEyeOrigin)
     {
@@ -3518,8 +3598,15 @@ bool VR::BuildRenderAimLineSegment(C_BasePlayer* localPlayer, Vector& start, Vec
     }
     else
     {
-        // Use the *render-frame* controller pose so the line stays glued to the hand/gun.
-        if (m_IsThirdPersonCamera)
+        if (useAutoGripAimPose)
+        {
+            // This snapshot is the render-frame controller ray after receiving the
+            // exact same rigid delta as the submitted gun, so no camera delta is needed.
+            originBase = autoGripAimOrigin;
+            dir = autoGripAimDirection;
+        }
+        // Otherwise use the *render-frame* controller pose so the legacy line stays glued to the hand.
+        else if (m_IsThirdPersonCamera)
         {
             // In third-person, the VR render camera is moved away from the player eye.
             // The local VR hand/viewmodel visuals are shifted by the same delta; apply it so the aim line stays on the hand.
@@ -3528,12 +3615,15 @@ bool VR::BuildRenderAimLineSegment(C_BasePlayer* localPlayer, Vector& start, Vec
                 originBase += camDelta;
         }
 
-        const QAngle angAbs = GetRightControllerAbsAngle();
+        if (!useAutoGripAimPose)
+        {
+            const QAngle angAbs = GetRightControllerAbsAngle();
 
-        Vector f{}, r{}, u{};
-        QAngle::AngleVectors(angAbs, &f, &r, &u);
+            Vector f{}, r{}, u{};
+            QAngle::AngleVectors(angAbs, &f, &r, &u);
 
-        dir = f;
+            dir = f;
+        }
     }
 
     if (dir.IsZero())
@@ -3544,7 +3634,7 @@ bool VR::BuildRenderAimLineSegment(C_BasePlayer* localPlayer, Vector& start, Vec
 
     VectorNormalize(dir);
 
-    start = originBase + dir * 2.0f;
+    start = useAutoGripAimPose ? originBase : originBase + dir * 2.0f;
 
     const float maxDistance = 8192.0f;
     Vector visualEnd = start + dir * maxDistance;
