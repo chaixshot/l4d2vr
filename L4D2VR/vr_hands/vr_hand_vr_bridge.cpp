@@ -4375,10 +4375,6 @@ bool VR::UpdateMagazineInteraction(
     C_BasePlayer* localPlayer,
     bool leftGripDown,
     bool leftGripJustPressed,
-
-    bool leftHandguardGripDown,
-    bool leftHandguardGripJustPressed,
-
     bool allowGameplayInputOnTwoHandedGripRelease)
 {
     const auto now = std::chrono::steady_clock::now();
@@ -5524,7 +5520,7 @@ bool VR::UpdateMagazineInteraction(
     {
         clearMountFriendlyGripContact();
 
-        if (!leftHandguardGripDown && twoHandedGripRuntimeAllowed && m_VrHandsTwoHandedGripActive)
+        if (leftGripJustPressed && twoHandedGripRuntimeAllowed && m_VrHandsTwoHandedGripActive)
         {
             m_VrHandsTwoHandedGripActive = false;
             m_VrHandsTwoHandedGripWeaponId = 0;
@@ -5539,7 +5535,12 @@ bool VR::UpdateMagazineInteraction(
             }
             return false;
         }
-        else if (leftHandguardGripDown && twoHandedGripRuntimeAllowed && !m_VrHandsTwoHandedGripActive)
+
+        if (leftGripJustPressed &&
+            twoHandedGripRuntimeAllowed &&
+            !IsMagazineInteractionManualActive() &&
+            !m_MagazineInteractionLeftHandHolding &&
+            !leftHandTouchesMagazineForGripExclusion())
         {
             float twoHandTargetDistance = FLT_MAX;
             if (leftHandTouchesTwoHandedGripTarget(twoHandTargetDistance))
