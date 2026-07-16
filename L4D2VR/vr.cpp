@@ -523,9 +523,13 @@ void VR::UpdateHudLiftGestureState(bool inGame)
     if (!inGame || !m_System)
     {
         stopLiftHudCapture(true);
+        m_HudShowActionHeld.store(0, std::memory_order_release);
         m_HudToggleState = false;
         return;
     }
+
+    const bool showHudHeld = PressedDigitalAction(m_ToggleHUD, false);
+    m_HudShowActionHeld.store(showHudHeld ? 1u : 0u, std::memory_order_release);
 
     if (m_HudAlwaysVisible)
     {
@@ -546,8 +550,12 @@ void VR::UpdateHudLiftGestureState(bool inGame)
         leftControllerIndex < vr::k_unMaxTrackedDeviceCount &&
         m_Poses[leftControllerIndex].bPoseIsValid;
 
+    // When the off-hand is actively gripping a two-handed weapon, its normal aiming
+    // movement must never be interpreted as a request to reveal the HUD. ShowHUD
+    // remains available as the explicit, hold-to-show action.
+    const bool offhandGripActive = m_VrHandsTwoHandedGripActive;
     bool raised = false;
-    if (leftControllerValid)
+    if (leftControllerValid && !offhandGripActive)
     {
         const float scale = (std::max)(1.0f, m_VRScale);
 
@@ -587,6 +595,7 @@ void VR::UpdateHudLiftGestureState(bool inGame)
 bool VR::IsGameplayHudRequested() const
 {
     return m_HudAlwaysVisible ||
+        m_HudShowActionHeld.load(std::memory_order_acquire) != 0 ||
         m_HudLiftGestureActive.load(std::memory_order_acquire) != 0;
 }
 

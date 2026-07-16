@@ -1058,6 +1058,8 @@ void VR::ParseConfigFile()
         {"menuright", &m_MenuRight},
         {"spray", &m_Spray},
         {"scoreboard", &m_Scoreboard},
+        {"showhud", &m_ToggleHUD},
+        // Compatibility alias for existing combo settings.
         {"togglehud", &m_ToggleHUD},
         {"pause", &m_Pause}
     };

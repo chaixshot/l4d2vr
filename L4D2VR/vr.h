@@ -1596,8 +1596,9 @@ public:
 	bool m_HudFollowHmdMovement = false;
 	bool m_HudAlwaysVisible = false;
 	bool m_HudToggleState = false;
-	// Runtime HUD request used by HudAlwaysVisible=false. Raised off-hand temporarily enables
-	// normal VGUI capture and top HUD display instead of only showing a stale overlay.
+	// Runtime HUD requests used by HudAlwaysVisible=false. ShowHUD is a hold action;
+	// the off-hand lift gesture is suppressed while that hand is gripping a two-handed weapon.
+	std::atomic<uint32_t> m_HudShowActionHeld{ 0 };
 	std::atomic<uint32_t> m_HudLiftGestureActive{ 0 };
 	std::chrono::steady_clock::time_point m_HudLiftGestureVisibleUntil{};
 	std::chrono::steady_clock::time_point m_HudChatVisibleUntil{};
