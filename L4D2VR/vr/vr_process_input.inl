@@ -1483,7 +1483,7 @@ void VR::ProcessInput()
     const bool wantReload =
         magazineInteractionReloadPulse ||
         (!crouchButtonDown && reloadButtonDown && !adjustViewmodelActive && !scopeAdjustActive);
-    if (wantReload && !m_ReloadCmdOwned)
+    if (wantReload && !m_ReloadCmdOwned && !m_MagazineInteractionEnabled)
     {
         m_Game->ClientCmd_Unrestricted("+reload");
         m_ReloadCmdOwned = true;
