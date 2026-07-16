@@ -2184,6 +2184,1393 @@ namespace
         return std::string(text);
     }
 
+    inline int HooksNativeViewmodelHandsOnlyBoneSide(const std::string& lowerName);
+
+    struct HooksViewmodelAutoGripLayout
+    {
+        bool parsed = false;
+        bool supported = false;
+        bool explicitAttachment = false;
+        bool hasFingerBasis = false;
+        int numBones = 0;
+        int handBone = -1;
+        std::array<int, 4> fingerBones{ { -1, -1, -1, -1 } };
+        int attachmentBone = -1;
+        vr_vm_stabilize::Mat3x4 attachmentLocal{};
+        std::string anchorName;
+    };
+
+    struct HooksViewmodelAutoGripCacheEntry
+    {
+        HooksViewmodelAutoGripLayout layout{};
+        bool candidateValid = false;
+        bool locked = false;
+        bool persistenceChecked = false;
+        int stableSamples = 0;
+        uint32_t lastSampleToken = 0;
+        float palmCenterFraction = -1.0f;
+        vr_vm_stabilize::Mat3x4 candidateLocal{};
+        vr_vm_stabilize::Mat3x4 lockedLocal{};
+        std::chrono::steady_clock::time_point lockedAt{};
+        std::chrono::steady_clock::time_point lastApplyLog{};
+    };
+
+    struct HooksViewmodelAutoGripPersistentEntry
+    {
+        float palmCenterFraction = 0.45f;
+        vr_vm_stabilize::Mat3x4 lockedLocal{};
+        std::string modelName;
+    };
+
+    struct HooksViewmodelAutoGripCompanionState
+    {
+        uint32_t weaponFingerprint = 0;
+        bool valid = false;
+        vr_vm_stabilize::Mat3x4 localCorrection{};
+        std::chrono::steady_clock::time_point updatedAt{};
+        std::chrono::steady_clock::time_point lastApplyLog{};
+    };
+
+    std::mutex s_ViewmodelAutoGripMutex;
+    std::unordered_map<uint32_t, HooksViewmodelAutoGripCacheEntry> s_ViewmodelAutoGripByFingerprint;
+    std::unordered_map<VR*, std::unordered_map<int, HooksViewmodelAutoGripCompanionState>>
+        s_ViewmodelAutoGripCompanionByVr;
+    std::mutex s_ViewmodelAutoGripPersistenceMutex;
+    bool s_ViewmodelAutoGripPersistenceLoaded = false;
+    std::string s_ViewmodelAutoGripPersistencePath;
+    std::unordered_map<uint32_t, HooksViewmodelAutoGripPersistentEntry>
+        s_ViewmodelAutoGripPersistentByKey;
+
+    inline bool HooksViewmodelAutoGripVectorFinite(const Vector& value)
+    {
+        return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z) &&
+            std::fabs(value.x) < 100000.0f && std::fabs(value.y) < 100000.0f && std::fabs(value.z) < 100000.0f;
+    }
+
+    inline Vector HooksViewmodelAutoGripMatrixAxis(const vr_vm_stabilize::Mat3x4& matrix, int column)
+    {
+        return Vector(matrix.m[0][column], matrix.m[1][column], matrix.m[2][column]);
+    }
+
+    inline bool HooksViewmodelAutoGripBuildRigidMatrix(
+        const Vector& origin,
+        Vector axisX,
+        Vector axisY,
+        Vector axisZHint,
+        vr_vm_stabilize::Mat3x4& out)
+    {
+        if (!HooksViewmodelAutoGripVectorFinite(origin) ||
+            !HooksViewmodelAutoGripVectorFinite(axisX) ||
+            !HooksViewmodelAutoGripVectorFinite(axisY) ||
+            !HooksViewmodelAutoGripVectorFinite(axisZHint) ||
+            VectorNormalize(axisX) == 0.0f)
+        {
+            return false;
+        }
+
+        axisY -= axisX * DotProduct(axisX, axisY);
+        if (VectorNormalize(axisY) == 0.0f)
+            return false;
+
+        Vector axisZ = CrossProduct(axisX, axisY);
+        if (VectorNormalize(axisZ) == 0.0f)
+            return false;
+        if (VectorNormalize(axisZHint) != 0.0f && DotProduct(axisZ, axisZHint) < 0.0f)
+        {
+            axisY *= -1.0f;
+            axisZ *= -1.0f;
+        }
+
+        out = {};
+        out.m[0][0] = axisX.x; out.m[0][1] = axisY.x; out.m[0][2] = axisZ.x; out.m[0][3] = origin.x;
+        out.m[1][0] = axisX.y; out.m[1][1] = axisY.y; out.m[1][2] = axisZ.y; out.m[1][3] = origin.y;
+        out.m[2][0] = axisX.z; out.m[2][1] = axisY.z; out.m[2][2] = axisZ.z; out.m[2][3] = origin.z;
+        return true;
+    }
+
+    inline bool HooksViewmodelAutoGripNormalizeRigidMatrix(
+        const vr_vm_stabilize::Mat3x4& input,
+        vr_vm_stabilize::Mat3x4& out)
+    {
+        return HooksViewmodelAutoGripBuildRigidMatrix(
+            vr_vm_stabilize::GetOrigin(input),
+            HooksViewmodelAutoGripMatrixAxis(input, 0),
+            HooksViewmodelAutoGripMatrixAxis(input, 1),
+            HooksViewmodelAutoGripMatrixAxis(input, 2),
+            out);
+    }
+
+    inline std::string HooksViewmodelAutoGripPersistencePath(const VR* vr)
+    {
+        if (vr && !vr->m_ViewmodelAdjustmentSavePath.empty())
+        {
+            const std::string& adjustmentPath = vr->m_ViewmodelAdjustmentSavePath;
+            const size_t slash = adjustmentPath.find_last_of("\\/");
+            if (slash != std::string::npos)
+                return adjustmentPath.substr(0, slash + 1u) + "viewmodel_auto_grip_cache.txt";
+        }
+        return "viewmodel_auto_grip_cache.txt";
+    }
+
+    inline uint32_t HooksBuildViewmodelAutoGripPersistentKey(
+        void* drawState,
+        const std::string& modelName)
+    {
+        uint32_t hash = 2166136261u;
+        hash = HooksFnv1aUpdateString(hash, vr_vm_stabilize::ToLowerAscii(modelName));
+
+        const uint8_t* studioHdr = nullptr;
+        int studioChecksum = 0;
+        int studioLength = 0;
+        if (vr_vm_stabilize::TryGetStudioHdrFromDrawState(drawState, studioHdr) && studioHdr)
+        {
+            vr_vm_stabilize::SafeRead(studioHdr + 0x08, studioChecksum);
+            vr_vm_stabilize::SafeRead(studioHdr + 0x4C, studioLength);
+        }
+        hash = HooksFnv1aUpdate(hash, &studioChecksum, sizeof(studioChecksum));
+        hash = HooksFnv1aUpdate(hash, &studioLength, sizeof(studioLength));
+
+        std::vector<std::string> boneNames;
+        std::vector<int> boneParents;
+        int numBones = 0;
+        int boneIndex = 0;
+        int stride = 0;
+        int numBonesOffset = 0;
+        if (vr_vm_stabilize::TryCollectBoneNamesFromDrawState(
+                drawState,
+                boneNames,
+                boneParents,
+                numBones,
+                boneIndex,
+                stride,
+                numBonesOffset) &&
+            numBones > 0 && numBones <= 512)
+        {
+            const uint32_t boneSignature = HooksBuildViewmodelBoneSignature(
+                modelName,
+                boneNames,
+                boneParents,
+                numBones,
+                boneIndex,
+                stride,
+                numBonesOffset);
+            hash = HooksFnv1aUpdate(hash, &boneSignature, sizeof(boneSignature));
+        }
+
+        return hash == 0 ? 1u : hash;
+    }
+
+    inline void HooksViewmodelAutoGripEnsurePersistenceLoaded(VR* vr)
+    {
+        const std::string path = HooksViewmodelAutoGripPersistencePath(vr);
+        std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripPersistenceMutex);
+        if (s_ViewmodelAutoGripPersistenceLoaded &&
+            s_ViewmodelAutoGripPersistencePath == path)
+        {
+            return;
+        }
+
+        s_ViewmodelAutoGripPersistenceLoaded = true;
+        s_ViewmodelAutoGripPersistencePath = path;
+        s_ViewmodelAutoGripPersistentByKey.clear();
+
+        std::ifstream input(path, std::ios::in);
+        if (!input)
+            return;
+
+        std::string line;
+        while (std::getline(input, line))
+        {
+            if (line.empty() || line[0] == '#')
+                continue;
+
+            std::istringstream parser(line);
+            std::string version;
+            std::string keyText;
+            HooksViewmodelAutoGripPersistentEntry entry{};
+            if (!(parser >> version >> keyText >> entry.palmCenterFraction) || version != "v1" ||
+                !std::isfinite(entry.palmCenterFraction) ||
+                entry.palmCenterFraction < 0.0f || entry.palmCenterFraction > 1.0f)
+            {
+                continue;
+            }
+
+            uint32_t persistentKey = 0;
+            std::istringstream keyParser(keyText);
+            keyParser >> std::hex >> persistentKey;
+            if (!keyParser || persistentKey == 0)
+                continue;
+
+            bool matrixParsed = true;
+            for (int row = 0; row < 3 && matrixParsed; ++row)
+            {
+                for (int column = 0; column < 4; ++column)
+                {
+                    if (!(parser >> entry.lockedLocal.m[row][column]) ||
+                        !std::isfinite(entry.lockedLocal.m[row][column]))
+                    {
+                        matrixParsed = false;
+                        break;
+                    }
+                }
+            }
+            if (!matrixParsed)
+                continue;
+
+            parser >> std::quoted(entry.modelName);
+            vr_vm_stabilize::Mat3x4 normalized{};
+            if (!HooksViewmodelAutoGripNormalizeRigidMatrix(entry.lockedLocal, normalized))
+                continue;
+            entry.lockedLocal = normalized;
+            s_ViewmodelAutoGripPersistentByKey[persistentKey] = std::move(entry);
+        }
+
+        if (vr && vr->m_ViewmodelAutoGripAlignDebugLog)
+        {
+            Game::logMsg(
+                "[VR][AutoGrip] cache loaded path=\"%s\" entries=%u",
+                path.c_str(),
+                static_cast<unsigned int>(s_ViewmodelAutoGripPersistentByKey.size()));
+        }
+    }
+
+    inline bool HooksViewmodelAutoGripTryRestorePersistent(
+        VR* vr,
+        uint32_t persistentKey,
+        float palmCenterFraction,
+        bool explicitAttachment,
+        vr_vm_stabilize::Mat3x4& outLockedLocal)
+    {
+        if (!vr || persistentKey == 0)
+            return false;
+        HooksViewmodelAutoGripEnsurePersistenceLoaded(vr);
+
+        HooksViewmodelAutoGripPersistentEntry entry{};
+        {
+            std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripPersistenceMutex);
+            const auto found = s_ViewmodelAutoGripPersistentByKey.find(persistentKey);
+            if (found == s_ViewmodelAutoGripPersistentByKey.end())
+                return false;
+            entry = found->second;
+        }
+
+        if (!explicitAttachment &&
+            std::fabs(entry.palmCenterFraction - palmCenterFraction) > 0.0001f)
+        {
+            return false;
+        }
+        return HooksViewmodelAutoGripNormalizeRigidMatrix(entry.lockedLocal, outLockedLocal);
+    }
+
+    inline bool HooksViewmodelAutoGripStorePersistent(
+        VR* vr,
+        uint32_t persistentKey,
+        float palmCenterFraction,
+        const vr_vm_stabilize::Mat3x4& lockedLocal,
+        const std::string& modelName)
+    {
+        if (!vr || persistentKey == 0)
+            return false;
+
+        vr_vm_stabilize::Mat3x4 normalized{};
+        if (!HooksViewmodelAutoGripNormalizeRigidMatrix(lockedLocal, normalized))
+            return false;
+        HooksViewmodelAutoGripEnsurePersistenceLoaded(vr);
+
+        std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripPersistenceMutex);
+        HooksViewmodelAutoGripPersistentEntry entry{};
+        entry.palmCenterFraction = std::clamp(palmCenterFraction, 0.0f, 1.0f);
+        entry.lockedLocal = normalized;
+        entry.modelName = modelName;
+        s_ViewmodelAutoGripPersistentByKey[persistentKey] = std::move(entry);
+
+        std::vector<uint32_t> keys;
+        keys.reserve(s_ViewmodelAutoGripPersistentByKey.size());
+        for (const auto& [key, unused] : s_ViewmodelAutoGripPersistentByKey)
+        {
+            (void)unused;
+            keys.push_back(key);
+        }
+        std::sort(keys.begin(), keys.end());
+
+        const std::string path = s_ViewmodelAutoGripPersistencePath.empty()
+            ? HooksViewmodelAutoGripPersistencePath(vr)
+            : s_ViewmodelAutoGripPersistencePath;
+        const std::string temporaryPath = path + ".tmp";
+        std::ofstream output(temporaryPath, std::ios::out | std::ios::trunc);
+        if (!output)
+            return false;
+
+        output << "# L4D2VR ViewmodelAutoGrip persistent cache v1\n";
+        output << "# version key palmCenterFraction matrix3x4 modelName\n";
+        output << std::scientific << std::setprecision(9);
+        for (uint32_t key : keys)
+        {
+            const auto found = s_ViewmodelAutoGripPersistentByKey.find(key);
+            if (found == s_ViewmodelAutoGripPersistentByKey.end())
+                continue;
+            const HooksViewmodelAutoGripPersistentEntry& saved = found->second;
+            output << "v1 "
+                << std::hex << std::setw(8) << std::setfill('0') << key
+                << std::dec << std::setfill(' ') << ' '
+                << saved.palmCenterFraction;
+            for (int row = 0; row < 3; ++row)
+            {
+                for (int column = 0; column < 4; ++column)
+                    output << ' ' << saved.lockedLocal.m[row][column];
+            }
+            output << ' ' << std::quoted(saved.modelName) << '\n';
+        }
+        output.flush();
+        const bool writeSucceeded = output.good();
+        output.close();
+        if (!writeSucceeded ||
+            !MoveFileExA(
+                temporaryPath.c_str(),
+                path.c_str(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        {
+            DeleteFileA(temporaryPath.c_str());
+            return false;
+        }
+
+        if (vr->m_ViewmodelAutoGripAlignDebugLog)
+        {
+            Game::logMsg(
+                "[VR][AutoGrip] cache saved path=\"%s\" key=%08x model=\"%s\" entries=%u",
+                path.c_str(),
+                persistentKey,
+                modelName.c_str(),
+                static_cast<unsigned int>(s_ViewmodelAutoGripPersistentByKey.size()));
+        }
+        return true;
+    }
+
+    inline bool HooksViewmodelAutoGripNameEndsWith(const std::string& lowerName, const char* lowerSuffix)
+    {
+        if (!lowerSuffix || !*lowerSuffix)
+            return false;
+        const size_t suffixLength = std::strlen(lowerSuffix);
+        if (lowerName.size() < suffixLength)
+            return false;
+        return lowerName.compare(lowerName.size() - suffixLength, suffixLength, lowerSuffix) == 0;
+    }
+
+    inline int HooksViewmodelAutoGripFindBone(
+        const std::vector<std::string>& boneNames,
+        const std::initializer_list<const char*>& suffixes)
+    {
+        for (size_t bone = 0; bone < boneNames.size(); ++bone)
+        {
+            const std::string lower = vr_vm_stabilize::ToLowerAscii(boneNames[bone]);
+            for (const char* suffix : suffixes)
+            {
+                if (HooksViewmodelAutoGripNameEndsWith(lower, suffix))
+                    return static_cast<int>(bone);
+            }
+        }
+        return -1;
+    }
+
+    inline bool HooksViewmodelAutoGripTryFindAttachment(
+        void* drawState,
+        int numBones,
+        int& outBone,
+        vr_vm_stabilize::Mat3x4& outLocal,
+        std::string& outName,
+        bool& outAttachmentTableParsed)
+    {
+        outBone = -1;
+        outLocal = {};
+        outName.clear();
+        outAttachmentTableParsed = false;
+
+        const uint8_t* studioHdr = nullptr;
+        if (!drawState || numBones <= 0 ||
+            !vr_vm_stabilize::TryGetStudioHdrFromDrawState(drawState, studioHdr) || !studioHdr)
+        {
+            return false;
+        }
+
+        int studioLength = 0;
+        int numAttachments = 0;
+        int attachmentIndex = 0;
+        vr_vm_stabilize::SafeRead(studioHdr + 0x4C, studioLength);
+        if (!vr_vm_stabilize::SafeRead(studioHdr + 0xF0, numAttachments) ||
+            !vr_vm_stabilize::SafeRead(studioHdr + 0xF4, attachmentIndex))
+        {
+            return false;
+        }
+
+        if (numAttachments == 0)
+        {
+            outAttachmentTableParsed = true;
+            return false;
+        }
+        if (numAttachments < 0 || numAttachments > 256 || attachmentIndex <= 0 || attachmentIndex > 0x200000)
+            return false;
+        if (studioLength > 0 &&
+            (attachmentIndex >= studioLength ||
+                static_cast<size_t>(attachmentIndex) + static_cast<size_t>(numAttachments) * 92u > static_cast<size_t>(studioLength)))
+        {
+            return false;
+        }
+
+        outAttachmentTableParsed = true;
+        static constexpr int kAttachmentStride = 92;
+        for (int attachment = 0; attachment < numAttachments; ++attachment)
+        {
+            const size_t attachmentOffset =
+                static_cast<size_t>(attachmentIndex) + static_cast<size_t>(attachment) * kAttachmentStride;
+            const uint8_t* attachmentBase = studioHdr + attachmentOffset;
+
+            int nameOffset = 0;
+            int localBone = -1;
+            if (!vr_vm_stabilize::SafeRead(attachmentBase + 0, nameOffset) ||
+                !vr_vm_stabilize::SafeRead(attachmentBase + 8, localBone) ||
+                nameOffset <= 0 || localBone < 0 || localBone >= numBones)
+            {
+                continue;
+            }
+
+            const size_t nameAddressOffset = attachmentOffset + static_cast<size_t>(nameOffset);
+            if (studioLength > 0 && nameAddressOffset >= static_cast<size_t>(studioLength))
+                continue;
+
+            std::string name;
+            if (!vr_vm_stabilize::TryReadCStringSafe(
+                    reinterpret_cast<const char*>(studioHdr + nameAddressOffset),
+                    name))
+            {
+                continue;
+            }
+
+            const std::string lower = vr_vm_stabilize::ToLowerAscii(name);
+            if (lower != "vr_grip" && lower != "vr_grip_r" &&
+                lower != "vr_weapon_grip" && lower != "weapon_vr_grip")
+            {
+                continue;
+            }
+
+            vr_vm_stabilize::Mat3x4 local{};
+            if (!vr_vm_stabilize::SafeRead(attachmentBase + 12, local))
+                continue;
+
+            outBone = localBone;
+            outLocal = local;
+            outName = name;
+            return true;
+        }
+        return false;
+    }
+
+    inline bool HooksViewmodelAutoGripResolveLayout(
+        void* drawState,
+        HooksViewmodelAutoGripLayout& outLayout)
+    {
+        outLayout = {};
+
+        std::vector<std::string> boneNames;
+        std::vector<int> boneParents;
+        int numBones = 0;
+        int boneIndex = 0;
+        int stride = 0;
+        int numBonesOffset = 0;
+        const bool namesParsed = vr_vm_stabilize::TryCollectBoneNamesFromDrawState(
+            drawState,
+            boneNames,
+            boneParents,
+            numBones,
+            boneIndex,
+            stride,
+            numBonesOffset);
+        if (!namesParsed && !vr_vm_stabilize::TryGetNumBonesFromDrawState(drawState, numBones))
+            return false;
+        if (numBones <= 0 || numBones > 512)
+            return false;
+
+        outLayout.numBones = numBones;
+        bool attachmentTableParsed = false;
+        if (HooksViewmodelAutoGripTryFindAttachment(
+                drawState,
+                numBones,
+                outLayout.attachmentBone,
+                outLayout.attachmentLocal,
+                outLayout.anchorName,
+                attachmentTableParsed))
+        {
+            outLayout.parsed = true;
+            outLayout.supported = true;
+            outLayout.explicitAttachment = true;
+            return true;
+        }
+
+        if (!namesParsed)
+        {
+            outLayout.parsed = attachmentTableParsed;
+            return outLayout.parsed;
+        }
+
+        outLayout.parsed = true;
+        outLayout.handBone = HooksViewmodelAutoGripFindBone(
+            boneNames,
+            { "valvebiped.bip01_r_hand", "bip01_r_hand", "r_hand", "hand_r" });
+        outLayout.fingerBones[0] = HooksViewmodelAutoGripFindBone(
+            boneNames,
+            { "valvebiped.bip01_r_finger1", "bip01_r_finger1" });
+        outLayout.fingerBones[1] = HooksViewmodelAutoGripFindBone(
+            boneNames,
+            { "valvebiped.bip01_r_finger2", "bip01_r_finger2" });
+        outLayout.fingerBones[2] = HooksViewmodelAutoGripFindBone(
+            boneNames,
+            { "valvebiped.bip01_r_finger3", "bip01_r_finger3" });
+        outLayout.fingerBones[3] = HooksViewmodelAutoGripFindBone(
+            boneNames,
+            { "valvebiped.bip01_r_finger4", "bip01_r_finger4" });
+
+        outLayout.hasFingerBasis = outLayout.handBone >= 0 &&
+            std::all_of(
+                outLayout.fingerBones.begin(),
+                outLayout.fingerBones.end(),
+                [](int bone) { return bone >= 0; });
+        outLayout.supported = outLayout.handBone >= 0;
+        outLayout.anchorName = outLayout.hasFingerBasis
+            ? "ValveBiped right palm"
+            : outLayout.supported
+                ? "ValveBiped right hand (position only)"
+                : "none";
+        return true;
+    }
+
+    inline bool HooksViewmodelAutoGripBuildAnchorWorld(
+        const HooksViewmodelAutoGripLayout& layout,
+        const vr_vm_stabilize::Mat3x4* bones,
+        float palmCenterFraction,
+        const vr_vm_stabilize::Mat3x4& entityWorld,
+        vr_vm_stabilize::Mat3x4& outAnchorWorld)
+    {
+        if (!bones || layout.numBones <= 0)
+            return false;
+
+        auto readBone = [&](int bone, vr_vm_stabilize::Mat3x4& out) -> bool
+            {
+                return bone >= 0 && bone < layout.numBones &&
+                    vr_vm_stabilize::SafeRead(bones + bone, out);
+            };
+
+        if (layout.explicitAttachment)
+        {
+            vr_vm_stabilize::Mat3x4 boneWorld{};
+            vr_vm_stabilize::Mat3x4 attachmentWorld{};
+            if (!readBone(layout.attachmentBone, boneWorld))
+                return false;
+            vr_vm_stabilize::Mul(boneWorld, layout.attachmentLocal, attachmentWorld);
+            return HooksViewmodelAutoGripNormalizeRigidMatrix(attachmentWorld, outAnchorWorld);
+        }
+
+        vr_vm_stabilize::Mat3x4 handWorld{};
+        if (!readBone(layout.handBone, handWorld))
+            return false;
+        const Vector handOrigin = vr_vm_stabilize::GetOrigin(handWorld);
+        if (!HooksViewmodelAutoGripVectorFinite(handOrigin))
+            return false;
+
+        if (layout.hasFingerBasis)
+        {
+            std::array<Vector, 4> fingerOrigins{};
+            Vector average(0.0f, 0.0f, 0.0f);
+            for (size_t finger = 0; finger < fingerOrigins.size(); ++finger)
+            {
+                vr_vm_stabilize::Mat3x4 fingerWorld{};
+                if (!readBone(layout.fingerBones[finger], fingerWorld))
+                    return false;
+                fingerOrigins[finger] = vr_vm_stabilize::GetOrigin(fingerWorld);
+                if (!HooksViewmodelAutoGripVectorFinite(fingerOrigins[finger]))
+                    return false;
+                average += fingerOrigins[finger];
+            }
+            average *= 0.25f;
+
+            const Vector palmForward = average - handOrigin;
+            const Vector palmSide = fingerOrigins[0] - fingerOrigins[3];
+            const Vector palmNormal = CrossProduct(palmForward, palmSide);
+            const Vector palmOrigin = handOrigin + palmForward * std::clamp(palmCenterFraction, 0.0f, 1.0f);
+            return HooksViewmodelAutoGripBuildRigidMatrix(
+                palmOrigin,
+                palmForward,
+                palmSide,
+                palmNormal,
+                outAnchorWorld);
+        }
+
+        // A hand-only skeleton is still useful for position correction. Keep the current
+        // entity orientation so a non-standard hand-bone axis can never flip the weapon.
+        outAnchorWorld = entityWorld;
+        outAnchorWorld.m[0][3] = handOrigin.x;
+        outAnchorWorld.m[1][3] = handOrigin.y;
+        outAnchorWorld.m[2][3] = handOrigin.z;
+        return true;
+    }
+
+    inline bool HooksViewmodelAutoGripLocalSamplesMatch(
+        const vr_vm_stabilize::Mat3x4& left,
+        const vr_vm_stabilize::Mat3x4& right)
+    {
+        const Vector positionDelta = vr_vm_stabilize::GetOrigin(left) - vr_vm_stabilize::GetOrigin(right);
+        if (positionDelta.LengthSqr() > (0.35f * 0.35f))
+            return false;
+
+        constexpr float kMinAxisDot = 0.9986295f; // cos(3 degrees)
+        for (int axisIndex = 0; axisIndex < 3; ++axisIndex)
+        {
+            Vector leftAxis = HooksViewmodelAutoGripMatrixAxis(left, axisIndex);
+            Vector rightAxis = HooksViewmodelAutoGripMatrixAxis(right, axisIndex);
+            if (VectorNormalize(leftAxis) == 0.0f || VectorNormalize(rightAxis) == 0.0f ||
+                DotProduct(leftAxis, rightAxis) < kMinAxisDot)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    inline void HooksViewmodelAutoGripRotateBasis(
+        Vector& forward,
+        Vector& right,
+        Vector& up,
+        const QAngle& angleOffset)
+    {
+        forward = VectorRotate(forward, up, angleOffset.y);
+        right = VectorRotate(right, up, angleOffset.y);
+        forward = VectorRotate(forward, right, angleOffset.x);
+        up = VectorRotate(up, right, angleOffset.x);
+        right = VectorRotate(right, forward, angleOffset.z);
+        up = VectorRotate(up, forward, angleOffset.z);
+    }
+
+    inline float HooksViewmodelAutoGripWrapAngle(float angle)
+    {
+        angle -= 360.0f * std::floor((angle + 180.0f) / 360.0f);
+        return angle;
+    }
+
+    inline bool HooksViewmodelAutoGripMatrixAngles(
+        const vr_vm_stabilize::Mat3x4& matrix,
+        QAngle& outAngles)
+    {
+        Vector forward = HooksViewmodelAutoGripMatrixAxis(matrix, 0);
+        Vector up = HooksViewmodelAutoGripMatrixAxis(matrix, 2);
+        if (VectorNormalize(forward) == 0.0f || VectorNormalize(up) == 0.0f)
+            return false;
+        QAngle::VectorAngles(forward, up, outAngles);
+        outAngles.x = HooksViewmodelAutoGripWrapAngle(outAngles.x);
+        outAngles.y = HooksViewmodelAutoGripWrapAngle(outAngles.y);
+        outAngles.z = HooksViewmodelAutoGripWrapAngle(outAngles.z);
+        return std::isfinite(outAngles.x) && std::isfinite(outAngles.y) && std::isfinite(outAngles.z);
+    }
+
+    inline bool HooksViewmodelAutoGripBoneDescendsFrom(
+        int bone,
+        int ancestor,
+        const std::vector<int>& boneParents)
+    {
+        if (bone < 0 || ancestor < 0 || bone >= static_cast<int>(boneParents.size()))
+            return false;
+
+        int current = bone;
+        for (int guard = 0; guard < static_cast<int>(boneParents.size()); ++guard)
+        {
+            if (current == ancestor)
+                return true;
+            if (current < 0 || current >= static_cast<int>(boneParents.size()))
+                break;
+            const int parent = boneParents[static_cast<size_t>(current)];
+            if (parent == current)
+                break;
+            current = parent;
+        }
+        return false;
+    }
+
+    inline bool ApplyViewmodelAutoGripCompanionAlignment(
+        VR* vr,
+        void* drawState,
+        const std::string& modelName,
+        ModelRenderInfo_t& drawInfoStorage,
+        const ModelRenderInfo_t*& pDrawInfo,
+        void*& pBonesToWorldFinal)
+    {
+        if (!vr || !drawState || !pDrawInfo || !pBonesToWorldFinal)
+            return false;
+
+        HooksViewmodelAutoGripCompanionState companion{};
+        const int entityIndex = pDrawInfo->entity_index;
+        int companionEntityKey = entityIndex;
+        {
+            std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripMutex);
+            const auto ownerFound = s_ViewmodelAutoGripCompanionByVr.find(vr);
+            if (ownerFound == s_ViewmodelAutoGripCompanionByVr.end())
+                return false;
+            const auto entityFound = ownerFound->second.find(entityIndex);
+            if (entityFound != ownerFound->second.end() && entityFound->second.valid)
+            {
+                companion = entityFound->second;
+            }
+            else
+            {
+                // Bonemerged arms are not guaranteed to reuse the weapon viewmodel's entity index.
+                // Fall back to the newest valid correction owned by this VR instance.
+                bool foundFallback = false;
+                for (const auto& [candidateEntity, candidate] : ownerFound->second)
+                {
+                    if (!candidate.valid ||
+                        candidate.updatedAt.time_since_epoch().count() == 0)
+                    {
+                        continue;
+                    }
+                    if (!foundFallback || candidate.updatedAt > companion.updatedAt)
+                    {
+                        companion = candidate;
+                        companionEntityKey = candidateEntity;
+                        foundFallback = true;
+                    }
+                }
+                if (!foundFallback)
+                    return false;
+            }
+        }
+
+        const auto now = std::chrono::steady_clock::now();
+        if (companion.updatedAt.time_since_epoch().count() == 0 ||
+            std::chrono::duration<float>(now - companion.updatedAt).count() > 0.35f)
+        {
+            std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripMutex);
+            auto ownerFound = s_ViewmodelAutoGripCompanionByVr.find(vr);
+            if (ownerFound != s_ViewmodelAutoGripCompanionByVr.end())
+            {
+                auto entityFound = ownerFound->second.find(companionEntityKey);
+                if (entityFound != ownerFound->second.end() &&
+                    entityFound->second.weaponFingerprint == companion.weaponFingerprint)
+                {
+                    entityFound->second.valid = false;
+                }
+            }
+            return false;
+        }
+
+        std::vector<std::string> boneNames;
+        std::vector<int> boneParents;
+        int numBones = 0;
+        int boneIndex = 0;
+        int stride = 0;
+        int numBonesOffset = 0;
+        if (!vr_vm_stabilize::TryCollectBoneNamesFromDrawState(
+                drawState,
+                boneNames,
+                boneParents,
+                numBones,
+                boneIndex,
+                stride,
+                numBonesOffset) ||
+            numBones <= 0 || numBones > 512 ||
+            static_cast<int>(boneNames.size()) < numBones ||
+            static_cast<int>(boneParents.size()) < numBones)
+        {
+            return false;
+        }
+
+        const int rightHand = HooksViewmodelAutoGripFindBone(
+            boneNames,
+            { "valvebiped.bip01_r_hand", "bip01_r_hand", "r_hand", "hand_r" });
+        if (rightHand < 0 || rightHand >= numBones)
+            return false;
+
+        const int leftHand = HooksViewmodelAutoGripFindBone(
+            boneNames,
+            { "valvebiped.bip01_l_hand", "bip01_l_hand", "l_hand", "hand_l" });
+        const bool containsBothHands = leftHand >= 0 && leftHand < numBones;
+
+        int rightBranchRoot = rightHand;
+        if (containsBothHands)
+        {
+            for (int guard = 0; guard < numBones; ++guard)
+            {
+                const int parent = boneParents[static_cast<size_t>(rightBranchRoot)];
+                if (parent < 0 || parent >= numBones || parent == rightBranchRoot)
+                    break;
+                const std::string lowerParent =
+                    vr_vm_stabilize::ToLowerAscii(boneNames[static_cast<size_t>(parent)]);
+                if (HooksNativeViewmodelHandsOnlyBoneSide(lowerParent) != 1)
+                    break;
+                rightBranchRoot = parent;
+            }
+        }
+
+        vr_vm_stabilize::Mat3x4 baseEntity{};
+        vr_vm_stabilize::BuildFromOrgAngles(pDrawInfo->origin, pDrawInfo->angles, baseEntity);
+        vr_vm_stabilize::Mat3x4 targetEntity{};
+        vr_vm_stabilize::Mul(baseEntity, companion.localCorrection, targetEntity);
+        vr_vm_stabilize::Mat3x4 baseInverse{};
+        vr_vm_stabilize::Mat3x4 drawDelta{};
+        vr_vm_stabilize::InvertTR(baseEntity, baseInverse);
+        vr_vm_stabilize::Mul(targetEntity, baseInverse, drawDelta);
+
+        uint32_t seqEven = vr->m_RenderFrameSeq.load(std::memory_order_acquire) & ~1u;
+        if (seqEven == 0)
+            seqEven = 2;
+        vr_vm_stabilize::Mat3x4* alignedBones =
+            vr_vm_stabilize::AllocStableBones(numBones, seqEven);
+        if (!alignedBones)
+            return false;
+        std::memcpy(
+            alignedBones,
+            pBonesToWorldFinal,
+            static_cast<size_t>(numBones) * sizeof(vr_vm_stabilize::Mat3x4));
+
+        if (containsBothHands)
+        {
+            for (int bone = 0; bone < numBones; ++bone)
+            {
+                if (!HooksViewmodelAutoGripBoneDescendsFrom(bone, rightBranchRoot, boneParents))
+                    continue;
+                vr_vm_stabilize::Mat3x4 moved{};
+                vr_vm_stabilize::Mul(drawDelta, alignedBones[bone], moved);
+                alignedBones[bone] = moved;
+            }
+        }
+        else
+        {
+            vr_vm_stabilize::ApplyDelta(drawDelta, alignedBones, numBones);
+        }
+        pBonesToWorldFinal = alignedBones;
+
+        // A single-right-hand companion can safely move its entity root as well. For a combined
+        // two-hand model, only move the right branch so the left controller-owned hand stays put.
+        if (!containsBothHands)
+        {
+            QAngle targetAngles{};
+            if (!HooksViewmodelAutoGripMatrixAngles(targetEntity, targetAngles))
+                return false;
+            drawInfoStorage = *pDrawInfo;
+            drawInfoStorage.origin = vr_vm_stabilize::GetOrigin(targetEntity);
+            drawInfoStorage.angles = targetAngles;
+            vr_vm_stabilize::Mat3x4* stableModelToWorld = vr_vm_stabilize::AllocStableBones(1, seqEven);
+            if (stableModelToWorld)
+            {
+                *stableModelToWorld = targetEntity;
+                drawInfoStorage.pModelToWorld = reinterpret_cast<const matrix3x4_t*>(stableModelToWorld);
+            }
+            pDrawInfo = &drawInfoStorage;
+        }
+
+        if (vr->m_ViewmodelAutoGripAlignDebugLog)
+        {
+            bool logNow = false;
+            {
+                std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripMutex);
+                auto& state = s_ViewmodelAutoGripCompanionByVr[vr][companionEntityKey];
+                if (state.lastApplyLog.time_since_epoch().count() == 0 ||
+                    std::chrono::duration<float>(now - state.lastApplyLog).count() >= 0.5f)
+                {
+                    state.lastApplyLog = now;
+                    logNow = true;
+                }
+            }
+            if (logNow)
+            {
+                Game::logMsg(
+                    "[VR][AutoGrip] companion model=\"%s\" fp=%08x mode=%s root=%d bones=%d",
+                    modelName.c_str(),
+                    companion.weaponFingerprint,
+                    containsBothHands ? "right-branch" : "whole-model",
+                    rightBranchRoot,
+                    numBones);
+            }
+        }
+        return true;
+    }
+
+    inline bool ApplyViewmodelAutoGripAlignment(
+        VR* vr,
+        void* drawState,
+        const std::string& modelName,
+        bool drawEntityIsViewmodelClass,
+        ModelRenderInfo_t& drawInfoStorage,
+        const ModelRenderInfo_t*& pDrawInfo,
+        void*& pBonesToWorldFinal)
+    {
+        if (!vr || !vr->m_ViewmodelAutoGripAlignEnabled || !vr->m_IsVREnabled ||
+            vr->m_MouseModeEnabled || vr->m_IsThirdPersonCamera || !drawState || !pDrawInfo ||
+            modelName.empty())
+        {
+            return false;
+        }
+
+        const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
+        if (!drawEntityIsViewmodelClass && !HooksModelNameIsViewmodel(lowerModel))
+        {
+            return false;
+        }
+
+        if (HooksModelNameIsArmsOrHands(lowerModel))
+        {
+            return ApplyViewmodelAutoGripCompanionAlignment(
+                vr,
+                drawState,
+                modelName,
+                drawInfoStorage,
+                pDrawInfo,
+                pBonesToWorldFinal);
+        }
+
+        const uint32_t fingerprint = HooksBuildStudioHdrFingerprint(drawState, 1u);
+        if (fingerprint == 0 || fingerprint == 1u)
+            return false;
+        const uint32_t persistentKey =
+            HooksBuildViewmodelAutoGripPersistentKey(drawState, modelName);
+
+        {
+            std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripMutex);
+            if (s_ViewmodelAutoGripCompanionByVr.size() > 8u)
+                s_ViewmodelAutoGripCompanionByVr.clear();
+            auto& companionByEntity = s_ViewmodelAutoGripCompanionByVr[vr];
+            if (companionByEntity.size() > 16u)
+                companionByEntity.clear();
+            auto& companion = companionByEntity[pDrawInfo->entity_index];
+            if (companion.weaponFingerprint != fingerprint)
+            {
+                companion.weaponFingerprint = fingerprint;
+                companion.valid = false;
+                companion.updatedAt = {};
+            }
+        }
+
+        HooksViewmodelAutoGripLayout layout{};
+        bool needsLayout = false;
+        {
+            std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripMutex);
+            auto& entry = s_ViewmodelAutoGripByFingerprint[fingerprint];
+            needsLayout = !entry.layout.parsed;
+            layout = entry.layout;
+        }
+
+        if (needsLayout)
+        {
+            HooksViewmodelAutoGripLayout resolved{};
+            if (!HooksViewmodelAutoGripResolveLayout(drawState, resolved) || !resolved.parsed)
+                return false;
+
+            {
+                std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripMutex);
+                if (s_ViewmodelAutoGripByFingerprint.size() > 256u)
+                    s_ViewmodelAutoGripByFingerprint.clear();
+                auto& entry = s_ViewmodelAutoGripByFingerprint[fingerprint];
+                entry.layout = resolved;
+                layout = entry.layout;
+            }
+
+            if (vr->m_ViewmodelAutoGripAlignDebugLog)
+            {
+                Game::logMsg(
+                    "[VR][AutoGrip] layout model=\"%s\" fp=%08x supported=%d anchor=\"%s\" bones=%d fullBasis=%d explicit=%d",
+                    modelName.c_str(),
+                    fingerprint,
+                    resolved.supported ? 1 : 0,
+                    resolved.anchorName.c_str(),
+                    resolved.numBones,
+                    resolved.hasFingerBasis ? 1 : 0,
+                    resolved.explicitAttachment ? 1 : 0);
+            }
+        }
+
+        if (!layout.supported)
+            return false;
+
+        uint32_t sampleToken = vr->m_RenderFrameSeq.load(std::memory_order_relaxed) & ~1u;
+        if (sampleToken == 0)
+            sampleToken = static_cast<uint32_t>(GetTickCount());
+
+        bool locked = false;
+        bool justLocked = false;
+        bool restoredFromPersistence = false;
+        bool shouldTryPersistence = false;
+        vr_vm_stabilize::Mat3x4 lockedLocal{};
+        std::chrono::steady_clock::time_point lockedAt{};
+        {
+            std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripMutex);
+            auto& entry = s_ViewmodelAutoGripByFingerprint[fingerprint];
+            if (!layout.explicitAttachment &&
+                std::fabs(entry.palmCenterFraction - vr->m_ViewmodelAutoGripPalmCenterFraction) > 0.0001f)
+            {
+                entry.candidateValid = false;
+                entry.locked = false;
+                entry.persistenceChecked = false;
+                entry.stableSamples = 0;
+                entry.lastSampleToken = 0;
+                entry.palmCenterFraction = vr->m_ViewmodelAutoGripPalmCenterFraction;
+            }
+            else if (entry.palmCenterFraction < 0.0f)
+            {
+                entry.palmCenterFraction = vr->m_ViewmodelAutoGripPalmCenterFraction;
+            }
+            shouldTryPersistence = !entry.locked && !entry.persistenceChecked;
+            if (shouldTryPersistence)
+                entry.persistenceChecked = true;
+            locked = entry.locked;
+            if (locked)
+            {
+                lockedLocal = entry.lockedLocal;
+                lockedAt = entry.lockedAt;
+            }
+        }
+
+        if (shouldTryPersistence)
+        {
+            vr_vm_stabilize::Mat3x4 persistedLocal{};
+            if (HooksViewmodelAutoGripTryRestorePersistent(
+                    vr,
+                    persistentKey,
+                    vr->m_ViewmodelAutoGripPalmCenterFraction,
+                    layout.explicitAttachment,
+                    persistedLocal))
+            {
+                const auto restoredAt = std::chrono::steady_clock::now() - std::chrono::milliseconds(180);
+                std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripMutex);
+                auto& entry = s_ViewmodelAutoGripByFingerprint[fingerprint];
+                const bool fractionStillMatches = layout.explicitAttachment ||
+                    std::fabs(entry.palmCenterFraction - vr->m_ViewmodelAutoGripPalmCenterFraction) <= 0.0001f;
+                if (!entry.locked && fractionStillMatches)
+                {
+                    entry.lockedLocal = persistedLocal;
+                    entry.locked = true;
+                    entry.lockedAt = restoredAt;
+                    entry.candidateValid = false;
+                    entry.stableSamples = 0;
+                    locked = true;
+                    restoredFromPersistence = true;
+                    lockedLocal = entry.lockedLocal;
+                    lockedAt = entry.lockedAt;
+                }
+            }
+        }
+
+        if (!locked)
+        {
+            // The persistent cache missed, so this model is about to be calculated for
+            // the first time. Ask the main thread to zero and save the current weapon
+            // ID's manual residual, and do not sample until that exact request completes.
+            const uint32_t adjustKeyHash =
+                vr->m_ViewmodelAutoGripCurrentAdjustKeyHash.load(std::memory_order_acquire);
+            if (adjustKeyHash == 0u)
+                return false;
+
+            const uint64_t clearRequest =
+                (static_cast<uint64_t>(adjustKeyHash) << 32u) |
+                static_cast<uint64_t>(persistentKey);
+            const uint64_t previousRequest =
+                vr->m_ViewmodelAutoGripManualClearRequest.exchange(
+                    clearRequest,
+                    std::memory_order_acq_rel);
+
+            if (previousRequest != clearRequest && vr->m_ViewmodelAutoGripAlignDebugLog)
+            {
+                Game::logMsg(
+                    "[VR][AutoGrip] requested manual clear model=\"%s\" key=%08x weaponHash=%08x",
+                    modelName.c_str(),
+                    persistentKey,
+                    adjustKeyHash);
+            }
+
+            if (vr->m_ViewmodelAutoGripManualClearCompleted.load(std::memory_order_acquire) != clearRequest)
+                return false;
+        }
+
+        if (!locked && pBonesToWorldFinal)
+        {
+            bool shouldSample = false;
+            {
+                std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripMutex);
+                auto& entry = s_ViewmodelAutoGripByFingerprint[fingerprint];
+                shouldSample = entry.lastSampleToken != sampleToken;
+                if (shouldSample)
+                    entry.lastSampleToken = sampleToken;
+            }
+
+            if (shouldSample)
+            {
+                vr_vm_stabilize::Mat3x4 entityWorld{};
+                vr_vm_stabilize::BuildFromOrgAngles(pDrawInfo->origin, pDrawInfo->angles, entityWorld);
+                vr_vm_stabilize::Mat3x4 anchorWorld{};
+                vr_vm_stabilize::Mat3x4 entityInverse{};
+                vr_vm_stabilize::Mat3x4 sampleLocal{};
+                if (HooksViewmodelAutoGripBuildAnchorWorld(
+                        layout,
+                        reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pBonesToWorldFinal),
+                        vr->m_ViewmodelAutoGripPalmCenterFraction,
+                        entityWorld,
+                        anchorWorld))
+                {
+                    vr_vm_stabilize::InvertTR(entityWorld, entityInverse);
+                    vr_vm_stabilize::Mul(entityInverse, anchorWorld, sampleLocal);
+                    vr_vm_stabilize::Mat3x4 normalizedLocal{};
+                    if (HooksViewmodelAutoGripNormalizeRigidMatrix(sampleLocal, normalizedLocal))
+                    {
+                        const auto now = std::chrono::steady_clock::now();
+                        std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripMutex);
+                        auto& entry = s_ViewmodelAutoGripByFingerprint[fingerprint];
+                        if (!entry.candidateValid ||
+                            !HooksViewmodelAutoGripLocalSamplesMatch(entry.candidateLocal, normalizedLocal))
+                        {
+                            entry.candidateLocal = normalizedLocal;
+                            entry.candidateValid = true;
+                            entry.stableSamples = 1;
+                        }
+                        else
+                        {
+                            ++entry.stableSamples;
+                        }
+
+                        constexpr int kStableSamplesRequired = 18;
+                        if (entry.stableSamples >= kStableSamplesRequired)
+                        {
+                            entry.lockedLocal = entry.candidateLocal;
+                            entry.locked = true;
+                            entry.lockedAt = now;
+                            locked = true;
+                            justLocked = true;
+                            lockedLocal = entry.lockedLocal;
+                            lockedAt = entry.lockedAt;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!locked)
+            return false;
+
+        if (restoredFromPersistence && vr->m_ViewmodelAutoGripAlignDebugLog)
+        {
+            const Vector localOrigin = vr_vm_stabilize::GetOrigin(lockedLocal);
+            Game::logMsg(
+                "[VR][AutoGrip] restored model=\"%s\" fp=%08x key=%08x local=(%.3f %.3f %.3f)",
+                modelName.c_str(),
+                fingerprint,
+                persistentKey,
+                localOrigin.x,
+                localOrigin.y,
+                localOrigin.z);
+        }
+
+        if (justLocked &&
+            !HooksViewmodelAutoGripStorePersistent(
+                vr,
+                persistentKey,
+                vr->m_ViewmodelAutoGripPalmCenterFraction,
+                lockedLocal,
+                modelName) &&
+            vr->m_ViewmodelAutoGripAlignDebugLog)
+        {
+            Game::logMsg(
+                "[VR][AutoGrip] cache save failed key=%08x model=\"%s\"",
+                persistentKey,
+                modelName.c_str());
+        }
+
+        if (justLocked && vr->m_ViewmodelAutoGripAlignDebugLog)
+        {
+            const Vector localOrigin = vr_vm_stabilize::GetOrigin(lockedLocal);
+            Game::logMsg(
+                "[VR][AutoGrip] locked model=\"%s\" fp=%08x anchor=\"%s\" local=(%.3f %.3f %.3f)",
+                modelName.c_str(),
+                fingerprint,
+                layout.anchorName.c_str(),
+                localOrigin.x,
+                localOrigin.y,
+                localOrigin.z);
+        }
+
+        vr_vm_stabilize::Mat3x4 baseEntity{};
+        vr_vm_stabilize::BuildFromOrgAngles(pDrawInfo->origin, pDrawInfo->angles, baseEntity);
+
+        const bool fullRotationAlignment =
+            layout.explicitAttachment || (layout.hasFingerBasis && vr->m_ViewmodelAutoGripAlignRotation);
+
+        Vector targetForward{};
+        Vector targetRight{};
+        Vector targetUp{};
+        if (fullRotationAlignment)
+        {
+            QAngle controllerAngles = vr->GetRightControllerAbsAngle();
+            QAngle::AngleVectors(controllerAngles, &targetForward, &targetRight, &targetUp);
+            const QAngle rotationOffset(
+                vr->m_ViewmodelAngAdjust.x + vr->m_ViewmodelAutoGripTargetRotationOffsetDeg.x,
+                vr->m_ViewmodelAngAdjust.y + vr->m_ViewmodelAutoGripTargetRotationOffsetDeg.y,
+                vr->m_ViewmodelAngAdjust.z + vr->m_ViewmodelAutoGripTargetRotationOffsetDeg.z);
+            HooksViewmodelAutoGripRotateBasis(targetForward, targetRight, targetUp, rotationOffset);
+        }
+        else
+        {
+            QAngle::AngleVectors(pDrawInfo->angles, &targetForward, &targetRight, &targetUp);
+        }
+
+        if (VectorNormalize(targetForward) == 0.0f ||
+            VectorNormalize(targetRight) == 0.0f ||
+            VectorNormalize(targetUp) == 0.0f)
+        {
+            return false;
+        }
+
+        const Vector& targetOffset = vr->m_ViewmodelAutoGripTargetOffsetMeters;
+        const Vector& manualOffset = vr->m_ViewmodelPosAdjust;
+        const Vector desiredGripOrigin = vr->GetRightControllerAbsPos()
+            + targetForward * (targetOffset.x * vr->m_VRScale - manualOffset.x)
+            + targetRight * (targetOffset.y * vr->m_VRScale - manualOffset.y)
+            + targetUp * (targetOffset.z * vr->m_VRScale - manualOffset.z);
+
+        vr_vm_stabilize::Mat3x4 solvedEntity = baseEntity;
+        if (fullRotationAlignment)
+        {
+            Vector palmNormal = CrossProduct(targetForward, targetUp);
+            vr_vm_stabilize::Mat3x4 desiredGripWorld{};
+            if (!HooksViewmodelAutoGripBuildRigidMatrix(
+                    desiredGripOrigin,
+                    targetForward,
+                    targetUp,
+                    palmNormal,
+                    desiredGripWorld))
+            {
+                return false;
+            }
+
+            vr_vm_stabilize::Mat3x4 localInverse{};
+            vr_vm_stabilize::InvertTR(lockedLocal, localInverse);
+            vr_vm_stabilize::Mul(desiredGripWorld, localInverse, solvedEntity);
+        }
+        else
+        {
+            vr_vm_stabilize::Mat3x4 currentGripWorld{};
+            vr_vm_stabilize::Mul(baseEntity, lockedLocal, currentGripWorld);
+            const Vector correction = desiredGripOrigin - vr_vm_stabilize::GetOrigin(currentGripWorld);
+            solvedEntity.m[0][3] += correction.x;
+            solvedEntity.m[1][3] += correction.y;
+            solvedEntity.m[2][3] += correction.z;
+        }
+
+        const Vector baseOrigin = vr_vm_stabilize::GetOrigin(baseEntity);
+        const Vector solvedOrigin = vr_vm_stabilize::GetOrigin(solvedEntity);
+        const Vector correction = solvedOrigin - baseOrigin;
+        const float maxCorrection = std::max(24.0f, vr->m_VRScale * 0.75f);
+        if (!HooksViewmodelAutoGripVectorFinite(solvedOrigin) ||
+            correction.LengthSqr() > maxCorrection * maxCorrection)
+        {
+            if (vr->m_ViewmodelAutoGripAlignDebugLog)
+            {
+                Game::logMsg(
+                    "[VR][AutoGrip] rejected model=\"%s\" fp=%08x correction=%.2f max=%.2f",
+                    modelName.c_str(),
+                    fingerprint,
+                    correction.Length(),
+                    maxCorrection);
+            }
+            return false;
+        }
+
+        const float blend = std::clamp(
+            std::chrono::duration<float>(std::chrono::steady_clock::now() - lockedAt).count() / 0.18f,
+            0.0f,
+            1.0f);
+        Vector finalOrigin = baseOrigin + correction * blend;
+        QAngle finalAngles = pDrawInfo->angles;
+        if (fullRotationAlignment)
+        {
+            QAngle solvedAngles{};
+            if (!HooksViewmodelAutoGripMatrixAngles(solvedEntity, solvedAngles))
+                return false;
+            finalAngles.x += HooksViewmodelAutoGripWrapAngle(solvedAngles.x - finalAngles.x) * blend;
+            finalAngles.y += HooksViewmodelAutoGripWrapAngle(solvedAngles.y - finalAngles.y) * blend;
+            finalAngles.z += HooksViewmodelAutoGripWrapAngle(solvedAngles.z - finalAngles.z) * blend;
+        }
+
+        vr_vm_stabilize::Mat3x4 finalEntity{};
+        vr_vm_stabilize::BuildFromOrgAngles(finalOrigin, finalAngles, finalEntity);
+        vr_vm_stabilize::Mat3x4 baseInverse{};
+        vr_vm_stabilize::Mat3x4 drawDelta{};
+        vr_vm_stabilize::InvertTR(baseEntity, baseInverse);
+        vr_vm_stabilize::Mul(finalEntity, baseInverse, drawDelta);
+
+        uint32_t seqEven = vr->m_RenderFrameSeq.load(std::memory_order_acquire) & ~1u;
+        if (seqEven == 0)
+            seqEven = 2;
+
+        if (pBonesToWorldFinal)
+        {
+            vr_vm_stabilize::Mat3x4* alignedBones =
+                vr_vm_stabilize::AllocStableBones(layout.numBones, seqEven);
+            if (!alignedBones)
+                return false;
+            std::memcpy(
+                alignedBones,
+                pBonesToWorldFinal,
+                static_cast<size_t>(layout.numBones) * sizeof(vr_vm_stabilize::Mat3x4));
+            vr_vm_stabilize::ApplyDelta(drawDelta, alignedBones, layout.numBones);
+            pBonesToWorldFinal = alignedBones;
+        }
+
+        drawInfoStorage = *pDrawInfo;
+        drawInfoStorage.origin = finalOrigin;
+        drawInfoStorage.angles = finalAngles;
+        vr_vm_stabilize::Mat3x4* stableModelToWorld = vr_vm_stabilize::AllocStableBones(1, seqEven);
+        if (stableModelToWorld)
+        {
+            *stableModelToWorld = finalEntity;
+            drawInfoStorage.pModelToWorld = reinterpret_cast<const matrix3x4_t*>(stableModelToWorld);
+        }
+        pDrawInfo = &drawInfoStorage;
+
+        vr_vm_stabilize::Mat3x4 localCorrection{};
+        vr_vm_stabilize::Mul(baseInverse, finalEntity, localCorrection);
+        vr_vm_stabilize::Mat3x4 normalizedLocalCorrection{};
+        if (HooksViewmodelAutoGripNormalizeRigidMatrix(localCorrection, normalizedLocalCorrection))
+        {
+            std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripMutex);
+            auto& companion = s_ViewmodelAutoGripCompanionByVr[vr][pDrawInfo->entity_index];
+            companion.weaponFingerprint = fingerprint;
+            companion.localCorrection = normalizedLocalCorrection;
+            companion.updatedAt = std::chrono::steady_clock::now();
+            companion.valid = true;
+        }
+
+        if (vr->m_ViewmodelAutoGripAlignDebugLog)
+        {
+            bool logNow = false;
+            {
+                std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripMutex);
+                auto& entry = s_ViewmodelAutoGripByFingerprint[fingerprint];
+                const auto now = std::chrono::steady_clock::now();
+                if (entry.lastApplyLog.time_since_epoch().count() == 0 ||
+                    std::chrono::duration<float>(now - entry.lastApplyLog).count() >= 0.5f)
+                {
+                    entry.lastApplyLog = now;
+                    logNow = true;
+                }
+            }
+            if (logNow)
+            {
+                Game::logMsg(
+                    "[VR][AutoGrip] apply model=\"%s\" fp=%08x mode=%s blend=%.2f correction=(%.2f %.2f %.2f)",
+                    modelName.c_str(),
+                    fingerprint,
+                    fullRotationAlignment ? "6dof" : "position",
+                    blend,
+                    correction.x,
+                    correction.y,
+                    correction.z);
+            }
+        }
+        return true;
+    }
+
     inline bool HooksCalibrationOriginIsValid(const Vector& value)
     {
         return std::isfinite(value.x) &&
@@ -6670,7 +8057,8 @@ namespace
         void* drawState,
         const std::string& modelName,
         const ModelRenderInfo_t& modelInfo,
-        const void* pCustomBoneToWorld)
+        const void* pCustomBoneToWorld,
+        bool autoGripAligned)
     {
         const bool wantsViewmodelHandSnapshot =
             vr &&
@@ -6680,7 +8068,10 @@ namespace
                 vr->IsVrHandsTwoHandedGripPoseActive());
         if (!wantsViewmodelHandSnapshot)
             return;
-        if (!drawState || !pCustomBoneToWorld || !HooksModelNameIsArmsOrHands(modelName))
+        const bool sourceIsArmsOrHands = HooksModelNameIsArmsOrHands(modelName);
+        const bool sourceIsAlignedViewmodel = autoGripAligned && HooksModelNameIsViewmodel(modelName);
+        if (!drawState || !pCustomBoneToWorld ||
+            (!sourceIsArmsOrHands && !sourceIsAlignedViewmodel))
             return;
 
         std::vector<std::string> boneNames;
@@ -6720,7 +8111,8 @@ namespace
             boneNames,
             boneParents,
             HooksMat3x4ToVrHandMatrix(modelWorld),
-            boneWorldMatrices);
+            boneWorldMatrices,
+            autoGripAligned);
     }
 
     struct MagazineInteractionFrozenViewmodelPoseEntry
@@ -14010,6 +15402,7 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 	QAngle magazineInteractionCalibrationPreviewAngles(0.0f, 0.0f, 0.0f);
 	bool magazineInteractionCalibrationPreviewDrawnAsPrimary = false;
 	bool drawEntityIsViewmodelClass = false;
+	bool viewmodelAutoGripApplied = false;
 
 	// Per-draw origin/angles override (used for multicore viewmodel stabilization).
 	// We never write into shared entity state here; we only override the ModelRenderInfo_t
@@ -14338,6 +15731,15 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 	}
 }
 
+		viewmodelAutoGripApplied = ApplyViewmodelAutoGripAlignment(
+			m_VR,
+			state,
+			modelName,
+			drawEntityIsViewmodelClass,
+			drawInfo,
+			pDrawInfo,
+			pBonesToWorldFinal);
+
 		const VR::SpecialInfectedType entityInfectedType =
 			entity ? m_VR->GetSpecialInfectedType(entity) : VR::SpecialInfectedType::None;
 		const VR::SpecialInfectedType modelInfectedType = m_VR->GetSpecialInfectedTypeFromModel(modelName);
@@ -14562,7 +15964,13 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 	// pBonesToWorldFinal contains the same stabilization delta as the visible gun,
 	// so the standalone right glove follows controller rotation and HMD movement.
 	MaybeCaptureViewmodelMuzzleSmokePose(m_VR, state, modelName, *pDrawInfo, pBonesToWorldFinal);
-	MaybeCaptureVrHandsVmPose(m_VR, state, modelName, *pDrawInfo, pBonesToWorldFinal);
+	MaybeCaptureVrHandsVmPose(
+		m_VR,
+		state,
+		modelName,
+		*pDrawInfo,
+		pBonesToWorldFinal,
+		viewmodelAutoGripApplied);
 	const std::string lowerModelForCalibrationHide = vr_vm_stabilize::ToLowerAscii(modelName);
 	const bool hideMagazineInteractionCalibrationOriginalViewmodel =
 		m_VR &&

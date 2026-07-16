@@ -250,6 +250,12 @@ TextToSpeechWhitelistSeparator=__VR_REGEX_SPLIT__
 QuickTurnCombo=SecondaryAttack+Crouch
 ViewmodelAdjustEnabled=false
 ViewmodelAdjustCombo=Reload+SecondaryAttack
+ViewmodelAutoGripAlignEnabled=true
+ViewmodelAutoGripAlignRotation=false
+ViewmodelAutoGripTargetOffsetMeters=0,0,0
+ViewmodelAutoGripTargetRotationOffsetDeg=0,0,0
+ViewmodelAutoGripPalmCenterFraction=0.45
+ViewmodelAutoGripAlignDebugLog=false
 
 AimLineEnabled=true
 AimLineOnlyWhenLaserSight=false

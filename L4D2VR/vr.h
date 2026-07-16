@@ -643,6 +643,20 @@ public:
 	bool m_ViewmodelAdjustEnabled = false;
 	float m_ViewmodelAdjustMoveSpeed = 1.0f;
 	float m_ViewmodelAdjustRotateSpeed = 1.0f;
+	// Resolve the visible viewmodel grip from a model-local hand/attachment anchor instead
+	// of assuming every replacement model shares the stock model origin.
+	bool m_ViewmodelAutoGripAlignEnabled = true;
+	bool m_ViewmodelAutoGripAlignRotation = false;
+	bool m_ViewmodelAutoGripAlignDebugLog = false;
+	Vector m_ViewmodelAutoGripTargetOffsetMeters = { 0.0f, 0.0f, 0.0f };
+	Vector m_ViewmodelAutoGripTargetRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
+	float m_ViewmodelAutoGripPalmCenterFraction = 0.45f;
+	// AutoGrip discovers models on the render thread, while per-weapon manual adjustments
+	// are owned by the main update thread. Pair the model cache key with the active
+	// adjustment-key hash so a cache miss can clear exactly that weapon before sampling.
+	std::atomic<uint32_t> m_ViewmodelAutoGripCurrentAdjustKeyHash{ 0u };
+	std::atomic<uint64_t> m_ViewmodelAutoGripManualClearRequest{ 0u };
+	std::atomic<uint64_t> m_ViewmodelAutoGripManualClearCompleted{ 0u };
 
 	bool m_AdjustingViewmodel = false;
 	std::string m_AdjustingKey;

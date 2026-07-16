@@ -365,6 +365,19 @@ void VR::RefreshActiveViewmodelAdjustment(C_BasePlayer* localPlayer)
     C_WeaponCSBase* activeWeapon = localPlayer ? (C_WeaponCSBase*)localPlayer->GetActiveWeapon() : nullptr;
     std::string adjustKey = BuildViewmodelAdjustKey(activeWeapon);
 
+    auto hashAdjustKey = [](const std::string& key)
+        {
+            uint32_t hash = 2166136261u;
+            for (const unsigned char value : key)
+            {
+                hash ^= value;
+                hash *= 16777619u;
+            }
+            return hash == 0u ? 1u : hash;
+        };
+
+    const uint32_t currentAdjustKeyHash = activeWeapon ? hashAdjustKey(adjustKey) : 0u;
+
     m_CurrentViewmodelKey = adjustKey;
 
     if (m_LastLoggedViewmodelKey != m_CurrentViewmodelKey)
@@ -373,8 +386,86 @@ void VR::RefreshActiveViewmodelAdjustment(C_BasePlayer* localPlayer)
     }
 
     ViewmodelAdjustment& adjustment = EnsureViewmodelAdjustment(adjustKey);
+
+    // A render-thread AutoGrip cache miss must discard the old per-weapon residual
+    // before collecting a new model-local grip. Do the map mutation and disk write
+    // here on the owning thread, then acknowledge the exact model/key pair.
+    m_ViewmodelAutoGripCurrentAdjustKeyHash.store(currentAdjustKeyHash, std::memory_order_release);
+    const uint64_t clearRequest =
+        m_ViewmodelAutoGripManualClearRequest.load(std::memory_order_acquire);
+    uint64_t completedClearRequest = 0u;
+    if (clearRequest != 0u &&
+        clearRequest != m_ViewmodelAutoGripManualClearCompleted.load(std::memory_order_relaxed))
+    {
+        const uint32_t requestedAdjustKeyHash = static_cast<uint32_t>(clearRequest >> 32u);
+        auto clearIt = m_ViewmodelAdjustments.end();
+
+        if (requestedAdjustKeyHash == currentAdjustKeyHash)
+        {
+            clearIt = m_ViewmodelAdjustments.find(adjustKey);
+        }
+        else
+        {
+            for (auto it = m_ViewmodelAdjustments.begin(); it != m_ViewmodelAdjustments.end(); ++it)
+            {
+                if (hashAdjustKey(it->first) == requestedAdjustKeyHash)
+                {
+                    clearIt = it;
+                    break;
+                }
+            }
+        }
+
+        if (clearIt != m_ViewmodelAdjustments.end())
+        {
+            const std::string clearedKey = clearIt->first;
+            clearIt->second.position = { 0.0f, 0.0f, 0.0f };
+            clearIt->second.angle = { 0.0f, 0.0f, 0.0f };
+            m_ViewmodelAdjustmentsDirty = true;
+
+            if (m_AdjustingViewmodel && m_AdjustingKey == clearedKey)
+            {
+                m_AdjustingViewmodel = false;
+                m_AdjustingKey.clear();
+                m_AdjustStickViewmodelAng = { 0.0f, 0.0f, 0.0f };
+                m_AdjustSuppressControllerUntil = {};
+                m_AdjustControllerSuppressed = false;
+            }
+
+            // Persist immediately: restarting the game must not restore the value that
+            // AutoGrip just removed before calculating this model.
+            SaveViewmodelAdjustments();
+
+            if (m_ViewmodelAutoGripAlignDebugLog)
+            {
+                Game::logMsg(
+                    "[VR][AutoGrip] cleared manual adjustment id=\"%s\" request=%016llx",
+                    clearedKey.c_str(),
+                    static_cast<unsigned long long>(clearRequest));
+            }
+        }
+        else if (m_ViewmodelAutoGripAlignDebugLog)
+        {
+            Game::logMsg(
+                "[VR][AutoGrip] manual adjustment already empty keyHash=%08x request=%016llx",
+                requestedAdjustKeyHash,
+                static_cast<unsigned long long>(clearRequest));
+        }
+
+        completedClearRequest = clearRequest;
+    }
+
     m_ViewmodelPosAdjust = adjustment.position;
     m_ViewmodelAngAdjust = adjustment.angle;
+
+    // Publish completion only after the live residuals are refreshed, so an acquire on
+    // the render thread cannot observe the acknowledgement with the previous values.
+    if (completedClearRequest != 0u)
+    {
+        m_ViewmodelAutoGripManualClearCompleted.store(
+            completedClearRequest,
+            std::memory_order_release);
+    }
 }
 
 void VR::LoadViewmodelAdjustments()
@@ -2544,6 +2635,23 @@ void VR::ParseConfigFile()
     m_ViewmodelAdjustEnabled = getBool("ViewmodelAdjustEnabled", m_ViewmodelAdjustEnabled);
     m_ViewmodelAdjustMoveSpeed = std::clamp(getFloat("ViewmodelAdjustMoveSpeed", m_ViewmodelAdjustMoveSpeed), 0.1f, 5.0f);
     m_ViewmodelAdjustRotateSpeed = std::clamp(getFloat("ViewmodelAdjustRotateSpeed", m_ViewmodelAdjustRotateSpeed), 0.1f, 5.0f);
+    m_ViewmodelAutoGripAlignEnabled = getBool("ViewmodelAutoGripAlignEnabled", m_ViewmodelAutoGripAlignEnabled);
+    m_ViewmodelAutoGripAlignRotation = getBool("ViewmodelAutoGripAlignRotation", m_ViewmodelAutoGripAlignRotation);
+    m_ViewmodelAutoGripAlignDebugLog = getBool("ViewmodelAutoGripAlignDebugLog", m_ViewmodelAutoGripAlignDebugLog);
+    m_ViewmodelAutoGripTargetOffsetMeters =
+        getVector3("ViewmodelAutoGripTargetOffsetMeters", m_ViewmodelAutoGripTargetOffsetMeters);
+    m_ViewmodelAutoGripTargetOffsetMeters.x = std::clamp(m_ViewmodelAutoGripTargetOffsetMeters.x, -0.5f, 0.5f);
+    m_ViewmodelAutoGripTargetOffsetMeters.y = std::clamp(m_ViewmodelAutoGripTargetOffsetMeters.y, -0.5f, 0.5f);
+    m_ViewmodelAutoGripTargetOffsetMeters.z = std::clamp(m_ViewmodelAutoGripTargetOffsetMeters.z, -0.5f, 0.5f);
+    m_ViewmodelAutoGripTargetRotationOffsetDeg =
+        getVector3("ViewmodelAutoGripTargetRotationOffsetDeg", m_ViewmodelAutoGripTargetRotationOffsetDeg);
+    m_ViewmodelAutoGripTargetRotationOffsetDeg.x = std::clamp(m_ViewmodelAutoGripTargetRotationOffsetDeg.x, -180.0f, 180.0f);
+    m_ViewmodelAutoGripTargetRotationOffsetDeg.y = std::clamp(m_ViewmodelAutoGripTargetRotationOffsetDeg.y, -180.0f, 180.0f);
+    m_ViewmodelAutoGripTargetRotationOffsetDeg.z = std::clamp(m_ViewmodelAutoGripTargetRotationOffsetDeg.z, -180.0f, 180.0f);
+    m_ViewmodelAutoGripPalmCenterFraction = std::clamp(
+        getFloat("ViewmodelAutoGripPalmCenterFraction", m_ViewmodelAutoGripPalmCenterFraction),
+        0.0f,
+        1.0f);
     m_AimLineThickness = std::max(0.0f, getFloat("AimLineThickness", m_AimLineThickness));
     m_AimLineEnabled = getBool("AimLineEnabled", m_AimLineEnabled);
     m_AimLineOnlyWhenLaserSight = getBool("AimLineOnlyWhenLaserSight", m_AimLineOnlyWhenLaserSight);

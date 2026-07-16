@@ -24,7 +24,8 @@ namespace VrHandVmPose
         const std::vector<std::string>& boneNames,
         const std::vector<int>& boneParents,
         const VrHandMatrix4& modelWorldMatrix,
-        const std::vector<VrHandMatrix4>& boneWorldMatrices)
+        const std::vector<VrHandMatrix4>& boneWorldMatrices,
+        bool autoGripAligned)
     {
         if (!modelName || !*modelName || boneNames.empty() || boneWorldMatrices.size() < boneNames.size())
             return;
@@ -35,6 +36,7 @@ namespace VrHandVmPose
         s_VmPoseSnapshot.boneParents = boneParents;
         s_VmPoseSnapshot.modelWorldMatrix = modelWorldMatrix;
         s_VmPoseSnapshot.boneWorldMatrices = boneWorldMatrices;
+        s_VmPoseSnapshot.autoGripAligned = autoGripAligned;
         s_VmPoseSnapshot.tick = GetTickCount();
         s_VmPoseSnapshot.sequence = ++s_VmPoseSequence;
         s_VmPoseSnapshot.valid = true;

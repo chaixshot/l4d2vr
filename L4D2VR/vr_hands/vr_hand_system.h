@@ -125,6 +125,7 @@ private:
         std::vector<VrHandMatrixRows3x4> palette;
         bool paletteValid = false;
         bool palmWorldValid = false;
+        bool autoGripAligned = false;
         bool anchorValid = false;
         bool debugLogged = false;
         bool debugMissingLogged = false;

@@ -944,6 +944,7 @@ bool VrHandSystem::BuildViewmodelPalette(
     }
     state.palmWorld = snapshot.boneWorldMatrices[static_cast<size_t>(vmPalm)];
     state.palmWorldValid = true;
+    state.autoGripAligned = snapshot.autoGripAligned;
 
     VrHandMatrix4 modelWorldInverse{};
     if (!VrHandMath::Invert4x4(snapshot.modelWorldMatrix, modelWorldInverse))
@@ -1592,7 +1593,7 @@ bool VrHandSystem::DrawForEye(
                     clampedModelScale,
                     positionOffsets[handIndex],
                     rotationOffsets[handIndex],
-                    !allowControllerlessTestPose,
+                    !allowControllerlessTestPose && !viewmodelState->autoGripAligned,
                     currentViewmodelPosition,
                     currentViewmodelAngles,
                     world))
