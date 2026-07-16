@@ -680,7 +680,7 @@ public:
 	float m_ViewmodelAdjustRotateSpeed = 1.0f;
 	// Resolve the visible viewmodel grip from a model-local hand/attachment anchor instead
 	// of assuming every replacement model shares the stock model origin.
-	bool m_ViewmodelAutoGripAlignEnabled = true;
+	bool m_ViewmodelAutoGripAlignEnabled = false;
 	bool m_ViewmodelAutoGripAlignRotation = false;
 	bool m_ViewmodelAutoGripAlignDebugLog = false;
 	Vector m_ViewmodelAutoGripTargetOffsetMeters = { 0.0f, 0.0f, 0.0f };
