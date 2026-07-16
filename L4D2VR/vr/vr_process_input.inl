@@ -73,7 +73,7 @@ void VR::ProcessInput()
         m_PrimaryAttackDown = false;
         m_MagazineInteractionThumbIndexCurlDownPrev = false;
         m_MagazineInteractionThreeFingerCurlDownPrev = false;
-        (void)UpdateMagazineInteraction(nullptr, false, false, false, false, false);
+        (void)UpdateMagazineInteraction(nullptr, false, false, false);
         CancelMagazineInteractionManual();
         CancelTeleportTargeting();
         return;
@@ -474,11 +474,14 @@ void VR::ProcessInput()
     const bool magazineButtonGripInput =
         vrHandsGripInputEnabled &&
         (!magazineInteractionInputEnabled || m_MagazineInteractionUseButtonGripInput);
+    const bool magazineFingerCurlInput =
+        magazineInteractionInputEnabled &&
+        !m_MagazineInteractionUseButtonGripInput;
     std::array<float, 5> magazineInteractionFingerCurls{};
     const bool magazineInteractionFingerCurlsValid =
-        magazineInteractionInputEnabled &&
+        magazineFingerCurlInput &&
         ReadMagazineInteractionFingerCurls(magazineInteractionFingerCurls);
-    if (!magazineInteractionInputEnabled)
+    if (!magazineFingerCurlInput)
     {
         m_MagazineInteractionThumbIndexCurlDownPrev = false;
         m_MagazineInteractionThreeFingerCurlDownPrev = false;
@@ -515,7 +518,7 @@ void VR::ProcessInput()
 
     bool thumbIndexGripDown = false;
     bool threeFingerGripDown = false;
-    if (magazineInteractionInputEnabled && magazineInteractionFingerCurlsValid)
+    if (magazineFingerCurlInput && magazineInteractionFingerCurlsValid)
     {
         const float thumbIndexThreshold = thumbIndexWasDown ? thumbIndexCurlRelease : thumbIndexCurlStart;
         const float threeFingerThreshold = threeFingerWasDown ? threeFingerCurlRelease : threeFingerCurlStart;
@@ -535,10 +538,6 @@ void VR::ProcessInput()
         ? magazineButtonGripJustPressed
         : ((thumbIndexGripDown && !thumbIndexWasDown) ||
             (threeFingerGripDown && !threeFingerWasDown));
-
-    const bool handguardGripDown =  (thumbIndexGripDown || threeFingerGripDown);
-    const bool handguardGripJustPressed =  (thumbIndexGripDown && !thumbIndexWasDown) || (threeFingerGripDown && !threeFingerWasDown);
-
     m_MagazineInteractionThumbIndexCurlDownPrev = thumbIndexGripDown;
     m_MagazineInteractionThreeFingerCurlDownPrev = threeFingerGripDown;
 
@@ -546,8 +545,6 @@ void VR::ProcessInput()
         localPlayer,
         magazineGripDown,
         magazineGripJustPressed,
-        handguardGripDown,
-        handguardGripJustPressed,
         allowGameplayInputOnTwoHandedGripRelease);
     if (IsMagazineInteractionLeftHandActive())
     {
