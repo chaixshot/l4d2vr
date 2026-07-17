@@ -24,6 +24,7 @@ LedgeGuardDebugLog=false
 LedgeGuardDebugLogHz=2
 AntiAliasing=0
 EyeRenderTargetMatchProjectionAspect=false
+EyeProjectionViewportCorrection=true
 
 ThirdPersonCameraFollowHmd=true
 ThirdPersonVRCameraOffset=38

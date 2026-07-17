@@ -263,6 +263,9 @@ public:
 	uint32_t m_RenderHeight;
 	uint32_t m_AntiAliasing = 0;
 	bool m_EyeRenderTargetMatchProjectionAspect = false;
+	bool m_EyeProjectionViewportCorrection = true;
+	uint32_t m_EyeRenderViewportWidth = 0;
+	uint32_t m_EyeRenderViewportHeight = 0;
 	float m_Aspect;
 	float m_Fov;
 

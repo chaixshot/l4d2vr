@@ -2862,6 +2862,7 @@ void VR::ParseConfigFile()
     // Global: hard-lock first-person viewmodel pose after engine calc (all queue modes).
     m_ViewmodelDisableMoveBob = getBool("ViewmodelDisableMoveBob", m_ViewmodelDisableMoveBob);
     m_EyeRenderTargetMatchProjectionAspect = getBool("EyeRenderTargetMatchProjectionAspect", m_EyeRenderTargetMatchProjectionAspect);
+    m_EyeProjectionViewportCorrection = getBool("EyeProjectionViewportCorrection", m_EyeProjectionViewportCorrection);
     m_QueuedViewmodelStabilizeDebugLog = getBool("QueuedViewmodelStabilizeDebugLog", m_QueuedViewmodelStabilizeDebugLog);
     m_QueuedViewmodelStabilizeDebugLogHz = std::max(0.0f, getFloat("QueuedViewmodelStabilizeDebugLogHz", m_QueuedViewmodelStabilizeDebugLogHz));
     m_RenderPipelineDebugLog = getBool("RenderPipelineDebugLog", m_RenderPipelineDebugLog);

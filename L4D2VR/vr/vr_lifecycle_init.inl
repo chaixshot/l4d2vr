@@ -958,29 +958,18 @@ VR::VR(Game* game)
     float r_left = 0.0f, r_right = 0.0f, r_top = 0.0f, r_bottom = 0.0f;
     m_System->GetProjectionRaw(vr::EVREye::Eye_Right, &r_left, &r_right, &r_top, &r_bottom);
 
-    float tanHalfFov[2];
+    const float tanHalfFovH = (std::max)({ -l_left, l_right, -r_left, r_right });
+    const float tanHalfFovV = (std::max)({ -l_top, l_bottom, -r_top, r_bottom });
 
-    tanHalfFov[0] = (std::max)({ -l_left, l_right, -r_left, r_right });
-    tanHalfFov[1] = (std::max)({ -l_top, l_bottom, -r_top, r_bottom });
-    // For some headsets, the driver provided texture size doesn't match the geometric aspect ratio of the lenses.
-    // In this case, we need to adjust the vertical tangent while still rendering to the recommended RT size.
-    m_TextureBounds[0].uMin = 0.5f + 0.5f * l_left / tanHalfFov[0];
-    m_TextureBounds[0].uMax = 0.5f + 0.5f * l_right / tanHalfFov[0];
-    m_TextureBounds[0].vMin = 0.5f - 0.5f * l_bottom / tanHalfFov[1];
-    m_TextureBounds[0].vMax = 0.5f - 0.5f * l_top / tanHalfFov[1];
-
-    m_TextureBounds[1].uMin = 0.5f + 0.5f * r_left / tanHalfFov[0];
-    m_TextureBounds[1].uMax = 0.5f + 0.5f * r_right / tanHalfFov[0];
-    m_TextureBounds[1].vMin = 0.5f - 0.5f * r_bottom / tanHalfFov[1];
-    m_TextureBounds[1].vMax = 0.5f - 0.5f * r_top / tanHalfFov[1];
-
-    m_Aspect = tanHalfFov[0] / tanHalfFov[1];
-    m_Fov = 2.0f * atan(tanHalfFov[0]) * 360 / (3.14159265358979323846 * 2);
+    m_Aspect = tanHalfFovH / tanHalfFovV;
+    m_Fov = 2.0f * atan(tanHalfFovH) * 360 / (3.14159265358979323846 * 2);
 
     const uint32_t recommendedRenderWidth = m_RenderWidth;
     const uint32_t recommendedRenderHeight = m_RenderHeight;
     m_EyeRenderTargetMatchProjectionAspect =
         ReadEarlyConfigBool("EyeRenderTargetMatchProjectionAspect", m_EyeRenderTargetMatchProjectionAspect);
+    m_EyeProjectionViewportCorrection =
+        ReadEarlyConfigBool("EyeProjectionViewportCorrection", m_EyeProjectionViewportCorrection);
 
     const float recommendedAspect = (recommendedRenderHeight > 0)
         ? static_cast<float>(recommendedRenderWidth) / static_cast<float>(recommendedRenderHeight)
@@ -1016,17 +1005,75 @@ VR::VR(Game* game)
     const float finalRenderAspect = (m_RenderHeight > 0)
         ? static_cast<float>(m_RenderWidth) / static_cast<float>(m_RenderHeight)
         : 0.0f;
+
+    // Keep the runtime-recommended texture allocation intact, but render Source into a
+    // top-left sub-viewport whose pixel aspect matches the geometric eye projection.
+    // This avoids changing Source's projection (which can make map rendering stall) and
+    // avoids resizing the compositor-facing textures (which can break screen effects).
+    m_EyeRenderViewportWidth = m_RenderWidth;
+    m_EyeRenderViewportHeight = m_RenderHeight;
+    constexpr float kViewportCorrectionRelativeMismatch = 0.15f;
+    const float relativeAspectMismatch = validProjectionAspect && finalRenderAspect > 0.0f
+        ? std::fabs(finalRenderAspect - m_Aspect) / m_Aspect
+        : 0.0f;
+    if (m_EyeProjectionViewportCorrection &&
+        validProjectionAspect &&
+        m_RenderWidth > 0 &&
+        m_RenderHeight > 0 &&
+        relativeAspectMismatch >= kViewportCorrectionRelativeMismatch)
+    {
+        if (finalRenderAspect < m_Aspect)
+        {
+            m_EyeRenderViewportHeight = static_cast<uint32_t>((std::max)(
+                1.0f,
+                std::round(static_cast<float>(m_RenderWidth) / m_Aspect)));
+            m_EyeRenderViewportHeight = (std::min)(m_EyeRenderViewportHeight, m_RenderHeight);
+        }
+        else
+        {
+            m_EyeRenderViewportWidth = static_cast<uint32_t>((std::max)(
+                1.0f,
+                std::round(static_cast<float>(m_RenderHeight) * m_Aspect)));
+            m_EyeRenderViewportWidth = (std::min)(m_EyeRenderViewportWidth, m_RenderWidth);
+        }
+    }
+
+    const float viewportScaleU = (m_RenderWidth > 0)
+        ? static_cast<float>(m_EyeRenderViewportWidth) / static_cast<float>(m_RenderWidth)
+        : 1.0f;
+    const float viewportScaleV = (m_RenderHeight > 0)
+        ? static_cast<float>(m_EyeRenderViewportHeight) / static_cast<float>(m_RenderHeight)
+        : 1.0f;
+
+    // First crop each asymmetric eye out of the symmetric projection, then map that crop
+    // into the valid sub-viewport inside the unchanged compositor texture.
+    m_TextureBounds[0].uMin = viewportScaleU * (0.5f + 0.5f * l_left / tanHalfFovH);
+    m_TextureBounds[0].uMax = viewportScaleU * (0.5f + 0.5f * l_right / tanHalfFovH);
+    m_TextureBounds[0].vMin = viewportScaleV * (0.5f - 0.5f * l_bottom / tanHalfFovV);
+    m_TextureBounds[0].vMax = viewportScaleV * (0.5f - 0.5f * l_top / tanHalfFovV);
+
+    m_TextureBounds[1].uMin = viewportScaleU * (0.5f + 0.5f * r_left / tanHalfFovH);
+    m_TextureBounds[1].uMax = viewportScaleU * (0.5f + 0.5f * r_right / tanHalfFovH);
+    m_TextureBounds[1].vMin = viewportScaleV * (0.5f - 0.5f * r_bottom / tanHalfFovV);
+    m_TextureBounds[1].vMax = viewportScaleV * (0.5f - 0.5f * r_top / tanHalfFovV);
+
     Game::logMsg(
-        "[VR][Projection] recommendedRT=%ux%u finalRT=%ux%u matchProjectionAspect=%d projectionAspect=%.6f recommendedAspect=%.6f finalAspect=%.6f fov=%.3f rawL=(%.4f %.4f %.4f %.4f) rawR=(%.4f %.4f %.4f %.4f)",
+        "[VR][Projection] recommendedRT=%ux%u finalRT=%ux%u view=%ux%u matchProjectionAspect=%d viewportCorrection=%d relativeMismatch=%.6f projectionAspect=%.6f recommendedAspect=%.6f finalAspect=%.6f fov=%.3f boundsL=(%.4f %.4f %.4f %.4f) boundsR=(%.4f %.4f %.4f %.4f) rawL=(%.4f %.4f %.4f %.4f) rawR=(%.4f %.4f %.4f %.4f)",
         recommendedRenderWidth,
         recommendedRenderHeight,
         m_RenderWidth,
         m_RenderHeight,
+        m_EyeRenderViewportWidth,
+        m_EyeRenderViewportHeight,
         m_EyeRenderTargetMatchProjectionAspect ? 1 : 0,
+        m_EyeProjectionViewportCorrection ? 1 : 0,
+        relativeAspectMismatch,
         m_Aspect,
         recommendedAspect,
         finalRenderAspect,
         m_Fov,
+        m_TextureBounds[0].uMin, m_TextureBounds[0].vMin, m_TextureBounds[0].uMax, m_TextureBounds[0].vMax,
+        m_TextureBounds[1].uMin, m_TextureBounds[1].vMin, m_TextureBounds[1].uMax, m_TextureBounds[1].vMax,
         l_left, l_right, l_top, l_bottom,
         r_left, r_right, r_top, r_bottom);
 
