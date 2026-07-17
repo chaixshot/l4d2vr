@@ -2118,7 +2118,7 @@ namespace
         struct CachedStudioHash
         {
             int length = 0;
-            uint32_t hash = 0;
+            uint32_t baseHash = 0;
         };
         static std::mutex s_hashMutex;
         static std::unordered_map<uintptr_t, CachedStudioHash> s_hashByStudioHdr;
@@ -2127,8 +2127,15 @@ namespace
         {
             std::lock_guard<std::mutex> lock(s_hashMutex);
             auto it = s_hashByStudioHdr.find(key);
-            if (it != s_hashByStudioHdr.end() && it->second.length == studioLength && it->second.hash != 0)
-                return it->second.hash;
+            if (it != s_hashByStudioHdr.end() &&
+                it->second.length == studioLength &&
+                it->second.baseHash != 0)
+            {
+                uint32_t cachedHash = it->second.baseHash;
+                cachedHash ^= fallback;
+                cachedHash *= 16777619u;
+                return cachedHash != 0 ? cachedHash : (fallback != 0 ? fallback : 1u);
+            }
         }
 
         uint32_t hash = 2166136261u;
@@ -2160,18 +2167,59 @@ namespace
             }
         }
 
-        hash ^= fallback;
-        hash *= 16777619u;
-        if (hash == 0)
-            hash = fallback != 0 ? fallback : 1u;
-
         {
             std::lock_guard<std::mutex> lock(s_hashMutex);
             if (s_hashByStudioHdr.size() > 256)
                 s_hashByStudioHdr.clear();
             s_hashByStudioHdr[key] = CachedStudioHash{ studioLength, hash };
         }
-        return hash;
+
+        hash ^= fallback;
+        hash *= 16777619u;
+        return hash != 0 ? hash : (fallback != 0 ? fallback : 1u);
+    }
+
+    inline bool HooksViewmodelAutoGripIsOfficialStudioFingerprint(uint32_t fingerprint)
+    {
+        // Generated from the raw IDST entries in the current Steam official
+        // left4dead2, DLC1-DLC3, and update pak01 VPKs with
+        // HooksBuildStudioHdrFingerprint(..., 1). Historical base and current
+        // update variants are both included. Paths are intentionally not used:
+        // workshop replacements commonly retain the official model path.
+        static constexpr uint32_t kOfficialFingerprints[] = {
+            0x01893D41u, 0x08148191u, 0x083E1630u, 0x09F8A0BFu,
+            0x0C9149EAu, 0x0E5E9DFDu, 0x106CB6C4u, 0x1800FB20u,
+            0x1ADF8CDAu, 0x1B47A09Eu, 0x22B2F8C0u, 0x23748688u,
+            0x27729856u, 0x2A955C65u, 0x307F3C46u, 0x31F1EB43u,
+            0x36EA35C7u, 0x3771FE31u, 0x39B66AA5u, 0x39FA48ADu,
+            0x3BD608BEu, 0x3F11D09Au, 0x43A1B1F1u, 0x446CC588u,
+            0x44C3EC2Du, 0x4699A3DBu, 0x4CA9FD2Eu, 0x55393D34u,
+            0x5615CCA0u, 0x59BF412Cu, 0x59F57196u, 0x5B7E1C5Du,
+            0x5BDF0038u, 0x5D7DB25Bu, 0x5E044BD9u, 0x5E56CCECu,
+            0x5F1D9291u, 0x5F352BF6u, 0x611ED869u, 0x62F5048Eu,
+            0x692BD699u, 0x69BB33C0u, 0x6A7385CDu, 0x6B226F78u,
+            0x6C96556Eu, 0x6DB08646u, 0x7A64D3F4u, 0x7CEF7120u,
+            0x7F8364A7u, 0x81493B1Bu, 0x858D5999u, 0x85EA1212u,
+            0x8765FEDAu, 0x887D2E02u, 0x89A22725u, 0x8B21EAB0u,
+            0x8E71DA2Au, 0x8EE6E8B4u, 0x9ACC5763u, 0x9D3BBEECu,
+            0xA08C918Au, 0xA17E11BBu, 0xA2EF1796u, 0xA37D3104u,
+            0xA68F9973u, 0xA9ACE85Au, 0xACCBC34Eu, 0xAD3845C9u,
+            0xAE2EE66Bu, 0xB203B68Cu, 0xB273F92Du, 0xB5C0E302u,
+            0xB93B1918u, 0xBA7809F0u, 0xBC9C7B04u, 0xBD52844Au,
+            0xC100602Cu, 0xC1F52FC2u, 0xC293E892u, 0xC54A4455u,
+            0xC6235F0Au, 0xC62BD4E2u, 0xCAD5D6B4u, 0xCC704258u,
+            0xCD6D6560u, 0xCE3A0A5Eu, 0xD005A5DAu, 0xD20AE5D5u,
+            0xD27E6080u, 0xD50E5412u, 0xDAF87D3Bu, 0xDDC7CF8Bu,
+            0xE306D393u, 0xE632F52Du, 0xEA99EDF7u, 0xED5432A2u,
+            0xEF313D1Bu, 0xF04A32DDu, 0xF07DD8FAu, 0xF5972561u,
+            0xF6767A57u, 0xFA7DAD60u, 0xFB3D54DCu, 0xFB3F1A37u,
+            0xFBE49085u, 0xFCEBDF2Cu, 0xFDAB7A55u, 0xFE691999u,
+            0xFFE2A150u
+        };
+        const uint32_t* begin = kOfficialFingerprints;
+        const uint32_t* end = begin +
+            (sizeof(kOfficialFingerprints) / sizeof(kOfficialFingerprints[0]));
+        return std::binary_search(begin, end, fingerprint);
     }
 
     inline std::string HooksBuildMagazineInteractionProfileKey(uint32_t modelFingerprint, uint32_t boneSignature)
@@ -2911,6 +2959,29 @@ namespace
         vr->m_ViewmodelAutoGripAimPoseSeq.store(even, std::memory_order_release);
     }
 
+    inline void InvalidateViewmodelAutoGripAimPose(VR* vr)
+    {
+        if (!vr)
+            return;
+
+        uint32_t seq = vr->m_ViewmodelAutoGripAimPoseSeq.load(std::memory_order_relaxed);
+        if (seq & 1u)
+            ++seq;
+        const uint32_t odd = seq + 1u;
+        const uint32_t even = odd + 1u;
+
+        vr->m_ViewmodelAutoGripAimPoseSeq.store(odd, std::memory_order_release);
+        vr->m_ViewmodelAutoGripAimPosX.store(0.0f, std::memory_order_relaxed);
+        vr->m_ViewmodelAutoGripAimPosY.store(0.0f, std::memory_order_relaxed);
+        vr->m_ViewmodelAutoGripAimPosZ.store(0.0f, std::memory_order_relaxed);
+        vr->m_ViewmodelAutoGripAimDirX.store(0.0f, std::memory_order_relaxed);
+        vr->m_ViewmodelAutoGripAimDirY.store(0.0f, std::memory_order_relaxed);
+        vr->m_ViewmodelAutoGripAimDirZ.store(0.0f, std::memory_order_relaxed);
+        vr->m_ViewmodelAutoGripAimPoseTickMs.store(0u, std::memory_order_relaxed);
+        vr->m_ViewmodelAutoGripAimPoseAdjustKeyHash.store(0u, std::memory_order_relaxed);
+        vr->m_ViewmodelAutoGripAimPoseSeq.store(even, std::memory_order_release);
+    }
+
     inline float HooksViewmodelAutoGripWrapAngle(float angle)
     {
         angle -= 360.0f * std::floor((angle + 180.0f) / 360.0f);
@@ -3198,6 +3269,31 @@ namespace
         const uint32_t fingerprint = HooksBuildStudioHdrFingerprint(drawState, 1u);
         if (fingerprint == 0 || fingerprint == 1u)
             return false;
+
+        if (HooksViewmodelAutoGripIsOfficialStudioFingerprint(fingerprint))
+        {
+            // Official weapons/items already use the native controller placement.
+            // Drop every recently published MOD companion correction before the
+            // arms pass can fall back to it, and make the aim ray use its native
+            // controller pose as well. This happens before layout parsing, manual
+            // residual clearing, sampling, or persistent-cache access.
+            {
+                std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripMutex);
+                const auto ownerFound = s_ViewmodelAutoGripCompanionByVr.find(vr);
+                if (ownerFound != s_ViewmodelAutoGripCompanionByVr.end())
+                {
+                    for (auto& [entityIndex, companion] : ownerFound->second)
+                    {
+                        (void)entityIndex;
+                        companion.valid = false;
+                        companion.updatedAt = {};
+                    }
+                }
+            }
+            InvalidateViewmodelAutoGripAimPose(vr);
+            return false;
+        }
+
         const uint32_t persistentKey =
             HooksBuildViewmodelAutoGripPersistentKey(drawState, modelName);
 
