@@ -127,6 +127,28 @@ struct CustomActionBinding
 	bool usePressReleaseCommands = false;
 };
 
+struct LeftHandedMirroredActionSource
+{
+	vr::VRActionHandle_t action = vr::k_ulInvalidActionHandle;
+	vr::VRInputValueHandle_t restrictToDevice = vr::k_ulInvalidInputValueHandle;
+};
+
+struct LeftHandedDigitalActionFrameCache
+{
+	uint64_t frameSerial = 0;
+	bool dataValid = false;
+	bool previousStateValid = false;
+	bool previousState = false;
+	vr::InputDigitalActionData_t data{};
+};
+
+struct LeftHandedAnalogActionFrameCache
+{
+	uint64_t frameSerial = 0;
+	bool dataValid = false;
+	vr::InputAnalogActionData_t data{};
+};
+
 struct WeaponHapticsProfile
 {
 	float durationSeconds = 0.0f;
@@ -263,9 +285,6 @@ public:
 	uint32_t m_RenderHeight;
 	uint32_t m_AntiAliasing = 0;
 	bool m_EyeRenderTargetMatchProjectionAspect = false;
-	bool m_EyeProjectionViewportCorrection = true;
-	uint32_t m_EyeRenderViewportWidth = 0;
-	uint32_t m_EyeRenderViewportHeight = 0;
 	float m_Aspect;
 	float m_Fov;
 
@@ -1118,50 +1137,62 @@ public:
 	// action sets
 	// /actions/main contains gameplay inputs. /actions/base contains the existing
 	// SteamVR pose, haptic and skeletal bindings used by the independent hand renderer.
-	vr::VRActionSetHandle_t m_ActionSet;
-	vr::VRActionSetHandle_t m_BaseActionSet;
+	vr::VRActionSetHandle_t m_ActionSet = vr::k_ulInvalidActionSetHandle;
+	vr::VRActionSetHandle_t m_BaseActionSet = vr::k_ulInvalidActionSetHandle;
 	std::array<vr::VRActiveActionSet_t, 2> m_ActiveActionSets{};
 
 	// actions
-	vr::VRActionHandle_t m_ActionJump;
-	vr::VRActionHandle_t m_ActionPrimaryAttack;
-	vr::VRActionHandle_t m_ActionSecondaryAttack;
-	vr::VRActionHandle_t m_ActionReload;
-	vr::VRActionHandle_t m_ActionWalk;
-	vr::VRActionHandle_t m_ActionTurn;
-	vr::VRActionHandle_t m_ActionUse;
-	vr::VRActionHandle_t m_ActionTeleport;
-	vr::VRActionHandle_t m_ActionNextItem;
-	vr::VRActionHandle_t m_ActionPrevItem;
-	vr::VRActionHandle_t m_ActionResetPosition;
-	vr::VRActionHandle_t m_ActionCrouch;
-	vr::VRActionHandle_t m_ActionFlashlight;
-	vr::VRActionHandle_t m_ActionInventoryGripLeft;
-	vr::VRActionHandle_t m_ActionInventoryGripRight;
-	vr::VRActionHandle_t m_ActionInventoryQuickSwitch;
-	vr::VRActionHandle_t m_ActionSpecialInfectedAutoAimToggle;
-	vr::VRActionHandle_t m_ActionSpecialInfectedDodgeToggle;
-	vr::VRActionHandle_t m_ActionLedgeGuardToggle;
-	vr::VRActionHandle_t m_ActionEffectiveAttackRangeAutoFireToggle;
-	vr::VRActionHandle_t m_ActionSpeechToText;
-	vr::VRActionHandle_t m_ActionActivateVR;
-	vr::VRActionHandle_t m_MenuSelect;
-	vr::VRActionHandle_t m_MenuBack;
-	vr::VRActionHandle_t m_MenuUp;
-	vr::VRActionHandle_t m_MenuDown;
-	vr::VRActionHandle_t m_MenuLeft;
-	vr::VRActionHandle_t m_MenuRight;
-	vr::VRActionHandle_t m_Spray;
-	vr::VRActionHandle_t m_Scoreboard;
-	vr::VRActionHandle_t m_ToggleHUD;
-	vr::VRActionHandle_t m_Pause;
-	vr::VRActionHandle_t m_NonVRServerMovementAngleToggle;
-	vr::VRActionHandle_t m_CustomAction1;
-	vr::VRActionHandle_t m_CustomAction2;
-	vr::VRActionHandle_t m_CustomAction3;
-	vr::VRActionHandle_t m_CustomAction4;
-	vr::VRActionHandle_t m_CustomAction5;
-	vr::VRActionHandle_t m_ActionScopeToggle;
+	vr::VRActionHandle_t m_ActionJump = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionPrimaryAttack = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionSecondaryAttack = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionReload = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionWalk = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionTurn = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionBooleanTurnLeft = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionBooleanTurnRight = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionUse = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionTeleport = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionNextItem = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionPrevItem = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionResetPosition = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionCrouch = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionFlashlight = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionInventoryGripLeft = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionInventoryGripRight = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionInventoryQuickSwitch = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionSpecialInfectedAutoAimToggle = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionSpecialInfectedDodgeToggle = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionLedgeGuardToggle = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionEffectiveAttackRangeAutoFireToggle = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionSpeechToText = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionActivateVR = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_MenuSelect = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_MenuBack = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_MenuUp = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_MenuDown = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_MenuLeft = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_MenuRight = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_Spray = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_Scoreboard = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ToggleHUD = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_Pause = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_NonVRServerMovementAngleToggle = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_CustomAction1 = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_CustomAction2 = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_CustomAction3 = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_CustomAction4 = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_CustomAction5 = vr::k_ulInvalidActionHandle;
+	vr::VRActionHandle_t m_ActionScopeToggle = vr::k_ulInvalidActionHandle;
+	std::unordered_map<vr::VRActionHandle_t, std::vector<LeftHandedMirroredActionSource>> m_LeftHandedDigitalActionSwapMap;
+	std::unordered_map<vr::VRActionHandle_t, std::vector<LeftHandedMirroredActionSource>> m_LeftHandedAnalogActionSwapMap;
+	std::unordered_set<vr::VRActionHandle_t> m_LeftHandedDigitalHandBoundActions;
+	std::unordered_set<vr::VRActionHandle_t> m_LeftHandedAnalogHandBoundActions;
+	std::unordered_map<vr::VRActionHandle_t, LeftHandedDigitalActionFrameCache> m_LeftHandedDigitalActionFrameCache;
+	std::unordered_map<vr::VRActionHandle_t, LeftHandedAnalogActionFrameCache> m_LeftHandedAnalogActionFrameCache;
+	std::chrono::steady_clock::time_point m_LeftHandedInputSwapNextRefresh{};
+	uint64_t m_LeftHandedInputBindingHash = 0;
+	uint64_t m_InputActionStateFrameSerial = 0;
+	bool m_LeftHandedInputSwapRuntimeEnabled = false;
 	bool m_WeaponHapticsEnabled = true;
 	std::unordered_map<std::string, WeaponHapticsProfile> m_WeaponHapticsOverrides;
 	WeaponHapticsProfile m_DefaultWeaponHapticsProfile = { 0.018f, 130.0f, 0.32f };
@@ -1271,6 +1302,10 @@ public:
 	Vector m_VrHandsLeftPoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	Vector m_VrHandsRightPoseOffsetMeters = { 0.0f, 0.0f, 0.0f };
 	Vector m_VrHandsRightPoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
+	// Left-handed mode uses gameplay-right for the physical left/gun hand and gameplay-left
+	// for the physical right/off hand. These offsets are named by physical hand.
+	Vector m_VrHandsLeftHandedLeftPoseOffsetMeters = { 0.0f, 0.0f, 0.0f };
+	Vector m_VrHandsLeftHandedTwoHandedRightPoseOffsetMeters = { 0.0f, 0.0f, 0.0f };
 	Vector m_VrHandsLeftHandedViewmodelPoseOffsetMeters = { 0.0f, 0.0f, 0.0f };
 	Vector m_VrHandsLeftHandedViewmodelPoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	// Built-in config overlay placement. Parsed by ParseConfigFile() so config hot-reload can update it.
@@ -2363,7 +2398,7 @@ public:
 
 
 	// Aim-line friendly-fire guard (client-side fire suppression)
-	vr::VRActionHandle_t m_ActionFriendlyFireBlockToggle;
+	vr::VRActionHandle_t m_ActionFriendlyFireBlockToggle = vr::k_ulInvalidActionHandle;
 	bool m_BlockFireOnFriendlyAimEnabled = false; // toggled by SteamVR binding
 	bool m_AimLineHitsFriendly = false;           // updated from a ray trace (aim ray)
 	// Extra radius (meters) for the friendly-fire aim guard trace.
@@ -3440,8 +3475,9 @@ public:
 	bool PressedDigitalAction(vr::VRActionHandle_t& actionHandle, bool checkIfActionChanged = false);
 	bool GetDigitalActionData(vr::VRActionHandle_t& actionHandle, vr::InputDigitalActionData_t& digitalDataOut);
 	bool GetAnalogActionData(vr::VRActionHandle_t& actionHandle, vr::InputAnalogActionData_t& analogDataOut);
-	vr::VRActionHandle_t ResolveLeftHandedSwapDigitalAction(vr::VRActionHandle_t actionHandle) const;
-	vr::VRActionHandle_t ResolveLeftHandedSwapAnalogAction(vr::VRActionHandle_t actionHandle) const;
+	void RefreshLeftHandedInputActionSwapMaps(bool force = false);
+	bool GetLeftHandedMirroredDigitalActionData(vr::VRActionHandle_t actionHandle, vr::InputDigitalActionData_t& digitalDataOut);
+	bool GetLeftHandedMirroredAnalogActionData(vr::VRActionHandle_t actionHandle, vr::InputAnalogActionData_t& analogDataOut);
 	void ResetPosition();
 	void GetPoseData(vr::TrackedDevicePose_t& poseRaw, TrackedDevicePoseData& poseOut);
 	void PoseWaiterThreadMain();

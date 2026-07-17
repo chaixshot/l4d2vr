@@ -7616,7 +7616,7 @@ bool VR::DrawVrHandsForEyeImmediate(
     Vector rightHandPoseOffsetMeters = m_VrHandsRightPoseOffsetMeters;
     Vector rightHandPoseRotationOffsetDeg = m_VrHandsRightPoseRotationOffsetDeg;
     const bool twoHandedGripPoseActive = IsVrHandsTwoHandedGripPoseActive();
-    const Vector leftHandPoseOffsetMeters = twoHandedGripPoseActive
+    Vector leftHandPoseOffsetMeters = twoHandedGripPoseActive
         ? Vector(0.0f, 0.0f, 0.0f)
         : m_VrHandsLeftPoseOffsetMeters;
     const Vector leftHandPoseRotationOffsetDeg = twoHandedGripPoseActive
@@ -7624,14 +7624,21 @@ bool VR::DrawVrHandsForEyeImmediate(
         : m_VrHandsLeftPoseRotationOffsetDeg;
     const bool vrHandsRightUseViewmodelPose =
         m_VrHandsRightUseViewmodelPose;
-    if (m_LeftHanded && vrHandsRightUseViewmodelPose)
+    if (m_LeftHanded)
     {
-        rightHandPoseOffsetMeters.x += m_VrHandsLeftHandedViewmodelPoseOffsetMeters.x;
-        rightHandPoseOffsetMeters.y += m_VrHandsLeftHandedViewmodelPoseOffsetMeters.y;
-        rightHandPoseOffsetMeters.z += m_VrHandsLeftHandedViewmodelPoseOffsetMeters.z;
-        rightHandPoseRotationOffsetDeg.x += m_VrHandsLeftHandedViewmodelPoseRotationOffsetDeg.x;
-        rightHandPoseRotationOffsetDeg.y += m_VrHandsLeftHandedViewmodelPoseRotationOffsetDeg.y;
-        rightHandPoseRotationOffsetDeg.z += m_VrHandsLeftHandedViewmodelPoseRotationOffsetDeg.z;
+        // Gameplay-right is the physical left/gun hand after the left-handed pose swap.
+        rightHandPoseOffsetMeters += m_VrHandsLeftHandedLeftPoseOffsetMeters;
+
+        // Gameplay-left is the physical right/off hand. Apply its dedicated correction
+        // only while the off hand is attached to the weapon in a two-hand grip.
+        if (twoHandedGripPoseActive)
+            leftHandPoseOffsetMeters += m_VrHandsLeftHandedTwoHandedRightPoseOffsetMeters;
+
+        if (vrHandsRightUseViewmodelPose)
+        {
+            rightHandPoseOffsetMeters += m_VrHandsLeftHandedViewmodelPoseOffsetMeters;
+            rightHandPoseRotationOffsetDeg += m_VrHandsLeftHandedViewmodelPoseRotationOffsetDeg;
+        }
     }
 
     if (drawGloves)

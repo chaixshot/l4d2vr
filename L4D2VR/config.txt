@@ -24,7 +24,6 @@ LedgeGuardDebugLog=false
 LedgeGuardDebugLogHz=2
 AntiAliasing=0
 EyeRenderTargetMatchProjectionAspect=false
-EyeProjectionViewportCorrection=true
 
 ThirdPersonCameraFollowHmd=true
 ThirdPersonVRCameraOffset=38
@@ -163,6 +162,8 @@ NativeViewmodelLeftHandOpenVRIndexInitialCurl=0.0
 NativeViewmodelLeftHandOpenVRMiddleInitialCurl=0.0
 NativeViewmodelLeftHandOpenVRRingInitialCurl=0.0
 NativeViewmodelLeftHandOpenVRPinkyInitialCurl=0.0
+VrHandsLeftHandedLeftPoseOffsetMeters=0,0,0
+VrHandsLeftHandedTwoHandedRightPoseOffsetMeters=0,0,0
 VrHandsLeftHandedViewmodelPoseOffsetMeters=0,0,0
 VrHandsLeftHandedViewmodelPoseRotationOffsetDeg=0,0,0
 MagazineBoxDebugEnabled=true

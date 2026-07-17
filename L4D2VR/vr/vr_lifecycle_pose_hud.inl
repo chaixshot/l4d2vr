@@ -164,6 +164,8 @@ bool VR::UpdatePosesAndActions()
         m_CompositorNeedsHandoff = false;
 
     m_Input->UpdateActionState(m_ActiveActionSets.data(), sizeof(vr::VRActiveActionSet_t), static_cast<uint32_t>(m_ActiveActionSets.size()));
+    ++m_InputActionStateFrameSerial;
+    RefreshLeftHandedInputActionSwapMaps(false);
     return posesValid;
 }
 
@@ -193,57 +195,458 @@ bool VR::PressedDigitalAction(vr::VRActionHandle_t& actionHandle, bool checkIfAc
     return digitalActionData.bState;
 }
 
+namespace
+{
+    enum class LeftHandedBindingHand
+    {
+        None,
+        Left,
+        Right
+    };
+
+    struct LeftHandedBindingGroup
+    {
+        std::vector<vr::VRActionHandle_t> leftActions;
+        std::vector<vr::VRActionHandle_t> rightActions;
+    };
+
+    std::string LeftHandedBindingToLower(const char* text)
+    {
+        std::string value = text ? text : "";
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch)
+            {
+                return static_cast<char>(std::tolower(ch));
+            });
+        return value;
+    }
+
+    LeftHandedBindingHand GetLeftHandedBindingHand(const vr::InputBindingInfo_t& binding)
+    {
+        const std::string devicePath = LeftHandedBindingToLower(binding.rchDevicePathName);
+        const std::string inputPath = LeftHandedBindingToLower(binding.rchInputPathName);
+        const std::string combined = devicePath + "|" + inputPath;
+        if (combined.find("/user/hand/left") != std::string::npos)
+            return LeftHandedBindingHand::Left;
+        if (combined.find("/user/hand/right") != std::string::npos)
+            return LeftHandedBindingHand::Right;
+        return LeftHandedBindingHand::None;
+    }
+
+    void ReplaceAllLeftHandedBindingText(std::string& value, const std::string& from, const std::string& to)
+    {
+        if (from.empty())
+            return;
+        size_t pos = 0;
+        while ((pos = value.find(from, pos)) != std::string::npos)
+        {
+            value.replace(pos, from.size(), to);
+            pos += to.size();
+        }
+    }
+
+    std::string BuildLeftHandedBindingMirrorKey(const vr::InputBindingInfo_t& binding)
+    {
+        std::string inputPath = LeftHandedBindingToLower(binding.rchInputPathName);
+        ReplaceAllLeftHandedBindingText(inputPath, "/user/hand/left", "/user/hand/mirrored");
+        ReplaceAllLeftHandedBindingText(inputPath, "/user/hand/right", "/user/hand/mirrored");
+
+        // Oculus/Cosmos use X/Y on the left controller and A/B on the right.
+        // Index exposes A/B on both controllers. Canonicalizing by button position
+        // lets the runtime pair either layout without assuming the active binding file.
+        ReplaceAllLeftHandedBindingText(inputPath, "/input/x/", "/input/face_primary/");
+        ReplaceAllLeftHandedBindingText(inputPath, "/input/a/", "/input/face_primary/");
+        ReplaceAllLeftHandedBindingText(inputPath, "/input/y/", "/input/face_secondary/");
+        ReplaceAllLeftHandedBindingText(inputPath, "/input/b/", "/input/face_secondary/");
+        if (inputPath.size() >= 8 && inputPath.compare(inputPath.size() - 8, 8, "/input/x") == 0)
+            inputPath.replace(inputPath.size() - 8, 8, "/input/face_primary");
+        if (inputPath.size() >= 8 && inputPath.compare(inputPath.size() - 8, 8, "/input/a") == 0)
+            inputPath.replace(inputPath.size() - 8, 8, "/input/face_primary");
+        if (inputPath.size() >= 8 && inputPath.compare(inputPath.size() - 8, 8, "/input/y") == 0)
+            inputPath.replace(inputPath.size() - 8, 8, "/input/face_secondary");
+        if (inputPath.size() >= 8 && inputPath.compare(inputPath.size() - 8, 8, "/input/b") == 0)
+            inputPath.replace(inputPath.size() - 8, 8, "/input/face_secondary");
+
+        return inputPath + "|" +
+            LeftHandedBindingToLower(binding.rchModeName) + "|" +
+            LeftHandedBindingToLower(binding.rchSlotName) + "|" +
+            LeftHandedBindingToLower(binding.rchInputSourceType);
+    }
+
+    void AddUniqueLeftHandedAction(std::vector<vr::VRActionHandle_t>& actions, vr::VRActionHandle_t action)
+    {
+        if (action == vr::k_ulInvalidActionHandle)
+            return;
+        if (std::find(actions.begin(), actions.end(), action) == actions.end())
+            actions.push_back(action);
+    }
+
+    void AddUniqueLeftHandedMirroredSource(
+        std::vector<LeftHandedMirroredActionSource>& sources,
+        vr::VRActionHandle_t action,
+        vr::VRInputValueHandle_t restrictToDevice)
+    {
+        if (action == vr::k_ulInvalidActionHandle || restrictToDevice == vr::k_ulInvalidInputValueHandle)
+            return;
+        const auto duplicate = std::find_if(sources.begin(), sources.end(), [&](const LeftHandedMirroredActionSource& source)
+            {
+                return source.action == action && source.restrictToDevice == restrictToDevice;
+            });
+        if (duplicate == sources.end())
+            sources.push_back({ action, restrictToDevice });
+    }
+
+    uint64_t HashLeftHandedBindingRecord(uint64_t hash, vr::VRActionHandle_t action, LeftHandedBindingHand hand, const std::string& key)
+    {
+        constexpr uint64_t kFnvPrime = 1099511628211ull;
+        auto mixByte = [&](uint8_t value)
+            {
+                hash ^= value;
+                hash *= kFnvPrime;
+            };
+        for (size_t i = 0; i < sizeof(action); ++i)
+            mixByte(static_cast<uint8_t>((action >> (i * 8)) & 0xffu));
+        mixByte(static_cast<uint8_t>(hand));
+        for (unsigned char ch : key)
+            mixByte(ch);
+        mixByte(0xffu);
+        return hash;
+    }
+}
+
+void VR::RefreshLeftHandedInputActionSwapMaps(bool force)
+{
+    const bool enabled = m_LeftHanded && m_LeftHandedSwapInputActions && m_Input;
+    if (!enabled)
+    {
+        if (m_LeftHandedInputSwapRuntimeEnabled)
+        {
+            m_LeftHandedDigitalActionSwapMap.clear();
+            m_LeftHandedAnalogActionSwapMap.clear();
+            m_LeftHandedDigitalHandBoundActions.clear();
+            m_LeftHandedAnalogHandBoundActions.clear();
+            m_LeftHandedDigitalActionFrameCache.clear();
+            m_LeftHandedAnalogActionFrameCache.clear();
+            m_LeftHandedInputBindingHash = 0;
+        }
+        m_LeftHandedInputSwapRuntimeEnabled = false;
+        return;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (!force && m_LeftHandedInputSwapRuntimeEnabled &&
+        m_LeftHandedInputSwapNextRefresh.time_since_epoch().count() != 0 &&
+        now < m_LeftHandedInputSwapNextRefresh)
+    {
+        return;
+    }
+    m_LeftHandedInputSwapNextRefresh = now + std::chrono::seconds(1);
+
+    vr::VRInputValueHandle_t leftInputSource = vr::k_ulInvalidInputValueHandle;
+    vr::VRInputValueHandle_t rightInputSource = vr::k_ulInvalidInputValueHandle;
+    if (m_Input->GetInputSourceHandle("/user/hand/left", &leftInputSource) != vr::VRInputError_None ||
+        m_Input->GetInputSourceHandle("/user/hand/right", &rightInputSource) != vr::VRInputError_None)
+    {
+        return;
+    }
+
+    const vr::VRActionHandle_t digitalActions[] =
+    {
+        m_ActionJump,
+        m_ActionPrimaryAttack,
+        m_ActionSecondaryAttack,
+        m_ActionReload,
+        m_ActionBooleanTurnLeft,
+        m_ActionBooleanTurnRight,
+        m_ActionUse,
+        m_ActionTeleport,
+        m_ActionNextItem,
+        m_ActionPrevItem,
+        m_ActionResetPosition,
+        m_ActionCrouch,
+        m_ActionFlashlight,
+        m_ActionInventoryGripLeft,
+        m_ActionInventoryGripRight,
+        m_ActionInventoryQuickSwitch,
+        m_ActionSpecialInfectedAutoAimToggle,
+        m_ActionSpecialInfectedDodgeToggle,
+        m_ActionLedgeGuardToggle,
+        m_ActionEffectiveAttackRangeAutoFireToggle,
+        m_ActionSpeechToText,
+        m_ActionActivateVR,
+        m_MenuSelect,
+        m_MenuBack,
+        m_MenuUp,
+        m_MenuDown,
+        m_MenuLeft,
+        m_MenuRight,
+        m_Spray,
+        m_Scoreboard,
+        m_ToggleHUD,
+        m_Pause,
+        m_NonVRServerMovementAngleToggle,
+        m_CustomAction1,
+        m_CustomAction2,
+        m_CustomAction3,
+        m_CustomAction4,
+        m_CustomAction5,
+        m_ActionScopeToggle,
+        m_ActionFriendlyFireBlockToggle
+    };
+    const vr::VRActionHandle_t analogActions[] =
+    {
+        m_ActionWalk,
+        m_ActionTurn
+    };
+
+    auto buildSwapMap = [&](const vr::VRActionHandle_t* actions, size_t actionCount,
+        std::unordered_map<vr::VRActionHandle_t, std::vector<LeftHandedMirroredActionSource>>& outMap,
+        std::unordered_set<vr::VRActionHandle_t>& outHandBoundActions,
+        uint64_t& bindingHash)
+        {
+            std::unordered_map<std::string, LeftHandedBindingGroup> groups;
+            for (size_t actionIndex = 0; actionIndex < actionCount; ++actionIndex)
+            {
+                const vr::VRActionHandle_t action = actions[actionIndex];
+                if (action == vr::k_ulInvalidActionHandle)
+                    continue;
+
+                std::array<vr::InputBindingInfo_t, 64> bindings{};
+                uint32_t bindingCount = 0;
+                const vr::EVRInputError error = m_Input->GetActionBindingInfo(
+                    action,
+                    bindings.data(),
+                    sizeof(vr::InputBindingInfo_t),
+                    static_cast<uint32_t>(bindings.size()),
+                    &bindingCount);
+                if (error != vr::VRInputError_None)
+                    continue;
+
+                bindingCount = (std::min)(bindingCount, static_cast<uint32_t>(bindings.size()));
+                for (uint32_t bindingIndex = 0; bindingIndex < bindingCount; ++bindingIndex)
+                {
+                    const vr::InputBindingInfo_t& binding = bindings[bindingIndex];
+                    const LeftHandedBindingHand hand = GetLeftHandedBindingHand(binding);
+                    if (hand == LeftHandedBindingHand::None)
+                        continue;
+
+                    const std::string key = BuildLeftHandedBindingMirrorKey(binding);
+                    if (key.empty())
+                        continue;
+
+                    outHandBoundActions.insert(action);
+                    bindingHash = HashLeftHandedBindingRecord(bindingHash, action, hand, key);
+                    LeftHandedBindingGroup& group = groups[key];
+                    if (hand == LeftHandedBindingHand::Left)
+                        AddUniqueLeftHandedAction(group.leftActions, action);
+                    else
+                        AddUniqueLeftHandedAction(group.rightActions, action);
+                }
+            }
+
+            for (const auto& pair : groups)
+            {
+                const LeftHandedBindingGroup& group = pair.second;
+                for (vr::VRActionHandle_t leftAction : group.leftActions)
+                {
+                    auto& targets = outMap[leftAction];
+                    for (vr::VRActionHandle_t rightAction : group.rightActions)
+                        AddUniqueLeftHandedMirroredSource(targets, rightAction, rightInputSource);
+                }
+                for (vr::VRActionHandle_t rightAction : group.rightActions)
+                {
+                    auto& targets = outMap[rightAction];
+                    for (vr::VRActionHandle_t leftAction : group.leftActions)
+                        AddUniqueLeftHandedMirroredSource(targets, leftAction, leftInputSource);
+                }
+            }
+        };
+
+    std::unordered_map<vr::VRActionHandle_t, std::vector<LeftHandedMirroredActionSource>> digitalSwapMap;
+    std::unordered_map<vr::VRActionHandle_t, std::vector<LeftHandedMirroredActionSource>> analogSwapMap;
+    std::unordered_set<vr::VRActionHandle_t> digitalHandBoundActions;
+    std::unordered_set<vr::VRActionHandle_t> analogHandBoundActions;
+    uint64_t bindingHash = 1469598103934665603ull;
+
+    buildSwapMap(digitalActions, std::size(digitalActions), digitalSwapMap, digitalHandBoundActions, bindingHash);
+    buildSwapMap(analogActions, std::size(analogActions), analogSwapMap, analogHandBoundActions, bindingHash);
+
+    if (!m_LeftHandedInputSwapRuntimeEnabled || bindingHash != m_LeftHandedInputBindingHash)
+    {
+        m_LeftHandedDigitalActionSwapMap.swap(digitalSwapMap);
+        m_LeftHandedAnalogActionSwapMap.swap(analogSwapMap);
+        m_LeftHandedDigitalHandBoundActions.swap(digitalHandBoundActions);
+        m_LeftHandedAnalogHandBoundActions.swap(analogHandBoundActions);
+        m_LeftHandedDigitalActionFrameCache.clear();
+        m_LeftHandedAnalogActionFrameCache.clear();
+        m_LeftHandedInputBindingHash = bindingHash;
+        Game::logMsg("[VR][LeftHandedInput] active bindings mirrored: digital=%zu analog=%zu custom actions included",
+            m_LeftHandedDigitalActionSwapMap.size(),
+            m_LeftHandedAnalogActionSwapMap.size());
+    }
+
+    m_LeftHandedInputSwapRuntimeEnabled = true;
+}
+
+bool VR::GetLeftHandedMirroredDigitalActionData(vr::VRActionHandle_t actionHandle, vr::InputDigitalActionData_t& digitalDataOut)
+{
+    const auto mapIt = m_LeftHandedDigitalActionSwapMap.find(actionHandle);
+    const bool isHandBound = m_LeftHandedDigitalHandBoundActions.find(actionHandle) != m_LeftHandedDigitalHandBoundActions.end();
+    if (!isHandBound)
+    {
+        return m_Input->GetDigitalActionData(
+            actionHandle,
+            &digitalDataOut,
+            sizeof(digitalDataOut),
+            vr::k_ulInvalidInputValueHandle) == vr::VRInputError_None;
+    }
+
+    LeftHandedDigitalActionFrameCache& cache = m_LeftHandedDigitalActionFrameCache[actionHandle];
+    if (cache.dataValid && cache.frameSerial == m_InputActionStateFrameSerial)
+    {
+        digitalDataOut = cache.data;
+        return true;
+    }
+
+    vr::InputDigitalActionData_t combined{};
+    bool anyRawChanged = false;
+    bool anyQuerySucceeded = false;
+    float newestUpdateTime = -std::numeric_limits<float>::infinity();
+    if (mapIt != m_LeftHandedDigitalActionSwapMap.end())
+    {
+        for (const LeftHandedMirroredActionSource& source : mapIt->second)
+        {
+            vr::InputDigitalActionData_t data{};
+            const vr::EVRInputError error = m_Input->GetDigitalActionData(
+                source.action,
+                &data,
+                sizeof(data),
+                source.restrictToDevice);
+            if (error != vr::VRInputError_None)
+                continue;
+
+            anyQuerySucceeded = true;
+            combined.bActive = combined.bActive || data.bActive;
+            anyRawChanged = anyRawChanged || data.bChanged;
+            if (data.bState)
+            {
+                combined.bState = true;
+                if (combined.activeOrigin == vr::k_ulInvalidInputValueHandle || data.fUpdateTime > newestUpdateTime)
+                {
+                    combined.activeOrigin = data.activeOrigin;
+                    newestUpdateTime = data.fUpdateTime;
+                }
+            }
+            else if (combined.activeOrigin == vr::k_ulInvalidInputValueHandle && data.bActive)
+            {
+                combined.activeOrigin = data.activeOrigin;
+            }
+            combined.fUpdateTime = (std::max)(combined.fUpdateTime, data.fUpdateTime);
+        }
+    }
+
+    // A hand-bound action with no binding on the mirrored controller is intentionally
+    // inactive after swapping. Do not leak its original-hand state back through.
+    if (!anyQuerySucceeded)
+        combined.bActive = true;
+
+    combined.bChanged = cache.previousStateValid
+        ? (cache.previousState != combined.bState)
+        : anyRawChanged;
+    cache.previousStateValid = true;
+    cache.previousState = combined.bState;
+    cache.frameSerial = m_InputActionStateFrameSerial;
+    cache.dataValid = true;
+    cache.data = combined;
+    digitalDataOut = combined;
+    return true;
+}
+
+bool VR::GetLeftHandedMirroredAnalogActionData(vr::VRActionHandle_t actionHandle, vr::InputAnalogActionData_t& analogDataOut)
+{
+    const auto mapIt = m_LeftHandedAnalogActionSwapMap.find(actionHandle);
+    const bool isHandBound = m_LeftHandedAnalogHandBoundActions.find(actionHandle) != m_LeftHandedAnalogHandBoundActions.end();
+    if (!isHandBound)
+    {
+        return m_Input->GetAnalogActionData(
+            actionHandle,
+            &analogDataOut,
+            sizeof(analogDataOut),
+            vr::k_ulInvalidInputValueHandle) == vr::VRInputError_None;
+    }
+
+    LeftHandedAnalogActionFrameCache& cache = m_LeftHandedAnalogActionFrameCache[actionHandle];
+    if (cache.dataValid && cache.frameSerial == m_InputActionStateFrameSerial)
+    {
+        analogDataOut = cache.data;
+        return true;
+    }
+
+    vr::InputAnalogActionData_t combined{};
+    float bestMagnitudeSq = -1.0f;
+    bool anyQuerySucceeded = false;
+    if (mapIt != m_LeftHandedAnalogActionSwapMap.end())
+    {
+        for (const LeftHandedMirroredActionSource& source : mapIt->second)
+        {
+            vr::InputAnalogActionData_t data{};
+            const vr::EVRInputError error = m_Input->GetAnalogActionData(
+                source.action,
+                &data,
+                sizeof(data),
+                source.restrictToDevice);
+            if (error != vr::VRInputError_None)
+                continue;
+
+            anyQuerySucceeded = true;
+            const float magnitudeSq = data.x * data.x + data.y * data.y + data.z * data.z;
+            if (magnitudeSq > bestMagnitudeSq)
+            {
+                bestMagnitudeSq = magnitudeSq;
+                combined = data;
+            }
+        }
+    }
+
+    if (!anyQuerySucceeded)
+        combined.bActive = true;
+
+    cache.frameSerial = m_InputActionStateFrameSerial;
+    cache.dataValid = true;
+    cache.data = combined;
+    analogDataOut = combined;
+    return true;
+}
+
 bool VR::GetDigitalActionData(vr::VRActionHandle_t& actionHandle, vr::InputDigitalActionData_t& digitalDataOut)
 {
-    const vr::VRActionHandle_t resolvedActionHandle = ResolveLeftHandedSwapDigitalAction(actionHandle);
-    vr::EVRInputError result = m_Input->GetDigitalActionData(resolvedActionHandle, &digitalDataOut, sizeof(digitalDataOut), vr::k_ulInvalidInputValueHandle);
+    if (m_LeftHanded && m_LeftHandedSwapInputActions)
+    {
+        RefreshLeftHandedInputActionSwapMaps(false);
+        return GetLeftHandedMirroredDigitalActionData(actionHandle, digitalDataOut);
+    }
 
+    const vr::EVRInputError result = m_Input->GetDigitalActionData(
+        actionHandle,
+        &digitalDataOut,
+        sizeof(digitalDataOut),
+        vr::k_ulInvalidInputValueHandle);
     return result == vr::VRInputError_None;
 }
 
 bool VR::GetAnalogActionData(vr::VRActionHandle_t& actionHandle, vr::InputAnalogActionData_t& analogDataOut)
 {
-    const vr::VRActionHandle_t resolvedActionHandle = ResolveLeftHandedSwapAnalogAction(actionHandle);
-    vr::EVRInputError result = m_Input->GetAnalogActionData(resolvedActionHandle, &analogDataOut, sizeof(analogDataOut), vr::k_ulInvalidInputValueHandle);
+    if (m_LeftHanded && m_LeftHandedSwapInputActions)
+    {
+        RefreshLeftHandedInputActionSwapMaps(false);
+        return GetLeftHandedMirroredAnalogActionData(actionHandle, analogDataOut);
+    }
 
-    if (result == vr::VRInputError_None)
-        return true;
-
-    return false;
-}
-
-vr::VRActionHandle_t VR::ResolveLeftHandedSwapDigitalAction(vr::VRActionHandle_t actionHandle) const
-{
-    if (!m_LeftHanded || !m_LeftHandedSwapInputActions)
-        return actionHandle;
-
-    if (actionHandle == m_ActionPrimaryAttack)
-        return m_ActionSecondaryAttack;
-    if (actionHandle == m_ActionSecondaryAttack)
-        return m_ActionPrimaryAttack;
-    if (actionHandle == m_ActionReload)
-        return m_ActionCrouch;
-    if (actionHandle == m_ActionCrouch)
-        return m_ActionReload;
-    if (actionHandle == m_ActionResetPosition)
-        return m_ActionFlashlight;
-    if (actionHandle == m_ActionFlashlight)
-        return m_ActionResetPosition;
-
-    return actionHandle;
-}
-
-vr::VRActionHandle_t VR::ResolveLeftHandedSwapAnalogAction(vr::VRActionHandle_t actionHandle) const
-{
-    if (!m_LeftHanded || !m_LeftHandedSwapInputActions)
-        return actionHandle;
-
-    if (actionHandle == m_ActionWalk)
-        return m_ActionTurn;
-    if (actionHandle == m_ActionTurn)
-        return m_ActionWalk;
-
-    return actionHandle;
+    const vr::EVRInputError result = m_Input->GetAnalogActionData(
+        actionHandle,
+        &analogDataOut,
+        sizeof(analogDataOut),
+        vr::k_ulInvalidInputValueHandle);
+    return result == vr::VRInputError_None;
 }
 
 void VR::ProcessMenuInput()

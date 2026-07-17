@@ -1229,6 +1229,14 @@ void VR::ParseConfigFile()
         m_VrHandsLeftPoseRotationOffsetDeg = clampVector(getVector3("VrHandsLeftPoseRotationOffsetDeg", m_VrHandsLeftPoseRotationOffsetDeg), -180.0f, 180.0f);
         m_VrHandsRightPoseOffsetMeters = clampVector(getVector3("VrHandsRightPoseOffsetMeters", m_VrHandsRightPoseOffsetMeters), -1.0f, 1.0f);
         m_VrHandsRightPoseRotationOffsetDeg = clampVector(getVector3("VrHandsRightPoseRotationOffsetDeg", m_VrHandsRightPoseRotationOffsetDeg), -180.0f, 180.0f);
+        m_VrHandsLeftHandedLeftPoseOffsetMeters = clampVector(
+            getVector3("VrHandsLeftHandedLeftPoseOffsetMeters", m_VrHandsLeftHandedLeftPoseOffsetMeters),
+            -1.0f,
+            1.0f);
+        m_VrHandsLeftHandedTwoHandedRightPoseOffsetMeters = clampVector(
+            getVector3("VrHandsLeftHandedTwoHandedRightPoseOffsetMeters", m_VrHandsLeftHandedTwoHandedRightPoseOffsetMeters),
+            -1.0f,
+            1.0f);
         m_VrHandsLeftHandedViewmodelPoseOffsetMeters = clampVector(getVector3("VrHandsLeftHandedViewmodelPoseOffsetMeters", m_VrHandsLeftHandedViewmodelPoseOffsetMeters), -1.0f, 1.0f);
         m_VrHandsLeftHandedViewmodelPoseRotationOffsetDeg = clampVector(getVector3("VrHandsLeftHandedViewmodelPoseRotationOffsetDeg", m_VrHandsLeftHandedViewmodelPoseRotationOffsetDeg), -180.0f, 180.0f);
     }
@@ -1496,8 +1504,11 @@ void VR::ParseConfigFile()
         getFloat("NativeViewmodelLeftHandOpenVRPinkyInitialCurl", m_NativeViewmodelLeftHandOpenVRInitialCurl[4]),
         -1.0f,
         1.0f);
-    const bool vrHandsEntryEnabled = getBool("VrHandsEnabled", false);
-    m_VrHandsGlovesEnabled = getBool("VrHandsGlovesEnabled", false);
+    const bool forceLeftHandedVrGloves = m_LeftHanded;
+    const bool vrHandsEntryEnabled =
+        getBool("VrHandsEnabled", false) || forceLeftHandedVrGloves;
+    m_VrHandsGlovesEnabled =
+        getBool("VrHandsGlovesEnabled", false) || forceLeftHandedVrGloves;
     m_VrHandsGloveFingerMaxCurl[0] = std::clamp(
         getFloat("VrHandsGloveThumbMaxCurl", m_VrHandsGloveFingerMaxCurl[0]),
         0.0f,
@@ -2862,7 +2873,6 @@ void VR::ParseConfigFile()
     // Global: hard-lock first-person viewmodel pose after engine calc (all queue modes).
     m_ViewmodelDisableMoveBob = getBool("ViewmodelDisableMoveBob", m_ViewmodelDisableMoveBob);
     m_EyeRenderTargetMatchProjectionAspect = getBool("EyeRenderTargetMatchProjectionAspect", m_EyeRenderTargetMatchProjectionAspect);
-    m_EyeProjectionViewportCorrection = getBool("EyeProjectionViewportCorrection", m_EyeProjectionViewportCorrection);
     m_QueuedViewmodelStabilizeDebugLog = getBool("QueuedViewmodelStabilizeDebugLog", m_QueuedViewmodelStabilizeDebugLog);
     m_QueuedViewmodelStabilizeDebugLogHz = std::max(0.0f, getFloat("QueuedViewmodelStabilizeDebugLogHz", m_QueuedViewmodelStabilizeDebugLogHz));
     m_RenderPipelineDebugLog = getBool("RenderPipelineDebugLog", m_RenderPipelineDebugLog);

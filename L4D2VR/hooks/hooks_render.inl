@@ -2119,12 +2119,8 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 
 	auto NormalizeViewSetupForVREye = [&](CViewSetup& view)
 		{
-			const int eyeWidth = static_cast<int>(m_VR->m_EyeRenderViewportWidth > 0
-				? m_VR->m_EyeRenderViewportWidth
-				: m_VR->m_RenderWidth);
-			const int eyeHeight = static_cast<int>(m_VR->m_EyeRenderViewportHeight > 0
-				? m_VR->m_EyeRenderViewportHeight
-				: m_VR->m_RenderHeight);
+			const int eyeWidth = static_cast<int>(m_VR->m_RenderWidth);
+			const int eyeHeight = static_cast<int>(m_VR->m_RenderHeight);
 
 			// Source keeps both scaled and unscaled viewport fields in CViewSetup.
 			// If the unscaled fields are left at the desktop/backbuffer size,
