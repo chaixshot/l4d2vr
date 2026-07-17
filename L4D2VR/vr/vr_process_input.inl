@@ -73,7 +73,7 @@ void VR::ProcessInput()
         m_PrimaryAttackDown = false;
         m_MagazineInteractionThumbIndexCurlDownPrev = false;
         m_MagazineInteractionThreeFingerCurlDownPrev = false;
-        (void)UpdateMagazineInteraction(nullptr, false, false, false);
+        (void)UpdateMagazineInteraction(nullptr, false, false, false, false, false);
         CancelMagazineInteractionManual();
         CancelTeleportTargeting();
         return;
@@ -476,7 +476,7 @@ void VR::ProcessInput()
         (!magazineInteractionInputEnabled || m_MagazineInteractionUseButtonGripInput);
     const bool magazineFingerCurlInput =
         magazineInteractionInputEnabled &&
-        !m_MagazineInteractionUseButtonGripInput;
+        (!m_MagazineInteractionUseButtonGripInput || m_MagazineInteractionSeparateButtonInput);
     std::array<float, 5> magazineInteractionFingerCurls{};
     const bool magazineInteractionFingerCurlsValid =
         magazineFingerCurlInput &&
@@ -538,6 +538,8 @@ void VR::ProcessInput()
         ? magazineButtonGripJustPressed
         : ((thumbIndexGripDown && !thumbIndexWasDown) ||
             (threeFingerGripDown && !threeFingerWasDown));
+    const bool supportHandDown = threeFingerGripDown;
+    const bool supportHandJustPressed = threeFingerGripDown && !threeFingerWasDown;
     m_MagazineInteractionThumbIndexCurlDownPrev = thumbIndexGripDown;
     m_MagazineInteractionThreeFingerCurlDownPrev = threeFingerGripDown;
 
@@ -545,6 +547,8 @@ void VR::ProcessInput()
         localPlayer,
         magazineGripDown,
         magazineGripJustPressed,
+        supportHandDown,
+        supportHandJustPressed,
         allowGameplayInputOnTwoHandedGripRelease);
     if (IsMagazineInteractionLeftHandActive())
     {

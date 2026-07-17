@@ -1417,6 +1417,7 @@ public:
 	bool m_MagazineInteractionEnabled = false;
 	bool m_MagazineInteractionQuickReloadMode = false;
 	bool m_MagazineInteractionUseButtonGripInput = true;
+	bool m_MagazineInteractionSeparateButtonInput = false;
 	bool m_MagazineInteractionSuppressEmptyClipAutoReload = false;
 	int m_MagazineInteractionShotgunShellsPerInsert = 1;
 	float m_MagazineInteractionThumbIndexCurlStart = 0.62f;
@@ -3330,6 +3331,8 @@ public:
 		C_BasePlayer* localPlayer,
 		bool leftGripDown,
 		bool leftGripJustPressed,
+		bool leftSupportHandDown,
+    	bool leftSupportHandJustPressed,
 		bool allowGameplayInputOnTwoHandedGripRelease);
 	void MarkMagazineInteractionReloadCommandIssued();
 	bool IsMagazineInteractionReloadCommandActive() const;
