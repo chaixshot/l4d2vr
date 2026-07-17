@@ -2958,6 +2958,26 @@ namespace
             : "ClipEmpty_Rifle";
     }
 
+    bool MagazineInteractionSoundLooksShotgunFire(const char* sample)
+    {
+        if (!sample || !*sample)
+            return false;
+
+        std::string lower(sample);
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return lower.find("shotgun_fire") != std::string::npos;
+    }
+
+    bool MagazineInteractionSoundLooksShotgunPump(const char* sample)
+    {
+        if (!sample || !*sample)
+            return false;
+
+        std::string lower(sample);
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return lower.find("shotgun_pump") != std::string::npos;
+    }
+
     bool MagazineInteractionSoundLooksClipEmpty(const char* sample)
     {
         if (!sample || !*sample)
@@ -8252,6 +8272,14 @@ bool VR::CaptureMagazineInteractionSound(int entityIndex, const char* sample, fl
         return false;
     if (MagazineInteractionSoundLooksClipEmpty(sample))
         return false;
+
+    if(m_MagazineInteractionEnabled)
+    {
+        if (MagazineInteractionSoundLooksShotgunFire(sample))
+            return false;
+        if (MagazineInteractionSoundLooksShotgunPump(sample))
+            return false;
+    }
 
     const auto now = std::chrono::steady_clock::now();
     const bool nativeReloadSuppressed =
