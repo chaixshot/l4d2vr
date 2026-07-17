@@ -5200,7 +5200,8 @@ namespace dxvk {
             const bool queued = (g_Game->GetMatQueueMode() != 0);
             // ReShade injects work outside the transactions known to the VR bridge, so
             // it retains the conservative all-call lock. Normal queued Source rendering
-            // uses the activity gate plus scoped exclusive plugin/Present transactions.
+            // is bracketed by call-queue ownership markers; the activity gate covers
+            // unbracketed fallback calls and short plugin/Present transactions.
             g_l4d2vrForceDeviceLock.store(
                 vr->m_ReShadeVRCompat,
                 std::memory_order_release);

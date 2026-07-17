@@ -193,6 +193,14 @@ namespace dxvk {
       return res;
     }
 
+    HRESULT STDMETHODCALLTYPE BeginSourceFrameOwnership() {
+      return m_device->BeginSourceFrameOwnership() ? D3D_OK : D3DERR_INVALIDCALL;
+    }
+
+    HRESULT STDMETHODCALLTYPE EndSourceFrameOwnership() {
+      return m_device->EndSourceFrameOwnership() ? D3D_OK : D3DERR_INVALIDCALL;
+    }
+
   private:
 
     D3D9DeviceEx* m_device;

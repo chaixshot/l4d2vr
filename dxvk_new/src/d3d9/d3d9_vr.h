@@ -38,6 +38,8 @@ IDirect3DVR9 : public IUnknown {
   virtual HRESULT STDMETHODCALLTYPE DrawQueuedEyeSubmitOverlays(VR* vr) = 0;
   virtual HRESULT STDMETHODCALLTYPE WaitDeviceIdle() = 0;
   virtual HRESULT STDMETHODCALLTYPE GetBackBufferData(SharedTextureHolder* backBufferData) = 0;
+  virtual HRESULT STDMETHODCALLTYPE BeginSourceFrameOwnership() = 0;
+  virtual HRESULT STDMETHODCALLTYPE EndSourceFrameOwnership() = 0;
 };
 
 #ifdef _MSC_VER

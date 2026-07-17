@@ -528,6 +528,19 @@ public:
 			return 0.0f;
 		return std::clamp(static_cast<float>(usec) / 1000000.0f, 0.0f, 0.030f);
 	}
+	inline float SampleQueuedTrackingPredictionSeconds()
+	{
+		// Sample the compositor at the render-pose acquisition point. The old cache
+		// setter had no caller, which silently reduced queued tracking prediction to
+		// zero seconds and made the pose increasingly stale as render latency grew.
+		if (m_Compositor)
+		{
+			const float runtimeSeconds = m_Compositor->GetFrameTimeRemaining();
+			if (std::isfinite(runtimeSeconds) && runtimeSeconds >= 0.0f && runtimeSeconds <= 0.5f)
+				CacheQueuedTrackingPredictionSeconds(runtimeSeconds);
+		}
+		return GetQueuedTrackingPredictionSeconds();
+	}
 
 	// Queued rendering: optional render-thread FPS cap, expressed as a percentage of the HMD refresh rate.
 	// 0 = unlimited, 100 = match HMD refresh, 80 = 80% of HMD refresh, etc.
@@ -3345,8 +3358,9 @@ public:
 		const vr::Texture_t* texture,
 		bool producerPrepared);
 	void InvalidateSourceRenderQueueMarkers();
-	bool QueueSourceRenderOwnershipReleaseMarker(IMatRenderContext* renderContext);
-	bool QueueSourceRenderCompletionMarker(IMatRenderContext* renderContext, uint32_t renderPoseToken, uint32_t renderFrameSeq, bool allowDuplicatePoseSubmit, const vr::HmdMatrix34_t* renderHmdPose = nullptr);
+	bool QueueSourceRenderOwnershipAcquireMarker(IMatRenderContext* renderContext);
+	bool QueueSourceRenderOwnershipReleaseMarker(IMatRenderContext* renderContext, bool releaseSourceFrameOwnership);
+	bool QueueSourceRenderCompletionMarker(IMatRenderContext* renderContext, uint32_t renderPoseToken, uint32_t renderFrameSeq, bool allowDuplicatePoseSubmit, bool releaseSourceFrameOwnership, const vr::HmdMatrix34_t* renderHmdPose = nullptr);
 	void PublishSourceQueueCompletedFrame(uint32_t sourceQueueEpoch, uint32_t renderPoseToken, uint32_t renderFrameSeq, bool allowDuplicatePoseSubmit, uint32_t sourceQueueMarkerId, const vr::HmdMatrix34_t* renderHmdPose = nullptr);
 	uint32_t PublishRenderCompletedFrame(uint32_t renderPoseToken, uint32_t renderFrameSeq, bool allowDuplicatePoseSubmit, const char* sourceTag, uint32_t sourceQueueMarkerId = 0, const vr::HmdMatrix34_t* renderHmdPose = nullptr);
 	void LogCompositorError(const char* action, vr::EVRCompositorError error);

@@ -1022,6 +1022,14 @@ namespace dxvk {
       return m_multithread.AcquireExclusiveLock();
     }
 
+    bool BeginSourceFrameOwnership() {
+      return m_multithread.BeginSourceFrameOwnership();
+    }
+
+    bool EndSourceFrameOwnership() {
+      return m_multithread.EndSourceFrameOwnership();
+    }
+
     const D3D9Options* GetOptions() const {
       return &m_d3d9Options;
     }

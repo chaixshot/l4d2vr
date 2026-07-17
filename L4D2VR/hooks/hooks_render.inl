@@ -216,9 +216,9 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 	};
 	RenderContextStateGuard renderContextStateGuard(rndrContext);
 	const int queueMode = (m_Game != nullptr) ? m_Game->GetMatQueueMode() : 0;
-	// Normal queued rendering uses DXVK's lightweight activity gate and takes an
-	// exclusive lock only for Present/plugin transactions. ReShade injects work
-	// outside those known windows, so it retains the conservative all-call lock.
+	// Normal queued rendering uses Source call-queue markers to own the device for
+	// complete render-command intervals. The activity gate remains a fallback for
+	// calls outside a proven interval. ReShade still retains the all-call lock.
 	L4D2VR_D3D9_SetForceDeviceLock(m_VR->m_ReShadeVRCompat ? 1 : 0);
 	struct SourceRenderQueueBuildScope
 	{
@@ -242,9 +242,76 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			}
 		}
 	};
+	struct SourceRenderExecutionScope
+	{
+		VR* vr = nullptr;
+		IMatRenderContext* context = nullptr;
+		bool trackQueueTail = false;
+		bool allowSourceFrameOwnership = false;
+		bool headAcquireAttempted = false;
+		bool sourceFrameAcquireQueued = false;
+		bool tailReleaseQueued = false;
+
+		SourceRenderExecutionScope(
+			VR* owner,
+			IMatRenderContext* renderContext,
+			bool queued,
+			bool allowSourceFrameOwnership)
+			: vr(owner),
+			context(renderContext),
+			trackQueueTail(queued && owner && renderContext),
+			allowSourceFrameOwnership(allowSourceFrameOwnership)
+		{
+		}
+
+		void QueueHeadAcquire()
+		{
+			if (headAcquireAttempted || !trackQueueTail || !allowSourceFrameOwnership)
+				return;
+
+			headAcquireAttempted = true;
+			sourceFrameAcquireQueued = vr->QueueSourceRenderOwnershipAcquireMarker(context);
+		}
+
+		bool QueueTailRelease()
+		{
+			if (!trackQueueTail || tailReleaseQueued)
+				return true;
+
+			if (!vr->QueueSourceRenderOwnershipReleaseMarker(context, sourceFrameAcquireQueued))
+				return false;
+
+			tailReleaseQueued = true;
+			return true;
+		}
+
+		void HandOffToCompletionMarker()
+		{
+			tailReleaseQueued = true;
+		}
+
+		bool ReleasesSourceFrameOwnership() const
+		{
+			return sourceFrameAcquireQueued;
+		}
+
+		~SourceRenderExecutionScope()
+		{
+			if (trackQueueTail && !tailReleaseQueued && !QueueTailRelease())
+			{
+				vr->m_SourceRenderQueueOwnershipUncertain.store(true, std::memory_order_release);
+				vr->m_QueuedEyeSubmitIsolationReady.store(false, std::memory_order_release);
+			}
+		}
+	};
 	// Enter the producer window before any queued pass-through branch. Even a
 	// non-drawable-window RenderView can append commands that outlive this call.
 	SourceRenderQueueBuildScope sourceRenderQueueBuildScope(m_VR, queueMode != 0);
+	SourceRenderExecutionScope sourceRenderExecutionScope(
+		m_VR,
+		rndrContext,
+		queueMode != 0,
+		!m_VR->m_ReShadeVRCompat);
 	const bool inGameForWindowState =
 		m_Game && m_Game->m_EngineClient && m_Game->m_EngineClient->IsInGame();
 	const bool vrWindowDrawable = DebugIsCurrentProcessMainWindowDrawable();
@@ -265,9 +332,10 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		}
 
 		m_VR->m_RenderedNewFrame.store(false, std::memory_order_release);
+		sourceRenderExecutionScope.QueueHeadAcquire();
 		callOriginalRenderView(setup, hudViewSetup, nClearFlags, whatToDraw);
 		renderContextStateGuard.Restore();
-		if (!m_VR->QueueSourceRenderOwnershipReleaseMarker(rndrContext))
+		if (!sourceRenderExecutionScope.QueueTailRelease())
 		{
 			m_VR->m_SourceRenderQueueOwnershipUncertain.store(true, std::memory_order_release);
 			m_VR->m_QueuedEyeSubmitIsolationReady.store(false, std::memory_order_release);
@@ -444,6 +512,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			}
 		}
 
+		sourceRenderExecutionScope.QueueHeadAcquire();
 		callOriginalRenderView(setup, hudViewSetup, nClearFlags, whatToDraw);
 		if (queueMode != 0)
 		{
@@ -451,7 +520,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			// are still executing. Restore the caller's RT/viewport before appending the
 			// tail marker, then hand ownership back only when that marker runs.
 			renderContextStateGuard.Restore();
-			if (!m_VR->QueueSourceRenderOwnershipReleaseMarker(rndrContext))
+			if (!sourceRenderExecutionScope.QueueTailRelease())
 			{
 				// No execution fence means this submit snapshot cannot be considered safe
 				// while the orphaned offscreen command stream may still be active.
@@ -949,7 +1018,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			if (useTrackingRenderPose)
 			{
 				const vr::ETrackingUniverseOrigin trackingOrigin = m_VR->GetCachedTrackingUniverseOrigin();
-				float predicted = m_VR->GetQueuedTrackingPredictionSeconds();
+				float predicted = m_VR->SampleQueuedTrackingPredictionSeconds();
 				if (!(predicted >= 0.0f && predicted <= 0.5f))
 					predicted = 0.0f;
 				m_VR->m_System->GetDeviceToAbsoluteTrackingPose(trackingOrigin, predicted, renderPoses.data(), vr::k_unMaxTrackedDeviceCount);
@@ -1305,7 +1374,7 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 				if (m_VR->m_System)
 				{
 					const vr::ETrackingUniverseOrigin trackingOrigin = m_VR->GetCachedTrackingUniverseOrigin();
-					float predicted = m_VR->GetQueuedTrackingPredictionSeconds();
+					float predicted = m_VR->SampleQueuedTrackingPredictionSeconds();
 					if (!(predicted >= 0.0f && predicted <= 0.5f))
 						predicted = 0.0f;
 					m_VR->m_System->GetDeviceToAbsoluteTrackingPose(trackingOrigin, predicted, renderPoses.data(), vr::k_unMaxTrackedDeviceCount);
@@ -2573,6 +2642,10 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		m_VR->m_IsVREnabled;
 	bool rightEyeCopiedFromLeft = false;
 
+	// Do not hold the device while this hook performs pose/camera CPU preparation.
+	// Acquire immediately before the first queued eye command and retain ownership
+	// through both eyes, scope/rear-mirror work and the completion tail marker.
+	sourceRenderExecutionScope.QueueHeadAcquire();
 	const auto stereoSceneStartTime = std::chrono::steady_clock::now();
 	{
 		renderEyeScene(1, m_VR->m_LeftEyeTexture, m_VR->m_D9LeftEyeSurface, leftEyeView, hudLeft, true);
@@ -2818,8 +2891,10 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 			renderPoseTokenUsed,
 			renderFrameSeq,
 			renderPoseAllowDuplicateSubmit,
+			sourceRenderExecutionScope.ReleasesSourceFrameOwnership(),
 			renderHmdPoseForSubmitValid ? &renderHmdPoseForSubmit : nullptr))
 		{
+			sourceRenderExecutionScope.HandOffToCompletionMarker();
 			return;
 		}
 

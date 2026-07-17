@@ -119,6 +119,43 @@ namespace
         g_SystemMouseInputSuppressThreadHandle = handle;
     }
 
+    class SourceRenderOwnershipAcquireFunctor final : public CFunctor
+    {
+    public:
+        SourceRenderOwnershipAcquireFunctor(VR* vr, uint32_t epoch)
+            : m_VR(vr), m_Epoch(epoch)
+        {
+        }
+
+        int AddRef() override
+        {
+            return static_cast<int>(m_RefCount.fetch_add(1, std::memory_order_acq_rel) + 1);
+        }
+
+        int Release() override
+        {
+            const long remaining = m_RefCount.fetch_sub(1, std::memory_order_acq_rel) - 1;
+            if (remaining == 0)
+                delete this;
+            return static_cast<int>(remaining);
+        }
+
+        void operator()() override
+        {
+            VR* vr = m_VR;
+            if (!vr || vr->m_SourceRenderQueueMarkerEpoch.load(std::memory_order_acquire) != m_Epoch)
+                return;
+
+            if (g_D3DVR9)
+                g_D3DVR9->BeginSourceFrameOwnership();
+        }
+
+    private:
+        std::atomic<long> m_RefCount{ 0 };
+        VR* m_VR = nullptr;
+        uint32_t m_Epoch = 0;
+    };
+
     class SourceRenderCompletionFunctor final : public CFunctor
     {
     public:
@@ -129,13 +166,15 @@ namespace
             uint32_t renderPoseToken,
             uint32_t renderFrameSeq,
             bool allowDuplicatePoseSubmit,
+            bool releaseSourceFrameOwnership,
             const vr::HmdMatrix34_t* renderHmdPose)
             : m_VR(vr),
             m_Epoch(epoch),
             m_MarkerId(markerId),
             m_RenderPoseToken(renderPoseToken),
             m_RenderFrameSeq(renderFrameSeq),
-            m_AllowDuplicatePoseSubmit(allowDuplicatePoseSubmit)
+            m_AllowDuplicatePoseSubmit(allowDuplicatePoseSubmit),
+            m_ReleaseSourceFrameOwnership(releaseSourceFrameOwnership)
         {
             if (renderHmdPose)
             {
@@ -159,6 +198,11 @@ namespace
 
         void operator()() override
         {
+            // The queued stereo command stream is complete at this marker. Release
+            // its frame-scale device ownership before Publish takes m_TextureMutex.
+            if (m_ReleaseSourceFrameOwnership && g_D3DVR9)
+                g_D3DVR9->EndSourceFrameOwnership();
+
             VR* vr = m_VR;
             if (!vr)
                 return;
@@ -183,6 +227,7 @@ namespace
         uint32_t m_RenderPoseToken = 0;
         uint32_t m_RenderFrameSeq = 0;
         bool m_AllowDuplicatePoseSubmit = false;
+        bool m_ReleaseSourceFrameOwnership = false;
         vr::HmdMatrix34_t m_RenderHmdPose{};
         bool m_RenderHmdPoseValid = false;
     };
@@ -190,8 +235,8 @@ namespace
     class SourceRenderOwnershipReleaseFunctor final : public CFunctor
     {
     public:
-        SourceRenderOwnershipReleaseFunctor(VR* vr, uint32_t epoch)
-            : m_VR(vr), m_Epoch(epoch)
+        SourceRenderOwnershipReleaseFunctor(VR* vr, uint32_t epoch, bool releaseSourceFrameOwnership)
+            : m_VR(vr), m_Epoch(epoch), m_ReleaseSourceFrameOwnership(releaseSourceFrameOwnership)
         {
         }
 
@@ -210,6 +255,11 @@ namespace
 
         void operator()() override
         {
+            // Source commands before this auxiliary tail marker are complete. Give up
+            // the long-lived execution lock before another producer transaction begins.
+            if (m_ReleaseSourceFrameOwnership && g_D3DVR9)
+                g_D3DVR9->EndSourceFrameOwnership();
+
             VR* vr = m_VR;
             if (!vr || vr->m_SourceRenderQueueMarkerEpoch.load(std::memory_order_acquire) != m_Epoch)
                 return;
@@ -228,6 +278,7 @@ namespace
         std::atomic<long> m_RefCount{ 0 };
         VR* m_VR = nullptr;
         uint32_t m_Epoch = 0;
+        bool m_ReleaseSourceFrameOwnership = false;
     };
 
     class VrHandsQueuedDrawFunctor final : public CFunctor
@@ -2481,7 +2532,26 @@ bool VR::QueueVrHandsDrawForEye(
     return true;
 }
 
-bool VR::QueueSourceRenderOwnershipReleaseMarker(IMatRenderContext* renderContext)
+bool VR::QueueSourceRenderOwnershipAcquireMarker(IMatRenderContext* renderContext)
+{
+    if (!renderContext || !g_D3DVR9)
+        return false;
+
+    ICallQueue* callQueue = GetSourceRenderContextCallQueue(renderContext, nullptr, nullptr);
+    if (!callQueue || !IsSourceCallQueueUsable(callQueue, nullptr))
+        return false;
+
+    // Texture recreation changes the epoch under this mutex. Queue the acquire
+    // marker in the same epoch transaction as the existing tail markers.
+    std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
+    const uint32_t epoch = m_SourceRenderQueueMarkerEpoch.load(std::memory_order_acquire);
+    callQueue->QueueFunctor(new SourceRenderOwnershipAcquireFunctor(this, epoch));
+    return true;
+}
+
+bool VR::QueueSourceRenderOwnershipReleaseMarker(
+    IMatRenderContext* renderContext,
+    bool releaseSourceFrameOwnership)
 {
     if (!renderContext)
         return false;
@@ -2493,7 +2563,10 @@ bool VR::QueueSourceRenderOwnershipReleaseMarker(IMatRenderContext* renderContex
     std::lock_guard<TextureStateMutex> textureLock(m_TextureMutex);
     const uint32_t epoch = m_SourceRenderQueueMarkerEpoch.load(std::memory_order_acquire);
     m_SourceRenderQueueAuxPendingCount.fetch_add(1, std::memory_order_acq_rel);
-    callQueue->QueueFunctor(new SourceRenderOwnershipReleaseFunctor(this, epoch));
+    callQueue->QueueFunctor(new SourceRenderOwnershipReleaseFunctor(
+        this,
+        epoch,
+        releaseSourceFrameOwnership));
     return true;
 }
 
@@ -2502,6 +2575,7 @@ bool VR::QueueSourceRenderCompletionMarker(
     uint32_t renderPoseToken,
     uint32_t renderFrameSeq,
     bool allowDuplicatePoseSubmit,
+    bool releaseSourceFrameOwnership,
     const vr::HmdMatrix34_t* renderHmdPose)
 {
     if (!renderContext)
@@ -2583,6 +2657,7 @@ bool VR::QueueSourceRenderCompletionMarker(
             renderPoseToken,
             renderFrameSeq,
             allowDuplicatePoseSubmit,
+            releaseSourceFrameOwnership,
             renderHmdPose));
     }
 
