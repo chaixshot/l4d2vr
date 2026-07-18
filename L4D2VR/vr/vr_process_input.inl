@@ -1300,7 +1300,7 @@ void VR::ProcessInput()
     const bool usingMountedWeaponForPrimary = vrAwareServerSupportPath && localPlayer && IsUsingMountedGun(localPlayer);
     if (!usingMountedWeaponForPrimary &&
         (magazineInteractionBlocksFire || suppressMagazineEmptyClipAutoReload) &&
-        primaryAttackDown)
+        primaryAttackJustPressed)
     {
         PlayMagazineInteractionBlockedFireEmptySound();
     }
