@@ -99,6 +99,9 @@ public:
     Offset StartMeleeSwingServer =       { "server.dll", 0x3E8780, "55 8B EC 53 56 8B F1 8B 86 ? ? ? ? 50 B9 ? ? ? ? E8 ? ? ? ? 8B" };
     Offset PrimaryAttackServer =         { "server.dll", 0x3E8AB0, "56 57 8B F1 E8 ? ? ? ? 8B F8 85 FF 0F 84 ? ? ? ? 8B 87 ? ? ? ? 83 F8 FF" };
     Offset ItemPostFrameServer =         { "server.dll", 0x3E8BA0, "56 57 8B F1 E8 ? ? ? ? 8B CE E8 ? ? ? ? 8B F8 85 FF 0F 84 ? ? ? ? 53" };
+    Offset MolotovProjectileCreate =     { "server.dll", 0x003DA4E0, "51 8B CE E8 ? ? ? ? D9 EE 6A 00 51 D9 1C 24 68 ? ? ? ? 8B CE E8 ? ? ? ? D9 EE 6A 00 51 D9 1C 24 68 ? ? ? ? 8B CE E8 ? ? ? ? 8B 0D ? ? ? ? 8B 11 8B 42 18 6A 00 6A 00 68 ? ? ? ? FF D0 8B F8 85 FF 74 ? 85 DB 74 ?", -0x1E0, true };
+    Offset PipeBombProjectileCreate =    { "server.dll", 0x003DE720, "55 8B EC 8B 45 18 8B 4D 0C 53 8B 5D 08 56 57 50 51 53 68 ? ? ? ? E8 ? ? ? ? 8B 7D 10 D9 47 08 83 EC 20 DD 5C 24 28 8B F0 D9 47 04 DD 5C 24 20 D9 07 DD 5C 24 18 D9 43 08 DD 5C 24 10 D9 43 04 DD 5C 24 08 D9 03 DD 1C 24 68 ? ? ? ? E8 ? ? ? ? 8B 15 ? ? ? ? D9 42 2C 83 C4 30 8B CE D9 1C 24 E8 ? ? ? ?", 0, true };
+    Offset VomitJarProjectileCreate =    { "server.dll", 0x003F4190, "8B 3E 8B CB E8 ? ? ? ? 50 8B 87 90 01 00 00 8B CE FF D0 8B 4D 14 51 8B CE E8 ? ? ? ? 5F 8B C6 5E 5B 5D C3", -0x1BE, true };
     Offset GetPrimaryAttackActivity =    { "server.dll", 0x3E7630, "55 8B EC 53 8B 5D 08 56 57 8B BB ? ? ? ?" };
     Offset GetActiveWeapon =             { "server.dll", 0x464F0, "55 8B EC 8B 45 0C 56 8B 75 08 50 56 E8 ? ? ? ? 84 C0 74 47 8B", -64 };
     Offset GetMeleeWeaponInfo =          { "server.dll", 0x3E67D0, "8B 81 ? ? ? ? 50 B9 ? ? ? ? E8 ? ? ? ? C3" };

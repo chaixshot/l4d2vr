@@ -855,6 +855,14 @@ public:
 	std::array<Vector, THROW_ARC_SEGMENTS + 1> m_LastThrowArcPoints{};
 	bool m_HasThrowArc = false;
 	bool m_LastAimWasThrowable = false;
+	bool m_ManualThrowEnabled = false;
+	float m_ManualThrowVelocityScale = 4.0f;
+	float m_ManualThrowHorizontalVelocityScale = 1.0f;
+	float m_ManualThrowVerticalVelocityScale = 1.0f;
+	float m_ManualThrowArcLiftRatio = 0.0f;
+	int m_ManualThrowVelocityWindowTicks = 5;
+	float m_ManualThrowPeakVelocityBlend = 0.5f;
+	float m_ManualThrowMaxVelocity = 1400.0f;
 	float m_ThrowArcBaseDistance = 500.0f;
 	float m_ThrowArcMinDistance = 20.0f;
 	float m_ThrowArcMaxDistance = 2200.0f;

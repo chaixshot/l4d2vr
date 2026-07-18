@@ -1827,11 +1827,6 @@ namespace
 
 int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 {
-	static thread_local uintptr_t s_serverThrowableAimWeapon = 0;
-	static thread_local bool s_serverThrowableAimPrevAttackDown = false;
-	static thread_local bool s_serverThrowableAimPrevWeaponThrowable = false;
-	static thread_local int s_serverThrowableAimTicks = 0;
-
 	m_ServerCommandControllerAimOverride = false;
 	m_ServerCommandControllerAimPlayer = nullptr;
 	m_ServerCommandControllerAimReason = 0;
@@ -1886,7 +1881,9 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 
 		if (hasValidPlayer)
 		{
-			m_Game->m_PlayersVRInfo[i].controllerPos.z = decodedZ;
+			Player& vrPlayer = m_Game->m_PlayersVRInfo[static_cast<size_t>(i)];
+			vrPlayer.controllerPos.z = decodedZ;
+			ManualThrowRecordPoseSample(vrPlayer, move->tick_count, vrPlayer.controllerPos, vrPlayer.controllerAngle);
 		}
 
 		move->viewangles.x = decodedAngle;
@@ -1902,41 +1899,54 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 			if (!MagazineInteractionWeaponIdIsShotgun(serverWeaponId))
 				m_VR->TryApplyMagazineInteractionServerClipCommit(serverWeapon, serverWeaponId, m_Game->m_CurrentUsercmdPlayer);
 		}
+		Player* vrPlayerState = hasValidPlayer
+			? &m_Game->m_PlayersVRInfo[static_cast<size_t>(i)]
+			: nullptr;
 		const uintptr_t weaponTag = reinterpret_cast<uintptr_t>(serverWeapon);
-		if (weaponTag != s_serverThrowableAimWeapon)
-		{
-			if (s_serverThrowableAimPrevWeaponThrowable && s_serverThrowableAimPrevAttackDown)
-				s_serverThrowableAimTicks = std::max(s_serverThrowableAimTicks, 48);
-			s_serverThrowableAimWeapon = weaponTag;
-			s_serverThrowableAimPrevAttackDown = false;
-			s_serverThrowableAimPrevWeaponThrowable = false;
-		}
+		const bool previousAttackDown = vrPlayerState && vrPlayerState->throwableAimPrevAttackDown;
+		const bool previousWeaponThrowable = vrPlayerState && vrPlayerState->throwableAimPrevWeaponThrowable;
+		const int previousThrowableWeaponId = vrPlayerState
+			? vrPlayerState->throwableAimWeaponId
+			: static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
+
+		if (vrPlayerState && weaponTag != vrPlayerState->throwableAimWeaponTag)
+			vrPlayerState->throwableAimWeaponTag = weaponTag;
 
 		constexpr int kIN_ATTACK = (1 << 0);
 		const bool attackDown = (move->buttons & kIN_ATTACK) != 0;
 		const bool activeWeaponIsThrowable = ServerWeaponIdIsThrowable(serverWeaponId);
+		const bool releasedThrowable = previousWeaponThrowable && previousAttackDown && !attackDown;
+		const int releasedWeaponId = activeWeaponIsThrowable ? serverWeaponId : previousThrowableWeaponId;
+		const bool manualThrowActive = s_ManualThrowHooksReady && m_VR && m_VR->m_ManualThrowEnabled;
 		bool commandControllerAim = false;
 		int commandControllerAimReason = 0;
 
-		if (activeWeaponIsThrowable)
+		if (vrPlayerState && activeWeaponIsThrowable && attackDown && !previousAttackDown)
+			vrPlayerState->manualThrowPending = {};
+		if (vrPlayerState && !manualThrowActive)
+			vrPlayerState->manualThrowPending = {};
+		if (vrPlayerState && manualThrowActive && releasedThrowable)
 		{
-			if (attackDown || (s_serverThrowableAimPrevAttackDown && !attackDown))
-				s_serverThrowableAimTicks = std::max(s_serverThrowableAimTicks, 48);
-			commandControllerAim = attackDown || (s_serverThrowableAimTicks > 0);
-			commandControllerAimReason = attackDown ? 2 : 3;
-			if (s_serverThrowableAimTicks > 0)
-				--s_serverThrowableAimTicks;
-		}
-		else
-		{
-			commandControllerAim = s_serverThrowableAimTicks > 0;
-			commandControllerAimReason = 3;
-			if (s_serverThrowableAimTicks > 0)
-				--s_serverThrowableAimTicks;
+			ManualThrowPreparePending(
+				*vrPlayerState,
+				m_Game->m_CurrentUsercmdPlayer,
+				releasedWeaponId,
+				move->tick_count);
 		}
 
-		s_serverThrowableAimPrevAttackDown = activeWeaponIsThrowable && attackDown;
-		s_serverThrowableAimPrevWeaponThrowable = activeWeaponIsThrowable;
+		// Projectile Create hooks already replace the spawn pose and release velocity.
+		// Do not redirect server EyePosition/EyeAngles while the trigger is held: that
+		// changes the weapon's prepared viewmodel pose and pulls it behind the controller.
+		if (vrPlayerState)
+			vrPlayerState->throwableAimTicks = 0;
+
+		if (vrPlayerState)
+		{
+			vrPlayerState->throwableAimPrevAttackDown = activeWeaponIsThrowable && attackDown;
+			vrPlayerState->throwableAimPrevWeaponThrowable = activeWeaponIsThrowable;
+			if (activeWeaponIsThrowable)
+				vrPlayerState->throwableAimWeaponId = serverWeaponId;
+		}
 
 		if (IsCurrentServerPlayerUsingMountedWeapon())
 		{
@@ -1978,7 +1988,9 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 	{
 		if (hasValidPlayer)
 		{
-			m_Game->m_PlayersVRInfo[i].isUsingVR = false;
+			Player& vrPlayer = m_Game->m_PlayersVRInfo[static_cast<size_t>(i)];
+			vrPlayer.isUsingVR = false;
+			ManualThrowResetPlayerState(vrPlayer);
 		}
 	}
 

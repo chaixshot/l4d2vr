@@ -91,6 +91,7 @@ typedef void(__thiscall* tDoMeleeSwing)(void* thisptr);
 typedef void(__thiscall* tStartMeleeSwing)(void* thisptr, void* player, bool a3);
 typedef int(__thiscall* tPrimaryAttack)(void* thisptr);
 typedef void(__thiscall* tItemPostFrame)(void* thisptr);
+typedef void* (__cdecl* tThrowableProjectileCreate)(const Vector& position, const QAngle& angles, const Vector& velocity, const Vector& angularVelocity, void* owner);
 typedef int(__thiscall* tGetPrimaryAttackActivity)(void* thisptr, void* meleeInfo);
 typedef Vector* (__thiscall* tEyePosition)(void* thisptr, Vector* eyePos);
 typedef void(__thiscall* tEyeVectors)(void* thisptr, Vector* forward, Vector* right, Vector* up);
@@ -145,6 +146,9 @@ public:
 	static inline Hook<tStartMeleeSwing> hkStartMeleeSwingServer;
 	static inline Hook<tPrimaryAttack> hkPrimaryAttackServer;
 	static inline Hook<tItemPostFrame> hkItemPostFrameServer;
+	static inline Hook<tThrowableProjectileCreate> hkMolotovProjectileCreate;
+	static inline Hook<tThrowableProjectileCreate> hkPipeBombProjectileCreate;
+	static inline Hook<tThrowableProjectileCreate> hkVomitJarProjectileCreate;
 	static inline Hook<tGetPrimaryAttackActivity> hkGetPrimaryAttackActivity;
 	static inline Hook<tEyePosition> hkEyePosition;
 	static inline Hook<tEyePosition> hkServerPlayerEyePosition;
@@ -178,6 +182,7 @@ public:
 	static inline Hook<tEmitSoundAttenuation> hkEmitSoundAttenuation;
 	static inline Hook<tEmitSoundLevel> hkEmitSoundLevel;
 	static bool s_ServerUnderstandsVR;
+	static inline bool s_ManualThrowHooksReady = false;
 
 	Hooks() {};
 	Hooks(Game* game);
@@ -207,6 +212,9 @@ public:
 	static void __fastcall dStartMeleeSwingServer(void* ecx, void* edx, void* player, bool a3);
 	static int __fastcall dPrimaryAttackServer(void* ecx, void* edx);
 	static void __fastcall dItemPostFrameServer(void* ecx, void* edx);
+	static void* __cdecl dMolotovProjectileCreate(const Vector& position, const QAngle& angles, const Vector& velocity, const Vector& angularVelocity, void* owner);
+	static void* __cdecl dPipeBombProjectileCreate(const Vector& position, const QAngle& angles, const Vector& velocity, const Vector& angularVelocity, void* owner);
+	static void* __cdecl dVomitJarProjectileCreate(const Vector& position, const QAngle& angles, const Vector& velocity, const Vector& angularVelocity, void* owner);
 	static int __fastcall dGetPrimaryAttackActivity(void* ecx, void* edx, void* meleeInfo);
 	static Vector* __fastcall dEyePosition(void* ecx, void* edx, Vector* eyePos);
 	static Vector* __fastcall dServerPlayerEyePosition(void* ecx, void* edx, Vector* eyePos);

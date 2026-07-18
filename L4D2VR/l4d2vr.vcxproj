@@ -664,6 +664,7 @@
     <None Include="hooks\hooks_createmove.inl" />
     <None Include="hooks\hooks_init.inl" />
     <None Include="hooks\hooks_misc.inl" />
+    <None Include="hooks\hooks_throwables.inl" />
     <None Include="hooks\hooks_render.inl" />
     <None Include="vr\vr_aiming.inl" />
     <None Include="vr\vr_lifecycle_init.inl" />

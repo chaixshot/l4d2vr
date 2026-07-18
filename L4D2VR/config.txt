@@ -279,6 +279,15 @@ AimLineFrameDurationMultiplier=0
 AimLineColor=255,0,0,100
 AimLineMinHitDistance=0
 
+ManualThrowEnabled=false
+ManualThrowVelocityScale=4.0
+ManualThrowHorizontalVelocityScale=1.0
+ManualThrowVerticalVelocityScale=1.0
+ManualThrowArcLiftRatio=0.0
+ManualThrowVelocityWindowTicks=5
+ManualThrowPeakVelocityBlend=0.5
+ManualThrowMaxVelocity=1400.0
+
 MotionGesturesEnabled=true
 MotionGestureSwingEnabled=true
 MotionGestureSwingThreshold=2

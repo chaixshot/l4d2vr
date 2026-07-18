@@ -36,6 +36,26 @@ class Hooks;
 inline Game* g_Game = nullptr;
 
 // === Per-Player VR State ===
+struct ManualThrowPoseSample
+{
+    bool valid = false;
+    int tick = 0;
+    Vector position = { 0.f, 0.f, 0.f };
+    QAngle angles = { 0.f, 0.f, 0.f };
+};
+
+struct ManualThrowPending
+{
+    bool valid = false;
+    int weaponId = 0;
+    int releaseTick = 0;
+    void* owner = nullptr;
+    Vector origin = { 0.f, 0.f, 0.f };
+    QAngle angles = { 0.f, 0.f, 0.f };
+    Vector velocity = { 0.f, 0.f, 0.f };
+    Vector angularVelocity = { 0.f, 0.f, 0.f };
+};
+
 struct Player
 {
     C_BasePlayer* pPlayer = nullptr;
@@ -47,6 +67,17 @@ struct Player
 
     bool isMeleeing = false;
     bool isNewSwing = false;
+
+    static constexpr size_t kManualThrowPoseSampleCount = 8;
+    std::array<ManualThrowPoseSample, kManualThrowPoseSampleCount> manualThrowPoseSamples{};
+    int manualThrowPoseCount = 0;
+    int manualThrowLastTick = 0;
+    uintptr_t throwableAimWeaponTag = 0;
+    int throwableAimWeaponId = 0;
+    int throwableAimTicks = 0;
+    bool throwableAimPrevAttackDown = false;
+    bool throwableAimPrevWeaponThrowable = false;
+    ManualThrowPending manualThrowPending{};
 };
 
 // === Main Game System ===

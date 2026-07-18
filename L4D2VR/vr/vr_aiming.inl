@@ -1843,10 +1843,10 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
         m_HasAimConvergePoint = false;
         m_HasThrowArc = false;
         m_LastAimWasThrowable = false;
-        {
-            std::lock_guard<std::mutex> lock(m_D3DAimLineOverlayMutex);
-            m_HasD3DAimLineWorldSegment = false;
-        }
+        // Clear both the cached world segment and the already-published per-eye D3D
+        // states immediately. Otherwise queued rendering can display the previous weapon's
+        // straight aim line for one or more frames after switching to a throwable.
+        ClearD3DAimLineOverlay();
 
         // Even when the aim line is hidden/disabled, still run the friendly-fire guard trace
         // if the user toggled it on.
@@ -2007,8 +2007,8 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
         m_HasAimConvergePoint = false;
         UpdateAimTeammateHudTarget(localPlayer, Vector{}, Vector{}, false);
 
-        // Match the VR-aware throw path: that server route now resolves throwable aim
-        // from the controller pose. ForceNonVRServerMovement already used this source.
+        // Legacy preview for the original game throw. Manual throw returns above because
+        // its trajectory depends on release velocity rather than controller pitch.
         Vector pitchSource = direction;
         if (m_ForceNonVRServerMovement && (useMouse || frontViewEyeAim) && !eyeDir.IsZero())
             pitchSource = eyeDir;
@@ -3339,6 +3339,11 @@ bool VR::ShouldShowAimLine(C_WeaponCSBase* weapon) const
         return false;
 
     if (!weapon)
+        return false;
+
+    // Manual throwing uses release velocity instead of a controller-forward ray.
+    // Hide every aim-line renderer for throwables while the feature is enabled.
+    if (m_ManualThrowEnabled && IsThrowableWeapon(weapon))
         return false;
 
     switch (weapon->GetWeaponID())

@@ -35,6 +35,24 @@ Hooks::Hooks(Game* game)
 	hkStartMeleeSwingServer.enableHook();
 	hkPrimaryAttackServer.enableHook();
 	hkItemPostFrameServer.enableHook();
+	if (s_ManualThrowHooksReady)
+	{
+		const bool molotovEnabled = hkMolotovProjectileCreate.enableHook() == 0;
+		const bool pipeBombEnabled = hkPipeBombProjectileCreate.enableHook() == 0;
+		const bool vomitJarEnabled = hkVomitJarProjectileCreate.enableHook() == 0;
+		s_ManualThrowHooksReady = molotovEnabled && pipeBombEnabled && vomitJarEnabled;
+		if (s_ManualThrowHooksReady)
+		{
+			Game::logMsg("[VR][ManualThrow] projectile Create hooks enabled molotov=%p pipe=%p vomitjar=%p",
+				hkMolotovProjectileCreate.pTarget,
+				hkPipeBombProjectileCreate.pTarget,
+				hkVomitJarProjectileCreate.pTarget);
+		}
+		else
+		{
+			Game::logMsg("[VR][ManualThrow] failed to enable all projectile Create hooks; manual throw remains inactive");
+		}
+	}
 	hkGetPrimaryAttackActivity.enableHook();
 	hkEyePosition.enableHook();
 	if (hkServerPlayerEyePosition.pTarget &&
@@ -182,6 +200,31 @@ int Hooks::initSourceHooks()
 
 	LPVOID ItemPostFrameServerAddr = (LPVOID)(m_Game->m_Offsets->ItemPostFrameServer.address);
 	hkItemPostFrameServer.createHook(ItemPostFrameServerAddr, &dItemPostFrameServer);
+
+	s_ManualThrowHooksReady = false;
+	if (m_Game->m_Offsets->MolotovProjectileCreate.valid &&
+		m_Game->m_Offsets->PipeBombProjectileCreate.valid &&
+		m_Game->m_Offsets->VomitJarProjectileCreate.valid)
+	{
+		hkMolotovProjectileCreate.createHook(
+			reinterpret_cast<LPVOID>(m_Game->m_Offsets->MolotovProjectileCreate.address),
+			reinterpret_cast<LPVOID>(&dMolotovProjectileCreate));
+		hkPipeBombProjectileCreate.createHook(
+			reinterpret_cast<LPVOID>(m_Game->m_Offsets->PipeBombProjectileCreate.address),
+			reinterpret_cast<LPVOID>(&dPipeBombProjectileCreate));
+		hkVomitJarProjectileCreate.createHook(
+			reinterpret_cast<LPVOID>(m_Game->m_Offsets->VomitJarProjectileCreate.address),
+			reinterpret_cast<LPVOID>(&dVomitJarProjectileCreate));
+
+		s_ManualThrowHooksReady =
+			hkMolotovProjectileCreate.pTarget != nullptr &&
+			hkPipeBombProjectileCreate.pTarget != nullptr &&
+			hkVomitJarProjectileCreate.pTarget != nullptr;
+	}
+	if (!s_ManualThrowHooksReady)
+	{
+		Game::logMsg("[VR][ManualThrow] projectile Create hooks unavailable; manual throw remains inactive");
+	}
 
 	LPVOID GetPrimaryAttackActivityAddr = (LPVOID)(m_Game->m_Offsets->GetPrimaryAttackActivity.address);
 	hkGetPrimaryAttackActivity.createHook(GetPrimaryAttackActivityAddr, &dGetPrimaryAttackActivity);

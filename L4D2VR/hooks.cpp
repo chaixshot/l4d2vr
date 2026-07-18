@@ -1596,5 +1596,6 @@ static inline bool ShouldForceThirdPersonByState(const C_BasePlayer* player,
 #include "hooks/hooks_init.inl"
 #include "hooks/hooks_render.inl"
 #include "hooks/hooks_createmove.inl"
+#include "hooks/hooks_throwables.inl"
 #include "hooks/hooks_combat_network.inl"
 #include "hooks/hooks_misc.inl"

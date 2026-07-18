@@ -1357,6 +1357,9 @@
     <None Include="hooks\hooks_misc.inl">
       <Filter>Source Files\hook</Filter>
     </None>
+    <None Include="hooks\hooks_throwables.inl">
+      <Filter>Source Files\hook</Filter>
+    </None>
     <None Include="hooks\hooks_render.inl">
       <Filter>Source Files\hook</Filter>
     </None>
