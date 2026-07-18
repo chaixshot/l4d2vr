@@ -4109,7 +4109,11 @@ void VR::UpdateScopeOverlayTransform()
     if ((!m_MouseModeEnabled && !useThirdPersonBodyAnchor) || m_ScopeHandle == vr::k_ulOverlayHandleInvalid)
         return;
 
-    const float scopeWidth = (std::max)(0.01f, m_ScopeOverlayWidthMeters);
+    const float scopeWidth = (std::max)(
+        0.01f,
+        useThirdPersonEyeAnchor
+            ? m_ThirdPersonFrontViewOverlayWidthMeters
+            : m_ScopeOverlayWidthMeters);
 
     // IMPORTANT:
     // - OpenVR absolute overlay transforms are in tracking-space *meters*.
@@ -4143,9 +4147,9 @@ void VR::UpdateScopeOverlayTransform()
                 fwd = { 0.0f, 0.0f, -1.0f };
 
             overlayPos = hmdPos
-                + (fwd * m_ThirdPersonScopeOverlayOffset.x)
-                + (parentRight * m_ThirdPersonScopeOverlayOffset.y)
-                + (parentUp * m_ThirdPersonScopeOverlayOffset.z);
+                + (fwd * m_ThirdPersonFrontViewOverlayOffset.x)
+                + (parentRight * m_ThirdPersonFrontViewOverlayOffset.y)
+                + (parentUp * m_ThirdPersonFrontViewOverlayOffset.z);
         }
         else
         {

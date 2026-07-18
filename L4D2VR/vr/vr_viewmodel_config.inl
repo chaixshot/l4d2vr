@@ -1273,6 +1273,13 @@ void VR::ParseConfigFile()
     m_ThirdPersonScopeOverlayOffset.x = getFloat("ThirdPersonScopeOverlayOffsetX", m_ThirdPersonScopeOverlayOffset.x);
     m_ThirdPersonScopeOverlayOffset.y = getFloat("ThirdPersonScopeOverlayOffsetY", m_ThirdPersonScopeOverlayOffset.y);
     m_ThirdPersonScopeOverlayOffset.z = getFloat("ThirdPersonScopeOverlayOffsetZ", m_ThirdPersonScopeOverlayOffset.z);
+    m_ThirdPersonFrontViewOverlayWidthMeters = std::clamp(
+        getFloat("ThirdPersonFrontViewOverlayWidthMeters", m_ThirdPersonFrontViewOverlayWidthMeters),
+        0.01f,
+        5.0f);
+    m_ThirdPersonFrontViewOverlayOffset = getVector3(
+        "ThirdPersonFrontViewOverlayOffset",
+        m_ThirdPersonFrontViewOverlayOffset);
     m_HideArms = getBool("HideArms", m_HideArms);
     m_NativeViewmodelHandsOnly = getBool("NativeViewmodelHandsOnly", m_NativeViewmodelHandsOnly);
     m_NativeViewmodelHandsOnlyWristKeepFraction = std::clamp(
