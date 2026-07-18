@@ -3431,6 +3431,7 @@ bool VR::ShouldSuppressMagazineInteractionEmptyClipAutoReload(C_BasePlayer* loca
 {
     if (!m_MagazineInteractionEnabled ||
         !m_IsVREnabled ||
+        !m_MagazineInteractionOneInChamber ||
         (!m_VrHandsEnabled && !m_NativeViewmodelHandsOnly))
     {
         return false;
@@ -3492,7 +3493,7 @@ bool VR::IsMagazineInteractionBlockingFire() const
             m_MagazineInteractionState == MagazineInteractionManualState::AutoBolting;
     }
 
-    return IsMagazineInteractionManualActive();
+    return IsMagazineInteractionManualActive() && !m_MagazineInteractionOneInChamber;
 }
 
 void VR::PlayMagazineInteractionBlockedFireEmptySound()
@@ -4241,6 +4242,7 @@ void VR::CancelMagazineInteractionManual()
     m_MagazineInteractionReloadCommandHoldUntil = {};
     m_MagazineInteractionOldMagazinePulled = false;
     m_MagazineInteractionChamberEmpty = false;
+    m_MagazineInteractionOneInChamber = false;
     m_MagazineInteractionOldMagazineContactActive = false;
     m_MagazineInteractionFreshMagazineContactActive = false;
     m_MagazineInteractionBoltContactActive = false;
@@ -6259,14 +6261,23 @@ bool VR::UpdateMagazineInteraction(
             m_MagazineInteractionState == MagazineInteractionManualState::WaitingForFreshMagazine ||
             m_MagazineInteractionState == MagazineInteractionManualState::HoldingFreshMagazine))
     {
-        applyServerHookClipSettlement(
-            0,
-            -1,
-            -1,
-            -1,
-            "magazine-out-maintain-empty",
-            0.35f,
-            false);
+        if (m_MagazineInteractionOneInChamber)
+        {
+            if (activeClip == 0) // Chamber was left one, but the clip just went empty.
+            {
+                m_MagazineInteractionChamberEmpty = true;
+                m_MagazineInteractionOneInChamber = false;
+            }
+        }
+        else
+            applyServerHookClipSettlement(
+                0,
+                -1,
+                -1,
+                -1,
+                "magazine-out-maintain-empty",
+                0.35f,
+                false);
     }
 
     if (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBackendReload)
@@ -7126,12 +7137,22 @@ bool VR::UpdateMagazineInteraction(
             if (m_MagazineInteractionServerClipSettlementActive &&
                 !m_MagazineInteractionShotgunShellMode)
             {
+                const int heldAmmoType = m_MagazineInteractionServerClipReserveHoldAmmoType;
+                const int heldReserve = m_MagazineInteractionServerClipReserveHoldReserve;
+
                 m_MagazineInteractionReloadTriggered = true;
                 m_MagazineInteractionReloadCommandPending = false;
                 m_MagazineInteractionReloadCommandIssued = false;
                 m_MagazineInteractionReloadCommandHoldUntil = {};
+                m_MagazineInteractionChamberEmpty = activeClip == 0;
+
+                if ((heldAmmoType <= 2 && heldReserve == 0)) // Pistol
+                    m_MagazineInteractionOneInChamber = true;
+                else
+                    m_MagazineInteractionOneInChamber = !m_MagazineInteractionChamberEmpty && m_MagazineInteractionServerClipReserveHoldReserve > 0;
+
                 applyServerHookClipSettlement(
-                    0,
+                    m_MagazineInteractionOneInChamber ? 1 : 0,
                     -1,
                     -1,
                     -1,
@@ -7169,6 +7190,7 @@ bool VR::UpdateMagazineInteraction(
             beginMagazineInteractionSession(box);
             m_MagazineInteractionState = MagazineInteractionManualState::WaitingForFreshMagazine;
             m_MagazineInteractionChamberEmpty = true;
+            m_MagazineInteractionOneInChamber = false;
             m_MagazineInteractionLeftHandHolding = false;
             m_MagazineInteractionOldMagazinePulled = true;
             m_MagazineInteractionFreshPickupBasisValid = false;
