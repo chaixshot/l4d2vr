@@ -8317,6 +8317,12 @@ namespace
         return cache;
     }
 
+    inline MagazineInteractionFrozenViewmodelPoseCache& GetManualThrowFrozenViewmodelPoseCache()
+    {
+        static MagazineInteractionFrozenViewmodelPoseCache cache;
+        return cache;
+    }
+
     inline bool TryGetMagazineInteractionModelAnchor(
         const ModelRenderInfo_t& info,
         vr_vm_stabilize::Mat3x4& outAnchor)
@@ -8375,6 +8381,102 @@ namespace
 
         for (int bone = 0; bone < numBones; ++bone)
             vr_vm_stabilize::Mul(modelAnchor, localBones[static_cast<size_t>(bone)], outBones[bone]);
+    }
+
+    inline void ApplyManualThrowViewmodelAnimationFreeze(
+        VR* vr,
+        void* drawState,
+        const std::string& modelName,
+        bool drawEntityIsViewmodelClass,
+        const ModelRenderInfo_t& info,
+        void*& pCustomBoneToWorld)
+    {
+        MagazineInteractionFrozenViewmodelPoseCache& frozenCache =
+            GetManualThrowFrozenViewmodelPoseCache();
+
+        constexpr uint32_t kThrowableActive = 1u << 0;
+        constexpr uint32_t kTriggerHeld = 1u << 1;
+        const uint32_t inputState = vr
+            ? vr->m_ManualThrowViewmodelInputState.load(std::memory_order_acquire)
+            : 0u;
+        const bool throwableActive =
+            vr &&
+            vr->m_IsVREnabled &&
+            vr->m_ManualThrowEnabled &&
+            (inputState & kThrowableActive) != 0u;
+        if (!throwableActive)
+        {
+            if (!vr || frozenCache.owner == vr)
+                frozenCache.Reset();
+            return;
+        }
+
+        if (!drawState || !pCustomBoneToWorld || modelName.empty())
+            return;
+
+        const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
+        if (!drawEntityIsViewmodelClass && !HooksModelNameIsViewmodel(lowerModel))
+            return;
+
+        int numBones = 0;
+        if (!vr_vm_stabilize::TryGetNumBonesFromDrawState(drawState, numBones) ||
+            numBones <= 0 || numBones > 512)
+        {
+            return;
+        }
+
+        vr_vm_stabilize::Mat3x4 modelAnchor{};
+        if (!TryGetMagazineInteractionModelAnchor(info, modelAnchor))
+            return;
+
+        if (frozenCache.owner != vr)
+        {
+            frozenCache.Reset();
+            frozenCache.owner = vr;
+        }
+
+        const auto* sourceBones =
+            reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pCustomBoneToWorld);
+        MagazineInteractionFrozenViewmodelPoseEntry& frozenPose =
+            frozenCache.models[lowerModel];
+        const bool poseMatches =
+            frozenPose.valid &&
+            frozenPose.modelName == modelName &&
+            frozenPose.numBones == numBones &&
+            static_cast<int>(frozenPose.frozenLocalBones.size()) == numBones;
+        const bool triggerHeld = (inputState & kTriggerHeld) != 0u;
+
+        // While the trigger is up, continuously retain the latest prepared idle
+        // pose. The first held draw can then restore the last pre-attack pose
+        // instead of capturing a viewmodel that has already started moving.
+        if (!triggerHeld || !poseMatches)
+        {
+            frozenPose = {};
+            frozenPose.modelName = modelName;
+            frozenPose.numBones = numBones;
+            frozenPose.valid = BuildMagazineInteractionLocalBones(
+                modelAnchor,
+                sourceBones,
+                numBones,
+                frozenPose.frozenLocalBones);
+            if (!triggerHeld || !frozenPose.valid)
+                return;
+        }
+
+        uint32_t seqEven = vr->m_RenderFrameSeq.load(std::memory_order_acquire) & ~1u;
+        if (seqEven == 0u)
+            seqEven = (static_cast<uint32_t>(GetTickCount()) << 1u) | 2u;
+        vr_vm_stabilize::Mat3x4* frozenBones =
+            vr_vm_stabilize::AllocStableBones(numBones, seqEven);
+        if (!frozenBones)
+            return;
+
+        ApplyMagazineInteractionLocalPose(
+            modelAnchor,
+            frozenPose.frozenLocalBones,
+            frozenBones,
+            numBones);
+        pCustomBoneToWorld = frozenBones;
     }
 
     inline void ApplyMagazineInteractionBoltPose(
@@ -16080,6 +16182,14 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
             m_VR,
             state,
 			modelName,
+			*pDrawInfo,
+			pBonesToWorldFinal);
+
+		ApplyManualThrowViewmodelAnimationFreeze(
+			m_VR,
+			state,
+			modelName,
+			drawEntityIsViewmodelClass,
 			*pDrawInfo,
 			pBonesToWorldFinal);
 

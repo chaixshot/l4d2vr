@@ -856,6 +856,11 @@ public:
 	bool m_HasThrowArc = false;
 	bool m_LastAimWasThrowable = false;
 	bool m_ManualThrowEnabled = false;
+	// CreateMove publishes whether the local player has a throwable equipped and
+	// whether its final IN_ATTACK state is held. DrawModelExecute consumes this
+	// atomically so queued rendering can freeze only animation-local viewmodel
+	// motion while continuing to follow the live controller anchor.
+	std::atomic<uint32_t> m_ManualThrowViewmodelInputState{ 0 };
 	float m_ManualThrowVelocityScale = 4.0f;
 	float m_ManualThrowHorizontalVelocityScale = 1.0f;
 	float m_ManualThrowVerticalVelocityScale = 1.0f;

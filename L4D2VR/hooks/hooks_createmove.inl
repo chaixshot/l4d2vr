@@ -139,6 +139,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		s_effectiveRangeMeleeSwitchBackCmd = -1;
 		s_effectiveRangeMeleeCycleEndCmd = -1;
 		m_VR->m_EffectiveAttackRangeAutoFirePrevAttackDown = false;
+		m_VR->m_ManualThrowViewmodelInputState.store(0u, std::memory_order_release);
 		return result;
 	}
 
@@ -1551,6 +1552,27 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 
 		m_VR->ApplyRoomscale1To1Move(cmd, flInputSampleTime, controlLocomotionActive);
 		m_VR->ApplyMovementLedgeGuard(cmd, m_VR->m_ScopeFovAdjustSuppressWalk || m_VR->m_TeleportTargetingActive);
+
+		// Publish the final command state after every helper has had a chance to
+		// suppress or synthesize IN_ATTACK. The render thread uses one atomic word
+		// so queued draws never observe a throwable/trigger mismatch.
+		constexpr uint32_t kManualThrowViewmodelThrowableActive = 1u << 0;
+		constexpr uint32_t kManualThrowViewmodelTriggerHeld = 1u << 1;
+		uint32_t manualThrowViewmodelInputState = 0u;
+		if (m_VR->m_IsVREnabled && m_VR->m_ManualThrowEnabled && localPlayerForAutoActions)
+		{
+			C_WeaponCSBase* manualThrowWeapon =
+				reinterpret_cast<C_WeaponCSBase*>(localPlayerForAutoActions->GetActiveWeapon());
+			if (IsVRThrowableWeapon(manualThrowWeapon, nullptr, nullptr))
+			{
+				manualThrowViewmodelInputState |= kManualThrowViewmodelThrowableActive;
+				if ((cmd->buttons & (1 << 0)) != 0) // IN_ATTACK
+					manualThrowViewmodelInputState |= kManualThrowViewmodelTriggerHeld;
+			}
+		}
+		m_VR->m_ManualThrowViewmodelInputState.store(
+			manualThrowViewmodelInputState,
+			std::memory_order_release);
 	}
 	return result;
 }
