@@ -1523,6 +1523,7 @@ public:
 	bool m_MagazineInteractionSuppressLeftInputUntilRelease = false;
 	bool m_MagazineInteractionOldMagazinePulled = false;
 	bool m_MagazineInteractionChamberEmpty = false;
+	bool m_MagazineInteractionOneInChamber = false;
 	bool m_MagazineInteractionOldMagazineContactActive = false;
 	bool m_MagazineInteractionFreshMagazineContactActive = false;
 	bool m_MagazineInteractionBoltContactActive = false;
