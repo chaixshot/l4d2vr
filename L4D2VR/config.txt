@@ -117,6 +117,7 @@ HideArms=false
 VrHandsEnabled=true
 VrHandsGlovesEnabled=false
 VrHandsTwoHandedGripTargetBoxScale=1.0
+VrHandsTwoHandedGripHeldMode=false
 VrHandsRealBulletSpreadEnabled=false
 VrHandsTwoHandedAimMountFriendly=false
 VrHandsVirtualStockEnabled=false
