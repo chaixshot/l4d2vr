@@ -2008,6 +2008,8 @@ void __fastcall Hooks::dWriteUsercmdDeltaToBuffer(void* ecx, void* edx, int a1, 
 
 int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 {
+	static int s_lastButtons = 0;
+
 	const bool localUsingMountedWeapon = m_VR &&
 		m_VR->m_IsVREnabled &&
 		!m_VR->m_ForceNonVRServerMovement &&
@@ -2023,7 +2025,7 @@ int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 		const bool magazineInteractionBlocksFire = m_VR->IsMagazineInteractionBlockingFire();
 		if (magazineInteractionBlocksFire)
 		{
-			if ((to->buttons & kMagazineInteractionInAttack) != 0)
+			if ((to->buttons & kMagazineInteractionInAttack) != 0 && (s_lastButtons & kMagazineInteractionInAttack) == 0)
 				m_VR->PlayMagazineInteractionBlockedFireEmptySound();
 			to->buttons &= ~kMagazineInteractionInAttack; // IN_ATTACK
 		}
@@ -2041,7 +2043,7 @@ int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 			m_VR->ShouldSuppressMagazineInteractionEmptyClipAutoReload(nullptr);
 		if (suppressMagazineEmptyClipAutoReload)
 		{
-			if ((to->buttons & kMagazineInteractionInAttack) != 0)
+			if ((to->buttons & kMagazineInteractionInAttack) != 0 && (s_lastButtons & kMagazineInteractionInAttack) == 0)
 				m_VR->PlayMagazineInteractionBlockedFireEmptySound();
 			to->buttons &= ~(kMagazineInteractionInAttack | kMagazineInteractionInReload);
 		}
@@ -2131,6 +2133,9 @@ int Hooks::dWriteUsercmd(void* buf, CUserCmd* to, CUserCmd* from)
 	// 重算校验，否则多人下枪声会异常
 	pVerified->m_cmd = *to;
 	pVerified->m_crc = to->GetChecksum();
+
+	s_lastButtons = to->buttons;
+
 	return 1;
 }
 

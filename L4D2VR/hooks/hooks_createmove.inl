@@ -53,6 +53,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 	static int s_effectiveRangeMeleeSwitchBackCmd = -1;
 	static int s_effectiveRangeMeleeCycleEndCmd = -1;
 
+	static int s_lastButtons = 0;
+
 	if (!cmd)
 		return hkCreateMove.fOriginal(ecx, flInputSampleTime, cmd);
 
@@ -1436,7 +1438,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 	const bool magazineInteractionBlocksFire = m_VR->IsMagazineInteractionBlockingFire();
 	if (!localUsingMountedWeapon && magazineInteractionBlocksFire)
 	{
-		if ((cmd->buttons & kMagazineInteractionInAttack) != 0)
+		if ((cmd->buttons & kMagazineInteractionInAttack) != 0 && (s_lastButtons & kMagazineInteractionInAttack) == 0)
 			m_VR->PlayMagazineInteractionBlockedFireEmptySound();
 		cmd->buttons &= ~kMagazineInteractionInAttack; // IN_ATTACK
 	}
@@ -1456,7 +1458,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		m_VR->ShouldSuppressMagazineInteractionEmptyClipAutoReload(nullptr);
 	if (!localUsingMountedWeapon && suppressMagazineEmptyClipAutoReload)
 	{
-		if ((cmd->buttons & kMagazineInteractionInAttack) != 0)
+		if ((cmd->buttons & kMagazineInteractionInAttack) != 0 && (s_lastButtons & kMagazineInteractionInAttack) == 0)
 			m_VR->PlayMagazineInteractionBlockedFireEmptySound();
 		cmd->buttons &= ~(kMagazineInteractionInAttack | kMagazineInteractionInReload);
 	}
@@ -1574,6 +1576,9 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			manualThrowViewmodelInputState,
 			std::memory_order_release);
 	}
+
+	s_lastButtons = cmd->buttons;
+
 	return result;
 }
 
