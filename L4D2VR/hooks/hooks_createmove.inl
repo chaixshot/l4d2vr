@@ -28,6 +28,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 	static QAngle s_tpMeleeLockedAngles = { 0,0,0 };
 	static uintptr_t s_vrAwareThrowableAimWeapon = 0;
 	static bool s_vrAwareThrowableAimPrevAttackDown = false;
+	static uintptr_t s_manualCarryThrowWeapon = 0;
+	static bool s_manualCarryThrowPhysicalAttackDown = false;
 	static bool s_vrAwareThrowableAimPrevWeaponThrowable = false;
 	static int s_vrAwareThrowableAimTicks = 0;
 	// Auto-repeat spray-push for pump/chrome shotguns and AWP/scout:
@@ -135,6 +137,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		s_nonvrMeleeHasPrev = false;
 		s_tpMeleePrevAttackDown = false;
 		s_tpMeleeLockUntil = {};
+		s_manualCarryThrowWeapon = 0;
+		s_manualCarryThrowPhysicalAttackDown = false;
 		s_autoRepeatSprayPushWeapon = 0;
 		s_autoRepeatSprayPushPrevClip1 = -1;
 		s_autoRepeatSprayPushDelayTicks = 0;
@@ -1122,9 +1126,16 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 			contains(wpnNet, "BaseCSGrenade") ||
 			(contains(wpnNet, "Grenade") && !contains(wpnNet, "GrenadeLauncher"));
 
+		// Carryable props use a press-to-drop action. They must never pass through
+		// semi-auto pulse generation because that would fabricate a release while
+		// the physical VR trigger is still held.
+		const bool isManualCarryThrowable =
+			m_VR->m_ManualThrowEnabled &&
+			IsVRManualCarryThrowWeapon(reinterpret_cast<C_WeaponCSBase*>(wpn), wpnName, wpnNet);
+
 		// Only pulse when holding attack and weapon is NOT full-auto, and NOT a hold-to-use item.
 		// NOT a hold-to-use item, and NOT during a continuous use action.
-		if (holdingAttack && !unknownWeapon && !isFullAuto && !isHoldToUseItem && !isChainsaw && !isThrowable && !doingUseAction && !usingMountedWeapon && !effectiveRangeContinuousAttack && (!isMeleeWeapon || !m_VR->m_AutoFastMelee))
+		if (holdingAttack && !unknownWeapon && !isFullAuto && !isHoldToUseItem && !isChainsaw && !isThrowable && !isManualCarryThrowable && !doingUseAction && !usingMountedWeapon && !effectiveRangeContinuousAttack && (!isMeleeWeapon || !m_VR->m_AutoFastMelee))
 		{
 			using namespace std::chrono;
 			const int kIN_ATTACK = (1 << 0);
@@ -1613,19 +1624,79 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		m_VR->ApplyRoomscale1To1Move(cmd, flInputSampleTime, controlLocomotionActive);
 		m_VR->ApplyMovementLedgeGuard(cmd, m_VR->m_ScopeFovAdjustSuppressWalk || m_VR->m_TeleportTargetingActive);
 
+		// Backpack carryables normally drop as soon as IN_ATTACK is pressed. For
+		// manual throwing, hold the command locally while the trigger is held and
+		// send one normal attack pulse on physical release. The server keeps the
+		// stock inventory/drop path and only replaces the released entity velocity.
+		{
+			constexpr uint32_t kManualCarryThrowIN_ATTACK = (1u << 0);
+			constexpr uint32_t kManualCarryThrowWeaponShift = 26u;
+			constexpr uint32_t kManualCarryThrowWeaponMask = (0x3Fu << kManualCarryThrowWeaponShift);
+			C_BaseCombatWeapon* carryBaseWeapon = localPlayerForAutoActions
+				? reinterpret_cast<C_BaseCombatWeapon*>(localPlayerForAutoActions->GetActiveWeapon())
+				: nullptr;
+			C_WeaponCSBase* carryWeapon = reinterpret_cast<C_WeaponCSBase*>(carryBaseWeapon);
+			const char* carryWeaponName = carryBaseWeapon ? carryBaseWeapon->GetName() : nullptr;
+			const char* carryWeaponNetClass = carryBaseWeapon
+				? m_Game->GetNetworkClassName(reinterpret_cast<uintptr_t*>(carryBaseWeapon))
+				: nullptr;
+			const uintptr_t carryWeaponTag = reinterpret_cast<uintptr_t>(carryWeapon);
+			const int carryWeaponId = ResolveVRManualCarryThrowWeaponId(
+				carryWeapon,
+				carryWeaponName,
+				carryWeaponNetClass);
+			const bool carryThrowActive =
+				m_VR->m_IsVREnabled &&
+				m_VR->m_ManualThrowEnabled &&
+				s_ServerUnderstandsVR &&
+				s_ManualCarryThrowHookReady &&
+				carryWeaponId != static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
+
+			if (!carryThrowActive)
+			{
+				s_manualCarryThrowWeapon = 0;
+				s_manualCarryThrowPhysicalAttackDown = false;
+			}
+			else
+			{
+				// Read the raw VR action state. cmd->buttons has already passed through
+				// semi-auto helpers and is not a reliable representation of the held trigger.
+				const bool physicalAttackDown = m_VR->m_PrimaryAttackDown;
+				if (carryWeaponTag != s_manualCarryThrowWeapon)
+				{
+					s_manualCarryThrowWeapon = carryWeaponTag;
+					s_manualCarryThrowPhysicalAttackDown = physicalAttackDown;
+				}
+
+				uint32_t carryButtons = static_cast<uint32_t>(cmd->buttons);
+				carryButtons &= ~(kManualCarryThrowIN_ATTACK | kManualCarryThrowWeaponMask);
+				if (!physicalAttackDown && s_manualCarryThrowPhysicalAttackDown)
+				{
+					carryButtons |= kManualCarryThrowIN_ATTACK;
+					// Bits 26-31 are unused by Source IN_* buttons. Encode weaponId+1
+					// for this one command, then strip it in dReadUsercmd before gameplay.
+					const uint32_t encodedWeaponId = static_cast<uint32_t>(carryWeaponId + 1);
+					carryButtons |= (encodedWeaponId & 0x3Fu) << kManualCarryThrowWeaponShift;
+					Game::logMsg(
+						"[VR][ManualCarryThrow] client release cmd=%d weaponId=%d weapon=%s netclass=%s",
+						cmd->command_number,
+						carryWeaponId,
+						carryWeaponName ? carryWeaponName : "",
+						carryWeaponNetClass ? carryWeaponNetClass : "");
+				}
+				cmd->buttons = static_cast<int>(carryButtons);
+
+				s_manualCarryThrowPhysicalAttackDown = physicalAttackDown;
+			}
+		}
+
 		// Publish the final command state after every helper has had a chance to
 		// suppress or synthesize IN_ATTACK. The render thread uses one atomic word
 		// so queued draws never observe a throwable/trigger mismatch.
 		constexpr uint32_t kManualThrowViewmodelThrowableActive = 1u << 0;
 		constexpr uint32_t kManualThrowViewmodelTriggerHeld = 1u << 1;
 		uint32_t manualThrowViewmodelInputState = 0u;
-		const bool manualThrowRuntimeActive =
-			m_VR->m_IsVREnabled &&
-			m_VR->m_ManualThrowEnabled &&
-			Hooks::s_ManualThrowHooksReady &&
-			Hooks::s_ServerUnderstandsVR &&
-			!m_VR->m_ForceNonVRServerMovement;
-		if (manualThrowRuntimeActive && localPlayerForAutoActions)
+		if (m_VR->m_IsVREnabled && m_VR->m_ManualThrowEnabled && localPlayerForAutoActions)
 		{
 			C_WeaponCSBase* manualThrowWeapon =
 				reinterpret_cast<C_WeaponCSBase*>(localPlayerForAutoActions->GetActiveWeapon());

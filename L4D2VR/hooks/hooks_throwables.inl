@@ -12,11 +12,53 @@ namespace
 		return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 	}
 
+	static void* ManualThrowReadEntityVtable(void* entity)
+	{
+		if (!entity)
+			return nullptr;
+#ifdef _MSC_VER
+		__try
+		{
+			return *reinterpret_cast<void**>(entity);
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return nullptr;
+		}
+#else
+		return *reinterpret_cast<void**>(entity);
+#endif
+	}
+
 	static bool ManualThrowWeaponIdIsThrowable(int weaponId)
 	{
 		return weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::MOLOTOV) ||
 			weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::PIPE_BOMB) ||
 			weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::VOMITJAR);
+	}
+
+	static bool ManualThrowWeaponIdIsCarryable(int weaponId)
+	{
+		return weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::GASCAN) ||
+			weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::PROPANE_TANK) ||
+			weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::OXYGEN_TANK) ||
+			weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::GNOME_CHOMPSKI) ||
+			weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::COLA_BOTTLES) ||
+			weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::FIREWORKS_BOX);
+	}
+
+	static const char* ManualCarryThrowWeaponName(int weaponId)
+	{
+		switch (weaponId)
+		{
+		case C_WeaponCSBase::WeaponID::GASCAN: return "gascan";
+		case C_WeaponCSBase::WeaponID::PROPANE_TANK: return "propane_tank";
+		case C_WeaponCSBase::WeaponID::OXYGEN_TANK: return "oxygen_tank";
+		case C_WeaponCSBase::WeaponID::GNOME_CHOMPSKI: return "gnome";
+		case C_WeaponCSBase::WeaponID::COLA_BOTTLES: return "cola_bottles";
+		case C_WeaponCSBase::WeaponID::FIREWORKS_BOX: return "fireworks_box";
+		default: return "unknown";
+		}
 	}
 
 	static int ManualThrowExpectedWeaponId(ManualThrowableKind kind)
@@ -65,58 +107,14 @@ namespace
 		player.throwableAimTicks = 0;
 		player.throwableAimPrevAttackDown = false;
 		player.throwableAimPrevWeaponThrowable = false;
+		player.manualCarryThrowLastDecodedReleaseTick = 0;
 		player.manualThrowPending = {};
 	}
 
-	static bool ManualThrowGetPlayerOrigin(void* owner, Vector& origin)
+	static void ManualThrowRecordPoseSample(Player& player, int tick, const Vector& position, const QAngle& angles)
 	{
-		origin = {};
-		if (!owner || !Hooks::m_Game || !Hooks::m_Game->m_Offsets ||
-			!Hooks::m_Game->m_Offsets->CBaseEntity_GetAbsOrigin_Server.valid)
-		{
-			return false;
-		}
-
-		using GetAbsOriginServerFn = Vector* (__thiscall*)(void*);
-		auto getAbsOrigin = reinterpret_cast<GetAbsOriginServerFn>(
-			Hooks::m_Game->m_Offsets->CBaseEntity_GetAbsOrigin_Server.address);
-		if (!getAbsOrigin)
-			return false;
-
-#ifdef _MSC_VER
-		__try
-		{
-			Vector* originPtr = getAbsOrigin(owner);
-			if (!originPtr || !ManualThrowIsFiniteVector(*originPtr))
-				return false;
-			origin = *originPtr;
-			return true;
-		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-			return false;
-		}
-#else
-		Vector* originPtr = getAbsOrigin(owner);
-		if (!originPtr || !ManualThrowIsFiniteVector(*originPtr))
-			return false;
-		origin = *originPtr;
-		return true;
-#endif
-	}
-
-	static void ManualThrowRecordPoseSample(
-		Player& player,
-		int tick,
-		const Vector& position,
-		const Vector& playerOrigin,
-		const QAngle& angles)
-	{
-		if (tick <= 0 || !ManualThrowIsFiniteVector(position) ||
-			!ManualThrowIsFiniteVector(playerOrigin) || !IsFiniteViewAngle(angles))
-		{
+		if (tick <= 0 || !ManualThrowIsFiniteVector(position) || !IsFiniteViewAngle(angles))
 			return;
-		}
 
 		if (player.manualThrowLastTick > 0 &&
 			(tick > player.manualThrowLastTick + 16 || tick < player.manualThrowLastTick - 16))
@@ -130,7 +128,6 @@ namespace
 			if (sample.valid && sample.tick == tick)
 			{
 				sample.position = position;
-				sample.playerOrigin = playerOrigin;
 				sample.angles = angles;
 				player.manualThrowLastTick = (std::max)(player.manualThrowLastTick, tick);
 				return;
@@ -141,7 +138,6 @@ namespace
 		sample.valid = true;
 		sample.tick = tick;
 		sample.position = position;
-		sample.playerOrigin = playerOrigin;
 		sample.angles = angles;
 
 		if (player.manualThrowPoseCount < static_cast<int>(Player::kManualThrowPoseSampleCount))
@@ -203,12 +199,7 @@ namespace
 			if (deltaSeconds <= 0.0f)
 				continue;
 
-			// Controller positions are encoded in world space. Remove the player's world
-			// translation between samples so joystick locomotion, knockback and moving
-			// platforms do not become artificial hand release velocity.
-			const Vector previousHandRelative = previous.position - previous.playerOrigin;
-			const Vector currentHandRelative = current.position - current.playerOrigin;
-			const Vector segmentVelocity = (currentHandRelative - previousHandRelative) / deltaSeconds;
+			const Vector segmentVelocity = (current.position - previous.position) / deltaSeconds;
 			Vector segmentAngularVelocity(
 				AngleDeltaDeg(current.angles.x, previous.angles.x) / deltaSeconds,
 				AngleDeltaDeg(current.angles.y, previous.angles.y) / deltaSeconds,
@@ -266,14 +257,21 @@ namespace
 	static bool ManualThrowPreparePending(
 		Player& player,
 		void* owner,
+		void* sourceWeapon,
 		int weaponId,
 		int releaseTick)
 	{
 		player.manualThrowPending = {};
 
-		if (!Hooks::s_ManualThrowHooksReady || !Hooks::m_VR || !Hooks::m_VR->m_ManualThrowEnabled)
+		if (!Hooks::m_VR || !Hooks::m_VR->m_ManualThrowEnabled)
 			return false;
-		if (!owner || !ManualThrowWeaponIdIsThrowable(weaponId))
+		const bool projectileThrow = ManualThrowWeaponIdIsThrowable(weaponId);
+		const bool carryableThrow = ManualThrowWeaponIdIsCarryable(weaponId);
+		if (!owner || !sourceWeapon || (!projectileThrow && !carryableThrow))
+			return false;
+		if (projectileThrow && !Hooks::s_ManualThrowHooksReady)
+			return false;
+		if (carryableThrow && !Hooks::s_ManualCarryThrowHookReady)
 			return false;
 
 		Vector measuredVelocity{};
@@ -315,6 +313,8 @@ namespace
 		pending.weaponId = weaponId;
 		pending.releaseTick = releaseTick;
 		pending.owner = owner;
+		pending.sourceWeapon = sourceWeapon;
+		pending.sourceWeaponVtable = ManualThrowReadEntityVtable(sourceWeapon);
 		pending.origin = player.controllerPos + spawnDirection * 5.0f;
 		pending.angles = player.controllerAngle;
 		pending.velocity = measuredVelocity;
@@ -406,6 +406,172 @@ namespace
 
 		return original(finalPosition, finalAngles, finalVelocity, finalAngularVelocity, owner);
 	}
+
+	static bool ManualCarryThrowTeleportDroppedWeapon(
+		void* weapon,
+		const ManualThrowPending& pending)
+	{
+		if (!weapon)
+			return false;
+
+		constexpr size_t kTeleportVtableSlot = 118;
+		void** vtable = nullptr;
+#ifdef _MSC_VER
+		__try
+		{
+			vtable = *reinterpret_cast<void***>(weapon);
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			vtable = nullptr;
+		}
+#else
+		vtable = *reinterpret_cast<void***>(weapon);
+#endif
+		if (!vtable || !IsReadableMemoryRange(vtable + kTeleportVtableSlot, sizeof(void*)))
+		{
+			Game::logMsg(
+				"[VR][ManualCarryThrow] Teleport resolve failed weapon=%p vtable=%p slot=%u",
+				weapon,
+				vtable,
+				static_cast<unsigned int>(kTeleportVtableSlot));
+			return false;
+		}
+
+		using TeleportFn = void(__thiscall*)(
+			void*,
+			const Vector*,
+			const QAngle*,
+			const Vector*);
+		void* teleportTarget = vtable[kTeleportVtableSlot];
+		HMODULE serverModule = GetModuleHandleA("server.dll");
+		MODULEINFO moduleInfo{};
+		const bool targetInServer = serverModule &&
+			GetModuleInformation(GetCurrentProcess(), serverModule, &moduleInfo, sizeof(moduleInfo)) &&
+			reinterpret_cast<uintptr_t>(teleportTarget) >= reinterpret_cast<uintptr_t>(moduleInfo.lpBaseOfDll) &&
+			reinterpret_cast<uintptr_t>(teleportTarget) <
+				reinterpret_cast<uintptr_t>(moduleInfo.lpBaseOfDll) + static_cast<uintptr_t>(moduleInfo.SizeOfImage);
+		if (!teleportTarget || !targetInServer)
+		{
+			Game::logMsg(
+				"[VR][ManualCarryThrow] Teleport target invalid weapon=%p slot=%u target=%p inServer=%d",
+				weapon,
+				static_cast<unsigned int>(kTeleportVtableSlot),
+				teleportTarget,
+				targetInServer ? 1 : 0);
+			return false;
+		}
+		auto teleport = reinterpret_cast<TeleportFn>(teleportTarget);
+
+#ifdef _MSC_VER
+		__try
+		{
+			teleport(weapon, &pending.origin, nullptr, &pending.velocity);
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			Game::logMsg(
+				"[VR][ManualCarryThrow] Teleport call exception weapon=%p target=%p",
+				weapon,
+				teleportTarget);
+			return false;
+		}
+#else
+		teleport(weapon, &pending.origin, nullptr, &pending.velocity);
+#endif
+		return true;
+	}
+
+	static bool ManualCarryThrowApplyPendingAfterWeaponDetached(
+		int playerIndex,
+		void* ownerPlayer,
+		void* activeWeaponAfterUsercmd,
+		bool activeWeaponReadSucceeded)
+	{
+		if (!Hooks::m_Game || !Hooks::m_VR || !Hooks::m_VR->m_ManualThrowEnabled ||
+			!Hooks::m_Game->IsValidPlayerIndex(playerIndex) || !ownerPlayer)
+		{
+			return false;
+		}
+
+		Player& player = Hooks::m_Game->m_PlayersVRInfo[static_cast<size_t>(playerIndex)];
+		ManualThrowPending& pending = player.manualThrowPending;
+		if (!activeWeaponReadSucceeded)
+		{
+			if (pending.valid && ManualThrowWeaponIdIsCarryable(pending.weaponId) &&
+				pending.owner == ownerPlayer && !pending.velocityMismatchLogged)
+			{
+				pending.velocityMismatchLogged = true;
+				Game::logMsg(
+					"[VR][ManualCarryThrow] active weapon read failed player=%d tick=%d source=%p",
+					playerIndex,
+					pending.releaseTick,
+					pending.sourceWeapon);
+			}
+			return false;
+		}
+
+		if (!player.isUsingVR || !pending.valid ||
+			!ManualThrowWeaponIdIsCarryable(pending.weaponId) ||
+			pending.owner != ownerPlayer || !pending.sourceWeapon)
+		{
+			return false;
+		}
+
+		const int pendingAgeTicks = player.manualThrowLastTick - pending.releaseTick;
+		if (pendingAgeTicks < 0 || pendingAgeTicks > 48)
+		{
+			Game::logMsg(
+				"[VR][ManualCarryThrow] detached pending expired type=%s player=%d releaseTick=%d lastTick=%d age=%d source=%p active=%p",
+				ManualCarryThrowWeaponName(pending.weaponId),
+				playerIndex,
+				pending.releaseTick,
+				player.manualThrowLastTick,
+				pendingAgeTicks,
+				pending.sourceWeapon,
+				activeWeaponAfterUsercmd);
+			pending = {};
+			return false;
+		}
+
+		if (activeWeaponAfterUsercmd == pending.sourceWeapon)
+		{
+			if (!pending.velocityMismatchLogged)
+			{
+				pending.velocityMismatchLogged = true;
+				Game::logMsg(
+					"[VR][ManualCarryThrow] waiting for detach type=%s player=%d tick=%d source=%p active=%p",
+					ManualCarryThrowWeaponName(pending.weaponId),
+					playerIndex,
+					pending.releaseTick,
+					pending.sourceWeapon,
+					activeWeaponAfterUsercmd);
+			}
+			return false;
+		}
+
+		const ManualThrowPending consumed = pending;
+		pending = {};
+		const bool applied = ManualCarryThrowTeleportDroppedWeapon(
+			consumed.sourceWeapon,
+			consumed);
+		Game::logMsg(
+			"[VR][ManualCarryThrow] %s detached type=%s player=%d tick=%d source=%p active=%p finalVel=(%.1f %.1f %.1f) origin=(%.1f %.1f %.1f)",
+			applied ? "apply" : "failed to apply",
+			ManualCarryThrowWeaponName(consumed.weaponId),
+			playerIndex,
+			consumed.releaseTick,
+			consumed.sourceWeapon,
+			activeWeaponAfterUsercmd,
+			consumed.velocity.x,
+			consumed.velocity.y,
+			consumed.velocity.z,
+			consumed.origin.x,
+			consumed.origin.y,
+			consumed.origin.z);
+		return applied;
+	}
+
 }
 
 void* __cdecl Hooks::dMolotovProjectileCreate(

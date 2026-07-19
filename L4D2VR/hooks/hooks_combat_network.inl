@@ -1614,7 +1614,40 @@ float __fastcall Hooks::dProcessUsercmds(void* ecx, void* edx, edict_t* player,
 	ApplyServerTeleportMove(pPlayer, pUnknown, index);
 	ApplyServerRoomscale1To1Move(pPlayer, pUnknown, index);
 
+	m_ServerProcessingUsercmd = true;
+	m_ServerProcessingUsercmdPlayer = pPlayer;
+	m_ServerProcessingUsercmdPlayerIndex = index;
 	float result = hkProcessUsercmds.fOriginal(ecx, player, buf, numcmds, totalcmds, dropped_packets, ignore, paused);
+	Server_WeaponCSBase* activeWeaponAfterUsercmd = nullptr;
+	bool activeWeaponReadSucceeded = false;
+	if (pPlayer)
+	{
+		typedef Server_WeaponCSBase* (__thiscall* tGetActiveWeaponAfterUsercmd)(void* thisptr);
+		static tGetActiveWeaponAfterUsercmd getActiveWeaponAfterUsercmd =
+			reinterpret_cast<tGetActiveWeaponAfterUsercmd>(m_Game->m_Offsets->GetActiveWeapon.address);
+#ifdef _MSC_VER
+		__try
+		{
+			activeWeaponAfterUsercmd = getActiveWeaponAfterUsercmd(pPlayer);
+			activeWeaponReadSucceeded = true;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			activeWeaponAfterUsercmd = nullptr;
+		}
+#else
+		activeWeaponAfterUsercmd = getActiveWeaponAfterUsercmd(pPlayer);
+		activeWeaponReadSucceeded = true;
+#endif
+	}
+	ManualCarryThrowApplyPendingAfterWeaponDetached(
+		index,
+		pPlayer,
+		activeWeaponAfterUsercmd,
+		activeWeaponReadSucceeded);
+	m_ServerProcessingUsercmd = false;
+	m_ServerProcessingUsercmdPlayer = nullptr;
+	m_ServerProcessingUsercmdPlayerIndex = -1;
 
 	m_ServerCommandControllerAimOverride = false;
 	m_ServerCommandControllerAimPlayer = nullptr;
@@ -1752,6 +1785,16 @@ namespace
 			weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::VOMITJAR);
 	}
 
+	static bool ServerWeaponIdIsManualCarryThrowable(int weaponId)
+	{
+		return weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::GASCAN) ||
+			weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::PROPANE_TANK) ||
+			weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::OXYGEN_TANK) ||
+			weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::GNOME_CHOMPSKI) ||
+			weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::COLA_BOTTLES) ||
+			weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::FIREWORKS_BOX);
+	}
+
 	static const char* ServerControllerAimReasonName(int reason)
 	{
 		switch (reason)
@@ -1883,21 +1926,7 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 		{
 			Player& vrPlayer = m_Game->m_PlayersVRInfo[static_cast<size_t>(i)];
 			vrPlayer.controllerPos.z = decodedZ;
-
-			Vector playerOrigin{};
-			if (ManualThrowGetPlayerOrigin(m_Game->m_CurrentUsercmdPlayer, playerOrigin))
-			{
-				ManualThrowRecordPoseSample(
-					vrPlayer,
-					move->tick_count,
-					vrPlayer.controllerPos,
-					playerOrigin,
-					vrPlayer.controllerAngle);
-			}
-			else
-			{
-				ManualThrowClearPoseHistory(vrPlayer);
-			}
+			ManualThrowRecordPoseSample(vrPlayer, move->tick_count, vrPlayer.controllerPos, vrPlayer.controllerAngle);
 		}
 
 		move->viewangles.x = decodedAngle;
@@ -1927,11 +1956,27 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 			vrPlayerState->throwableAimWeaponTag = weaponTag;
 
 		constexpr int kIN_ATTACK = (1 << 0);
+		constexpr uint32_t kManualCarryThrowWeaponShift = 26u;
+		constexpr uint32_t kManualCarryThrowWeaponMask = (0x3Fu << kManualCarryThrowWeaponShift);
+		const uint32_t encodedCarryValue =
+			(static_cast<uint32_t>(move->buttons) & kManualCarryThrowWeaponMask) >>
+			kManualCarryThrowWeaponShift;
+		const int encodedCarryWeaponId = encodedCarryValue > 0u
+			? static_cast<int>(encodedCarryValue - 1u)
+			: static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
+		// Remove the private client-to-listen-server marker before Source processes
+		// the command as gameplay input.
+		move->buttons = static_cast<int>(
+			static_cast<uint32_t>(move->buttons) & ~kManualCarryThrowWeaponMask);
 		const bool attackDown = (move->buttons & kIN_ATTACK) != 0;
 		const bool activeWeaponIsThrowable = ServerWeaponIdIsThrowable(serverWeaponId);
+		const bool activeWeaponIsCarryThrowable = ServerWeaponIdIsManualCarryThrowable(serverWeaponId);
+		const bool encodedCarryRelease =
+			attackDown && ServerWeaponIdIsManualCarryThrowable(encodedCarryWeaponId);
 		const bool releasedThrowable = previousWeaponThrowable && previousAttackDown && !attackDown;
 		const int releasedWeaponId = activeWeaponIsThrowable ? serverWeaponId : previousThrowableWeaponId;
 		const bool manualThrowActive = s_ManualThrowHooksReady && m_VR && m_VR->m_ManualThrowEnabled;
+		const bool manualCarryThrowActive = s_ManualCarryThrowHookReady && m_VR && m_VR->m_ManualThrowEnabled;
 		bool commandControllerAim = false;
 		int commandControllerAimReason = 0;
 
@@ -1944,8 +1989,46 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 			ManualThrowPreparePending(
 				*vrPlayerState,
 				m_Game->m_CurrentUsercmdPlayer,
+				serverWeapon,
 				releasedWeaponId,
 				move->tick_count);
+		}
+		if (vrPlayerState && manualCarryThrowActive && encodedCarryRelease &&
+			vrPlayerState->manualCarryThrowLastDecodedReleaseTick != move->tick_count)
+		{
+			const bool sourceMatchesRelease =
+				serverWeapon && activeWeaponIsCarryThrowable && serverWeaponId == encodedCarryWeaponId;
+			if (sourceMatchesRelease)
+			{
+				vrPlayerState->manualCarryThrowLastDecodedReleaseTick = move->tick_count;
+				const bool prepared = ManualThrowPreparePending(
+					*vrPlayerState,
+					m_Game->m_CurrentUsercmdPlayer,
+					serverWeapon,
+					encodedCarryWeaponId,
+					move->tick_count);
+				Game::logMsg(
+					"[VR][ManualCarryThrow] release decoded player=%d tick=%d encodedWeaponId=%d serverWeaponId=%d source=%p sourceMatch=1 detachedApply=1 prepared=%d velocity=(%.1f %.1f %.1f)",
+					i,
+					move->tick_count,
+					encodedCarryWeaponId,
+					serverWeaponId,
+					serverWeapon,
+					prepared ? 1 : 0,
+					vrPlayerState->manualThrowPending.velocity.x,
+					vrPlayerState->manualThrowPending.velocity.y,
+					vrPlayerState->manualThrowPending.velocity.z);
+			}
+			else
+			{
+				Game::logMsg(
+					"[VR][ManualCarryThrow] release source ignored player=%d tick=%d encodedWeaponId=%d serverWeaponId=%d source=%p",
+					i,
+					move->tick_count,
+					encodedCarryWeaponId,
+					serverWeaponId,
+					serverWeapon);
+			}
 		}
 
 		// Projectile Create hooks already replace the spawn pose and release velocity.

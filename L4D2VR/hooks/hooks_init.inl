@@ -35,6 +35,11 @@ Hooks::Hooks(Game* game)
 	hkStartMeleeSwingServer.enableHook();
 	hkPrimaryAttackServer.enableHook();
 	hkItemPostFrameServer.enableHook();
+	if (s_ManualCarryThrowHookReady)
+	{
+		Game::logMsg(
+			"[VR][ManualCarryThrow] detached-weapon apply armed teleportSlot=118");
+	}
 	if (s_ManualThrowHooksReady)
 	{
 		const bool molotovEnabled = hkMolotovProjectileCreate.enableHook() == 0;
@@ -200,6 +205,8 @@ int Hooks::initSourceHooks()
 
 	LPVOID ItemPostFrameServerAddr = (LPVOID)(m_Game->m_Offsets->ItemPostFrameServer.address);
 	hkItemPostFrameServer.createHook(ItemPostFrameServerAddr, &dItemPostFrameServer);
+
+	s_ManualCarryThrowHookReady = true;
 
 	s_ManualThrowHooksReady = false;
 	if (m_Game->m_Offsets->MolotovProjectileCreate.valid &&

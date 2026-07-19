@@ -41,7 +41,6 @@ struct ManualThrowPoseSample
     bool valid = false;
     int tick = 0;
     Vector position = { 0.f, 0.f, 0.f };
-    Vector playerOrigin = { 0.f, 0.f, 0.f };
     QAngle angles = { 0.f, 0.f, 0.f };
 };
 
@@ -51,6 +50,9 @@ struct ManualThrowPending
     int weaponId = 0;
     int releaseTick = 0;
     void* owner = nullptr;
+    void* sourceWeapon = nullptr;
+    void* sourceWeaponVtable = nullptr;
+    bool velocityMismatchLogged = false;
     Vector origin = { 0.f, 0.f, 0.f };
     QAngle angles = { 0.f, 0.f, 0.f };
     Vector velocity = { 0.f, 0.f, 0.f };
@@ -78,6 +80,7 @@ struct Player
     int throwableAimTicks = 0;
     bool throwableAimPrevAttackDown = false;
     bool throwableAimPrevWeaponThrowable = false;
+    int manualCarryThrowLastDecodedReleaseTick = 0;
     ManualThrowPending manualThrowPending{};
 };
 

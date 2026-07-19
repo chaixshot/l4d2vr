@@ -183,6 +183,7 @@ public:
 	static inline Hook<tEmitSoundLevel> hkEmitSoundLevel;
 	static bool s_ServerUnderstandsVR;
 	static inline bool s_ManualThrowHooksReady = false;
+	static inline bool s_ManualCarryThrowHookReady = false;
 
 	Hooks() {};
 	Hooks(Game* game);
@@ -268,4 +269,7 @@ public:
 	static inline thread_local Vector m_ServerCommandControllerAimOrigin = { 0.0f, 0.0f, 0.0f };
 	static inline thread_local QAngle m_ServerCommandControllerAimAngles = { 0.0f, 0.0f, 0.0f };
 	static inline thread_local int m_ServerCommandControllerAimReason = 0;
+	static inline thread_local bool m_ServerProcessingUsercmd = false;
+	static inline thread_local void* m_ServerProcessingUsercmdPlayer = nullptr;
+	static inline thread_local int m_ServerProcessingUsercmdPlayerIndex = -1;
 };

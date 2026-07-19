@@ -68,6 +68,43 @@ static inline bool MagazineInteractionWeaponIdIsShotgun(int weaponId)
 		weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::SPAS);
 }
 
+static bool ManualCarryThrowWeaponIdIsSupported(C_WeaponCSBase::WeaponID weaponId)
+{
+	return weaponId == C_WeaponCSBase::WeaponID::GASCAN ||
+		weaponId == C_WeaponCSBase::WeaponID::PROPANE_TANK ||
+		weaponId == C_WeaponCSBase::WeaponID::OXYGEN_TANK ||
+		weaponId == C_WeaponCSBase::WeaponID::GNOME_CHOMPSKI ||
+		weaponId == C_WeaponCSBase::WeaponID::COLA_BOTTLES ||
+		weaponId == C_WeaponCSBase::WeaponID::FIREWORKS_BOX;
+}
+
+static int ResolveVRManualCarryThrowWeaponId(C_WeaponCSBase* weapon, const char* weaponName, const char* weaponNetClass)
+{
+	if (weapon && ManualCarryThrowWeaponIdIsSupported(weapon->GetWeaponID()))
+		return static_cast<int>(weapon->GetWeaponID());
+
+	if (StringContains(weaponName, "gascan") || StringContains(weaponNetClass, "GasCan"))
+		return static_cast<int>(C_WeaponCSBase::WeaponID::GASCAN);
+	if (StringContains(weaponName, "propane") || StringContains(weaponNetClass, "PropaneTank"))
+		return static_cast<int>(C_WeaponCSBase::WeaponID::PROPANE_TANK);
+	if (StringContains(weaponName, "oxygen") || StringContains(weaponNetClass, "OxygenTank"))
+		return static_cast<int>(C_WeaponCSBase::WeaponID::OXYGEN_TANK);
+	if (StringContains(weaponName, "gnome") || StringContains(weaponNetClass, "Gnome"))
+		return static_cast<int>(C_WeaponCSBase::WeaponID::GNOME_CHOMPSKI);
+	if (StringContains(weaponName, "cola_bottles") || StringContains(weaponNetClass, "ColaBottles"))
+		return static_cast<int>(C_WeaponCSBase::WeaponID::COLA_BOTTLES);
+	if (StringContains(weaponName, "firework") || StringContains(weaponNetClass, "FireworkCrate"))
+		return static_cast<int>(C_WeaponCSBase::WeaponID::FIREWORKS_BOX);
+
+	return static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
+}
+
+static bool IsVRManualCarryThrowWeapon(C_WeaponCSBase* weapon, const char* weaponName, const char* weaponNetClass)
+{
+	return ResolveVRManualCarryThrowWeaponId(weapon, weaponName, weaponNetClass) !=
+		static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
+}
+
 static bool IsVRThrowableWeapon(C_WeaponCSBase* weapon, const char* weaponName, const char* weaponNetClass)
 {
 	if (weapon)
