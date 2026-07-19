@@ -68,10 +68,55 @@ namespace
 		player.manualThrowPending = {};
 	}
 
-	static void ManualThrowRecordPoseSample(Player& player, int tick, const Vector& position, const QAngle& angles)
+	static bool ManualThrowGetPlayerOrigin(void* owner, Vector& origin)
 	{
-		if (tick <= 0 || !ManualThrowIsFiniteVector(position) || !IsFiniteViewAngle(angles))
+		origin = {};
+		if (!owner || !Hooks::m_Game || !Hooks::m_Game->m_Offsets ||
+			!Hooks::m_Game->m_Offsets->CBaseEntity_GetAbsOrigin_Server.valid)
+		{
+			return false;
+		}
+
+		using GetAbsOriginServerFn = Vector* (__thiscall*)(void*);
+		auto getAbsOrigin = reinterpret_cast<GetAbsOriginServerFn>(
+			Hooks::m_Game->m_Offsets->CBaseEntity_GetAbsOrigin_Server.address);
+		if (!getAbsOrigin)
+			return false;
+
+#ifdef _MSC_VER
+		__try
+		{
+			Vector* originPtr = getAbsOrigin(owner);
+			if (!originPtr || !ManualThrowIsFiniteVector(*originPtr))
+				return false;
+			origin = *originPtr;
+			return true;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+#else
+		Vector* originPtr = getAbsOrigin(owner);
+		if (!originPtr || !ManualThrowIsFiniteVector(*originPtr))
+			return false;
+		origin = *originPtr;
+		return true;
+#endif
+	}
+
+	static void ManualThrowRecordPoseSample(
+		Player& player,
+		int tick,
+		const Vector& position,
+		const Vector& playerOrigin,
+		const QAngle& angles)
+	{
+		if (tick <= 0 || !ManualThrowIsFiniteVector(position) ||
+			!ManualThrowIsFiniteVector(playerOrigin) || !IsFiniteViewAngle(angles))
+		{
 			return;
+		}
 
 		if (player.manualThrowLastTick > 0 &&
 			(tick > player.manualThrowLastTick + 16 || tick < player.manualThrowLastTick - 16))
@@ -85,6 +130,7 @@ namespace
 			if (sample.valid && sample.tick == tick)
 			{
 				sample.position = position;
+				sample.playerOrigin = playerOrigin;
 				sample.angles = angles;
 				player.manualThrowLastTick = (std::max)(player.manualThrowLastTick, tick);
 				return;
@@ -95,6 +141,7 @@ namespace
 		sample.valid = true;
 		sample.tick = tick;
 		sample.position = position;
+		sample.playerOrigin = playerOrigin;
 		sample.angles = angles;
 
 		if (player.manualThrowPoseCount < static_cast<int>(Player::kManualThrowPoseSampleCount))
@@ -156,7 +203,12 @@ namespace
 			if (deltaSeconds <= 0.0f)
 				continue;
 
-			const Vector segmentVelocity = (current.position - previous.position) / deltaSeconds;
+			// Controller positions are encoded in world space. Remove the player's world
+			// translation between samples so joystick locomotion, knockback and moving
+			// platforms do not become artificial hand release velocity.
+			const Vector previousHandRelative = previous.position - previous.playerOrigin;
+			const Vector currentHandRelative = current.position - current.playerOrigin;
+			const Vector segmentVelocity = (currentHandRelative - previousHandRelative) / deltaSeconds;
 			Vector segmentAngularVelocity(
 				AngleDeltaDeg(current.angles.x, previous.angles.x) / deltaSeconds,
 				AngleDeltaDeg(current.angles.y, previous.angles.y) / deltaSeconds,

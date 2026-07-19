@@ -41,6 +41,7 @@ struct ManualThrowPoseSample
     bool valid = false;
     int tick = 0;
     Vector position = { 0.f, 0.f, 0.f };
+    Vector playerOrigin = { 0.f, 0.f, 0.f };
     QAngle angles = { 0.f, 0.f, 0.f };
 };
 

@@ -2733,7 +2733,11 @@ void __fastcall Hooks::dRenderView(void* ecx, void* edx, CViewSetup& setup, CVie
 		scopeView.m_nUnscaledWidth = m_VR->m_ScopeRTTSize;
 		scopeView.height = m_VR->m_ScopeRTTSize;
 		scopeView.m_nUnscaledHeight = m_VR->m_ScopeRTTSize;
-		scopeView.fov = m_VR->m_ScopeFov;
+		const bool thirdPersonFrontViewScope =
+			m_VR->m_ThirdPersonFrontViewEnabled && m_VR->m_IsThirdPersonCamera;
+		scopeView.fov = thirdPersonFrontViewScope
+			? m_VR->m_ThirdPersonFrontViewOverlayFov
+			: m_VR->m_ScopeFov;
 		scopeView.m_flAspectRatio = 1.0f;
 		scopeView.fovViewmodel = scopeView.fov;
 		scopeView.zNear = m_VR->m_ScopeZNear;

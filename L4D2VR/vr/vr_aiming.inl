@@ -2007,8 +2007,8 @@ void VR::UpdateAimingLaser(C_BasePlayer* localPlayer)
         m_HasAimConvergePoint = false;
         UpdateAimTeammateHudTarget(localPlayer, Vector{}, Vector{}, false);
 
-        // Legacy preview for the original game throw. Manual throw returns above because
-        // its trajectory depends on release velocity rather than controller pitch.
+        // Legacy preview for the original game throw. A supported VR server hides this
+        // path in ShouldShowAimLine(); unsupported servers keep it as the visible fallback.
         Vector pitchSource = direction;
         if (m_ForceNonVRServerMovement && (useMouse || frontViewEyeAim) && !eyeDir.IsZero())
             pitchSource = eyeDir;
@@ -3341,9 +3341,15 @@ bool VR::ShouldShowAimLine(C_WeaponCSBase* weapon) const
     if (!weapon)
         return false;
 
-    // Manual throwing uses release velocity instead of a controller-forward ray.
-    // Hide every aim-line renderer for throwables while the feature is enabled.
-    if (m_ManualThrowEnabled && IsThrowableWeapon(weapon))
+    // Manual throwing uses release velocity instead of a controller-forward ray,
+    // but only a VR-aware server can apply it. Until server support is confirmed,
+    // keep the original throwable trajectory preview and normal throw behavior.
+    const bool manualThrowRuntimeActive =
+        m_ManualThrowEnabled &&
+        Hooks::s_ManualThrowHooksReady &&
+        Hooks::s_ServerUnderstandsVR &&
+        !m_ForceNonVRServerMovement;
+    if (manualThrowRuntimeActive && IsThrowableWeapon(weapon))
         return false;
 
     switch (weapon->GetWeaponID())

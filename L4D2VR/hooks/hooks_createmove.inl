@@ -259,8 +259,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 						s_effectiveRangeAutoFireRandomState ^= s_effectiveRangeAutoFireRandomState >> 17;
 						s_effectiveRangeAutoFireRandomState ^= s_effectiveRangeAutoFireRandomState << 5;
 
-						constexpr int kMinReactionDelayMs = 50;
-						constexpr int kReactionDelayRangeMs = 51; // Inclusive 50..100 ms.
+						constexpr int kMinReactionDelayMs = 13;
+						constexpr int kReactionDelayRangeMs = 25; // Inclusive 50..100 ms.
 						const int reactionDelayMs = kMinReactionDelayMs
 							+ static_cast<int>(s_effectiveRangeAutoFireRandomState % kReactionDelayRangeMs);
 						s_effectiveRangeAutoFireAt = now + std::chrono::milliseconds(reactionDelayMs);
@@ -1619,7 +1619,13 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		constexpr uint32_t kManualThrowViewmodelThrowableActive = 1u << 0;
 		constexpr uint32_t kManualThrowViewmodelTriggerHeld = 1u << 1;
 		uint32_t manualThrowViewmodelInputState = 0u;
-		if (m_VR->m_IsVREnabled && m_VR->m_ManualThrowEnabled && localPlayerForAutoActions)
+		const bool manualThrowRuntimeActive =
+			m_VR->m_IsVREnabled &&
+			m_VR->m_ManualThrowEnabled &&
+			Hooks::s_ManualThrowHooksReady &&
+			Hooks::s_ServerUnderstandsVR &&
+			!m_VR->m_ForceNonVRServerMovement;
+		if (manualThrowRuntimeActive && localPlayerForAutoActions)
 		{
 			C_WeaponCSBase* manualThrowWeapon =
 				reinterpret_cast<C_WeaponCSBase*>(localPlayerForAutoActions->GetActiveWeapon());

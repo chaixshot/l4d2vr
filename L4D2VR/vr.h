@@ -389,9 +389,10 @@ public:
 	// Third-person scope overlay local offset in body basis (meters):
 	// x=front/back, y=left/right, z=up/down.
 	Vector m_ThirdPersonScopeOverlayOffset = { 1.5f, 0.4f, -0.3f };
-	// Third-person front-view overlay has independent placement/size/rotation so tuning it
+	// Third-person front-view overlay has independent placement/size/FOV/rotation so tuning it
 	// does not alter the weapon-mounted scope overlay or normal third-person overlay.
 	float m_ThirdPersonFrontViewOverlayWidthMeters = 0.3f;
+	float m_ThirdPersonFrontViewOverlayFov = 20.0f;
 	Vector m_ThirdPersonFrontViewOverlayOffset = { 1.5f, 0.4f, -0.3f };
 	QAngle m_ThirdPersonFrontViewOverlayAngleOffset = { -45.0f, -5.0f, -5.0f };
 	Vector m_LeftControllerPosAbs;

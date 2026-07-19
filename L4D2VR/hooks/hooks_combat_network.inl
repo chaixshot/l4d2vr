@@ -1883,7 +1883,21 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 		{
 			Player& vrPlayer = m_Game->m_PlayersVRInfo[static_cast<size_t>(i)];
 			vrPlayer.controllerPos.z = decodedZ;
-			ManualThrowRecordPoseSample(vrPlayer, move->tick_count, vrPlayer.controllerPos, vrPlayer.controllerAngle);
+
+			Vector playerOrigin{};
+			if (ManualThrowGetPlayerOrigin(m_Game->m_CurrentUsercmdPlayer, playerOrigin))
+			{
+				ManualThrowRecordPoseSample(
+					vrPlayer,
+					move->tick_count,
+					vrPlayer.controllerPos,
+					playerOrigin,
+					vrPlayer.controllerAngle);
+			}
+			else
+			{
+				ManualThrowClearPoseHistory(vrPlayer);
+			}
 		}
 
 		move->viewangles.x = decodedAngle;

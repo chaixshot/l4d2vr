@@ -1277,6 +1277,10 @@ void VR::ParseConfigFile()
         getFloat("ThirdPersonFrontViewOverlayWidthMeters", m_ThirdPersonFrontViewOverlayWidthMeters),
         0.01f,
         5.0f);
+    m_ThirdPersonFrontViewOverlayFov = std::clamp(
+        getFloat("ThirdPersonFrontViewOverlayFov", m_ThirdPersonFrontViewOverlayFov),
+        1.0f,
+        179.0f);
     m_ThirdPersonFrontViewOverlayOffset = getVector3(
         "ThirdPersonFrontViewOverlayOffset",
         m_ThirdPersonFrontViewOverlayOffset);
