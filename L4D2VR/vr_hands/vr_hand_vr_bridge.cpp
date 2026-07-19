@@ -2452,11 +2452,15 @@ namespace
         return MagazineInteractionWeaponUsesPhysicalReload(weaponId);
     }
 
-    int MagazineInteractionDefaultMaxClip(C_WeaponCSBase::WeaponID weaponId, int currentClip)
+    int MagazineInteractionDefaultMaxClip(C_WeaponCSBase::WeaponID weaponId, const std::string& modelName)
     {
+        std::string lowerModel = modelName;
+        std::transform(lowerModel.begin(), lowerModel.end(), lowerModel.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
         switch (weaponId)
         {
-        case C_WeaponCSBase::WeaponID::PISTOL: return currentClip > 15 ? 30 : 15;
+        case C_WeaponCSBase::WeaponID::PISTOL:
+            return (lowerModel.find("dual_pistol") != std::string::npos || lowerModel.find("dual_pistola") != std::string::npos) ? 30 : 15;
         case C_WeaponCSBase::WeaponID::MAGNUM: return 8;
         case C_WeaponCSBase::WeaponID::UZI: return 50;
         case C_WeaponCSBase::WeaponID::MAC10: return 50;
@@ -5382,12 +5386,12 @@ bool VR::UpdateMagazineInteraction(
 
     auto leftHandTouchesMagazineForGripExclusion = [&]() -> bool
     {
-        const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, activeClip);
-        if (maxClip > 0 && activeClip >= maxClip)
-            return false;
-
         MagazineInteractionBoxSnapshot box{};
         if (!GetMagazineInteractionBox(box) || !boxFreshForActiveWeapon(box))
+            return false;
+
+        const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, box.modelName);
+        if (maxClip > 0 && activeClip >= maxClip)
             return false;
 
         MagazineInteractionBoxSnapshot magazineTouchBox = box;
@@ -6283,7 +6287,7 @@ bool VR::UpdateMagazineInteraction(
     if (m_MagazineInteractionState == MagazineInteractionManualState::WaitingForBackendReload)
     {
         const float elapsed = std::chrono::duration<float>(now - m_MagazineInteractionPostInsertStarted).count();
-        const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, activeClip);
+        const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, m_MagazineInteractionMagazineModelName);
         const bool clipUpdated =
             activeClip > m_MagazineInteractionStartClip ||
             (maxClip > 0 && activeClip >= maxClip && activeClip != m_MagazineInteractionStartClip);
@@ -6471,7 +6475,7 @@ bool VR::UpdateMagazineInteraction(
         m_MagazineInteractionShotgunLastInterruptedClip >= 0 &&
         activeClip > m_MagazineInteractionShotgunLastInterruptedClip)
     {
-        const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, activeClip);
+        const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, m_MagazineInteractionMagazineModelName);
         m_MagazineInteractionShotgunLastInterruptedClip = activeClip;
         ApplyMagazineInteractionShotgunClientReloadAbort(
             activeWeapon,
@@ -6673,7 +6677,7 @@ bool VR::UpdateMagazineInteraction(
         m_MagazineInteractionOldMagazineContactActive = false;
         m_MagazineInteractionLeftHandHolding = false;
         m_MagazineInteractionLeftHandPoseActive.store(0, std::memory_order_relaxed);
-        const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, activeClip);
+        const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, m_MagazineInteractionMagazineModelName);
         if (m_MagazineInteractionShotgunShellMode &&
             m_MagazineInteractionShotgunShellsLoadedThisSession > 0 &&
             leftGripDown)
@@ -6865,7 +6869,7 @@ bool VR::UpdateMagazineInteraction(
             return reloadCommandPending();
         }
 
-        const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, activeClip);
+        const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, m_MagazineInteractionMagazineModelName);
         if (m_MagazineInteractionShotgunShellMode && maxClip > 0 && activeClip >= maxClip)
         {
             m_MagazineInteractionState = MagazineInteractionManualState::WaitingForFreshMagazine;
@@ -6990,7 +6994,7 @@ bool VR::UpdateMagazineInteraction(
             {
                 const int targetClip = MagazineInteractionDefaultMaxClip(
                     activeWeaponId,
-                    std::max(activeClip, m_MagazineInteractionStartClip));
+                    m_MagazineInteractionMagazineModelName);
                 if (targetClip > 0)
                 {
                     int ammoType = -1;
@@ -7252,7 +7256,14 @@ bool VR::UpdateMagazineInteraction(
         return false;
     }
 
-    const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, activeClip);
+    MagazineInteractionBoxSnapshot box{};
+    if (!GetMagazineInteractionBox(box))
+    {
+        m_MagazineInteractionOldMagazineContactActive = false;
+        return false;
+    }
+
+    const int maxClip = MagazineInteractionDefaultMaxClip(activeWeaponId, box.modelName);
     if (maxClip > 0 && activeClip >= maxClip)
     {
         m_MagazineInteractionOldMagazineContactActive = false;
@@ -7264,13 +7275,6 @@ bool VR::UpdateMagazineInteraction(
                 activeClip,
                 maxClip);
         }
-        return false;
-    }
-
-    MagazineInteractionBoxSnapshot box{};
-    if (!GetMagazineInteractionBox(box))
-    {
-        m_MagazineInteractionOldMagazineContactActive = false;
         return false;
     }
 
