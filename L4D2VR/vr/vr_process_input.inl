@@ -1481,7 +1481,7 @@ void VR::ProcessInput()
         magazineInteractionReloadPulse ||
         (!crouchButtonDown && reloadButtonDown && !adjustViewmodelActive && !scopeAdjustActive);
     if (wantReload && !m_ReloadCmdOwned &&
-        (!m_MagazineInteractionEnabled || !magazineGripDown))
+        (!m_MagazineInteractionUseButtonDisbleReloadCommand || !m_MagazineInteractionUseButtonGripInput || !m_MagazineInteractionEnabled || !magazineGripDown))
     {
         m_Game->ClientCmd_Unrestricted("+reload");
         m_ReloadCmdOwned = true;
@@ -1493,7 +1493,7 @@ void VR::ProcessInput()
         MarkMagazineInteractionReloadCommandIssued();
     }
     else if (m_ReloadCmdOwned &&
-        (!wantReload || (m_MagazineInteractionEnabled && magazineGripDown)))
+        (!wantReload || (m_MagazineInteractionUseButtonDisbleReloadCommand && m_MagazineInteractionUseButtonGripInput && m_MagazineInteractionEnabled && magazineGripDown)))
     {
         m_Game->ClientCmd_Unrestricted("-reload");
         m_ReloadCmdOwned = false;
