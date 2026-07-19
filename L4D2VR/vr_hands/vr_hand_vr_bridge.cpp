@@ -6271,6 +6271,9 @@ bool VR::UpdateMagazineInteraction(
             {
                 m_MagazineInteractionChamberEmpty = true;
                 m_MagazineInteractionOneInChamber = false;
+                m_MagazineInteractionViewmodelFreezeDeferredUntil =
+                    now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                        std::chrono::duration<float>(kMagazineInteractionEmptyClipAutoEjectFreezeDelaySeconds));
             }
         }
         else
