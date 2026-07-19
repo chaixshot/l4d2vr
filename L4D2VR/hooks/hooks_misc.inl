@@ -16346,17 +16346,19 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 			m_VR->m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed);
 		if (!m_VR ||
 			(!magazineInteractionCalibrationOverlayActive &&
-				!m_VR->ShouldHideMagazineInteractionNativeClip()))
-		{
-			DrawCurrentWeaponMagazineBox(
-				m_VR,
-				state,
-				modelName,
-				drawEntityIsViewmodelClass,
-				info.entity_index,
-				info.hitboxset,
-				info.pModelToWorld,
-				pBonesToWorldFinal);
+			!m_VR->ShouldHideMagazineInteractionNativeClip()))
+		{ 
+            const bool isViewmodelModel = HooksModelNameIsViewmodel(modelName);
+            if(isViewmodelModel)
+                DrawCurrentWeaponMagazineBox(
+                    m_VR,
+                    state,
+                    modelName,
+                    drawEntityIsViewmodelClass,
+                    info.entity_index,
+                    info.hitboxset,
+                    info.pModelToWorld,
+                    pBonesToWorldFinal);
 		}
 	}
 
