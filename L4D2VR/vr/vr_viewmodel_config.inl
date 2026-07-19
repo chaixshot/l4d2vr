@@ -1280,6 +1280,15 @@ void VR::ParseConfigFile()
     m_ThirdPersonFrontViewOverlayOffset = getVector3(
         "ThirdPersonFrontViewOverlayOffset",
         m_ThirdPersonFrontViewOverlayOffset);
+    {
+        Vector tmp = getVector3(
+            "ThirdPersonFrontViewOverlayAngleOffset",
+            Vector{
+                m_ThirdPersonFrontViewOverlayAngleOffset.x,
+                m_ThirdPersonFrontViewOverlayAngleOffset.y,
+                m_ThirdPersonFrontViewOverlayAngleOffset.z });
+        m_ThirdPersonFrontViewOverlayAngleOffset = QAngle{ tmp.x, tmp.y, tmp.z };
+    }
     m_HideArms = getBool("HideArms", m_HideArms);
     m_NativeViewmodelHandsOnly = getBool("NativeViewmodelHandsOnly", m_NativeViewmodelHandsOnly);
     m_NativeViewmodelHandsOnlyWristKeepFraction = std::clamp(

@@ -30,6 +30,7 @@ ThirdPersonVRCameraOffset=38
 ThirdPersonFrontVRCameraOffset=80,30,-15
 ThirdPersonFrontViewOverlayWidthMeters=0.3
 ThirdPersonFrontViewOverlayOffset=1.5,0.4,-0.3
+ThirdPersonFrontViewOverlayAngleOffset=-45,-5,-5
 ThirdPersonScopeOverlayOffsetX=1.5
 ThirdPersonScopeOverlayOffsetY=0.4
 ThirdPersonScopeOverlayOffsetZ=-0.3

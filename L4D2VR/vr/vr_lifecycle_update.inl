@@ -4196,9 +4196,11 @@ void VR::UpdateScopeOverlayTransform()
         }
     }
 
-    const QAngle a = ((m_MouseModeEnabled && m_MouseModeScopeOverlayAngleOffsetSet)
-        ? m_MouseModeScopeOverlayAngleOffset
-        : m_ScopeOverlayAngleOffset);
+    const QAngle a = useThirdPersonEyeAnchor
+        ? m_ThirdPersonFrontViewOverlayAngleOffset
+        : ((m_MouseModeEnabled && m_MouseModeScopeOverlayAngleOffsetSet)
+            ? m_MouseModeScopeOverlayAngleOffset
+            : m_ScopeOverlayAngleOffset);
     const float cx = std::cos(DEG2RAD(a.x)), sx = std::sin(DEG2RAD(a.x));
     const float cy = std::cos(DEG2RAD(a.y)), sy = std::sin(DEG2RAD(a.y));
     const float cz = std::cos(DEG2RAD(a.z)), sz = std::sin(DEG2RAD(a.z));

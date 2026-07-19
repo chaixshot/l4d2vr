@@ -52,6 +52,13 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 	static int s_effectiveRangeMeleeSwitchOutCmd = -1;
 	static int s_effectiveRangeMeleeSwitchBackCmd = -1;
 	static int s_effectiveRangeMeleeCycleEndCmd = -1;
+	// Give effective-range auto-fire a short humanized reaction window instead of
+	// attacking on the same command that first acquires a target.
+	static bool s_effectiveRangeAutoFireDelayPending = false;
+	static std::chrono::steady_clock::time_point s_effectiveRangeAutoFireAt{};
+	static uintptr_t s_effectiveRangeAutoFireTarget = 0;
+	static uintptr_t s_effectiveRangeAutoFireWeapon = 0;
+	static uint32_t s_effectiveRangeAutoFireRandomState = 0;
 
 	static int s_lastButtons = 0;
 
@@ -76,6 +83,13 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		m_VR->ApplyPendingRoomscale1To1ServerVisualCorrection();
 
 	m_VR->m_EffectiveAttackRangeAutoFireActive = false;
+	auto resetEffectiveRangeAutoFireDelay = [&]()
+		{
+			s_effectiveRangeAutoFireDelayPending = false;
+			s_effectiveRangeAutoFireAt = {};
+			s_effectiveRangeAutoFireTarget = 0;
+			s_effectiveRangeAutoFireWeapon = 0;
+		};
 
 	constexpr int kAutoActionIN_USE = (1 << 5);
 	const bool localUseButtonDownForAutoActions = (cmd->buttons & kAutoActionIN_USE) != 0;
@@ -140,6 +154,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		s_effectiveRangeMeleeSwitchOutCmd = -1;
 		s_effectiveRangeMeleeSwitchBackCmd = -1;
 		s_effectiveRangeMeleeCycleEndCmd = -1;
+		resetEffectiveRangeAutoFireDelay();
 		m_VR->m_EffectiveAttackRangeAutoFirePrevAttackDown = false;
 		m_VR->m_ManualThrowViewmodelInputState.store(0u, std::memory_order_release);
 		return result;
@@ -194,6 +209,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 
 		m_VR->ApplyOptionalCreateMoveFeatures(cmd, 0, inputJumpHeld, false, 0.0f, 0.0f, false);
 
+		bool effectiveRangeAutoFireEligible = false;
 		if (m_VR->m_EffectiveAttackRangeAutoFireEnabled
 			&& m_VR->m_AimLineEffectiveAttackRangeActive
 			&& !m_VR->m_AimLineEffectiveAttackRangeTargetIsWitch
@@ -220,16 +236,54 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 				const bool canAutoFire = (lifeState == 0) && (observerMode == 0) && !isHoldToUseWeaponId;
 				if (canAutoFire)
 				{
-					constexpr int kIN_ATTACK = (1 << 0);
-					if (weaponId != C_WeaponCSBase::WeaponID::MELEE)
+					effectiveRangeAutoFireEligible = true;
+					const uintptr_t targetTag = m_VR->m_AimLineEffectiveAttackRangeTarget;
+					const uintptr_t weaponTag = reinterpret_cast<uintptr_t>(activeWeapon);
+					const auto now = std::chrono::steady_clock::now();
+
+					if (!s_effectiveRangeAutoFireDelayPending
+						|| targetTag != s_effectiveRangeAutoFireTarget
+						|| weaponTag != s_effectiveRangeAutoFireWeapon)
 					{
-						cmd->buttons &= ~kIN_ATTACK;
-						cmd->buttons |= kIN_ATTACK;
+						if (s_effectiveRangeAutoFireRandomState == 0)
+						{
+							const uint64_t entropy = static_cast<uint64_t>(now.time_since_epoch().count());
+							s_effectiveRangeAutoFireRandomState =
+								static_cast<uint32_t>(entropy) ^
+								static_cast<uint32_t>(entropy >> 32) ^
+								(static_cast<uint32_t>(cmd->command_number) * 0x9E3779B9u);
+							if (s_effectiveRangeAutoFireRandomState == 0)
+								s_effectiveRangeAutoFireRandomState = 0xA341316Cu;
+						}
+						s_effectiveRangeAutoFireRandomState ^= s_effectiveRangeAutoFireRandomState << 13;
+						s_effectiveRangeAutoFireRandomState ^= s_effectiveRangeAutoFireRandomState >> 17;
+						s_effectiveRangeAutoFireRandomState ^= s_effectiveRangeAutoFireRandomState << 5;
+
+						constexpr int kMinReactionDelayMs = 50;
+						constexpr int kReactionDelayRangeMs = 51; // Inclusive 50..100 ms.
+						const int reactionDelayMs = kMinReactionDelayMs
+							+ static_cast<int>(s_effectiveRangeAutoFireRandomState % kReactionDelayRangeMs);
+						s_effectiveRangeAutoFireAt = now + std::chrono::milliseconds(reactionDelayMs);
+						s_effectiveRangeAutoFireTarget = targetTag;
+						s_effectiveRangeAutoFireWeapon = weaponTag;
+						s_effectiveRangeAutoFireDelayPending = true;
 					}
-					m_VR->m_EffectiveAttackRangeAutoFireActive = true;
+
+					if (now >= s_effectiveRangeAutoFireAt)
+					{
+						constexpr int kIN_ATTACK = (1 << 0);
+						if (weaponId != C_WeaponCSBase::WeaponID::MELEE)
+						{
+							cmd->buttons &= ~kIN_ATTACK;
+							cmd->buttons |= kIN_ATTACK;
+						}
+						m_VR->m_EffectiveAttackRangeAutoFireActive = true;
+					}
 				}
 			}
 		}
+		if (!effectiveRangeAutoFireEligible)
+			resetEffectiveRangeAutoFireDelay();
 
 		// Mouse mode: consume raw mouse deltas to drive body yaw and independent aim pitch.
 		// Mouse X -> yaw (m_RotationOffset), Mouse Y -> m_MouseAimPitchOffset.
@@ -921,6 +975,10 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		}
 
 		m_VR->ApplyOptionalCreateMoveFeatures(cmd, 1, inputJumpHeld, hadWalkAxis, walkNx, walkNy, suppressScopeWalk);
+	}
+	else
+	{
+		resetEffectiveRangeAutoFireDelay();
 	}
 
 	// Keep Source's main-thread viewangles aligned with the VR audio listener while
