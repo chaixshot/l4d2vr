@@ -465,9 +465,13 @@ namespace
             (modelName.find("models/weapons/v_") != std::string::npos) ||
             (modelName.find("/v_models/") != std::string::npos) ||
             (modelName.find("models/v_models/") != std::string::npos) ||
+
+            // L4D2 melee viewmodels often live under models/weapons/melee/...
             (modelName.find("models/weapons/melee/v_") != std::string::npos) ||
             (modelName.find("models/weapons/melee/") != std::string::npos && modelName.find("/v_") != std::string::npos) ||
             (modelName.find("/melee/v_") != std::string::npos) ||
+
+            // Arms/hands are frequently separate models from the gun.
             HooksModelNameIsArmsOrHands(modelName);
     }
 
@@ -15904,26 +15908,8 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 {
 	const bool isViewmodelClass = className &&
 		(std::strcmp(className, "CBaseViewModel") == 0 || std::strcmp(className, "C_BaseViewModel") == 0);
-	const bool isArmsOrHandsModel =
-		(modelName.find("models/weapons/arms/") != std::string::npos) ||
-		(modelName.find("/arms/") != std::string::npos) ||
-		(modelName.find("v_arms") != std::string::npos) ||
-		(modelName.find("models/weapons/hands/") != std::string::npos) ||
-		(modelName.find("/hands/") != std::string::npos) ||
-		(modelName.find("v_hands") != std::string::npos);
-	const bool isViewmodelModel =
-		(modelName.find("models/weapons/v_") != std::string::npos) ||
-		(modelName.find("/v_models/") != std::string::npos) ||
-		(modelName.find("models/v_models/") != std::string::npos) ||
-
-		// L4D2 melee viewmodels often live under models/weapons/melee/...
-		(modelName.find("models/weapons/melee/v_") != std::string::npos) ||
-		(modelName.find("models/weapons/melee/") != std::string::npos && modelName.find("/v_") != std::string::npos) ||
-		(modelName.find("/melee/v_") != std::string::npos) ||
-
-		// Arms/hands are frequently separate models from the gun.
-		isArmsOrHandsModel;
-
+    const bool isArmsOrHandsModel = HooksModelNameIsArmsOrHands(modelName);
+    const bool isViewmodelModel = HooksModelNameIsViewmodel(modelName);
 
 	if (isViewmodelClass || isViewmodelModel)
 	{
