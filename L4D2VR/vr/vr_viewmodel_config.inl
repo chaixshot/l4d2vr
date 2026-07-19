@@ -1575,6 +1575,7 @@ void VR::ParseConfigFile()
     m_VrHandsModelScale = std::clamp(getFloat("VrHandsModelScale", m_VrHandsModelScale), 0.25f, 4.0f);
     m_VrHandsRightUseViewmodelPose = getBool("VrHandsRightUseViewmodelPose", m_VrHandsRightUseViewmodelPose);
     m_VrHandsTwoHandedGripTargetBoxScale = std::clamp(getFloat("VrHandsTwoHandedGripTargetBoxScale", m_VrHandsTwoHandedGripTargetBoxScale), 0.25f, 8.0f);
+    m_VrHandsTwoHandedGripHeldMode = getBool("VrHandsTwoHandedGripHeldMode", m_VrHandsTwoHandedGripHeldMode);
     m_VrHandsRealBulletSpreadEnabled = getBool("VrHandsRealBulletSpreadEnabled", m_VrHandsRealBulletSpreadEnabled);
     m_VrHandsTwoHandedAimMountFriendly = getBool("VrHandsTwoHandedAimMountFriendly", m_VrHandsTwoHandedAimMountFriendly);
     m_VrHandsVirtualStockEnabled = getBool("VrHandsVirtualStockEnabled", m_VrHandsVirtualStockEnabled);
