@@ -5542,7 +5542,7 @@ bool VR::UpdateMagazineInteraction(
     {
         clearMountFriendlyGripContact();
 
-        if (leftGripJustPressed && twoHandedGripRuntimeAllowed && m_VrHandsTwoHandedGripActive)
+        if ((m_VrHandsTwoHandedGripHeldMode ? !leftGripDown : leftGripJustPressed) && twoHandedGripRuntimeAllowed && m_VrHandsTwoHandedGripActive)
         {
             m_VrHandsTwoHandedGripActive = false;
             m_VrHandsTwoHandedGripWeaponId = 0;

@@ -1391,6 +1391,7 @@ public:
 	bool m_VrHandsMotionRangeWithoutController = false;
 	bool m_VrHandsRightUseViewmodelPose = false;
 	float m_VrHandsTwoHandedGripTargetBoxScale = 1.0f;
+	bool m_VrHandsTwoHandedGripHeldMode = false;
 	bool m_VrHandsRealBulletSpreadEnabled = false;
 	bool m_VrHandsTwoHandedAimMountFriendly = false;
 	bool m_VrHandsVirtualStockEnabled = false;
