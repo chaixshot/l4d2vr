@@ -1641,7 +1641,7 @@ namespace
             return;
         }
 
-        const int nextScroll = (std::clamp)(s.scroll + delta, 0, (std::max)(0, total - kCfgOverlayRowsVisible));
+        const int nextScroll = (std::clamp)(s.scroll + delta, 0, (std::max)(0, total - 1));
         if (nextScroll == s.scroll)
             return;
 
