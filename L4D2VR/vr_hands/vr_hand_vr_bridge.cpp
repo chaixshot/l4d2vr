@@ -5564,7 +5564,7 @@ bool VR::UpdateMagazineInteraction(
 
         if (leftGripJustPressed &&
             twoHandedGripRuntimeAllowed &&
-            !IsMagazineInteractionManualActive() &&
+            (!IsMagazineInteractionManualActive() || activeWeaponUsesShotgunShells) &&
             !m_MagazineInteractionLeftHandHolding &&
             !leftHandTouchesMagazineForGripExclusion())
         {
