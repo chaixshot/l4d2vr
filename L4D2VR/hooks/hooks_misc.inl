@@ -2624,61 +2624,6 @@ namespace
         return -1;
     }
 
-    inline bool HooksViewmodelAutoGripIsMeleeModel(const std::string& lowerModel)
-    {
-        if (lowerModel.find("/melee/") != std::string::npos ||
-            lowerModel.find("\\melee\\") != std::string::npos)
-        {
-            return true;
-        }
-
-        // CSS knife and some replacement packs keep melee viewmodels in
-        // models/v_models rather than models/weapons/melee. Match the complete
-        // stock replacement basenames as well as the directory convention.
-        static constexpr const char* kMeleeBasenames[] = {
-            "v_bat.mdl",
-            "v_chainsaw.mdl",
-            "v_cricket_bat.mdl",
-            "v_crowbar.mdl",
-            "v_electric_guitar.mdl",
-            "v_fireaxe.mdl",
-            "v_frying_pan.mdl",
-            "v_golfclub.mdl",
-            "v_katana.mdl",
-            "v_knife_t.mdl",
-            "v_machete.mdl",
-            "v_pitchfork.mdl",
-            "v_riotshield.mdl",
-            "v_shovel.mdl",
-            "v_tonfa.mdl"
-        };
-        const size_t slash = lowerModel.find_last_of("/\\");
-        const std::string basename = slash == std::string::npos
-            ? lowerModel
-            : lowerModel.substr(slash + 1u);
-        for (const char* candidate : kMeleeBasenames)
-        {
-            if (basename == candidate)
-                return true;
-        }
-        return false;
-    }
-
-    inline bool HooksViewmodelAutoGripUsesLiveAnimatedAnchor(const std::string& lowerModel)
-    {
-        // Firearm viewmodels keep their firing hand near the grip during recoil, so
-        // a locked idle anchor preserves the authored animation. Melee swings and
-        // throwable preparation animations move that hand substantially in model
-        // space; using their old idle anchor leaves the visible grip away from the
-        // controller even though the model root was corrected.
-        const bool throwable =
-            lowerModel.find("v_molotov") != std::string::npos ||
-            lowerModel.find("v_pipebomb") != std::string::npos ||
-            lowerModel.find("v_bile_flask") != std::string::npos ||
-            lowerModel.find("v_vomitjar") != std::string::npos;
-        return HooksViewmodelAutoGripIsMeleeModel(lowerModel) || throwable;
-    }
-
     inline bool HooksViewmodelAutoGripTryFindAttachment(
         void* drawState,
         int numBones,
@@ -2854,8 +2799,7 @@ namespace
         const vr_vm_stabilize::Mat3x4* bones,
         float palmCenterFraction,
         const vr_vm_stabilize::Mat3x4& entityWorld,
-        vr_vm_stabilize::Mat3x4& outAnchorWorld,
-        bool useHandBoneOrigin = false)
+        vr_vm_stabilize::Mat3x4& outAnchorWorld)
     {
         if (!bones || layout.numBones <= 0)
             return false;
@@ -2883,19 +2827,6 @@ namespace
         if (!HooksViewmodelAutoGripVectorFinite(handOrigin))
             return false;
 
-        if (useHandBoneOrigin)
-        {
-            // Melee replacement packs frequently ship stretched, open-pose, or
-            // placeholder finger roots. Position correction must not depend on
-            // those bones: place the current animated right-hand bone itself at
-            // the controller and retain the entity basis to avoid axis flips.
-            outAnchorWorld = entityWorld;
-            outAnchorWorld.m[0][3] = handOrigin.x;
-            outAnchorWorld.m[1][3] = handOrigin.y;
-            outAnchorWorld.m[2][3] = handOrigin.z;
-            return true;
-        }
-
         if (layout.hasFingerBasis)
         {
             std::array<Vector, 4> fingerOrigins{};
@@ -2915,8 +2846,7 @@ namespace
             const Vector palmForward = average - handOrigin;
             const Vector palmSide = fingerOrigins[0] - fingerOrigins[3];
             const Vector palmNormal = CrossProduct(palmForward, palmSide);
-            const Vector palmOrigin =
-                handOrigin + palmForward * std::clamp(palmCenterFraction, 0.0f, 1.0f);
+            const Vector palmOrigin = handOrigin + palmForward * std::clamp(palmCenterFraction, 0.0f, 1.0f);
             return HooksViewmodelAutoGripBuildRigidMatrix(
                 palmOrigin,
                 palmForward,
@@ -3329,11 +3259,6 @@ namespace
             return false;
         }
 
-        const bool isMeleeAutoGripModel =
-            HooksViewmodelAutoGripIsMeleeModel(lowerModel);
-        const bool useLiveAnimatedAnchor =
-            HooksViewmodelAutoGripUsesLiveAnimatedAnchor(lowerModel);
-
         if (HooksModelNameIsArmsOrHands(lowerModel))
         {
             return ApplyViewmodelAutoGripCompanionAlignment(
@@ -3373,26 +3298,8 @@ namespace
             return false;
         }
 
-        uint32_t persistentKey =
+        const uint32_t persistentKey =
             HooksBuildViewmodelAutoGripPersistentKey(drawState, modelName);
-        if (useLiveAnimatedAnchor)
-        {
-            // Version the cache separately from the old locked-idle-anchor solver.
-            // This deliberately creates one cache miss after upgrading, which also
-            // runs the existing per-weapon manual-residual clear handshake before
-            // collecting the new result.
-            // Throwables retain live-anchor v2. All melee models move to v3 because
-            // their live position now comes from the right-hand bone rather than a
-            // potentially invalid finger average.
-            const uint32_t liveAnimatedAnchorCacheVersion =
-                isMeleeAutoGripModel ? 3u : 2u;
-            persistentKey = HooksFnv1aUpdate(
-                persistentKey,
-                &liveAnimatedAnchorCacheVersion,
-                sizeof(liveAnimatedAnchorCacheVersion));
-            if (persistentKey == 0u)
-                persistentKey = 1u;
-        }
 
         {
             std::lock_guard<std::mutex> lock(s_ViewmodelAutoGripMutex);
@@ -3658,36 +3565,6 @@ namespace
         vr_vm_stabilize::Mat3x4 baseEntity{};
         vr_vm_stabilize::BuildFromOrgAngles(pDrawInfo->origin, pDrawInfo->angles, baseEntity);
 
-        vr_vm_stabilize::Mat3x4 solveLocal = lockedLocal;
-        if (useLiveAnimatedAnchor && pBonesToWorldFinal)
-        {
-            // Follow the current animated grip so native swing and preparation
-            // animations cannot pull the held object away from the controller.
-            // Melee uses its right-hand bone directly; throwables retain the palm
-            // estimate. The locked sample remains a fallback for unreadable frames.
-            vr_vm_stabilize::Mat3x4 currentAnchorWorld{};
-            if (HooksViewmodelAutoGripBuildAnchorWorld(
-                    layout,
-                    reinterpret_cast<const vr_vm_stabilize::Mat3x4*>(pBonesToWorldFinal),
-                    vr->m_ViewmodelAutoGripPalmCenterFraction,
-                    baseEntity,
-                    currentAnchorWorld,
-                    isMeleeAutoGripModel))
-            {
-                vr_vm_stabilize::Mat3x4 entityInverse{};
-                vr_vm_stabilize::Mat3x4 currentAnchorLocal{};
-                vr_vm_stabilize::Mat3x4 normalizedCurrentAnchorLocal{};
-                vr_vm_stabilize::InvertTR(baseEntity, entityInverse);
-                vr_vm_stabilize::Mul(entityInverse, currentAnchorWorld, currentAnchorLocal);
-                if (HooksViewmodelAutoGripNormalizeRigidMatrix(
-                        currentAnchorLocal,
-                        normalizedCurrentAnchorLocal))
-                {
-                    solveLocal = normalizedCurrentAnchorLocal;
-                }
-            }
-        }
-
         const bool fullRotationAlignment =
             layout.explicitAttachment || (layout.hasFingerBasis && vr->m_ViewmodelAutoGripAlignRotation);
 
@@ -3739,13 +3616,13 @@ namespace
             }
 
             vr_vm_stabilize::Mat3x4 localInverse{};
-            vr_vm_stabilize::InvertTR(solveLocal, localInverse);
+            vr_vm_stabilize::InvertTR(lockedLocal, localInverse);
             vr_vm_stabilize::Mul(desiredGripWorld, localInverse, solvedEntity);
         }
         else
         {
             vr_vm_stabilize::Mat3x4 currentGripWorld{};
-            vr_vm_stabilize::Mul(baseEntity, solveLocal, currentGripWorld);
+            vr_vm_stabilize::Mul(baseEntity, lockedLocal, currentGripWorld);
             const Vector correction = desiredGripOrigin - vr_vm_stabilize::GetOrigin(currentGripWorld);
             solvedEntity.m[0][3] += correction.x;
             solvedEntity.m[1][3] += correction.y;
@@ -3755,9 +3632,7 @@ namespace
         const Vector baseOrigin = vr_vm_stabilize::GetOrigin(baseEntity);
         const Vector solvedOrigin = vr_vm_stabilize::GetOrigin(solvedEntity);
         const Vector correction = solvedOrigin - baseOrigin;
-        const float maxCorrection = useLiveAnimatedAnchor
-            ? std::max(48.0f, vr->m_VRScale * 2.0f)
-            : std::max(24.0f, vr->m_VRScale * 0.75f);
+        const float maxCorrection = std::max(24.0f, vr->m_VRScale * 0.75f);
         if (!HooksViewmodelAutoGripVectorFinite(solvedOrigin) ||
             correction.LengthSqr() > maxCorrection * maxCorrection)
         {
@@ -16119,18 +15994,6 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 	}
 }
 
-        // Freeze a prepared throwable pose before AutoGrip reads its animated hand.
-        // Otherwise AutoGrip compensates the hidden native throw animation first
-        // and the later freeze restores a different grip, putting the object away
-        // from the controller again.
-        ApplyManualThrowViewmodelAnimationFreeze(
-            m_VR,
-            state,
-            modelName,
-            drawEntityIsViewmodelClass,
-            *pDrawInfo,
-            pBonesToWorldFinal);
-
         viewmodelAutoGripApplied = ApplyViewmodelAutoGripAlignment(
             m_VR,
             state,
@@ -16305,6 +16168,14 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
             m_VR,
             state,
 			modelName,
+			*pDrawInfo,
+			pBonesToWorldFinal);
+
+		ApplyManualThrowViewmodelAnimationFreeze(
+			m_VR,
+			state,
+			modelName,
+			drawEntityIsViewmodelClass,
 			*pDrawInfo,
 			pBonesToWorldFinal);
 
