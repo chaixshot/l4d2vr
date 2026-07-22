@@ -1714,6 +1714,7 @@ namespace
     static void CfgLoad(CfgOverlayState& s)
     {
         CfgReadLanguageValue(s);
+        s.calibrationSeenModelFingerprint = -1;
         s.configPath = CfgDefaultConfigPath();
         s.lines.clear();
         s.values.clear();
@@ -3840,6 +3841,9 @@ namespace
             s.calibrationSeenViewmodelClass != snapshot.sourceIsViewmodelClass;
         if (identityChanged)
         {
+            if(s.calibrationSeenModelFingerprint == -1)
+                g_Game->m_VR->ParseConfigFile();
+
             s.calibrationBoltPullAxisLocalValid = false;
             s.calibrationBoltPullFirstRunBlockedProfileKey.clear();
             s.calibrationBoltPullFirstRunSaveSkipped = false;
@@ -6232,6 +6236,17 @@ namespace
                 s.calibrationBoltPullFirstRunSaveSkipped = false;
                 CfgLoad(s);
                 CfgApplyOverlayPlacement(s);
+
+                if (s.panelMode == CfgPanelMode::MagazineCalibration)
+                {
+                    MagazineInteractionCalibrationSnapshot snapshot{};
+                    if (CfgReadFreshCalibrationSnapshot(snapshot))
+                    {
+                        s.calibrationSeenModelFingerprint = -1;
+                        CfgRefreshCalibrationSelection(s, snapshot);
+                    }
+                }
+
                 return;
             }
             if (mx >= kCfgSaveX && mx <= kCfgSaveX + kCfgSaveW)
