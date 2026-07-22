@@ -5511,8 +5511,8 @@ namespace
             // Attach to the pause HUD plane, upper-right, and move a little toward the player.
             // This prevents the pause HUD overlay from winning the SteamVR ray hit test.
             rel.m[0][3] = hudWidthMeters * 0.5f - 0.22f;
-            rel.m[1][3] = hudHeightMeters * 0.5f - 0.09f;
-            rel.m[2][3] = -0.05f;
+            rel.m[1][3] = hudHeightMeters * 0.5f + 0.09f;
+            rel.m[2][3] = g_Game->m_VR->m_TopHudCurvature;
 
             vr::HmdMatrix34_t mat = CfgMul34(hudTransform, rel);
             ov->SetOverlayTransformAbsolute(h, origin, &mat);
