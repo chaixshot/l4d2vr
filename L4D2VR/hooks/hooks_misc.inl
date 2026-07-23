@@ -459,6 +459,22 @@ namespace
             (modelName.find("v_hands") != std::string::npos);
     }
 
+    inline bool HooksNativeViewmodelHandsOnlyActive(VR* vr)
+    {
+        return vr &&
+            (vr->m_NativeViewmodelHandsOnly ||
+                vr->m_ManualInventoryEmptyHandsActive.load(std::memory_order_acquire));
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyHideArmsRequested(VR* vr)
+    {
+        if (!vr)
+            return true;
+        const bool emptyHandsPlaceholderActive =
+            vr->m_ManualInventoryEmptyHandsActive.load(std::memory_order_acquire);
+        return vr->m_HideArms && !emptyHandsPlaceholderActive;
+    }
+
     inline bool HooksModelNameIsViewmodel(const std::string& modelName)
     {
         return
@@ -8782,6 +8798,96 @@ namespace
         return true;
     }
 
+    inline bool HooksNativeViewmodelHandsOnlyReadBoneRestLocalTransform(
+        void* drawState,
+        int boneIndex,
+        int stride,
+        int bone,
+        vr_vm_stabilize::Mat3x4& outLocal)
+    {
+        outLocal = vr_vm_stabilize::Identity();
+        if (!drawState || boneIndex <= 0 || stride <= 0 || bone < 0)
+            return false;
+
+        const uint8_t* studioHdr = nullptr;
+        if (!vr_vm_stabilize::TryGetStudioHdrFromDrawState(drawState, studioHdr) || !studioHdr)
+            return false;
+
+        int studioLength = 0;
+        vr_vm_stabilize::SafeRead(studioHdr + 0x4C, studioLength);
+
+        const size_t boneOffset = static_cast<size_t>(boneIndex) +
+            (static_cast<size_t>(stride) * static_cast<size_t>(bone));
+        constexpr size_t kMStudioBonePosOffset = 32u;
+        constexpr size_t kMStudioBoneQuatOffset = 44u;
+        constexpr size_t kQuatBytes = sizeof(float) * 4u;
+        if (studioLength > 0 &&
+            boneOffset + kMStudioBoneQuatOffset + kQuatBytes > static_cast<size_t>(studioLength))
+        {
+            return false;
+        }
+
+        float px = 0.0f;
+        float py = 0.0f;
+        float pz = 0.0f;
+        float qx = 0.0f;
+        float qy = 0.0f;
+        float qz = 0.0f;
+        float qw = 1.0f;
+        const uint8_t* boneBase = studioHdr + boneOffset;
+        if (!vr_vm_stabilize::SafeRead(boneBase + kMStudioBonePosOffset + 0u, px) ||
+            !vr_vm_stabilize::SafeRead(boneBase + kMStudioBonePosOffset + 4u, py) ||
+            !vr_vm_stabilize::SafeRead(boneBase + kMStudioBonePosOffset + 8u, pz) ||
+            !vr_vm_stabilize::SafeRead(boneBase + kMStudioBoneQuatOffset + 0u, qx) ||
+            !vr_vm_stabilize::SafeRead(boneBase + kMStudioBoneQuatOffset + 4u, qy) ||
+            !vr_vm_stabilize::SafeRead(boneBase + kMStudioBoneQuatOffset + 8u, qz) ||
+            !vr_vm_stabilize::SafeRead(boneBase + kMStudioBoneQuatOffset + 12u, qw))
+        {
+            return false;
+        }
+
+        if (!std::isfinite(px) || !std::isfinite(py) || !std::isfinite(pz) ||
+            !std::isfinite(qx) || !std::isfinite(qy) ||
+            !std::isfinite(qz) || !std::isfinite(qw))
+        {
+            return false;
+        }
+
+        const float quatLengthSq = qx * qx + qy * qy + qz * qz + qw * qw;
+        if (!std::isfinite(quatLengthSq) || quatLengthSq < 0.000001f)
+            return false;
+
+        const float invQuatLength = 1.0f / std::sqrt(quatLengthSq);
+        qx *= invQuatLength;
+        qy *= invQuatLength;
+        qz *= invQuatLength;
+        qw *= invQuatLength;
+
+        const float xx = qx * qx;
+        const float yy = qy * qy;
+        const float zz = qz * qz;
+        const float xy = qx * qy;
+        const float xz = qx * qz;
+        const float yz = qy * qz;
+        const float wx = qw * qx;
+        const float wy = qw * qy;
+        const float wz = qw * qz;
+
+        outLocal.m[0][0] = 1.0f - 2.0f * (yy + zz);
+        outLocal.m[0][1] = 2.0f * (xy - wz);
+        outLocal.m[0][2] = 2.0f * (xz + wy);
+        outLocal.m[1][0] = 2.0f * (xy + wz);
+        outLocal.m[1][1] = 1.0f - 2.0f * (xx + zz);
+        outLocal.m[1][2] = 2.0f * (yz - wx);
+        outLocal.m[2][0] = 2.0f * (xz - wy);
+        outLocal.m[2][1] = 2.0f * (yz + wx);
+        outLocal.m[2][2] = 1.0f - 2.0f * (xx + yy);
+        outLocal.m[0][3] = px;
+        outLocal.m[1][3] = py;
+        outLocal.m[2][3] = pz;
+        return true;
+    }
+
     inline bool HooksNativeViewmodelHandsOnlyIsAncestor(
         const std::vector<int>& boneParents,
         int child,
@@ -10729,10 +10835,11 @@ namespace
         const Vector& sourceHandPos,
         float plane[4]);
 
-    inline int HooksNativeViewmodelHandsOnlyBuildLeftFingerDriveMask(
+    inline int HooksNativeViewmodelHandsOnlyBuildFingerDriveMask(
         const std::vector<std::string>& boneNames,
         const std::vector<int>& boneParents,
         int numBones,
+        int side,
         const std::array<float, 5>* curls,
         float strength,
         float direction,
@@ -10746,7 +10853,8 @@ namespace
             outHasAngle->assign(maskSize, 0u);
         if (outAngleByBone)
             outAngleByBone->assign(maskSize, 0.0f);
-        if (numBones <= 0 || numBones > 512 ||
+        if ((side != -1 && side != 1) ||
+            numBones <= 0 || numBones > 512 ||
             static_cast<int>(boneNames.size()) < numBones ||
             static_cast<int>(boneParents.size()) < numBones)
         {
@@ -10760,6 +10868,14 @@ namespace
             { "bip01_l_finger2", "bip01_l_finger21", "bip01_l_finger22" },
             { "bip01_l_finger3", "bip01_l_finger31", "bip01_l_finger32" },
             { "bip01_l_finger4", "bip01_l_finger41", "bip01_l_finger42" },
+        };
+        static const char* kRightFingerBones[5][3] =
+        {
+            { "bip01_r_finger0", "bip01_r_finger01", "bip01_r_finger02" },
+            { "bip01_r_finger1", "bip01_r_finger11", "bip01_r_finger12" },
+            { "bip01_r_finger2", "bip01_r_finger21", "bip01_r_finger22" },
+            { "bip01_r_finger3", "bip01_r_finger31", "bip01_r_finger32" },
+            { "bip01_r_finger4", "bip01_r_finger41", "bip01_r_finger42" },
         };
         static const float kMaxCurlRadians[5][3] =
         {
@@ -10780,7 +10896,9 @@ namespace
                 int bone = -1;
                 if (!HooksNativeViewmodelHandsOnlyFindBoneByLowerSuffix(
                         boneNames,
-                        kLeftFingerBones[finger][segment],
+                        (side < 0)
+                            ? kLeftFingerBones[finger][segment]
+                            : kRightFingerBones[finger][segment],
                         bone) ||
                     bone < 0 ||
                     bone >= numBones)
@@ -10821,19 +10939,46 @@ namespace
         return mappedSegments;
     }
 
-    inline int HooksNativeViewmodelHandsOnlyBuildLeftThumbRootMask(
+    inline int HooksNativeViewmodelHandsOnlyBuildLeftFingerDriveMask(
+        const std::vector<std::string>& boneNames,
+        const std::vector<int>& boneParents,
+        int numBones,
+        const std::array<float, 5>* curls,
+        float strength,
+        float direction,
+        std::vector<uint8_t>& outDriveMask,
+        std::vector<uint8_t>* outHasAngle,
+        std::vector<float>* outAngleByBone)
+    {
+        return HooksNativeViewmodelHandsOnlyBuildFingerDriveMask(
+            boneNames,
+            boneParents,
+            numBones,
+            -1,
+            curls,
+            strength,
+            direction,
+            outDriveMask,
+            outHasAngle,
+            outAngleByBone);
+    }
+
+    inline int HooksNativeViewmodelHandsOnlyBuildThumbRootMask(
         const std::vector<std::string>& boneNames,
         int numBones,
+        int side,
         std::vector<uint8_t>& outMask)
     {
         outMask.assign(static_cast<size_t>(numBones > 0 ? numBones : 0), 0u);
-        if (numBones <= 0 || numBones > 512 || static_cast<int>(boneNames.size()) < numBones)
+        if ((side != -1 && side != 1) ||
+            numBones <= 0 || numBones > 512 ||
+            static_cast<int>(boneNames.size()) < numBones)
             return 0;
 
         int thumbRoot = -1;
         if (!HooksNativeViewmodelHandsOnlyFindBoneByLowerSuffix(
                 boneNames,
-                "bip01_l_finger0",
+                (side < 0) ? "bip01_l_finger0" : "bip01_r_finger0",
                 thumbRoot) ||
             thumbRoot < 0 ||
             thumbRoot >= numBones)
@@ -10843,6 +10988,18 @@ namespace
 
         outMask[static_cast<size_t>(thumbRoot)] = 1u;
         return 1;
+    }
+
+    inline int HooksNativeViewmodelHandsOnlyBuildLeftThumbRootMask(
+        const std::vector<std::string>& boneNames,
+        int numBones,
+        std::vector<uint8_t>& outMask)
+    {
+        return HooksNativeViewmodelHandsOnlyBuildThumbRootMask(
+            boneNames,
+            numBones,
+            -1,
+            outMask);
     }
 
     inline int HooksNativeViewmodelHandsOnlyNeutralizeFrozenLeftFingerRotations(
@@ -12712,13 +12869,16 @@ namespace
 
     inline vr_vm_stabilize::Mat3x4 HooksNativeViewmodelHandsOnlyApplyThumbRootAdjust(
         VR* vr,
+        int side,
         const vr_vm_stabilize::Mat3x4& local)
     {
-        if (!vr)
+        if (!vr || (side != -1 && side != 1))
             return local;
 
         vr_vm_stabilize::Mat3x4 adjusted = local;
-        const Vector offset = vr->m_NativeViewmodelLeftHandOpenVRThumbRootOffsetUnits;
+        const Vector offset = (side < 0)
+            ? vr->m_NativeViewmodelLeftHandOpenVRThumbRootOffsetUnits
+            : vr->m_NativeViewmodelRightHandOpenVRThumbRootOffsetUnits;
         if (std::isfinite(offset.x) && std::isfinite(offset.y) && std::isfinite(offset.z))
         {
             adjusted.m[0][3] += offset.x;
@@ -12726,7 +12886,9 @@ namespace
             adjusted.m[2][3] += offset.z;
         }
 
-        const Vector rotation = vr->m_NativeViewmodelLeftHandOpenVRThumbRootRotationOffsetDeg;
+        const Vector rotation = (side < 0)
+            ? vr->m_NativeViewmodelLeftHandOpenVRThumbRootRotationOffsetDeg
+            : vr->m_NativeViewmodelRightHandOpenVRThumbRootRotationOffsetDeg;
         if (std::isfinite(rotation.x) && std::isfinite(rotation.y) && std::isfinite(rotation.z))
         {
             constexpr float kDegToRad = 3.14159265358979323846f / 180.0f;
@@ -12800,7 +12962,41 @@ namespace
         return true;
     }
 
-    inline bool HooksNativeViewmodelHandsOnlyApplyOpenVRLeftFingerPose(
+    inline bool HooksNativeViewmodelHandsOnlyReadOpenVRRightFingerCurls(
+        VR* vr,
+        std::array<float, 5>& outCurls)
+    {
+        outCurls = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+        if (!vr || !vr->m_NativeViewmodelLeftHandOpenVRSkeleton)
+            return false;
+
+        const bool haveLiveCurls =
+            vr->GetNativeViewmodelRightHandOpenVRFingerCurls(outCurls);
+        const bool emptyHandsPlaceholderActive =
+            vr->m_ManualInventoryEmptyHandsActive.load(std::memory_order_acquire);
+        if (!haveLiveCurls && !emptyHandsPlaceholderActive)
+            return false;
+
+        constexpr float kOpenVRThumbMaxCurl = 2.00f;
+        constexpr float kOpenVRFingerMaxCurl = 2.00f;
+        const float curlScale =
+            std::clamp(vr->m_NativeViewmodelLeftHandOpenVRCurlScale, 0.0f, 2.0f);
+        for (int finger = 0; finger < 5; ++finger)
+        {
+            const float baseCurl =
+                std::clamp(outCurls[static_cast<size_t>(finger)], 0.0f, 1.0f) * curlScale;
+            const float initialCurl =
+                (finger < static_cast<int>(vr->m_NativeViewmodelLeftHandOpenVRInitialCurl.size()))
+                ? vr->m_NativeViewmodelLeftHandOpenVRInitialCurl[static_cast<size_t>(finger)]
+                : 0.0f;
+            const float maxCurl = (finger == 0) ? kOpenVRThumbMaxCurl : kOpenVRFingerMaxCurl;
+            outCurls[static_cast<size_t>(finger)] =
+                std::clamp(baseCurl + initialCurl, 0.0f, maxCurl);
+        }
+        return true;
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyApplyOpenVRFingerPose(
         VR* vr,
         void* drawState,
         int boneIndex,
@@ -12809,34 +13005,45 @@ namespace
         const std::vector<int>& boneParents,
         int numBones,
         const HooksNativeViewmodelHandsOnlySideInfo& keepSide,
+        const vr_vm_stabilize::Mat3x4* sourcePoseBones,
         vr_vm_stabilize::Mat3x4* currentBones)
     {
-        if (!vr || !currentBones || keepSide.side != -1 || numBones <= 0 || numBones > 512 ||
+        const bool emptyHandsPlaceholderActive =
+            vr && vr->m_ManualInventoryEmptyHandsActive.load(std::memory_order_acquire);
+        const bool applyLeftHand = keepSide.side == -1;
+        const bool applyEmptyRightHand =
+            keepSide.side == 1 && emptyHandsPlaceholderActive;
+        if (!vr || !currentBones || (!applyLeftHand && !applyEmptyRightHand) ||
+            numBones <= 0 || numBones > 512 ||
             static_cast<int>(boneNames.size()) < numBones ||
             static_cast<int>(boneParents.size()) < numBones)
         {
             return false;
         }
-        (void)drawState;
         (void)boneIndex;
         (void)stride;
 
         std::array<float, 5> curls{};
-        if (!HooksNativeViewmodelHandsOnlyReadOpenVRLeftFingerCurls(vr, curls))
+        const bool haveCurls = applyLeftHand
+            ? HooksNativeViewmodelHandsOnlyReadOpenVRLeftFingerCurls(vr, curls)
+            : HooksNativeViewmodelHandsOnlyReadOpenVRRightFingerCurls(vr, curls);
+        if (!haveCurls)
             return false;
 
         const float strength = std::clamp(vr->m_NativeViewmodelLeftHandOpenVRCurlStrength, 0.0f, 2.0f);
-        const float direction = std::clamp(vr->m_NativeViewmodelLeftHandOpenVRCurlDirection, -1.0f, 1.0f);
+        const float direction =
+            std::clamp(vr->m_NativeViewmodelLeftHandOpenVRCurlDirection, -1.0f, 1.0f);
         if (strength <= 0.0001f || std::fabs(direction) <= 0.0001f)
             return false;
 
         std::vector<uint8_t> driveMask;
         std::vector<uint8_t> hasAngle;
         std::vector<float> angleByBone;
-        const int mappedSegments = HooksNativeViewmodelHandsOnlyBuildLeftFingerDriveMask(
+        const int mappedSegments = HooksNativeViewmodelHandsOnlyBuildFingerDriveMask(
             boneNames,
             boneParents,
             numBones,
+            keepSide.side,
             &curls,
             strength,
             direction,
@@ -12847,15 +13054,26 @@ namespace
             return false;
 
         std::vector<uint8_t> thumbRootMask;
-        HooksNativeViewmodelHandsOnlyBuildLeftThumbRootMask(
+        HooksNativeViewmodelHandsOnlyBuildThumbRootMask(
             boneNames,
             numBones,
+            keepSide.side,
             thumbRootMask);
 
         std::vector<vr_vm_stabilize::Mat3x4> baseWorld(static_cast<size_t>(numBones));
         std::vector<vr_vm_stabilize::Mat3x4> baseLocal(static_cast<size_t>(numBones));
+        const vr_vm_stabilize::Mat3x4* localPoseSource =
+            (applyEmptyRightHand && sourcePoseBones) ? sourcePoseBones : currentBones;
         for (int bone = 0; bone < numBones; ++bone)
-            baseWorld[static_cast<size_t>(bone)] = currentBones[bone];
+        {
+            if (!vr_vm_stabilize::SafeRead(
+                    localPoseSource + bone,
+                    baseWorld[static_cast<size_t>(bone)]) ||
+                !HooksNativeViewmodelHandsOnlyMatrixFinite(baseWorld[static_cast<size_t>(bone)]))
+            {
+                return false;
+            }
+        }
 
         for (int bone = 0; bone < numBones; ++bone)
         {
@@ -12894,10 +13112,33 @@ namespace
                 }
 
                 vr_vm_stabilize::Mat3x4 local = baseLocal[static_cast<size_t>(bone)];
-                if (bone < static_cast<int>(thumbRootMask.size()) &&
-                    thumbRootMask[static_cast<size_t>(bone)])
+                const bool thumbRoot =
+                    bone < static_cast<int>(thumbRootMask.size()) &&
+                    thumbRootMask[static_cast<size_t>(bone)] != 0u;
+                if (applyEmptyRightHand &&
+                    !thumbRoot &&
+                    hasAngle[static_cast<size_t>(bone)])
                 {
-                    local = HooksNativeViewmodelHandsOnlyApplyThumbRootAdjust(vr, local);
+                    vr_vm_stabilize::Mat3x4 restLocal{};
+                    if (HooksNativeViewmodelHandsOnlyReadBoneRestLocalTransform(
+                            drawState,
+                            boneIndex,
+                            stride,
+                            bone,
+                            restLocal))
+                    {
+                        restLocal.m[0][3] = local.m[0][3];
+                        restLocal.m[1][3] = local.m[1][3];
+                        restLocal.m[2][3] = local.m[2][3];
+                        local = restLocal;
+                    }
+                }
+                if (thumbRoot)
+                {
+                    local = HooksNativeViewmodelHandsOnlyApplyThumbRootAdjust(
+                        vr,
+                        keepSide.side,
+                        local);
                 }
                 if (hasAngle[static_cast<size_t>(bone)])
                 {
@@ -12944,12 +13185,16 @@ namespace
         if (vr->m_VrHandsDebugLog)
         {
             static DWORD s_lastOpenVRLeftLogTick = 0;
+            static DWORD s_lastOpenVRRightLogTick = 0;
             const DWORD now = GetTickCount();
-            if (now - s_lastOpenVRLeftLogTick >= 1000u)
+            DWORD& lastLogTick =
+                applyEmptyRightHand ? s_lastOpenVRRightLogTick : s_lastOpenVRLeftLogTick;
+            if (now - lastLogTick >= 1000u)
             {
-                s_lastOpenVRLeftLogTick = now;
+                lastLogTick = now;
                 Game::logMsg(
-                    "[VR][NativeHandsOnly] OpenVR left fingers mapped=%d drivenBones=%d curl=(%.2f %.2f %.2f %.2f %.2f) axis=%d strength=%.2f dir=%.2f",
+                    "[VR][NativeHandsOnly] OpenVR %s fingers mapped=%d drivenBones=%d curl=(%.2f %.2f %.2f %.2f %.2f) axis=%d strength=%.2f dir=%.2f restUnlocked=%d",
+                    applyEmptyRightHand ? "empty right" : "left",
                     mappedSegments,
                     applied,
                     curls[0],
@@ -12959,7 +13204,8 @@ namespace
                     curls[4],
                     vr->m_NativeViewmodelLeftHandOpenVRCurlAxis,
                     strength,
-                    direction);
+                    direction,
+                    applyEmptyRightHand ? 1 : 0);
             }
         }
 
@@ -13152,6 +13398,39 @@ namespace
             vr->m_NativeViewmodelLeftHandPoseRotationOffsetDeg);
         outAnchor = HooksVrHandMatrixToMat3x4(
             VrHandMath::Multiply(controllerWorld, localCorrection));
+        return HooksNativeViewmodelHandsOnlyMatrixFinite(outAnchor);
+    }
+
+    inline bool HooksNativeViewmodelHandsOnlyBuildRightControllerWorldAnchor(
+        VR* vr,
+        vr_vm_stabilize::Mat3x4& outAnchor)
+    {
+        if (!vr || !vr->m_IsVREnabled)
+            return false;
+
+        Vector origin = vr->GetRightControllerAbsPos();
+        Vector reprojectedOrigin{};
+        if (HooksNativeViewmodelHandsOnlyReprojectScenePointToViewmodelLayer(
+                vr,
+                origin,
+                reprojectedOrigin))
+        {
+            origin = reprojectedOrigin;
+        }
+
+        const QAngle angles = vr->GetRightControllerAbsAngle();
+        Vector forward{};
+        Vector right{};
+        Vector up{};
+        QAngle::AngleVectors(angles, &forward, &right, &up);
+
+        const VrHandMatrix4 controllerWorld =
+            HooksNativeViewmodelHandsOnlyBuildControllerWorldFromAxes(
+                origin,
+                forward,
+                right,
+                up);
+        outAnchor = HooksVrHandMatrixToMat3x4(controllerWorld);
         return HooksNativeViewmodelHandsOnlyMatrixFinite(outAnchor);
     }
 
@@ -13768,7 +14047,13 @@ namespace
         vr_vm_stabilize::Mat3x4& outDelta,
         vr_vm_stabilize::Mat3x4* outTargetAnchor = nullptr)
     {
-        if (!vr || !sourceBones || keepSide.side != -1 ||
+        const bool emptyHandsPlaceholderActive =
+            vr && vr->m_ManualInventoryEmptyHandsActive.load(std::memory_order_acquire);
+        const bool buildLeftControllerTarget = keepSide.side == -1;
+        const bool buildEmptyRightControllerTarget =
+            keepSide.side == 1 && emptyHandsPlaceholderActive;
+        if (!vr || !sourceBones ||
+            (!buildLeftControllerTarget && !buildEmptyRightControllerTarget) ||
             keepSide.hand < 0 || keepSide.hand >= numBones)
         {
             return false;
@@ -13782,8 +14067,97 @@ namespace
         }
 
         vr_vm_stabilize::Mat3x4 targetAnchor{};
-        if (!HooksNativeViewmodelHandsOnlyBuildLeftControllerTargetAnchor(vr, targetAnchor))
-            return false;
+        if (buildLeftControllerTarget)
+        {
+            if (!HooksNativeViewmodelHandsOnlyBuildLeftControllerTargetAnchor(vr, targetAnchor))
+                return false;
+        }
+        else
+        {
+            vr_vm_stabilize::Mat3x4 controllerAnchor{};
+            if (!HooksNativeViewmodelHandsOnlyBuildRightControllerWorldAnchor(
+                    vr,
+                    controllerAnchor))
+            {
+                return false;
+            }
+
+            struct RightControllerHandCalibration
+            {
+                VR* owner = nullptr;
+                uint32_t generation = 0;
+                int numBones = 0;
+                int handBone = -1;
+                bool valid = false;
+                vr_vm_stabilize::Mat3x4 controllerToHand{};
+            };
+            static std::mutex s_rightControllerHandCalibrationMutex;
+            static RightControllerHandCalibration s_rightControllerHandCalibration;
+            std::lock_guard<std::mutex> lock(s_rightControllerHandCalibrationMutex);
+
+            const uint32_t generation =
+                vr->m_NativeViewmodelLeftHandFreezeGeneration.load(std::memory_order_acquire);
+            const bool calibrationMatches =
+                s_rightControllerHandCalibration.valid &&
+                s_rightControllerHandCalibration.owner == vr &&
+                s_rightControllerHandCalibration.generation == generation &&
+                s_rightControllerHandCalibration.numBones == numBones &&
+                s_rightControllerHandCalibration.handBone == keepSide.hand;
+            if (!calibrationMatches)
+            {
+                vr_vm_stabilize::Mat3x4 inverseController{};
+                vr_vm_stabilize::InvertTR(controllerAnchor, inverseController);
+                vr_vm_stabilize::Mul(
+                    inverseController,
+                    sourceAnchor,
+                    s_rightControllerHandCalibration.controllerToHand);
+                // Preserve only the model-specific hand-axis correction. The stock
+                // pistol viewmodel also carries a downward hand translation; keeping
+                // that translation would place the empty hand below the controller.
+                s_rightControllerHandCalibration.controllerToHand.m[0][3] = 0.0f;
+                s_rightControllerHandCalibration.controllerToHand.m[1][3] = 0.0f;
+                s_rightControllerHandCalibration.controllerToHand.m[2][3] = 0.0f;
+                if (!HooksNativeViewmodelHandsOnlyMatrixFinite(
+                        s_rightControllerHandCalibration.controllerToHand))
+                {
+                    s_rightControllerHandCalibration = RightControllerHandCalibration{};
+                    return false;
+                }
+
+                s_rightControllerHandCalibration.owner = vr;
+                s_rightControllerHandCalibration.generation = generation;
+                s_rightControllerHandCalibration.numBones = numBones;
+                s_rightControllerHandCalibration.handBone = keepSide.hand;
+                s_rightControllerHandCalibration.valid = true;
+                if (vr->m_VrHandsDebugLog)
+                {
+                    Game::logMsg(
+                        "[VR][NativeHandsOnly] calibrated empty right hand directly to controller bone hand=%d bones=%d generation=%u",
+                        keepSide.hand,
+                        numBones,
+                        generation);
+                }
+            }
+
+            const VrHandMatrix4 poseCorrection =
+                HooksNativeViewmodelHandsOnlyBuildLocalTransform(
+                    vr->m_VRScale,
+                    vr->m_NativeViewmodelRightHandPoseOffsetMeters,
+                    vr->m_NativeViewmodelRightHandPoseRotationOffsetDeg);
+            const vr_vm_stabilize::Mat3x4 poseCorrectionMat =
+                HooksVrHandMatrixToMat3x4(poseCorrection);
+            vr_vm_stabilize::Mat3x4 adjustedControllerAnchor{};
+            vr_vm_stabilize::Mul(
+                controllerAnchor,
+                poseCorrectionMat,
+                adjustedControllerAnchor);
+            vr_vm_stabilize::Mul(
+                adjustedControllerAnchor,
+                s_rightControllerHandCalibration.controllerToHand,
+                targetAnchor);
+            if (!HooksNativeViewmodelHandsOnlyMatrixFinite(targetAnchor))
+                return false;
+        }
 
         vr_vm_stabilize::Mat3x4 inverseSourceAnchor{};
         vr_vm_stabilize::InvertTR(sourceAnchor, inverseSourceAnchor);
@@ -14102,7 +14476,7 @@ namespace
 
         if (!keepSourceViewmodelAnimation)
         {
-            HooksNativeViewmodelHandsOnlyApplyOpenVRLeftFingerPose(
+            HooksNativeViewmodelHandsOnlyApplyOpenVRFingerPose(
                 vr,
                 drawState,
                 boneIndex,
@@ -14111,6 +14485,7 @@ namespace
                 boneParents,
                 numBones,
                 keepSide,
+                sourceBones,
                 isolated);
         }
 
@@ -14306,7 +14681,9 @@ namespace
         {
             HooksNativeViewmodelHandsOnlyResetFixedFreezePlaneLocks(vr);
         }
-        if (!vr || !vr->m_NativeViewmodelHandsOnly || vr->m_HideArms || !drawState || !pCustomBoneToWorld)
+        if (!HooksNativeViewmodelHandsOnlyActive(vr) ||
+            HooksNativeViewmodelHandsOnlyHideArmsRequested(vr) ||
+            !drawState || !pCustomBoneToWorld)
             return false;
 
         const std::string lowerModel = vr_vm_stabilize::ToLowerAscii(modelName);
@@ -14538,7 +14915,9 @@ namespace
             const std::string& modelName,
             void* pCustomBoneToWorld)
         {
-            if (!vr || !vr->m_NativeViewmodelHandsOnly || vr->m_HideArms || !pCustomBoneToWorld)
+            if (!HooksNativeViewmodelHandsOnlyActive(vr) ||
+                HooksNativeViewmodelHandsOnlyHideArmsRequested(vr) ||
+                !pCustomBoneToWorld)
                 return;
 
             float plane[4]{};
@@ -15669,9 +16048,15 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 	if (m_Game->m_SwitchedWeapons)
 		m_Game->m_CachedArmsModel = false;
 
-	const bool nativeViewmodelHandsOnlyActive = m_VR && m_VR->m_NativeViewmodelHandsOnly;
-	bool hideArms = m_VR->m_HideArms ||
-		(m_Game->m_IsMeleeWeaponActive && !nativeViewmodelHandsOnlyActive);
+	const bool nativeViewmodelHandsOnlyActive =
+		HooksNativeViewmodelHandsOnlyActive(m_VR);
+	const bool emptyHandsPlaceholderActiveAtEntry =
+		m_VR &&
+		m_VR->m_ManualInventoryEmptyHandsActive.load(std::memory_order_acquire);
+	bool hideArms =
+		!emptyHandsPlaceholderActiveAtEntry &&
+		(m_VR->m_HideArms ||
+			(m_Game->m_IsMeleeWeaponActive && !nativeViewmodelHandsOnlyActive));
 
 	void* pBonesToWorldFinal = pCustomBoneToWorld;
 	vr_vm_stabilize::Mat3x4* magazineInteractionDetachedMagazineBones = nullptr;
@@ -15749,6 +16134,17 @@ void Hooks::dDrawModelExecute(void* ecx, void* edx, void* state, const ModelRend
 			return;
 		if (teleportSuppressibleViewmodel)
 			m_VR->DrawVrHandsWorldDepthMaskBeforeViewmodel();
+		const bool emptyHandsPlaceholderActive =
+			m_VR->m_ManualInventoryEmptyHandsActive.load(std::memory_order_acquire);
+		if (emptyHandsPlaceholderActive &&
+			teleportSuppressibleViewmodel &&
+			!HooksModelNameIsArmsOrHands(vr_vm_stabilize::ToLowerAscii(modelName)))
+		{
+			// The native placeholder pistol supplies stock shove behavior, but its
+			// weapon model is not visible. Keep the separate survivor arms model;
+			// the forced NativeViewmodelHandsOnly path below trims it to both hands.
+			return;
+		}
 
 		const bool suppressDesktopMirrorPluginOverlays =
 			m_VR->m_DesktopMirrorCleanRenderingPass && m_VR->m_DesktopMirrorHidePluginOverlays;
@@ -15779,7 +16175,9 @@ if (m_VR->m_IsVREnabled && queueMode == 2 &&
 	(m_VR->m_QueuedViewmodelStabilize ||
 	 m_VR->m_ViewmodelDisableMoveBob ||
 	 (!m_VR->m_MouseModeEnabled &&
-	  (m_VR->m_VrHandsRightUseViewmodelPose || m_VR->IsVrHandsTwoHandedGripPoseActive()))))
+	  (m_VR->m_VrHandsRightUseViewmodelPose ||
+	   emptyHandsPlaceholderActive ||
+	   m_VR->IsVrHandsTwoHandedGripPoseActive()))))
 {
 	const bool isViewmodelClass = className &&
 		(std::strcmp(className, "CBaseViewModel") == 0 || std::strcmp(className, "C_BaseViewModel") == 0);

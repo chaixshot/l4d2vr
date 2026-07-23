@@ -1618,6 +1618,10 @@ float __fastcall Hooks::dProcessUsercmds(void* ecx, void* edx, edict_t* player,
 	m_ServerProcessingUsercmdPlayer = pPlayer;
 	m_ServerProcessingUsercmdPlayerIndex = index;
 	float result = hkProcessUsercmds.fOriginal(ecx, player, buf, numcmds, totalcmds, dropped_packets, ignore, paused);
+	// Custom inventory throws suppress stock IN_ATTACK/IN_USE, then invoke the
+	// game's generic Weapon_Drop path here.
+	const bool inventoryDropExecuted =
+		ManualInventoryThrowExecutePendingDrop(index, pPlayer);
 	Server_WeaponCSBase* activeWeaponAfterUsercmd = nullptr;
 	bool activeWeaponReadSucceeded = false;
 	if (pPlayer)
@@ -1640,11 +1644,15 @@ float __fastcall Hooks::dProcessUsercmds(void* ecx, void* edx, edict_t* player,
 		activeWeaponReadSucceeded = true;
 #endif
 	}
-	ManualCarryThrowApplyPendingAfterWeaponDetached(
+	const bool detachedThrowApplied = ManualCarryThrowApplyPendingAfterWeaponDetached(
 		index,
 		pPlayer,
 		activeWeaponAfterUsercmd,
 		activeWeaponReadSucceeded);
+	ManualEmptyHandsPlaceholderUpdate(
+		index,
+		pPlayer,
+		inventoryDropExecuted || detachedThrowApplied);
 	ManualCarryImpactUpdate();
 	m_ServerProcessingUsercmd = false;
 	m_ServerProcessingUsercmdPlayer = nullptr;
@@ -1934,6 +1942,21 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 		move->viewangles.z = 0;
 		move->upmove = 0;
 
+		Player* vrPlayerState = hasValidPlayer
+			? &m_Game->m_PlayersVRInfo[static_cast<size_t>(i)]
+			: nullptr;
+		constexpr int kIN_ATTACK = (1 << 0);
+		constexpr int kIN_USE = (1 << 5);
+		constexpr int kIN_RELOAD = (1 << 13);
+		if (vrPlayerState)
+		{
+			ManualEmptyHandsPlaceholderPrepareForUse(
+				i,
+				m_Game->m_CurrentUsercmdPlayer,
+				*vrPlayerState,
+				(move->buttons & kIN_USE) != 0);
+		}
+
 		Server_WeaponCSBase* serverWeapon = nullptr;
 		int serverWeaponId = static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
 		TryGetServerCurrentWeapon(serverWeapon, serverWeaponId);
@@ -1943,9 +1966,9 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 			if (!MagazineInteractionWeaponIdIsShotgun(serverWeaponId))
 				m_VR->TryApplyMagazineInteractionServerClipCommit(serverWeapon, serverWeaponId, m_Game->m_CurrentUsercmdPlayer);
 		}
-		Player* vrPlayerState = hasValidPlayer
-			? &m_Game->m_PlayersVRInfo[static_cast<size_t>(i)]
-			: nullptr;
+		const bool serverWeaponIsDummyPistol =
+			vrPlayerState &&
+			ManualEmptyHandsPlaceholderIsTrackedDummy(*vrPlayerState, serverWeapon);
 		const uintptr_t weaponTag = reinterpret_cast<uintptr_t>(serverWeapon);
 		const bool previousAttackDown = vrPlayerState && vrPlayerState->throwableAimPrevAttackDown;
 		const bool previousWeaponThrowable = vrPlayerState && vrPlayerState->throwableAimPrevWeaponThrowable;
@@ -1956,7 +1979,6 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 		if (vrPlayerState && weaponTag != vrPlayerState->throwableAimWeaponTag)
 			vrPlayerState->throwableAimWeaponTag = weaponTag;
 
-		constexpr int kIN_ATTACK = (1 << 0);
 		constexpr uint32_t kManualCarryThrowWeaponShift = 26u;
 		constexpr uint32_t kManualCarryThrowWeaponMask = (0x3Fu << kManualCarryThrowWeaponShift);
 		const uint32_t encodedCarryValue =
@@ -1969,17 +1991,29 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 		// the command as gameplay input.
 		move->buttons = static_cast<int>(
 			static_cast<uint32_t>(move->buttons) & ~kManualCarryThrowWeaponMask);
+		if (serverWeaponIsDummyPistol)
+		{
+			// The hidden pistol exists only so Source's native IN_ATTACK2 shove and
+			// cooldown logic stay intact. It may never shoot or reload.
+			move->buttons &= ~(kIN_ATTACK | kIN_RELOAD);
+		}
 		const bool attackDown = (move->buttons & kIN_ATTACK) != 0;
 		const bool activeWeaponIsThrowable = ServerWeaponIdIsThrowable(serverWeaponId);
 		const bool activeWeaponIsCarryThrowable = ServerWeaponIdIsManualCarryThrowable(serverWeaponId);
 		const bool encodedCarryRelease =
 			attackDown && ServerWeaponIdIsManualCarryThrowable(encodedCarryWeaponId);
+		const bool encodedInventoryRelease =
+			!attackDown && ManualInventoryThrowWeaponIdRequiresCustomDrop(encodedCarryWeaponId);
 		const bool releasedThrowable = previousWeaponThrowable && previousAttackDown && !attackDown;
 		const int releasedWeaponId = activeWeaponIsThrowable ? serverWeaponId : previousThrowableWeaponId;
 		const bool manualThrowActive = s_ManualThrowHooksReady && m_VR && m_VR->m_ManualThrowEnabled;
 		const bool manualCarryThrowActive =
 			ManualCarryThrowBackendIsReady(encodedCarryWeaponId) &&
 			m_VR && m_VR->m_ManualThrowEnabled;
+		const bool manualInventoryThrowActive =
+			ManualInventoryThrowBackendIsReady(encodedCarryWeaponId) &&
+			m_VR && m_VR->m_ManualThrowEnabled &&
+			!serverWeaponIsDummyPistol;
 		bool commandControllerAim = false;
 		int commandControllerAimReason = 0;
 
@@ -2031,6 +2065,33 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 					encodedCarryWeaponId,
 					serverWeaponId,
 					serverWeapon);
+			}
+		}
+		if (vrPlayerState && manualInventoryThrowActive && encodedInventoryRelease &&
+			vrPlayerState->manualCarryThrowLastDecodedReleaseTick != move->tick_count)
+		{
+			const bool sourceMatchesRelease = serverWeapon &&
+				ManualInventoryThrowWeaponIdRequiresCustomDrop(serverWeaponId) &&
+				serverWeaponId == encodedCarryWeaponId;
+			if (sourceMatchesRelease)
+			{
+				vrPlayerState->manualCarryThrowLastDecodedReleaseTick = move->tick_count;
+				const bool prepared = ManualThrowPreparePending(
+					*vrPlayerState,
+					m_Game->m_CurrentUsercmdPlayer,
+					serverWeapon,
+					encodedCarryWeaponId,
+					move->tick_count);
+				Game::logMsg(
+					"[VR][ManualInventoryThrow] release decoded player=%d tick=%d weaponId=%d source=%p prepared=%d velocity=(%.1f %.1f %.1f)",
+					i,
+					move->tick_count,
+					encodedCarryWeaponId,
+					serverWeapon,
+					prepared ? 1 : 0,
+					vrPlayerState->manualThrowPending.velocity.x,
+					vrPlayerState->manualThrowPending.velocity.y,
+					vrPlayerState->manualThrowPending.velocity.z);
 			}
 		}
 

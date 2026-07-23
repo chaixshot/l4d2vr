@@ -1477,6 +1477,14 @@ void VR::ParseConfigFile()
         getVector3("NativeViewmodelLeftHandPoseRotationOffsetDeg", m_NativeViewmodelLeftHandPoseRotationOffsetDeg),
         -180.0f,
         180.0f);
+    m_NativeViewmodelRightHandPoseOffsetMeters = clampNativePoseVector(
+        getVector3("NativeViewmodelRightHandPoseOffsetMeters", m_NativeViewmodelRightHandPoseOffsetMeters),
+        -1.0f,
+        1.0f);
+    m_NativeViewmodelRightHandPoseRotationOffsetDeg = clampNativePoseVector(
+        getVector3("NativeViewmodelRightHandPoseRotationOffsetDeg", m_NativeViewmodelRightHandPoseRotationOffsetDeg),
+        -180.0f,
+        180.0f);
     m_NativeViewmodelLeftHandOpenVRSkeleton = getBool(
         "NativeViewmodelLeftHandOpenVRSkeleton",
         m_NativeViewmodelLeftHandOpenVRSkeleton);
@@ -1502,6 +1510,14 @@ void VR::ParseConfigFile()
         16.0f);
     m_NativeViewmodelLeftHandOpenVRThumbRootRotationOffsetDeg = clampNativePoseVector(
         getVector3("NativeViewmodelLeftHandOpenVRThumbRootRotationOffsetDeg", m_NativeViewmodelLeftHandOpenVRThumbRootRotationOffsetDeg),
+        -90.0f,
+        90.0f);
+    m_NativeViewmodelRightHandOpenVRThumbRootOffsetUnits = clampNativePoseVector(
+        getVector3("NativeViewmodelRightHandOpenVRThumbRootOffsetUnits", m_NativeViewmodelRightHandOpenVRThumbRootOffsetUnits),
+        -16.0f,
+        16.0f);
+    m_NativeViewmodelRightHandOpenVRThumbRootRotationOffsetDeg = clampNativePoseVector(
+        getVector3("NativeViewmodelRightHandOpenVRThumbRootRotationOffsetDeg", m_NativeViewmodelRightHandOpenVRThumbRootRotationOffsetDeg),
         -90.0f,
         90.0f);
     m_NativeViewmodelLeftHandOpenVRInitialCurl[0] = std::clamp(

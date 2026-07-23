@@ -118,6 +118,39 @@ public:
         0,
         true
     };
+    // CBaseCombatCharacter::Weapon_Drop(CBaseCombatWeapon*, Vector*, Vector*).
+    // Unlike CWeaponCarry::DropToPhysicsProp, this works for ordinary guns,
+    // melee weapons, packs and medicine. It detaches the existing weapon entity
+    // from the survivor and runs the native next-weapon selection path.
+    Offset ManualInventoryWeaponDrop = { "server.dll", 0x00045360,
+        "53 8B DC 83 EC 08 83 E4 F0 83 C4 04 55 8B 6B 04 89 6C 24 04 8B EC 81 EC 18 01 00 00 A1 ? ? ? ? 33 C5 89 45 FC 8B 43 0C 56 8B 73 08 57 8B F9",
+        0,
+        true
+    };
+    // CBaseCombatCharacter::RemovePlayerItem and UTIL_Remove. Empty-hand mode
+    // uses them to destroy only the hidden placeholder pistol before a pickup.
+    Offset ManualEmptyHandsRemovePlayerItem = { "server.dll", 0x00045200,
+        "55 8B EC 51 83 7D 08 00 53 56 8B D9 57 89 5D FC 74 4F 8D BB F4 18 00 00 33 F6 8B D7",
+        0,
+        true
+    };
+    Offset ManualEmptyHandsUtilRemove = { "server.dll", 0x002071E0,
+        "55 8B EC 8B 45 08 85 C0 74 0C 83 C0 1C 50 E8 ? ? ? ? 83 C4 04 5D C3",
+        0,
+        true
+    };
+    // Exact L4D2 CTakeDamageInfo constructor and CBaseEntity::TakeDamage wrapper.
+    // Using these avoids guessing target vtable slots in collision handling.
+    Offset CTakeDamageInfoCtor_Server = { "server.dll", 0x001E9030,
+        "55 8B EC D9 45 10 8B 55 0C 56 8B F1 8B 4D 14 83 C8 FF 89 46 30 89 46 34 89 46 38",
+        0,
+        true
+    };
+    Offset CBaseEntity_TakeDamage_Server = { "server.dll", 0x00055C70,
+        "55 8B EC 83 EC 6C 57 8B F9 8B 0D ? ? ? ? 85 C9 0F 84 ? ? ? ? 8B 11 56 8B 75 08",
+        0,
+        true
+    };
     Offset GetPrimaryAttackActivity =    { "server.dll", 0x3E7630, "55 8B EC 53 8B 5D 08 56 57 8B BB ? ? ? ?" };
     Offset GetActiveWeapon =             { "server.dll", 0x464F0, "55 8B EC 8B 45 0C 56 8B 75 08 50 56 E8 ? ? ? ? 84 C0 74 47 8B", -64 };
     Offset GetMeleeWeaponInfo =          { "server.dll", 0x3E67D0, "8B 81 ? ? ? ? 50 B9 ? ? ? ? E8 ? ? ? ? C3" };

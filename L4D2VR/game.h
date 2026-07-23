@@ -47,6 +47,8 @@ struct ManualThrowPoseSample
 struct ManualThrowPending
 {
     bool valid = false;
+    bool inventoryDrop = false;
+    bool inventoryDropExecuted = false;
     int weaponId = 0;
     int releaseTick = 0;
     void* owner = nullptr;
@@ -82,6 +84,10 @@ struct Player
     bool throwableAimPrevAttackDown = false;
     bool throwableAimPrevWeaponThrowable = false;
     int manualCarryThrowLastDecodedReleaseTick = 0;
+    bool manualEmptyHandsPlaceholderArmed = false;
+    bool manualEmptyHandsPlaceholderUseDown = false;
+    void* manualEmptyHandsDummyPistol = nullptr;
+    void* manualEmptyHandsDummyPistolVtable = nullptr;
     ManualThrowPending manualThrowPending{};
 };
 

@@ -30,6 +30,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 	static bool s_vrAwareThrowableAimPrevAttackDown = false;
 	static uintptr_t s_manualCarryThrowWeapon = 0;
 	static bool s_manualCarryThrowPhysicalAttackDown = false;
+	static bool s_manualInventoryThrowPhysicalUseDown = false;
+	static bool s_manualInventoryThrowArmed = false;
 	static bool s_vrAwareThrowableAimPrevWeaponThrowable = false;
 	static int s_vrAwareThrowableAimTicks = 0;
 	// Auto-repeat spray-push for pump/chrome shotguns and AWP/scout:
@@ -139,6 +141,8 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		s_tpMeleeLockUntil = {};
 		s_manualCarryThrowWeapon = 0;
 		s_manualCarryThrowPhysicalAttackDown = false;
+		s_manualInventoryThrowPhysicalUseDown = false;
+		s_manualInventoryThrowArmed = false;
 		s_autoRepeatSprayPushWeapon = 0;
 		s_autoRepeatSprayPushPrevClip1 = -1;
 		s_autoRepeatSprayPushDelayTicks = 0;
@@ -1624,70 +1628,136 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		m_VR->ApplyRoomscale1To1Move(cmd, flInputSampleTime, controlLocomotionActive);
 		m_VR->ApplyMovementLedgeGuard(cmd, m_VR->m_ScopeFovAdjustSuppressWalk || m_VR->m_TeleportTargetingActive);
 
-		// Backpack carryables normally drop as soon as IN_ATTACK is pressed. For
-		// manual throwing, hold the command locally while the trigger is held and
-		// send one normal attack pulse on physical release. The server keeps the
-		// stock inventory/drop path and only replaces the released entity velocity.
+		// Hold Use first, then pull the trigger to enter inventory-throw mode. While
+		// armed, neither action reaches normal gameplay. Carryables receive one stock
+		// attack pulse on release; guns, melee weapons, packs and medicine send only
+		// the private weapon marker and use the server's native Weapon_Drop path.
 		{
 			constexpr uint32_t kManualCarryThrowIN_ATTACK = (1u << 0);
+			constexpr uint32_t kManualInventoryThrowIN_USE = (1u << 5);
 			constexpr uint32_t kManualCarryThrowWeaponShift = 26u;
 			constexpr uint32_t kManualCarryThrowWeaponMask = (0x3Fu << kManualCarryThrowWeaponShift);
-			C_BaseCombatWeapon* carryBaseWeapon = localPlayerForAutoActions
+			C_BaseCombatWeapon* inventoryBaseWeapon = localPlayerForAutoActions
 				? reinterpret_cast<C_BaseCombatWeapon*>(localPlayerForAutoActions->GetActiveWeapon())
 				: nullptr;
-			C_WeaponCSBase* carryWeapon = reinterpret_cast<C_WeaponCSBase*>(carryBaseWeapon);
-			const char* carryWeaponName = carryBaseWeapon ? carryBaseWeapon->GetName() : nullptr;
-			const char* carryWeaponNetClass = carryBaseWeapon
-				? m_Game->GetNetworkClassName(reinterpret_cast<uintptr_t*>(carryBaseWeapon))
+			C_WeaponCSBase* inventoryWeapon = reinterpret_cast<C_WeaponCSBase*>(inventoryBaseWeapon);
+			const char* inventoryWeaponName = inventoryBaseWeapon ? inventoryBaseWeapon->GetName() : nullptr;
+			const char* inventoryWeaponNetClass = inventoryBaseWeapon
+				? m_Game->GetNetworkClassName(reinterpret_cast<uintptr_t*>(inventoryBaseWeapon))
 				: nullptr;
-			const uintptr_t carryWeaponTag = reinterpret_cast<uintptr_t>(carryWeapon);
-			const int carryWeaponId = ResolveVRManualCarryThrowWeaponId(
-				carryWeapon,
-				carryWeaponName,
-				carryWeaponNetClass);
-			const bool carryThrowActive =
+			const uintptr_t inventoryWeaponTag = reinterpret_cast<uintptr_t>(inventoryWeapon);
+			int inventoryWeaponId = inventoryWeapon
+				? static_cast<int>(inventoryWeapon->GetWeaponID())
+				: static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
+			const bool nativeProjectileThrow =
+				IsVRThrowableWeapon(inventoryWeapon, inventoryWeaponName, inventoryWeaponNetClass);
+			if (!nativeProjectileThrow &&
+				!ManualInventoryThrowWeaponIdIsSupported(inventoryWeaponId))
+			{
+				inventoryWeaponId = ResolveVRManualCarryThrowWeaponId(
+					inventoryWeapon,
+					inventoryWeaponName,
+					inventoryWeaponNetClass);
+			}
+			const bool emptyHandsPlaceholderActive =
+				m_VR->m_ManualInventoryEmptyHandsActive.load(std::memory_order_acquire);
+			const bool throwBackendReady = nativeProjectileThrow
+				? s_ManualThrowHooksReady
+				: ManualInventoryThrowBackendIsReady(inventoryWeaponId);
+			const bool inventoryThrowActive =
 				m_VR->m_IsVREnabled &&
 				m_VR->m_ManualThrowEnabled &&
 				s_ServerUnderstandsVR &&
-				ManualCarryThrowBackendIsReady(carryWeaponId) &&
-				carryWeaponId != static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
+				throwBackendReady &&
+				inventoryWeaponId != static_cast<int>(C_WeaponCSBase::WeaponID::NONE) &&
+				!emptyHandsPlaceholderActive;
 
-			if (!carryThrowActive)
+			const bool physicalAttackDown = m_VR->m_PrimaryAttackDown;
+			const bool physicalUseDown = localUseButtonDownForAutoActions || m_VR->m_UseCmdOwned;
+			if (!inventoryThrowActive)
 			{
 				s_manualCarryThrowWeapon = 0;
-				s_manualCarryThrowPhysicalAttackDown = false;
+				s_manualCarryThrowPhysicalAttackDown = physicalAttackDown;
+				s_manualInventoryThrowPhysicalUseDown = physicalUseDown;
+				s_manualInventoryThrowArmed = false;
 			}
 			else
 			{
-				// Read the raw VR action state. cmd->buttons has already passed through
-				// semi-auto helpers and is not a reliable representation of the held trigger.
-				const bool physicalAttackDown = m_VR->m_PrimaryAttackDown;
-				if (carryWeaponTag != s_manualCarryThrowWeapon)
+				if (inventoryWeaponTag != s_manualCarryThrowWeapon)
 				{
-					s_manualCarryThrowWeapon = carryWeaponTag;
+					s_manualCarryThrowWeapon = inventoryWeaponTag;
 					s_manualCarryThrowPhysicalAttackDown = physicalAttackDown;
+					s_manualInventoryThrowPhysicalUseDown = physicalUseDown;
+					s_manualInventoryThrowArmed = false;
 				}
 
 				uint32_t carryButtons = static_cast<uint32_t>(cmd->buttons);
-				carryButtons &= ~(kManualCarryThrowIN_ATTACK | kManualCarryThrowWeaponMask);
-				if (!physicalAttackDown && s_manualCarryThrowPhysicalAttackDown)
+				carryButtons &= ~kManualCarryThrowWeaponMask;
+				const bool triggerPressedAfterUse =
+					physicalAttackDown && !s_manualCarryThrowPhysicalAttackDown &&
+					physicalUseDown && s_manualInventoryThrowPhysicalUseDown;
+				if (!s_manualInventoryThrowArmed && triggerPressedAfterUse)
+					s_manualInventoryThrowArmed = true;
+
+				if (s_manualInventoryThrowArmed)
 				{
-					carryButtons |= kManualCarryThrowIN_ATTACK;
-					// Bits 26-31 are unused by Source IN_* buttons. Encode weaponId+1
-					// for this one command, then strip it in dReadUsercmd before gameplay.
-					const uint32_t encodedWeaponId = static_cast<uint32_t>(carryWeaponId + 1);
-					carryButtons |= (encodedWeaponId & 0x3Fu) << kManualCarryThrowWeaponShift;
+					carryButtons &= ~kManualInventoryThrowIN_USE;
+					// Native grenade weapons must receive the held IN_ATTACK so
+					// Source enters its ordinary pin/pullback state. Every other
+					// inventory item would fire, heal, deploy, or drop immediately,
+					// so its primary action remains suppressed until release.
+					if (!nativeProjectileThrow)
+						carryButtons &= ~kManualCarryThrowIN_ATTACK;
+				}
+				if (s_manualInventoryThrowArmed &&
+					!physicalAttackDown && s_manualCarryThrowPhysicalAttackDown)
+				{
+					const bool stockCarryRelease =
+						!nativeProjectileThrow &&
+						ManualCarryThrowWeaponIdIsSupported(
+							static_cast<C_WeaponCSBase::WeaponID>(inventoryWeaponId));
+					if (nativeProjectileThrow)
+					{
+						// Make the release edge explicit; dReadUsercmd uses the
+						// normal throwable transition and projectile-create hooks.
+						carryButtons &= ~kManualCarryThrowIN_ATTACK;
+					}
+					else
+					{
+						if (stockCarryRelease)
+							carryButtons |= kManualCarryThrowIN_ATTACK;
+						// Bits 26-31 are unused by Source IN_* buttons. Encode weaponId+1
+						// for this one command. IN_ATTACK distinguishes stock carry release
+						// from a custom inventory Weapon_Drop request on the server.
+						const uint32_t encodedWeaponId = static_cast<uint32_t>(inventoryWeaponId + 1);
+						carryButtons |= (encodedWeaponId & 0x3Fu) << kManualCarryThrowWeaponShift;
+					}
 					Game::logMsg(
-						"[VR][ManualCarryThrow] client release cmd=%d weaponId=%d weapon=%s netclass=%s",
+						"[VR][ManualInventoryThrow] client release cmd=%d weaponId=%d nativeProjectile=%d stockCarry=%d weapon=%s netclass=%s",
 						cmd->command_number,
-						carryWeaponId,
-						carryWeaponName ? carryWeaponName : "",
-						carryWeaponNetClass ? carryWeaponNetClass : "");
+						inventoryWeaponId,
+						nativeProjectileThrow ? 1 : 0,
+						stockCarryRelease ? 1 : 0,
+						inventoryWeaponName ? inventoryWeaponName : "",
+						inventoryWeaponNetClass ? inventoryWeaponNetClass : "");
+					s_manualInventoryThrowArmed = false;
 				}
 				cmd->buttons = static_cast<int>(carryButtons);
 
 				s_manualCarryThrowPhysicalAttackDown = physicalAttackDown;
+				s_manualInventoryThrowPhysicalUseDown = physicalUseDown;
 			}
+		}
+
+		if (m_VR->m_ManualInventoryEmptyHandsActive.load(std::memory_order_acquire))
+		{
+			// The server repeats this filter authoritatively. Keeping the client
+			// command clean also prevents muzzle flash, recoil and reload animation
+			// from being predicted for the hidden placeholder pistol.
+			constexpr int kEmptyHandsIN_ATTACK = (1 << 0);
+			constexpr int kEmptyHandsIN_RELOAD = (1 << 13);
+			cmd->buttons &= ~(kEmptyHandsIN_ATTACK | kEmptyHandsIN_RELOAD);
+			s_manualInventoryThrowArmed = false;
 		}
 
 		// Publish the final command state after every helper has had a chance to
@@ -1700,10 +1770,16 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 		{
 			C_WeaponCSBase* manualThrowWeapon =
 				reinterpret_cast<C_WeaponCSBase*>(localPlayerForAutoActions->GetActiveWeapon());
-			if (IsVRThrowableWeapon(manualThrowWeapon, nullptr, nullptr))
+			const int manualThrowWeaponId = manualThrowWeapon
+				? static_cast<int>(manualThrowWeapon->GetWeaponID())
+				: static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
+			const bool nativeThrowable = IsVRThrowableWeapon(manualThrowWeapon, nullptr, nullptr);
+			const bool inventoryThrowable = ManualInventoryThrowWeaponIdIsSupported(manualThrowWeaponId);
+			if (nativeThrowable || inventoryThrowable)
 			{
 				manualThrowViewmodelInputState |= kManualThrowViewmodelThrowableActive;
-				if ((cmd->buttons & (1 << 0)) != 0) // IN_ATTACK
+				if ((nativeThrowable && (cmd->buttons & (1 << 0)) != 0) ||
+					(inventoryThrowable && s_manualInventoryThrowArmed))
 					manualThrowViewmodelInputState |= kManualThrowViewmodelTriggerHeld;
 			}
 		}

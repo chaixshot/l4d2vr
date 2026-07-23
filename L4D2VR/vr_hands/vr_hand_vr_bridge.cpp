@@ -4397,6 +4397,63 @@ bool VR::GetNativeViewmodelLeftHandOpenVRFingerCurls(std::array<float, 5>& outCu
     return true;
 }
 
+void VR::UpdateNativeViewmodelRightHandOpenVRFingerCurls()
+{
+    std::array<float, 5> curls{};
+    const bool physicalLeftHand = IsGameplayHandLeftPhysical(false);
+    vr::VRActionHandle_t& action = physicalLeftHand
+        ? m_NativeViewmodelLeftHandOpenVRAction
+        : m_NativeViewmodelRightHandOpenVRAction;
+    const char* actionPath = physicalLeftHand
+        ? "/actions/base/in/skeleton_lefthand"
+        : "/actions/base/in/skeleton_righthand";
+    const bool valid =
+        m_NativeViewmodelLeftHandOpenVRSkeleton &&
+        m_Input &&
+        ReadOpenVRSkeletalFingerCurls(
+            m_Input,
+            action,
+            actionPath,
+            curls,
+            physicalLeftHand
+                ? "native viewmodel gameplay right hand (physical left)"
+                : "native viewmodel right hand");
+
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(m_NativeViewmodelRightHandOpenVRFingerCurlMutex);
+    if (valid)
+    {
+        m_NativeViewmodelRightHandOpenVRFingerCurls = curls;
+        m_NativeViewmodelRightHandOpenVRFingerCurlsAt = now;
+        m_NativeViewmodelRightHandOpenVRFingerCurlsValid = true;
+        return;
+    }
+
+    const bool stale =
+        m_NativeViewmodelRightHandOpenVRFingerCurlsValid &&
+        std::chrono::duration<float>(now - m_NativeViewmodelRightHandOpenVRFingerCurlsAt).count() > 0.35f;
+    if (!m_NativeViewmodelLeftHandOpenVRSkeleton || !m_Input || stale)
+        m_NativeViewmodelRightHandOpenVRFingerCurlsValid = false;
+}
+
+bool VR::GetNativeViewmodelRightHandOpenVRFingerCurls(std::array<float, 5>& outCurls) const
+{
+    outCurls = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+    if (!m_NativeViewmodelLeftHandOpenVRSkeleton)
+        return false;
+
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock(m_NativeViewmodelRightHandOpenVRFingerCurlMutex);
+    if (!m_NativeViewmodelRightHandOpenVRFingerCurlsValid ||
+        std::chrono::duration<float>(now - m_NativeViewmodelRightHandOpenVRFingerCurlsAt).count() > 0.35f)
+    {
+        return false;
+    }
+
+    outCurls = m_NativeViewmodelRightHandOpenVRFingerCurls;
+    return true;
+}
+
 bool VR::UpdateMagazineInteraction(
     C_BasePlayer* localPlayer,
     bool leftGripDown,
@@ -7413,7 +7470,10 @@ bool VR::DrawVrHandsForEyeImmediate(
     VrHandDrawPass drawPass,
     bool allowQueuedMode)
 {
-    const bool drawGloves = m_VrHandsEnabled && m_Input;
+    const bool emptyHandsPlaceholderActive =
+        m_ManualInventoryEmptyHandsActive.load(std::memory_order_acquire);
+    const bool drawGloves =
+        m_VrHandsEnabled && !emptyHandsPlaceholderActive && m_Input;
     const bool calibrationOverlayActive =
         m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed);
     const bool drawMagazineDebugBoxes =
@@ -7779,7 +7839,10 @@ bool VR::DrawVrHandsForEyeImmediate(
 
 bool VR::DrawVrHandsWorldDepthMaskForEyeImmediate(const CViewSetup& view, int eyeIndex, bool allowQueuedMode)
 {
-    if (!m_VrHandsEnabled || !m_IsVREnabled || !m_Input || !m_Game)
+    const bool emptyHandsPlaceholderActive =
+        m_ManualInventoryEmptyHandsActive.load(std::memory_order_acquire);
+    if (!m_VrHandsEnabled || emptyHandsPlaceholderActive ||
+        !m_IsVREnabled || !m_Input || !m_Game)
         return false;
 
     const int queueMode = m_Game->GetMatQueueMode();
@@ -7851,7 +7914,11 @@ void VR::BeginVrHandsEyeRender(const CViewSetup& view, int eyeIndex)
     if (!m_IsVREnabled || !m_Game)
         return;
 
-    if (m_VrHandsEnabled && m_Input && m_VrHandsGlovesEnabled)
+    const bool emptyHandsPlaceholderActive =
+        m_ManualInventoryEmptyHandsActive.load(std::memory_order_acquire);
+    const bool drawVrGloves =
+        m_VrHandsEnabled && !emptyHandsPlaceholderActive;
+    if (drawVrGloves && m_Input && m_VrHandsGlovesEnabled)
     {
         if (!m_VrHands)
             m_VrHands = std::make_unique<VrHandSystem>();
@@ -7863,7 +7930,7 @@ void VR::BeginVrHandsEyeRender(const CViewSetup& view, int eyeIndex)
         }
     }
 
-    if (!m_VrHandsEnabled && !m_NativeViewmodelHandsOnly && !drawMagazineDebugBoxes)
+    if (!drawVrGloves && !m_NativeViewmodelHandsOnly && !drawMagazineDebugBoxes)
         return;
 
     m_VrHandsActiveEyeView = &view;

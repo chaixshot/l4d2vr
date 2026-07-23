@@ -78,6 +78,67 @@ static bool ManualCarryThrowWeaponIdIsSupported(C_WeaponCSBase::WeaponID weaponI
 		weaponId == C_WeaponCSBase::WeaponID::FIREWORKS_BOX;
 }
 
+static bool ManualInventoryThrowWeaponIdDoesMeleeDamage(int weaponId)
+{
+	switch (static_cast<C_WeaponCSBase::WeaponID>(weaponId))
+	{
+	case C_WeaponCSBase::WeaponID::PISTOL:
+	case C_WeaponCSBase::WeaponID::UZI:
+	case C_WeaponCSBase::WeaponID::PUMPSHOTGUN:
+	case C_WeaponCSBase::WeaponID::AUTOSHOTGUN:
+	case C_WeaponCSBase::WeaponID::M16A1:
+	case C_WeaponCSBase::WeaponID::HUNTING_RIFLE:
+	case C_WeaponCSBase::WeaponID::MAC10:
+	case C_WeaponCSBase::WeaponID::SHOTGUN_CHROME:
+	case C_WeaponCSBase::WeaponID::SCAR:
+	case C_WeaponCSBase::WeaponID::SNIPER_MILITARY:
+	case C_WeaponCSBase::WeaponID::SPAS:
+	case C_WeaponCSBase::WeaponID::MELEE:
+	case C_WeaponCSBase::WeaponID::CHAINSAW:
+	case C_WeaponCSBase::WeaponID::GRENADE_LAUNCHER:
+	case C_WeaponCSBase::WeaponID::AK47:
+	case C_WeaponCSBase::WeaponID::MAGNUM:
+	case C_WeaponCSBase::WeaponID::MP5:
+	case C_WeaponCSBase::WeaponID::SG552:
+	case C_WeaponCSBase::WeaponID::AWP:
+	case C_WeaponCSBase::WeaponID::SCOUT:
+	case C_WeaponCSBase::WeaponID::M60:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static bool ManualInventoryThrowWeaponIdDoesShove(int weaponId)
+{
+	switch (static_cast<C_WeaponCSBase::WeaponID>(weaponId))
+	{
+	case C_WeaponCSBase::WeaponID::FIRST_AID_KIT:
+	case C_WeaponCSBase::WeaponID::PAIN_PILLS:
+	case C_WeaponCSBase::WeaponID::AMMO_PACK:
+	case C_WeaponCSBase::WeaponID::ADRENALINE:
+	case C_WeaponCSBase::WeaponID::DEFIBRILLATOR:
+	case C_WeaponCSBase::WeaponID::INCENDIARY_AMMO:
+	case C_WeaponCSBase::WeaponID::FRAG_AMMO:
+		return true;
+	default:
+		return ManualCarryThrowWeaponIdIsSupported(
+			static_cast<C_WeaponCSBase::WeaponID>(weaponId));
+	}
+}
+
+static bool ManualInventoryThrowWeaponIdIsSupported(int weaponId)
+{
+	return ManualInventoryThrowWeaponIdDoesMeleeDamage(weaponId) ||
+		ManualInventoryThrowWeaponIdDoesShove(weaponId);
+}
+
+static bool ManualInventoryThrowWeaponIdRequiresCustomDrop(int weaponId)
+{
+	return ManualInventoryThrowWeaponIdIsSupported(weaponId) &&
+		!ManualCarryThrowWeaponIdIsSupported(static_cast<C_WeaponCSBase::WeaponID>(weaponId));
+}
+
 static bool ManualCarryThrowWeaponIdUsesSpawnedPhysicsProp(int weaponId)
 {
 	return weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::PROPANE_TANK) ||
@@ -91,6 +152,17 @@ static bool ManualCarryThrowBackendIsReady(int weaponId)
 	return Hooks::s_ManualCarryThrowHookReady &&
 		(!ManualCarryThrowWeaponIdUsesSpawnedPhysicsProp(weaponId) ||
 			Hooks::s_ManualCarryThrowPropSpawnHookReady);
+}
+
+static bool ManualInventoryThrowBackendIsReady(int weaponId)
+{
+	if (!ManualInventoryThrowWeaponIdIsSupported(weaponId))
+		return false;
+	if (ManualCarryThrowWeaponIdIsSupported(static_cast<C_WeaponCSBase::WeaponID>(weaponId)))
+		return ManualCarryThrowBackendIsReady(weaponId);
+	return Hooks::s_ManualCarryThrowHookReady &&
+		Hooks::m_Game && Hooks::m_Game->m_Offsets &&
+		Hooks::m_Game->m_Offsets->ManualInventoryWeaponDrop.valid;
 }
 
 static int ResolveVRManualCarryThrowWeaponId(C_WeaponCSBase* weapon, const char* weaponName, const char* weaponNetClass)

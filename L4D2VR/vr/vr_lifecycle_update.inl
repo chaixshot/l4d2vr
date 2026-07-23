@@ -1798,6 +1798,7 @@ void VR::Update()
             };
         if (!inGame)
         {
+			m_ManualInventoryEmptyHandsActive.store(false, std::memory_order_release);
             m_AutoResetPositionPending = false;
             m_AutoResetHadLocalPlayerPrev = false;
             m_LocalVScriptConvarsMapAuditPending = false;
@@ -1811,7 +1812,7 @@ void VR::Update()
             C_BasePlayer* localPlayer = (C_BasePlayer*)m_Game->GetClientEntity(playerIndex);
             const bool hasLocalPlayer = (localPlayer != nullptr);
             const auto now = std::chrono::steady_clock::now();
-            bool hasLiveLocalPlayerWithWeapon = false;
+            bool hasLiveLocalPlayerForHands = false;
             bool hasLocalSurvivorCharacter = false;
             int localSurvivorCharacter = -1;
             if (hasLocalPlayer)
@@ -1820,7 +1821,6 @@ void VR::Update()
                 const int teamNum = *reinterpret_cast<const int*>(base + kTeamNumOffset);
                 const unsigned char lifeState = *reinterpret_cast<const unsigned char*>(base + kLifeStateOffset);
                 const int obsMode = *reinterpret_cast<const int*>(base + kObserverModeOffset);
-                C_WeaponCSBase* activeWeapon = static_cast<C_WeaponCSBase*>(localPlayer->GetActiveWeapon());
                 if (teamNum == 2)
                 {
                     localSurvivorCharacter = *reinterpret_cast<const int*>(base + kSurvivorCharacterOffset);
@@ -1828,12 +1828,10 @@ void VR::Update()
                         localSurvivorCharacter >= 0 &&
                         localSurvivorCharacter <= 16;
                 }
-                hasLiveLocalPlayerWithWeapon =
+                hasLiveLocalPlayerForHands =
                     teamNum != 1 &&
                     lifeState == 0 &&
-                    obsMode == 0 &&
-                    activeWeapon &&
-                    activeWeapon->GetWeaponID() != C_WeaponCSBase::WeaponID::NONE;
+                    obsMode == 0;
             }
 
             const bool twoHandedGripPoseActive = IsVrHandsTwoHandedGripPoseActive();
@@ -1857,7 +1855,13 @@ void VR::Update()
                 }
             }
 
-            setNativeLeftHandFreezePlaneContextActive(nativeHandsOnlyFreezePlaneContextEnabled && hasLiveLocalPlayerWithWeapon);
+            // Weapon drop/give/pickup transitions can briefly expose no active
+            // weapon. Keep both hand clip-plane generations alive for the entire
+            // live-player lifetime so entering or leaving the empty placeholder
+            // never resamples the wrist cuts.
+            setNativeLeftHandFreezePlaneContextActive(
+                nativeHandsOnlyFreezePlaneContextEnabled &&
+                hasLiveLocalPlayerForHands);
             if (!m_NativeViewmodelHandsOnly)
             {
                 resetNativeLeftHandFreezeForMapChange();
@@ -1866,13 +1870,13 @@ void VR::Update()
             {
                 m_NativeViewmodelLeftHandFreezePending = false;
                 m_NativeViewmodelLeftHandFreezeDueTime = {};
-                if (hasLiveLocalPlayerWithWeapon)
+                if (hasLiveLocalPlayerForHands)
                 {
                     m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev = true;
                     m_NativeViewmodelLeftHandFreezeReady.store(1u, std::memory_order_release);
                 }
             }
-            if (nativeLeftHandFreezeEnabled && hasLiveLocalPlayerWithWeapon)
+            if (nativeLeftHandFreezeEnabled && hasLiveLocalPlayerForHands)
             {
                 if (!m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev)
                 {
@@ -1997,6 +2001,7 @@ void VR::Update()
 
     UpdateTracking();
     UpdateNativeViewmodelLeftHandOpenVRFingerCurls();
+    UpdateNativeViewmodelRightHandOpenVRFingerCurls();
     UpdateKillSoundFeedback();
     UpdateMeleeHitHaptics();
     PumpSpeechToTextCapture();
@@ -2450,7 +2455,10 @@ bool VR::QueueVrHandsDrawForEye(
     int eyeIndex,
     VrHandDrawPass drawPass)
 {
-    const bool drawGloves = m_VrHandsEnabled && m_Input;
+    const bool emptyHandsPlaceholderActive =
+        m_ManualInventoryEmptyHandsActive.load(std::memory_order_acquire);
+    const bool drawGloves =
+        m_VrHandsEnabled && !emptyHandsPlaceholderActive && m_Input;
     const bool calibrationOverlayActive =
         m_MagazineInteractionCalibrationOverlayActive.load(std::memory_order_relaxed);
     const bool drawMagazineDebugBoxes =

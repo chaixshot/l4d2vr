@@ -858,6 +858,7 @@ public:
 	bool m_HasThrowArc = false;
 	bool m_LastAimWasThrowable = false;
 	bool m_ManualThrowEnabled = false;
+	std::atomic<bool> m_ManualInventoryEmptyHandsActive{ false };
 	// CreateMove publishes whether the local player has a throwable equipped and
 	// whether its final IN_ATTACK state is held. DrawModelExecute consumes this
 	// atomically so queued rendering can freeze only animation-local viewmodel
@@ -1358,6 +1359,8 @@ public:
 	Vector m_NativeViewmodelHandsOnlyRightFreezePoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	Vector m_NativeViewmodelLeftHandPoseOffsetMeters = { 0.0f, 0.0f, 0.0f };
 	Vector m_NativeViewmodelLeftHandPoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
+	Vector m_NativeViewmodelRightHandPoseOffsetMeters = { 0.0f, 0.0f, 0.0f };
+	Vector m_NativeViewmodelRightHandPoseRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	bool m_NativeViewmodelLeftHandOpenVRSkeleton = true;
 	float m_NativeViewmodelLeftHandOpenVRCurlStrength = 1.0f;
 	float m_NativeViewmodelLeftHandOpenVRCurlScale = 1.0f;
@@ -1366,12 +1369,18 @@ public:
 	std::array<float, 5> m_NativeViewmodelLeftHandOpenVRInitialCurl = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 	Vector m_NativeViewmodelLeftHandOpenVRThumbRootOffsetUnits = { 0.0f, 0.0f, 0.0f };
 	Vector m_NativeViewmodelLeftHandOpenVRThumbRootRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
+	Vector m_NativeViewmodelRightHandOpenVRThumbRootOffsetUnits = { 0.0f, 0.0f, 0.0f };
+	Vector m_NativeViewmodelRightHandOpenVRThumbRootRotationOffsetDeg = { 0.0f, 0.0f, 0.0f };
 	vr::VRActionHandle_t m_NativeViewmodelLeftHandOpenVRAction = vr::k_ulInvalidActionHandle;
 	vr::VRActionHandle_t m_NativeViewmodelRightHandOpenVRAction = vr::k_ulInvalidActionHandle;
 	mutable std::mutex m_NativeViewmodelLeftHandOpenVRFingerCurlMutex;
 	std::array<float, 5> m_NativeViewmodelLeftHandOpenVRFingerCurls = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 	std::chrono::steady_clock::time_point m_NativeViewmodelLeftHandOpenVRFingerCurlsAt{};
 	bool m_NativeViewmodelLeftHandOpenVRFingerCurlsValid = false;
+	mutable std::mutex m_NativeViewmodelRightHandOpenVRFingerCurlMutex;
+	std::array<float, 5> m_NativeViewmodelRightHandOpenVRFingerCurls = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+	std::chrono::steady_clock::time_point m_NativeViewmodelRightHandOpenVRFingerCurlsAt{};
+	bool m_NativeViewmodelRightHandOpenVRFingerCurlsValid = false;
 	bool m_NativeViewmodelLeftHandFreezeHadLocalPlayerPrev = false;
 	bool m_NativeViewmodelLeftHandFreezePending = false;
 	std::chrono::steady_clock::time_point m_NativeViewmodelLeftHandFreezeDueTime{};
@@ -3345,6 +3354,8 @@ public:
 	bool GetMagazineInteractionCalibrationSnapshot(MagazineInteractionCalibrationSnapshot& outSnapshot) const;
 	void UpdateNativeViewmodelLeftHandOpenVRFingerCurls();
 	bool GetNativeViewmodelLeftHandOpenVRFingerCurls(std::array<float, 5>& outCurls) const;
+	void UpdateNativeViewmodelRightHandOpenVRFingerCurls();
+	bool GetNativeViewmodelRightHandOpenVRFingerCurls(std::array<float, 5>& outCurls) const;
 	bool ReadMagazineInteractionFingerCurls(std::array<float, 5>& outCurls);
 	bool UpdateMagazineInteraction(
 		C_BasePlayer* localPlayer,

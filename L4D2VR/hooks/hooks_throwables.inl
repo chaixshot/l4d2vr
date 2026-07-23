@@ -51,12 +51,40 @@ namespace
 	{
 		switch (weaponId)
 		{
+		case C_WeaponCSBase::WeaponID::PISTOL: return "pistol";
+		case C_WeaponCSBase::WeaponID::UZI: return "smg";
+		case C_WeaponCSBase::WeaponID::PUMPSHOTGUN: return "pumpshotgun";
+		case C_WeaponCSBase::WeaponID::AUTOSHOTGUN: return "autoshotgun";
+		case C_WeaponCSBase::WeaponID::M16A1: return "rifle";
+		case C_WeaponCSBase::WeaponID::HUNTING_RIFLE: return "hunting_rifle";
+		case C_WeaponCSBase::WeaponID::MAC10: return "silenced_smg";
+		case C_WeaponCSBase::WeaponID::SHOTGUN_CHROME: return "chrome_shotgun";
+		case C_WeaponCSBase::WeaponID::SCAR: return "desert_rifle";
+		case C_WeaponCSBase::WeaponID::SNIPER_MILITARY: return "military_sniper";
+		case C_WeaponCSBase::WeaponID::SPAS: return "spas";
+		case C_WeaponCSBase::WeaponID::FIRST_AID_KIT: return "first_aid_kit";
+		case C_WeaponCSBase::WeaponID::PAIN_PILLS: return "pain_pills";
 		case C_WeaponCSBase::WeaponID::GASCAN: return "gascan";
 		case C_WeaponCSBase::WeaponID::PROPANE_TANK: return "propane_tank";
 		case C_WeaponCSBase::WeaponID::OXYGEN_TANK: return "oxygen_tank";
+		case C_WeaponCSBase::WeaponID::MELEE: return "melee";
+		case C_WeaponCSBase::WeaponID::CHAINSAW: return "chainsaw";
+		case C_WeaponCSBase::WeaponID::GRENADE_LAUNCHER: return "grenade_launcher";
+		case C_WeaponCSBase::WeaponID::AMMO_PACK: return "ammo_pack";
+		case C_WeaponCSBase::WeaponID::ADRENALINE: return "adrenaline";
+		case C_WeaponCSBase::WeaponID::DEFIBRILLATOR: return "defibrillator";
+		case C_WeaponCSBase::WeaponID::AK47: return "ak47";
 		case C_WeaponCSBase::WeaponID::GNOME_CHOMPSKI: return "gnome";
 		case C_WeaponCSBase::WeaponID::COLA_BOTTLES: return "cola_bottles";
 		case C_WeaponCSBase::WeaponID::FIREWORKS_BOX: return "fireworks_box";
+		case C_WeaponCSBase::WeaponID::INCENDIARY_AMMO: return "incendiary_ammo";
+		case C_WeaponCSBase::WeaponID::FRAG_AMMO: return "explosive_ammo";
+		case C_WeaponCSBase::WeaponID::MAGNUM: return "magnum";
+		case C_WeaponCSBase::WeaponID::MP5: return "mp5";
+		case C_WeaponCSBase::WeaponID::SG552: return "sg552";
+		case C_WeaponCSBase::WeaponID::AWP: return "awp";
+		case C_WeaponCSBase::WeaponID::SCOUT: return "scout";
+		case C_WeaponCSBase::WeaponID::M60: return "m60";
 		default: return "unknown";
 		}
 	}
@@ -267,11 +295,14 @@ namespace
 			return false;
 		const bool projectileThrow = ManualThrowWeaponIdIsThrowable(weaponId);
 		const bool carryableThrow = ManualThrowWeaponIdIsCarryable(weaponId);
-		if (!owner || !sourceWeapon || (!projectileThrow && !carryableThrow))
+		const bool inventoryDropThrow = ManualInventoryThrowWeaponIdRequiresCustomDrop(weaponId);
+		if (!owner || !sourceWeapon || (!projectileThrow && !carryableThrow && !inventoryDropThrow))
 			return false;
 		if (projectileThrow && !Hooks::s_ManualThrowHooksReady)
 			return false;
 		if (carryableThrow && !ManualCarryThrowBackendIsReady(weaponId))
+			return false;
+		if (inventoryDropThrow && !ManualInventoryThrowBackendIsReady(weaponId))
 			return false;
 
 		Vector measuredVelocity{};
@@ -310,6 +341,7 @@ namespace
 
 		ManualThrowPending pending{};
 		pending.valid = true;
+		pending.inventoryDrop = inventoryDropThrow;
 		pending.weaponId = weaponId;
 		pending.releaseTick = releaseTick;
 		pending.owner = owner;
@@ -502,6 +534,10 @@ namespace
 		Vector launchDirection{};
 		float launchSpeed = 0.0f;
 		float knockbackFraction = 0.25f;
+		bool meleeDamageImpact = false;
+		int maxPenetrations = 1;
+		int penetrationCount = 0;
+		std::array<void*, 6> hitTargets{};
 		bool collisionPending = false;
 		void* collisionTarget = nullptr;
 		void* collisionTargetVtable = nullptr;
@@ -767,9 +803,13 @@ namespace
 	class ManualCarryImpactInfectedTraceFilter final : public CTraceFilter
 	{
 	public:
-		ManualCarryImpactInfectedTraceFilter(IHandleEntity* thrownEntity, IHandleEntity* owner)
+		ManualCarryImpactInfectedTraceFilter(
+			IHandleEntity* thrownEntity,
+			IHandleEntity* owner,
+			const ManualCarryImpactTrack* track)
 			: CTraceFilter(thrownEntity, 0)
 			, m_Owner(owner)
+			, m_Track(track)
 		{
 		}
 
@@ -778,6 +818,14 @@ namespace
 			(void)contentsMask;
 			if (!candidate || candidate == m_pPassEnt || candidate == m_Owner)
 				return false;
+			if (m_Track)
+			{
+				for (void* hitTarget : m_Track->hitTargets)
+				{
+					if (hitTarget == candidate)
+						return false;
+				}
+			}
 
 			int team = 0;
 			unsigned char lifeState = 1;
@@ -794,6 +842,7 @@ namespace
 
 	private:
 		IHandleEntity* m_Owner = nullptr;
+		const ManualCarryImpactTrack* m_Track = nullptr;
 	};
 
 	class ManualCarryImpactWorldOnlyTraceFilter final : public CTraceFilter
@@ -1182,6 +1231,106 @@ namespace
 		return ManualCarryThrowTeleportDroppedEntity(track.entity, contactMove);
 	}
 
+	static bool ManualInventoryImpactContinueThrough(
+		ManualCarryImpactTrack& track,
+		const Vector& contactOrigin)
+	{
+		Vector direction = track.launchDirection;
+		if (VectorNormalize(direction) <= 0.0001f)
+			direction = Vector(1.0f, 0.0f, 0.0f);
+
+		ManualThrowPending continuation{};
+		continuation.origin = contactOrigin + direction * 28.0f;
+		continuation.velocity = direction * (std::max)(track.launchSpeed, 120.0f);
+		const bool moved = ManualCarryThrowTeleportDroppedEntity(track.entity, continuation);
+		if (moved)
+			track.previousOrigin = continuation.origin;
+		return moved;
+	}
+
+	static bool ManualInventoryImpactHasHitTarget(
+		const ManualCarryImpactTrack& track,
+		void* target)
+	{
+		return std::find(track.hitTargets.begin(), track.hitTargets.end(), target) !=
+			track.hitTargets.end();
+	}
+
+	static bool ManualInventoryImpactApplyMeleeDamage(
+		ManualCarryImpactTrack& track,
+		void* target,
+		const Vector& impactOrigin,
+		const char* detectionPath)
+	{
+		if (!target || !track.owner || ManualInventoryImpactHasHitTarget(track, target) ||
+			!Hooks::m_Game || !Hooks::m_Game->m_Offsets ||
+			!Hooks::m_Game->m_Offsets->CTakeDamageInfoCtor_Server.valid ||
+			!Hooks::m_Game->m_Offsets->CBaseEntity_TakeDamage_Server.valid)
+		{
+			return false;
+		}
+
+		// L4D2's CTakeDamageInfo is 0x60 bytes. Construct it with the game's own
+		// constructor so EHANDLE fields and private defaults stay ABI-correct, then
+		// call the non-virtual CBaseEntity::TakeDamage wrapper. A full melee hit is
+		// 250 base damage; throw strength controls penetration count, not damage.
+		alignas(16) std::array<unsigned char, 0x60> damageInfo{};
+		using DamageInfoCtorFn = void(__thiscall*)(void*, void*, void*, float, int, int);
+		using TakeDamageFn = int(__thiscall*)(void*, const void*);
+		auto constructDamageInfo = reinterpret_cast<DamageInfoCtorFn>(
+			Hooks::m_Game->m_Offsets->CTakeDamageInfoCtor_Server.address);
+		auto takeDamage = reinterpret_cast<TakeDamageFn>(
+			Hooks::m_Game->m_Offsets->CBaseEntity_TakeDamage_Server.address);
+		if (!constructDamageInfo || !takeDamage)
+			return false;
+
+		constexpr float kFullMeleeDamage = 250.0f;
+		constexpr int kDamageClub = (1 << 7);
+		int result = 0;
+#ifdef _MSC_VER
+		__try
+		{
+#endif
+			constructDamageInfo(
+				damageInfo.data(),
+				track.owner,
+				track.owner,
+				kFullMeleeDamage,
+				kDamageClub,
+				0);
+			Vector damageForce = track.launchDirection * (kFullMeleeDamage * 8.0f);
+			*reinterpret_cast<Vector*>(damageInfo.data() + 0x00) = damageForce;
+			*reinterpret_cast<Vector*>(damageInfo.data() + 0x0C) = impactOrigin;
+			*reinterpret_cast<Vector*>(damageInfo.data() + 0x18) = impactOrigin;
+			result = takeDamage(target, damageInfo.data());
+#ifdef _MSC_VER
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			Game::logMsg(
+				"[VR][ManualInventoryImpact] damage exception path=%s type=%s target=%p",
+				detectionPath ? detectionPath : "unknown",
+				ManualCarryThrowWeaponName(track.weaponId),
+				target);
+			return false;
+		}
+#endif
+
+		if (track.penetrationCount < static_cast<int>(track.hitTargets.size()))
+			track.hitTargets[static_cast<size_t>(track.penetrationCount)] = target;
+		++track.penetrationCount;
+		Game::logMsg(
+			"[VR][ManualInventoryImpact] melee-damage path=%s type=%s target=%p damage=%.0f result=%d penetration=%d/%d",
+			detectionPath ? detectionPath : "unknown",
+			ManualCarryThrowWeaponName(track.weaponId),
+			target,
+			kFullMeleeDamage,
+			result,
+			track.penetrationCount,
+			track.maxPenetrations);
+		return true;
+	}
+
 	static bool ManualCarryImpactApplyTrackedTarget(
 		ManualCarryImpactTrack& track,
 		void* target,
@@ -1206,6 +1355,15 @@ namespace
 			areaOrigin = *contactOrigin;
 		else if (!ManualCarryImpactReadOrigin(target, areaOrigin))
 			areaOrigin = track.previousOrigin;
+
+		if (track.meleeDamageImpact)
+		{
+			return ManualInventoryImpactApplyMeleeDamage(
+				track,
+				target,
+				areaOrigin,
+				detectionPath);
+		}
 
 		float effectRadius = 0.0f;
 		int commonCount = 0;
@@ -1267,6 +1425,11 @@ namespace
 		void* target = event->entities[index == 0 ? 1 : 0];
 		if (!target || target == matchingTrack->entity || target == matchingTrack->owner)
 			return;
+		if (matchingTrack->meleeDamageImpact &&
+			ManualInventoryImpactHasHitTarget(*matchingTrack, target))
+		{
+			return;
+		}
 
 		int team = 0;
 		unsigned char lifeState = 1;
@@ -1348,14 +1511,20 @@ namespace
 		selected->launchDirection = launchDirection;
 		selected->launchSpeed = launchSpeed;
 		selected->knockbackFraction = knockbackFraction;
+		selected->meleeDamageImpact = ManualInventoryThrowWeaponIdDoesMeleeDamage(pending.weaponId);
+		selected->maxPenetrations = selected->meleeDamageImpact
+			? std::clamp(1 + static_cast<int>(std::floor(normalizedStrength * 5.0f + 0.0001f)), 1, 6)
+			: 1;
 		selected->armedAt = std::chrono::steady_clock::now();
 
 		Game::logMsg(
-			"[VR][ManualCarryImpact] armed type=%s entity=%p speed=%.1f strength=%.0f%%",
+			"[VR][ManualCarryImpact] armed type=%s entity=%p speed=%.1f strength=%.0f%% damage=%d penetrations=%d",
 			ManualCarryThrowWeaponName(pending.weaponId),
 			entity,
 			launchSpeed,
-			knockbackFraction * 100.0f);
+			knockbackFraction * 100.0f,
+			selected->meleeDamageImpact ? 1 : 0,
+			selected->maxPenetrations);
 	}
 
 	static void ManualCarryImpactUpdate()
@@ -1413,8 +1582,21 @@ namespace
 					nullptr,
 					"physics-collision"))
 				{
-					track = {};
-					continue;
+					if (track.meleeDamageImpact &&
+						track.penetrationCount < track.maxPenetrations)
+					{
+						Vector contactOrigin = track.previousOrigin;
+						ManualCarryImpactReadOrigin(track.entity, contactOrigin);
+						ManualInventoryImpactContinueThrough(track, contactOrigin);
+					}
+					else
+					{
+						Vector contactOrigin = track.previousOrigin;
+						ManualCarryImpactReadOrigin(track.entity, contactOrigin);
+						ManualCarryImpactResolveSweptPropContact(track, contactOrigin);
+						track = {};
+						continue;
+					}
 				}
 				track.collisionPending = false;
 				track.collisionTarget = nullptr;
@@ -1452,7 +1634,8 @@ namespace
 			ray.Init(track.previousOrigin, currentOrigin, traceMins, traceMaxs);
 			ManualCarryImpactInfectedTraceFilter filter(
 				reinterpret_cast<IHandleEntity*>(track.entity),
-				reinterpret_cast<IHandleEntity*>(track.owner));
+				reinterpret_cast<IHandleEntity*>(track.owner),
+				&track);
 			CGameTrace trace{};
 			TraceRoomscaleServerRay(
 				Hooks::m_Game->m_EngineTraceServer,
@@ -1466,8 +1649,6 @@ namespace
 			if (!target || target == track.entity || target == track.owner)
 				continue;
 
-			const bool propContactResolved =
-				ManualCarryImpactResolveSweptPropContact(track, trace.endpos);
 			if (ManualCarryImpactApplyTrackedTarget(
 				track,
 				target,
@@ -1475,19 +1656,423 @@ namespace
 				&trace.endpos,
 				"trace-fallback"))
 			{
+				const bool shouldPenetrate = track.meleeDamageImpact &&
+					track.penetrationCount < track.maxPenetrations;
+				const bool propContactResolved = shouldPenetrate
+					? ManualInventoryImpactContinueThrough(track, trace.endpos)
+					: ManualCarryImpactResolveSweptPropContact(track, trace.endpos);
 				Game::logMsg(
-					"[VR][ManualCarryImpact] swept contact propResponse=%s type=%s entity=%p contact=(%.1f %.1f %.1f)",
-					propContactResolved ? "rebound" : "failed",
+					"[VR][ManualCarryImpact] swept contact propResponse=%s type=%s entity=%p contact=(%.1f %.1f %.1f) penetration=%d/%d",
+					propContactResolved ? (shouldPenetrate ? "penetrate" : "rebound") : "failed",
 					ManualCarryThrowWeaponName(track.weaponId),
 					track.entity,
 					trace.endpos.x,
 					trace.endpos.y,
-					trace.endpos.z);
+					trace.endpos.z,
+					track.penetrationCount,
+					track.maxPenetrations);
 				// Each carried prop creates one native shove pulse. This prevents a
 				// resting or bouncing prop from repeatedly staggering the same group.
-				track = {};
+				if (!shouldPenetrate)
+					track = {};
 			}
 		}
+	}
+
+	struct ManualEmptyHandsInventoryState
+	{
+		bool readable = false;
+		bool hasDummy = false;
+		bool hasActualItem = false;
+	};
+
+	static bool ManualEmptyHandsPlaceholderIsTrackedDummy(
+		const Player& player,
+		void* weapon)
+	{
+		return weapon &&
+			weapon == player.manualEmptyHandsDummyPistol &&
+			ManualThrowReadEntityVtable(weapon) == player.manualEmptyHandsDummyPistolVtable;
+	}
+
+	static void ManualEmptyHandsPlaceholderPublish(int playerIndex, bool active)
+	{
+		if (!Hooks::m_VR || !Hooks::m_Game || !Hooks::m_Game->m_EngineClient ||
+			Hooks::m_Game->m_EngineClient->GetLocalPlayer() != playerIndex)
+		{
+			return;
+		}
+
+		const bool previous = Hooks::m_VR->m_ManualInventoryEmptyHandsActive.exchange(
+			active,
+			std::memory_order_acq_rel);
+		if (previous != active)
+		{
+			Game::logMsg(
+				"[VR][ManualEmptyHands] placeholder render state active=%d",
+				active ? 1 : 0);
+		}
+	}
+
+	static bool ManualEmptyHandsPlaceholderOwnerIsLiveSurvivor(void* ownerPlayer)
+	{
+		if (!ownerPlayer)
+			return false;
+
+		const unsigned char* base = reinterpret_cast<const unsigned char*>(ownerPlayer);
+		constexpr size_t kServerLifeStateOffset = 0xF0;
+		constexpr size_t kServerTeamNumOffset = 0x238;
+		if (!IsReadableMemoryRange(base + kServerLifeStateOffset, sizeof(unsigned char)) ||
+			!IsReadableMemoryRange(base + kServerTeamNumOffset, sizeof(int)))
+		{
+			return false;
+		}
+
+		unsigned char lifeState = 1;
+		int teamNum = 0;
+#ifdef _MSC_VER
+		__try
+		{
+#endif
+			lifeState = *reinterpret_cast<const unsigned char*>(
+				base + kServerLifeStateOffset);
+			teamNum = *reinterpret_cast<const int*>(base + kServerTeamNumOffset);
+#ifdef _MSC_VER
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+#endif
+		return lifeState == 0 && teamNum == 2;
+	}
+
+	static ManualEmptyHandsInventoryState ManualEmptyHandsPlaceholderScanInventory(
+		void* ownerPlayer,
+		const Player& player)
+	{
+		ManualEmptyHandsInventoryState result{};
+		if (!ownerPlayer)
+			return result;
+
+#ifdef _MSC_VER
+		__try
+		{
+#endif
+			void** ownerVtable = *reinterpret_cast<void***>(ownerPlayer);
+			if (!ownerVtable)
+				return result;
+
+			using WeaponGetSlotFn = void* (__thiscall*)(void*, int);
+			auto weaponGetSlot = *reinterpret_cast<WeaponGetSlotFn*>(
+				reinterpret_cast<unsigned char*>(ownerVtable) + 0x480);
+			if (!weaponGetSlot)
+				return result;
+
+			result.readable = true;
+			for (int slot = 0; slot < 6; ++slot)
+			{
+				void* weapon = weaponGetSlot(ownerPlayer, slot);
+				if (!weapon)
+					continue;
+				if (ManualEmptyHandsPlaceholderIsTrackedDummy(player, weapon))
+					result.hasDummy = true;
+				else
+					result.hasActualItem = true;
+			}
+#ifdef _MSC_VER
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			result = {};
+		}
+#endif
+		return result;
+	}
+
+	static void ManualEmptyHandsPlaceholderForgetDummy(Player& player)
+	{
+		player.manualEmptyHandsDummyPistol = nullptr;
+		player.manualEmptyHandsDummyPistolVtable = nullptr;
+	}
+
+	static bool ManualEmptyHandsPlaceholderRemoveDummy(
+		int playerIndex,
+		void* ownerPlayer,
+		Player& player,
+		const char* reason)
+	{
+		void* dummy = player.manualEmptyHandsDummyPistol;
+		const bool dummyStillValid = ManualEmptyHandsPlaceholderIsTrackedDummy(player, dummy);
+		ManualEmptyHandsPlaceholderForgetDummy(player);
+		if (!dummyStillValid || !ownerPlayer || !Hooks::m_Game ||
+			!Hooks::m_Game->m_Offsets ||
+			!Hooks::m_Game->m_Offsets->ManualEmptyHandsRemovePlayerItem.valid ||
+			!Hooks::m_Game->m_Offsets->ManualEmptyHandsUtilRemove.valid)
+		{
+			return false;
+		}
+
+		using RemovePlayerItemFn = bool(__thiscall*)(void*, void*);
+		using UtilRemoveFn = void(__cdecl*)(void*);
+		auto removePlayerItem = reinterpret_cast<RemovePlayerItemFn>(
+			Hooks::m_Game->m_Offsets->ManualEmptyHandsRemovePlayerItem.address);
+		auto utilRemove = reinterpret_cast<UtilRemoveFn>(
+			Hooks::m_Game->m_Offsets->ManualEmptyHandsUtilRemove.address);
+		bool detached = false;
+#ifdef _MSC_VER
+		__try
+		{
+#endif
+			detached = removePlayerItem(ownerPlayer, dummy);
+			utilRemove(dummy);
+#ifdef _MSC_VER
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			Game::logMsg(
+				"[VR][ManualEmptyHands] placeholder remove exception player=%d dummy=%p reason=%s",
+				playerIndex,
+				dummy,
+				reason ? reason : "unknown");
+			return false;
+		}
+#endif
+		Game::logMsg(
+			"[VR][ManualEmptyHands] placeholder removed player=%d dummy=%p detached=%d reason=%s",
+			playerIndex,
+			dummy,
+			detached ? 1 : 0,
+			reason ? reason : "unknown");
+		return true;
+	}
+
+	static bool ManualEmptyHandsPlaceholderGiveDummy(
+		int playerIndex,
+		void* ownerPlayer,
+		Player& player)
+	{
+		if (!ownerPlayer || player.manualEmptyHandsDummyPistol ||
+			!Hooks::m_Game || !Hooks::m_Game->m_Offsets ||
+			!Hooks::m_Game->m_Offsets->ManualEmptyHandsRemovePlayerItem.valid ||
+			!Hooks::m_Game->m_Offsets->ManualEmptyHandsUtilRemove.valid)
+		{
+			return false;
+		}
+
+		void* dummy = nullptr;
+#ifdef _MSC_VER
+		__try
+		{
+#endif
+			void** ownerVtable = *reinterpret_cast<void***>(ownerPlayer);
+			if (!ownerVtable)
+				return false;
+
+			// CTerrorPlayer's GiveNamedItem virtual is slot 0x6BC in the current
+			// server build. This is the same native path used by survivor spawn.
+			using GiveNamedItemFn = void* (__thiscall*)(
+				void*,
+				const char*,
+				int,
+				bool,
+				const Vector*);
+			auto giveNamedItem = *reinterpret_cast<GiveNamedItemFn*>(
+				reinterpret_cast<unsigned char*>(ownerVtable) + 0x6BC);
+			if (!giveNamedItem)
+				return false;
+			dummy = giveNamedItem(ownerPlayer, "weapon_pistol", 0, true, nullptr);
+#ifdef _MSC_VER
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			dummy = nullptr;
+		}
+#endif
+		void* dummyVtable = ManualThrowReadEntityVtable(dummy);
+		if (!dummy || !dummyVtable)
+		{
+			Game::logMsg(
+				"[VR][ManualEmptyHands] placeholder give failed player=%d",
+				playerIndex);
+			return false;
+		}
+
+		player.manualEmptyHandsDummyPistol = dummy;
+		player.manualEmptyHandsDummyPistolVtable = dummyVtable;
+		Game::logMsg(
+			"[VR][ManualEmptyHands] placeholder pistol given player=%d dummy=%p",
+			playerIndex,
+			dummy);
+		return true;
+	}
+
+	static void ManualEmptyHandsPlaceholderPrepareForUse(
+		int playerIndex,
+		void* ownerPlayer,
+		Player& player,
+		bool useDown)
+	{
+		player.manualEmptyHandsPlaceholderUseDown = useDown;
+		if (player.manualEmptyHandsPlaceholderArmed && useDown &&
+			player.manualEmptyHandsDummyPistol)
+		{
+			// Remove the dummy before Source handles IN_USE. In particular, a real
+			// pistol must see an empty secondary slot instead of upgrading the dummy
+			// to a dual-pistol entity that cannot be distinguished after the pickup.
+			ManualEmptyHandsPlaceholderRemoveDummy(
+				playerIndex,
+				ownerPlayer,
+				player,
+				"use/pickup");
+		}
+	}
+
+	static void ManualEmptyHandsPlaceholderUpdate(
+		int playerIndex,
+		void* ownerPlayer,
+		bool completedManualThrow)
+	{
+		if (!Hooks::m_Game || !Hooks::m_Game->IsValidPlayerIndex(playerIndex) ||
+			!ownerPlayer)
+		{
+			ManualEmptyHandsPlaceholderPublish(playerIndex, false);
+			return;
+		}
+
+		Player& player = Hooks::m_Game->m_PlayersVRInfo[static_cast<size_t>(playerIndex)];
+		if (!player.isUsingVR || !ManualEmptyHandsPlaceholderOwnerIsLiveSurvivor(ownerPlayer))
+		{
+			ManualEmptyHandsPlaceholderRemoveDummy(
+				playerIndex,
+				ownerPlayer,
+				player,
+				"inactive-player");
+			player.manualEmptyHandsPlaceholderArmed = false;
+			player.manualEmptyHandsPlaceholderUseDown = false;
+			ManualEmptyHandsPlaceholderPublish(playerIndex, false);
+			return;
+		}
+
+		if (player.manualEmptyHandsDummyPistol &&
+			!ManualEmptyHandsPlaceholderIsTrackedDummy(
+				player,
+				player.manualEmptyHandsDummyPistol))
+		{
+			Game::logMsg(
+				"[VR][ManualEmptyHands] placeholder entity expired player=%d dummy=%p",
+				playerIndex,
+				player.manualEmptyHandsDummyPistol);
+			ManualEmptyHandsPlaceholderForgetDummy(player);
+		}
+
+		ManualEmptyHandsInventoryState inventory =
+			ManualEmptyHandsPlaceholderScanInventory(ownerPlayer, player);
+		if (!inventory.readable)
+		{
+			ManualEmptyHandsPlaceholderPublish(
+				playerIndex,
+				player.manualEmptyHandsPlaceholderArmed);
+			return;
+		}
+
+		if (inventory.hasActualItem)
+		{
+			ManualEmptyHandsPlaceholderRemoveDummy(
+				playerIndex,
+				ownerPlayer,
+				player,
+				"actual-item-acquired");
+			player.manualEmptyHandsPlaceholderArmed = false;
+			player.manualEmptyHandsPlaceholderUseDown = false;
+			ManualEmptyHandsPlaceholderPublish(playerIndex, false);
+			return;
+		}
+
+		if (player.manualEmptyHandsDummyPistol && !inventory.hasDummy)
+		{
+			ManualEmptyHandsPlaceholderRemoveDummy(
+				playerIndex,
+				ownerPlayer,
+				player,
+				"dummy-left-inventory");
+		}
+
+		if (completedManualThrow)
+			player.manualEmptyHandsPlaceholderArmed = true;
+
+		if (player.manualEmptyHandsPlaceholderArmed &&
+			!player.manualEmptyHandsPlaceholderUseDown &&
+			!player.manualEmptyHandsDummyPistol)
+		{
+			ManualEmptyHandsPlaceholderGiveDummy(playerIndex, ownerPlayer, player);
+		}
+
+		ManualEmptyHandsPlaceholderPublish(
+			playerIndex,
+			player.manualEmptyHandsPlaceholderArmed);
+	}
+
+	static bool ManualInventoryThrowExecutePendingDrop(
+		int playerIndex,
+		void* ownerPlayer)
+	{
+		if (!Hooks::m_Game || !Hooks::m_Game->m_Offsets ||
+			!Hooks::m_Game->m_Offsets->ManualInventoryWeaponDrop.valid ||
+			!Hooks::m_Game->IsValidPlayerIndex(playerIndex) || !ownerPlayer)
+		{
+			return false;
+		}
+
+		Player& player = Hooks::m_Game->m_PlayersVRInfo[static_cast<size_t>(playerIndex)];
+		ManualThrowPending& pending = player.manualThrowPending;
+		if (!player.isUsingVR || !pending.valid || !pending.inventoryDrop ||
+			pending.inventoryDropExecuted || pending.owner != ownerPlayer ||
+			!pending.sourceWeapon ||
+			ManualThrowReadEntityVtable(pending.sourceWeapon) != pending.sourceWeaponVtable)
+		{
+			return false;
+		}
+
+		// The similarly named CWeaponCarry::DropToPhysicsProp routine is only valid
+		// for carry-weapon subclasses: it calls carry-only vtable entries and faults
+		// when handed a gun, melee weapon, pack, or medicine. Weapon_Drop is the
+		// common CBaseCombatCharacter path used by arbitrary inventory weapons.
+		using WeaponDropFn = void(__thiscall*)(
+			void*,
+			void*,
+			const Vector*,
+			const Vector*);
+		auto weaponDrop = reinterpret_cast<WeaponDropFn>(
+			Hooks::m_Game->m_Offsets->ManualInventoryWeaponDrop.address);
+#ifdef _MSC_VER
+		__try
+		{
+#endif
+			weaponDrop(ownerPlayer, pending.sourceWeapon, nullptr, &pending.velocity);
+#ifdef _MSC_VER
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			Game::logMsg(
+				"[VR][ManualInventoryThrow] native drop exception player=%d type=%s source=%p",
+				playerIndex,
+				ManualCarryThrowWeaponName(pending.weaponId),
+				pending.sourceWeapon);
+			pending = {};
+			return false;
+		}
+#endif
+		pending.inventoryDropExecuted = true;
+		Game::logMsg(
+			"[VR][ManualInventoryThrow] native weapon drop player=%d type=%s source=%p velocity=(%.1f %.1f %.1f)",
+			playerIndex,
+			ManualCarryThrowWeaponName(pending.weaponId),
+			pending.sourceWeapon,
+			pending.velocity.x,
+			pending.velocity.y,
+			pending.velocity.z);
+		return true;
 	}
 
 	static bool ManualCarryThrowApplyPendingAfterWeaponDetached(
@@ -1506,7 +2091,7 @@ namespace
 		ManualThrowPending& pending = player.manualThrowPending;
 		if (!activeWeaponReadSucceeded)
 		{
-			if (pending.valid && ManualThrowWeaponIdIsCarryable(pending.weaponId) &&
+			if (pending.valid && ManualInventoryThrowWeaponIdIsSupported(pending.weaponId) &&
 				pending.owner == ownerPlayer && !pending.velocityMismatchLogged)
 			{
 				pending.velocityMismatchLogged = true;
@@ -1520,7 +2105,7 @@ namespace
 		}
 
 		if (!player.isUsingVR || !pending.valid ||
-			!ManualThrowWeaponIdIsCarryable(pending.weaponId) ||
+			!ManualInventoryThrowWeaponIdIsSupported(pending.weaponId) ||
 			pending.owner != ownerPlayer || !pending.sourceWeapon)
 		{
 			return false;
