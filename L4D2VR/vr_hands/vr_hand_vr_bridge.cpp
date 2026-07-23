@@ -24,8 +24,6 @@ VR::~VR() = default;
 
 namespace
 {
-    constexpr float kMagazineInteractionEmptyClipAutoEjectFreezeDelaySeconds = 0.18f;
-
     std::string MagazineInteractionPrepareConsoleSoundSample(const std::string& rawSample);
     std::string MagazineInteractionPrepareSoundSamplePath(const std::string& rawSample);
     bool MagazineInteractionReprojectScenePointToViewmodelLayer(
@@ -2176,6 +2174,50 @@ namespace
             return true;
         default:
             return false;
+        }
+    }
+
+    float GetMagazineInteractionEmptyClipAutoEjectFreezeDelaySeconds(C_WeaponCSBase::WeaponID weaponId)
+    {
+        switch (weaponId)
+        {
+        case C_WeaponCSBase::WeaponID::PISTOL:
+            return 0.12f;
+        case C_WeaponCSBase::WeaponID::MAGNUM:
+            return 0.12f;
+        case C_WeaponCSBase::WeaponID::UZI:
+            return 0.15f;
+        case C_WeaponCSBase::WeaponID::MAC10:
+            return 0.15f;
+        case C_WeaponCSBase::WeaponID::MP5:
+            return 0.15f;
+        case C_WeaponCSBase::WeaponID::M16A1:
+            return 0.08f;
+        case C_WeaponCSBase::WeaponID::AK47:
+            return 0.08f;
+        case C_WeaponCSBase::WeaponID::SCAR:
+            return 0.08f;
+        case C_WeaponCSBase::WeaponID::SG552:
+            return 0.005f;
+            return 0.0f;
+        case C_WeaponCSBase::WeaponID::SNIPER_MILITARY:
+            return 0.0f;
+        case C_WeaponCSBase::WeaponID::AWP:
+            return 0.0f;
+        case C_WeaponCSBase::WeaponID::SCOUT:
+            return 0.0f;
+        case C_WeaponCSBase::WeaponID::M60:
+            return 0.0f;
+        case C_WeaponCSBase::WeaponID::PUMPSHOTGUN:
+            return 0.25f;
+        case C_WeaponCSBase::WeaponID::SHOTGUN_CHROME:
+            return 0.25f;
+        case C_WeaponCSBase::WeaponID::AUTOSHOTGUN:
+            return 0.25f;
+        case C_WeaponCSBase::WeaponID::SPAS:
+            return 0.25f;
+        default:
+            return 0.18f;
         }
     }
 
@@ -6273,7 +6315,7 @@ bool VR::UpdateMagazineInteraction(
                 m_MagazineInteractionOneInChamber = false;
                 m_MagazineInteractionViewmodelFreezeDeferredUntil =
                     now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                        std::chrono::duration<float>(kMagazineInteractionEmptyClipAutoEjectFreezeDelaySeconds));
+                        std::chrono::duration<float>(GetMagazineInteractionEmptyClipAutoEjectFreezeDelaySeconds(activeWeaponId)));
             }
         }
         else
@@ -7203,7 +7245,7 @@ bool VR::UpdateMagazineInteraction(
             m_MagazineInteractionFreshPickupBasisValid = false;
             m_MagazineInteractionViewmodelFreezeDeferredUntil =
                 now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                    std::chrono::duration<float>(kMagazineInteractionEmptyClipAutoEjectFreezeDelaySeconds));
+                    std::chrono::duration<float>(GetMagazineInteractionEmptyClipAutoEjectFreezeDelaySeconds(activeWeaponId)));
             if (m_MagazineInteractionServerClipSettlementActive &&
                 !m_MagazineInteractionShotgunShellMode)
             {
@@ -7244,7 +7286,7 @@ bool VR::UpdateMagazineInteraction(
                 boxAgeSeconds,
                 usedCachedBox ? 1 : 0,
                 m_MagazineInteractionServerClipSettlementActive ? 1 : 0,
-                kMagazineInteractionEmptyClipAutoEjectFreezeDelaySeconds,
+                GetMagazineInteractionEmptyClipAutoEjectFreezeDelaySeconds(activeWeaponId),
                 box.modelName.c_str());
             return reloadCommandPending();
         }
