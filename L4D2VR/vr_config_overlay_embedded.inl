@@ -88,6 +88,13 @@ namespace
         Vec3
     };
 
+    enum class CfgDevice
+    {
+        HMD,
+        LeftController,
+        RightController
+    };
+
     struct CfgOptionSpec
     {
         const char* key;
@@ -693,7 +700,7 @@ namespace
     static void CfgInvalidateFixedPlacement(CfgOverlayState& s);
     static void CfgOpenPanelFromMenuButton(CfgOverlayState& s, vr::IVROverlay* ov = nullptr);
     static vr::HmdMatrix34_t CfgMul34(const vr::HmdMatrix34_t& a, const vr::HmdMatrix34_t& b);
-    static bool CfgGetCurrentHmdAbsolutePose(vr::ETrackingUniverseOrigin& origin, vr::HmdMatrix34_t& hmdAbs);
+    static bool CfgGetCurrentDeviceAbsolutePose(vr::ETrackingUniverseOrigin& origin, vr::HmdMatrix34_t& deviceAbs, CfgDevice device);
 
     static std::wstring CfgUtf8ToWide(const char* s)
     {
@@ -3089,6 +3096,66 @@ namespace
             return false;
 
         VR* vrState = g_Game->m_VR;
+        vr::ETrackingUniverseOrigin origin = vr::TrackingUniverseStanding;
+        vr::HmdMatrix34_t controllerAbs{};
+        
+        if (CfgGetCurrentDeviceAbsolutePose(origin, controllerAbs, (vrState->m_LeftHanded ? CfgDevice::LeftController : CfgDevice::RightController)))
+        {
+            vr::HmdMatrix34_t hmdAbs{};
+            const bool hasHmd = CfgGetCurrentDeviceAbsolutePose(origin, hmdAbs, CfgDevice::HMD);
+
+            Vector hmdRight = { 1.0f, 0.0f, 0.0f };
+            Vector hmdUp = { 0.0f, 1.0f, 0.0f };
+            Vector hmdForward = { 0.0f, 0.0f, -1.0f };
+            if (hasHmd)
+            {
+                hmdRight = { hmdAbs.m[0][0], hmdAbs.m[1][0], hmdAbs.m[2][0] };
+                hmdUp = { hmdAbs.m[0][1], hmdAbs.m[1][1], hmdAbs.m[2][1] };
+                hmdForward = { -hmdAbs.m[0][2], -hmdAbs.m[1][2], -hmdAbs.m[2][2] };
+            }
+
+            const Vector controllerPos = { controllerAbs.m[0][3], controllerAbs.m[1][3], controllerAbs.m[2][3] };
+            const Vector hmdPos = hasHmd ? Vector{ hmdAbs.m[0][3], hmdAbs.m[1][3], hmdAbs.m[2][3] } : Vector{};
+            const Vector deltaPos = controllerPos - hmdPos;
+
+            s.calibrationPreviewForwardMeters = deltaPos.x * hmdForward.x + deltaPos.y * hmdForward.y + deltaPos.z * hmdForward.z;
+            s.calibrationPreviewRightMeters = deltaPos.x * hmdRight.x + deltaPos.y * hmdRight.y + deltaPos.z * hmdRight.z;
+            s.calibrationPreviewUpMeters = deltaPos.x * hmdUp.x + deltaPos.y * hmdUp.y + deltaPos.z * hmdUp.z;
+
+            float Rctrl[3][3];
+            for (int r = 0; r < 3; ++r)
+                for (int c = 0; c < 3; ++c)
+                    Rctrl[r][c] = controllerAbs.m[r][c];
+
+            auto MatrixToAngles = [](const float matrix[3][3], QAngle& angles) -> void
+            {
+                float forward[3], right[3], up[3];
+                float sr, sp, sy, cr, cp, cy;
+
+                sp = -matrix[1][2];
+
+                if (sp >= 1.0f)
+                    angles.x = -90.0f;
+                else if (sp <= -1.0f)
+                    angles.x = 90.0f;
+                else
+                    angles.x = asinf(sp) * (180.0f / 3.1415926535f);
+
+                cp = cosf(angles.x * (3.1415926535f / 180.0f));
+
+                if (cp > 0.001f)
+                    angles.y = atan2f(matrix[0][2], matrix[2][2]) * (180.0f / 3.1415926535f);
+                    angles.z = atan2f(matrix[1][0], matrix[1][1]) * (180.0f / 3.1415926535f);
+            };
+            
+            QAngle angles;
+            MatrixToAngles(Rctrl, angles);
+
+            s.calibrationPreviewPitchDeg = -angles.x;
+            s.calibrationPreviewYawDeg = angles.y;
+            s.calibrationPreviewRollDeg = -angles.z;
+        }
+
         const Vector viewLeft = vrState->GetViewOriginLeft();
         const Vector viewRight = vrState->GetViewOriginRight();
         const Vector viewOrigin = (viewLeft + viewRight) * 0.5f;
@@ -4063,6 +4130,7 @@ namespace
         drawButton(4, row0Y, "\xE4\xB8\x8A\x2D", "U-");
         drawButton(5, row0Y, "\xE4\xB8\x8A\x2B", "U+");
         drawButton(7, row0Y, "\xE9\x87\x8D\xE6\x94\xBE", "Place");
+        drawButton(8, row0Y, "\xE7\xA7\xBB\xE5\x8A\xA8", "Move");
 
         drawButton(0, row1Y, "\xE4\xBF\xAF\x2D", "P-");
         drawButton(1, row1Y, "\xE4\xBF\xAF\x2B", "P+");
@@ -4077,7 +4145,7 @@ namespace
             row1Y - 1,
             350,
             buttonH,
-            s.useChinese ? "\xE5\x89\xAF\xE6\x9C\xAC\xE6\x8C\x89\xE5\x8F\x82\xE6\x95\xB0\xE7\x94\x9F\xE6\x88\x90\xE5\x90\x8E\xE5\x9B\xBA\xE5\xAE\x9A\xE5\x9C\xA8\xE7\xA9\xBA\xE9\x97\xB4" : "Copy is placed from HMD params, then fixed",
+            s.useChinese ? "\xE6\x94\xBE\xE7\xBD\xAE\xE5\x9C\xA8\xE4\xB8\xBB\xE6\x8E\xA7\xE5\x88\xB6\xE5\x99\xA8\xE5\x8F\x98\xE6\x8D\xA2" : "Place at primary controller transform",
             g.smallFont,
             { 160, 196, 255 });
     }
@@ -4113,6 +4181,110 @@ namespace
         else if (hit(4, row0Y)) { s.calibrationPreviewUpMeters -= posStep; changed = true; }
         else if (hit(5, row0Y)) { s.calibrationPreviewUpMeters += posStep; changed = true; }
         else if (hit(7, row0Y)) { CfgResetCalibrationPreview(s); changed = true; }
+        else if (hit(8, row0Y)) 
+        {
+            vr::ETrackingUniverseOrigin origin = vr::TrackingUniverseStanding;
+            vr::HmdMatrix34_t controllerAbs{};
+
+            if (CfgGetCurrentDeviceAbsolutePose(origin, controllerAbs, (g_Game->m_VR->m_LeftHanded ? CfgDevice::LeftController : CfgDevice::RightController)))
+            {
+                vr::HmdMatrix34_t hmdAbs{};
+                const bool hasHmd = CfgGetCurrentDeviceAbsolutePose(origin, hmdAbs, CfgDevice::HMD);
+                bool mouseDown = true;
+
+                Vector hmdRight = { 1.0f, 0.0f, 0.0f };
+                Vector hmdUp = { 0.0f, 1.0f, 0.0f };
+                Vector hmdForward = { 0.0f, 0.0f, -1.0f };
+                if (hasHmd)
+                {
+                    hmdRight = { hmdAbs.m[0][0], hmdAbs.m[1][0], hmdAbs.m[2][0] };
+                    hmdUp = { hmdAbs.m[0][1], hmdAbs.m[1][1], hmdAbs.m[2][1] };
+                    hmdForward = { -hmdAbs.m[0][2], -hmdAbs.m[1][2], -hmdAbs.m[2][2] };
+                }
+
+                const float initialForward = s.calibrationPreviewForwardMeters;
+                const float initialRight = s.calibrationPreviewRightMeters;
+                const float initialUp = s.calibrationPreviewUpMeters;
+                const float initialPitch = s.calibrationPreviewPitchDeg;
+                const float initialYaw = s.calibrationPreviewYawDeg;
+                const float initialRoll = s.calibrationPreviewRollDeg;
+
+                const Vector initialPos = { controllerAbs.m[0][3], controllerAbs.m[1][3], controllerAbs.m[2][3] };
+
+                constexpr float radToDeg = 180.0f / 3.14159265358979323846f;
+
+                const float initFx = -controllerAbs.m[0][2];
+                const float initFy = -controllerAbs.m[1][2];
+                const float initFz = -controllerAbs.m[2][2];
+                const float initUx = controllerAbs.m[0][1];
+                const float initUy = controllerAbs.m[1][1];
+
+                const float initialYawCtrl = std::atan2(initFx, -initFz) * radToDeg;
+                const float initialPitchCtrl = std::atan2(initFy, std::sqrt(initFx * initFx + initFz * initFz)) * radToDeg;
+                const float initialRollCtrl = std::atan2(initUx, initUy) * radToDeg;
+
+                auto wrap180 = [](float deg) -> float {
+                    deg = std::fmod(deg, 360.0f);
+                    if (deg > 180.0f) deg -= 360.0f;
+                    if (deg < -180.0f) deg += 360.0f;
+                    return deg;
+                };
+
+                while (mouseDown)
+                {
+                    if (vr::IVROverlay* ov = vr::VROverlay())
+                    {
+                        vr::VREvent_t ev{};
+                        while (ov->PollNextOverlayEvent(s.handle, &ev, sizeof(ev)))
+                            if (ev.eventType == vr::VREvent_MouseButtonUp)
+                                mouseDown = false;
+                    }
+
+                    if (!mouseDown)
+                        break;
+
+                    vr::HmdMatrix34_t controllerAbs{};
+
+                    if (CfgGetCurrentDeviceAbsolutePose(origin, controllerAbs, (g_Game->m_VR->m_LeftHanded ? CfgDevice::LeftController : CfgDevice::RightController)))
+                    {
+                        const Vector currentPos = { controllerAbs.m[0][3], controllerAbs.m[1][3], controllerAbs.m[2][3] };
+                        const Vector deltaPos = currentPos - initialPos;
+
+                        const float deltaRight = deltaPos.x * hmdRight.x + deltaPos.y * hmdRight.y + deltaPos.z * hmdRight.z;
+                        const float deltaUp = deltaPos.x * hmdUp.x + deltaPos.y * hmdUp.y + deltaPos.z * hmdUp.z;
+                        const float deltaForward = deltaPos.x * hmdForward.x + deltaPos.y * hmdForward.y + deltaPos.z * hmdForward.z;
+
+                        s.calibrationPreviewForwardMeters = initialForward + deltaForward;
+                        s.calibrationPreviewRightMeters = initialRight + deltaRight;
+                        s.calibrationPreviewUpMeters = initialUp + deltaUp;
+
+                        const float currFx = -controllerAbs.m[0][2];
+                        const float currFy = -controllerAbs.m[1][2];
+                        const float currFz = -controllerAbs.m[2][2];
+                        const float currUx = controllerAbs.m[0][1];
+                        const float currUy = controllerAbs.m[1][1];
+
+                        const float currentYawCtrl = std::atan2(currFx, -currFz) * radToDeg;
+                        const float currentPitchCtrl = std::atan2(currFy, std::sqrt(currFx * currFx + currFz * currFz)) * radToDeg;
+                        const float currentRollCtrl = std::atan2(currUx, currUy) * radToDeg;
+
+                        const float deltaPitch = wrap180(currentPitchCtrl - initialPitchCtrl) * 0.5;
+                        const float deltaYaw = wrap180(currentYawCtrl - initialYawCtrl) * 0.5;
+                        const float deltaRoll = wrap180(currentRollCtrl - initialRollCtrl) * 0.5;
+
+                        s.calibrationPreviewPitchDeg = initialPitch - deltaPitch;
+                        s.calibrationPreviewYawDeg = initialYaw - deltaYaw;
+                        s.calibrationPreviewRollDeg = initialRoll + deltaRoll;
+
+                        CfgNormalizeCalibrationPreview(s);
+                        CfgApplyCalibrationRuntimeState(s);
+                    }
+
+                    Sleep(10);
+                }
+                changed = true;
+            }
+        }
         else if (hit(0, row1Y)) { s.calibrationPreviewPitchDeg -= rotStep; changed = true; }
         else if (hit(1, row1Y)) { s.calibrationPreviewPitchDeg += rotStep; changed = true; }
         else if (hit(2, row1Y)) { s.calibrationPreviewYawDeg -= rotStep; changed = true; }
@@ -5423,7 +5595,7 @@ namespace
     {
         origin = vr::TrackingUniverseStanding;
         vr::HmdMatrix34_t hmdAbs{};
-        if (!CfgGetCurrentHmdAbsolutePose(origin, hmdAbs))
+        if (!CfgGetCurrentDeviceAbsolutePose(origin, hmdAbs, CfgDevice::HMD))
             return false;
 
         Vector hmdPosition = { hmdAbs.m[0][3], hmdAbs.m[1][3], hmdAbs.m[2][3] };
@@ -5814,7 +5986,7 @@ namespace
         return mat;
     }
 
-    static bool CfgGetCurrentHmdAbsolutePose(vr::ETrackingUniverseOrigin& origin, vr::HmdMatrix34_t& hmdAbs)
+    static bool CfgGetCurrentDeviceAbsolutePose(vr::ETrackingUniverseOrigin& origin, vr::HmdMatrix34_t& deviceAbs, CfgDevice device)
     {
         origin = vr::TrackingUniverseStanding;
         if (vr::IVRCompositor* comp = vr::VRCompositor())
@@ -5822,24 +5994,44 @@ namespace
         else if (g_Game && g_Game->m_VR && g_Game->m_VR->m_Compositor)
             origin = g_Game->m_VR->m_Compositor->GetTrackingSpace();
 
-        vr::TrackedDevicePose_t poses[vr::k_unMaxTrackedDeviceCount]{};
-        if (vr::IVRSystem* sys = vr::VRSystem())
+        vr::IVRSystem* sys = vr::VRSystem();
+        if (!sys)
+            return false;
+
+        vr::TrackedDeviceIndex_t deviceIndex;
+        switch (device)
         {
-            sys->GetDeviceToAbsoluteTrackingPose(origin, 0.0f, poses, vr::k_unMaxTrackedDeviceCount);
-            const vr::TrackedDevicePose_t& hmd = poses[vr::k_unTrackedDeviceIndex_Hmd];
-            if (hmd.bPoseIsValid)
-            {
-                hmdAbs = hmd.mDeviceToAbsoluteTracking;
-                return true;
-            }
+        case CfgDevice::HMD:
+            deviceIndex = vr::k_unTrackedDeviceIndex_Hmd;
+            break;
+        case CfgDevice::LeftController:
+            deviceIndex = sys->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_LeftHand);
+            break;
+        case CfgDevice::RightController:
+            deviceIndex = sys->GetTrackedDeviceIndexForControllerRole(vr::TrackedControllerRole_RightHand);
+            break;
+        default:
+            return false;
+        }
+
+        if (deviceIndex == vr::k_unTrackedDeviceIndexInvalid)
+            return false;
+
+        vr::TrackedDevicePose_t poses[vr::k_unMaxTrackedDeviceCount]{};
+        sys->GetDeviceToAbsoluteTrackingPose(origin, 0.0f, poses, vr::k_unMaxTrackedDeviceCount);
+        const vr::TrackedDevicePose_t& pose = poses[deviceIndex];
+        if (pose.bPoseIsValid)
+        {
+            deviceAbs = pose.mDeviceToAbsoluteTracking;
+            return true;
         }
 
         if (g_Game && g_Game->m_VR)
         {
-            const vr::TrackedDevicePose_t& hmd = g_Game->m_VR->m_Poses[vr::k_unTrackedDeviceIndex_Hmd];
-            if (hmd.bPoseIsValid)
+            const vr::TrackedDevicePose_t& fallbackPose = g_Game->m_VR->m_Poses[deviceIndex];
+            if (fallbackPose.bPoseIsValid)
             {
-                hmdAbs = hmd.mDeviceToAbsoluteTracking;
+                deviceAbs = fallbackPose.mDeviceToAbsoluteTracking;
                 return true;
             }
         }
