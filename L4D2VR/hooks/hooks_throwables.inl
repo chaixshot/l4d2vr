@@ -271,7 +271,7 @@ namespace
 			return false;
 		if (projectileThrow && !Hooks::s_ManualThrowHooksReady)
 			return false;
-		if (carryableThrow && !Hooks::s_ManualCarryThrowHookReady)
+		if (carryableThrow && !ManualCarryThrowBackendIsReady(weaponId))
 			return false;
 
 		Vector measuredVelocity{};
@@ -407,11 +407,11 @@ namespace
 		return original(finalPosition, finalAngles, finalVelocity, finalAngularVelocity, owner);
 	}
 
-	static bool ManualCarryThrowTeleportDroppedWeapon(
-		void* weapon,
+	static bool ManualCarryThrowTeleportDroppedEntity(
+		void* entity,
 		const ManualThrowPending& pending)
 	{
-		if (!weapon)
+		if (!entity)
 			return false;
 
 		constexpr size_t kTeleportVtableSlot = 118;
@@ -419,20 +419,20 @@ namespace
 #ifdef _MSC_VER
 		__try
 		{
-			vtable = *reinterpret_cast<void***>(weapon);
+			vtable = *reinterpret_cast<void***>(entity);
 		}
 		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
 			vtable = nullptr;
 		}
 #else
-		vtable = *reinterpret_cast<void***>(weapon);
+		vtable = *reinterpret_cast<void***>(entity);
 #endif
 		if (!vtable || !IsReadableMemoryRange(vtable + kTeleportVtableSlot, sizeof(void*)))
 		{
 			Game::logMsg(
-				"[VR][ManualCarryThrow] Teleport resolve failed weapon=%p vtable=%p slot=%u",
-				weapon,
+				"[VR][ManualCarryThrow] Teleport resolve failed entity=%p vtable=%p slot=%u",
+				entity,
 				vtable,
 				static_cast<unsigned int>(kTeleportVtableSlot));
 			return false;
@@ -454,8 +454,8 @@ namespace
 		if (!teleportTarget || !targetInServer)
 		{
 			Game::logMsg(
-				"[VR][ManualCarryThrow] Teleport target invalid weapon=%p slot=%u target=%p inServer=%d",
-				weapon,
+				"[VR][ManualCarryThrow] Teleport target invalid entity=%p slot=%u target=%p inServer=%d",
+				entity,
 				static_cast<unsigned int>(kTeleportVtableSlot),
 				teleportTarget,
 				targetInServer ? 1 : 0);
@@ -466,20 +466,1028 @@ namespace
 #ifdef _MSC_VER
 		__try
 		{
-			teleport(weapon, &pending.origin, nullptr, &pending.velocity);
+			teleport(entity, &pending.origin, nullptr, &pending.velocity);
 		}
 		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
 			Game::logMsg(
-				"[VR][ManualCarryThrow] Teleport call exception weapon=%p target=%p",
-				weapon,
+				"[VR][ManualCarryThrow] Teleport call exception entity=%p target=%p",
+				entity,
 				teleportTarget);
 			return false;
 		}
 #else
-		teleport(weapon, &pending.origin, nullptr, &pending.velocity);
+		teleport(entity, &pending.origin, nullptr, &pending.velocity);
 #endif
 		return true;
+	}
+
+	enum class ManualCarryImpactTargetKind
+	{
+		None,
+		CommonInfected,
+		SpecialInfected,
+		Witch,
+		InfectedFallback,
+	};
+
+	struct ManualCarryImpactTrack
+	{
+		bool active = false;
+		void* entity = nullptr;
+		void* entityVtable = nullptr;
+		void* owner = nullptr;
+		int weaponId = 0;
+		Vector previousOrigin{};
+		Vector launchDirection{};
+		float launchSpeed = 0.0f;
+		float knockbackFraction = 0.25f;
+		bool collisionPending = false;
+		void* collisionTarget = nullptr;
+		void* collisionTargetVtable = nullptr;
+		Vector collisionVelocity{};
+		float collisionSpeed = 0.0f;
+		std::chrono::steady_clock::time_point armedAt{};
+	};
+
+	static std::array<ManualCarryImpactTrack, 16> s_ManualCarryImpactTracks{};
+
+	// x86 gamevcollisionevent_t layout from server physics.h. The base
+	// vcollisionevent_t is 0x20 bytes; L4D2 then appends three pairs of vectors
+	// and finally the two CBaseEntity pointers at offset 0x68.
+	struct ManualCarryGameVCollisionEvent
+	{
+		void* physicsObjects[2];
+		int surfaceProps[2];
+		bool isCollision;
+		bool isShadowCollision;
+		unsigned char alignmentPadding[2];
+		float deltaCollisionTime;
+		float collisionSpeed;
+		void* internalData;
+		Vector preVelocity[2];
+		Vector postVelocity[2];
+		Vector preAngularVelocity[2];
+		void* entities[2];
+	};
+	static_assert(offsetof(ManualCarryGameVCollisionEvent, entities) == 0x68,
+		"Unexpected gamevcollisionevent_t layout");
+
+	static const char* ManualCarryImpactTargetKindName(ManualCarryImpactTargetKind kind)
+	{
+		switch (kind)
+		{
+		case ManualCarryImpactTargetKind::CommonInfected: return "common";
+		case ManualCarryImpactTargetKind::SpecialInfected: return "special";
+		case ManualCarryImpactTargetKind::Witch: return "witch";
+		case ManualCarryImpactTargetKind::InfectedFallback: return "infected";
+		default: return "none";
+		}
+	}
+
+	struct ManualCarrySpawnedPhysicsProp
+	{
+		bool valid = false;
+		void* sourceWeapon = nullptr;
+		void* sourceWeaponVtable = nullptr;
+		void* spawnedEntity = nullptr;
+		void* spawnedEntityVtable = nullptr;
+		int weaponId = static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
+		std::chrono::steady_clock::time_point createdAt{};
+	};
+
+	static std::array<ManualCarrySpawnedPhysicsProp, 16> s_ManualCarrySpawnedPhysicsProps{};
+
+	static int ManualCarryThrowReadServerWeaponId(void* sourceWeapon)
+	{
+		if (!sourceWeapon)
+			return static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
+#ifdef _MSC_VER
+		__try
+		{
+#endif
+			return reinterpret_cast<Server_WeaponCSBase*>(sourceWeapon)->GetWeaponID();
+#ifdef _MSC_VER
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
+		}
+#endif
+	}
+
+	static void ManualCarryThrowCacheSpawnedPhysicsProp(
+		void* sourceWeapon,
+		void* spawnedEntity,
+		int weaponId,
+		const char* capturePath)
+	{
+		if (!sourceWeapon || !spawnedEntity ||
+			!ManualCarryThrowWeaponIdUsesSpawnedPhysicsProp(weaponId))
+		{
+			return;
+		}
+
+		ManualCarrySpawnedPhysicsProp* selected = nullptr;
+		for (ManualCarrySpawnedPhysicsProp& candidate : s_ManualCarrySpawnedPhysicsProps)
+		{
+			if (candidate.valid && candidate.sourceWeapon == sourceWeapon)
+			{
+				selected = &candidate;
+				break;
+			}
+			if (!candidate.valid && !selected)
+				selected = &candidate;
+		}
+		if (!selected)
+		{
+			selected = &*std::min_element(
+				s_ManualCarrySpawnedPhysicsProps.begin(),
+				s_ManualCarrySpawnedPhysicsProps.end(),
+				[](const ManualCarrySpawnedPhysicsProp& lhs, const ManualCarrySpawnedPhysicsProp& rhs)
+				{
+					return lhs.createdAt < rhs.createdAt;
+				});
+		}
+
+		*selected = {};
+		selected->valid = true;
+		selected->sourceWeapon = sourceWeapon;
+		selected->sourceWeaponVtable = ManualThrowReadEntityVtable(sourceWeapon);
+		selected->spawnedEntity = spawnedEntity;
+		selected->spawnedEntityVtable = ManualThrowReadEntityVtable(spawnedEntity);
+		selected->weaponId = weaponId;
+		selected->createdAt = std::chrono::steady_clock::now();
+		Game::logMsg(
+			"[VR][ManualCarryThrow] cached pre-release physics_prop path=%s type=%s source=%p dropped=%p",
+			capturePath ? capturePath : "unknown",
+			ManualCarryThrowWeaponName(weaponId),
+			sourceWeapon,
+			spawnedEntity);
+	}
+
+	static void* ManualCarryThrowClaimSpawnedPhysicsProp(
+		void* sourceWeapon,
+		int weaponId)
+	{
+		if (!sourceWeapon || !ManualCarryThrowWeaponIdUsesSpawnedPhysicsProp(weaponId))
+			return nullptr;
+
+		const auto now = std::chrono::steady_clock::now();
+		constexpr float kMaximumCandidateAgeSeconds = 20.0f;
+		ManualCarrySpawnedPhysicsProp* selected = nullptr;
+		for (ManualCarrySpawnedPhysicsProp& candidate : s_ManualCarrySpawnedPhysicsProps)
+		{
+			if (!candidate.valid)
+				continue;
+			const float age = std::chrono::duration<float>(now - candidate.createdAt).count();
+			if (age < 0.0f || age > kMaximumCandidateAgeSeconds ||
+				ManualThrowReadEntityVtable(candidate.spawnedEntity) != candidate.spawnedEntityVtable)
+			{
+				candidate = {};
+				continue;
+			}
+			if (candidate.sourceWeapon == sourceWeapon && candidate.weaponId == weaponId &&
+				(!selected || candidate.createdAt > selected->createdAt))
+			{
+				selected = &candidate;
+			}
+		}
+		if (!selected)
+			return nullptr;
+
+		void* spawnedEntity = selected->spawnedEntity;
+		const float age = std::chrono::duration<float>(now - selected->createdAt).count();
+		Game::logMsg(
+			"[VR][ManualCarryThrow] claimed cached physics_prop type=%s source=%p dropped=%p age=%.3f",
+			ManualCarryThrowWeaponName(weaponId),
+			sourceWeapon,
+			spawnedEntity,
+			age);
+		*selected = {};
+		return spawnedEntity;
+	}
+
+	static bool ManualCarryImpactReadServerClassName(
+		void* entity,
+		char* output,
+		size_t outputCapacity)
+	{
+		if (!output || outputCapacity == 0)
+			return false;
+		output[0] = '\0';
+		if (!entity)
+			return false;
+
+#ifdef _MSC_VER
+		__try
+		{
+#endif
+			IServerUnknown* unknown = reinterpret_cast<IServerUnknown*>(entity);
+			void* networkable = unknown->GetNetworkable();
+			if (!networkable)
+				return false;
+
+			void** vtable = *reinterpret_cast<void***>(networkable);
+			constexpr size_t kGetClassNameVtableSlot = 3;
+			if (!vtable || !IsReadableMemoryRange(vtable + kGetClassNameVtableSlot, sizeof(void*)))
+				return false;
+
+			using GetClassNameFn = const char* (__thiscall*)(void*);
+			auto getClassName = reinterpret_cast<GetClassNameFn>(vtable[kGetClassNameVtableSlot]);
+			if (!getClassName)
+				return false;
+
+			const char* source = getClassName(networkable);
+			if (!source)
+				return false;
+
+			size_t length = 0;
+			for (; length + 1 < outputCapacity; ++length)
+			{
+				if (!IsReadableMemoryRange(source + length, sizeof(char)))
+					break;
+				const char value = source[length];
+				output[length] = value;
+				if (value == '\0')
+					return length > 0;
+			}
+			output[length] = '\0';
+			return length > 0;
+#ifdef _MSC_VER
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			output[0] = '\0';
+			return false;
+		}
+#endif
+	}
+
+	static bool ManualCarryImpactReadTargetState(void* entity, int& team, unsigned char& lifeState)
+	{
+		// These are server.dll CBaseEntity offsets, not the similarly named client
+		// recv-table offsets in VR.  The current server's DT_BaseEntity send table
+		// registers m_iTeamNum at 0x238, while the CBaseEntity data map registers
+		// m_lifeState at 0xF0.  Reading the client offsets here caused every real
+		// infected collision to be rejected before it could be queued.
+		constexpr size_t kServerTeamNumOffset = 0x238;
+		constexpr size_t kServerLifeStateOffset = 0xF0;
+
+		team = 0;
+		lifeState = 1;
+		if (!entity)
+			return false;
+
+		const unsigned char* base = reinterpret_cast<const unsigned char*>(entity);
+		if (!IsReadableMemoryRange(base + kServerTeamNumOffset, sizeof(team)) ||
+			!IsReadableMemoryRange(base + kServerLifeStateOffset, sizeof(lifeState)))
+		{
+			return false;
+		}
+
+#ifdef _MSC_VER
+		__try
+		{
+#endif
+			team = *reinterpret_cast<const int*>(base + kServerTeamNumOffset);
+			lifeState = *reinterpret_cast<const unsigned char*>(base + kServerLifeStateOffset);
+			return true;
+#ifdef _MSC_VER
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			team = 0;
+			lifeState = 1;
+			return false;
+		}
+#endif
+	}
+
+	class ManualCarryImpactInfectedTraceFilter final : public CTraceFilter
+	{
+	public:
+		ManualCarryImpactInfectedTraceFilter(IHandleEntity* thrownEntity, IHandleEntity* owner)
+			: CTraceFilter(thrownEntity, 0)
+			, m_Owner(owner)
+		{
+		}
+
+		bool ShouldHitEntity(IHandleEntity* candidate, int contentsMask) override
+		{
+			(void)contentsMask;
+			if (!candidate || candidate == m_pPassEnt || candidate == m_Owner)
+				return false;
+
+			int team = 0;
+			unsigned char lifeState = 1;
+			return ManualCarryImpactReadTargetState(candidate, team, lifeState) &&
+				team == 3 && lifeState == 0;
+		}
+
+		TraceType GetTraceType() const override
+		{
+			// World geometry and unrelated props must not hide an infected that the
+			// carried prop physically overlaps during this movement segment.
+			return TraceType::TRACE_ENTITIES_ONLY;
+		}
+
+	private:
+		IHandleEntity* m_Owner = nullptr;
+	};
+
+	class ManualCarryImpactWorldOnlyTraceFilter final : public CTraceFilter
+	{
+	public:
+		ManualCarryImpactWorldOnlyTraceFilter()
+			: CTraceFilter(nullptr, 0)
+		{
+		}
+
+		bool ShouldHitEntity(IHandleEntity*, int) override
+		{
+			return false;
+		}
+
+		TraceType GetTraceType() const override
+		{
+			return TraceType::TRACE_WORLD_ONLY;
+		}
+	};
+
+	// IEngineTrace::EnumerateEntities uses this single-method callback ABI.
+	// Keep it local so the existing compact trace SDK declaration does not need
+	// to grow solely for manual carry impact handling.
+	class ManualCarryImpactEntityCollector
+	{
+	public:
+		virtual bool EnumEntity(IHandleEntity* candidate)
+		{
+			if (!candidate)
+				return true;
+			void* entity = candidate;
+			for (size_t i = 0; i < count; ++i)
+			{
+				if (entities[i] == entity)
+					return true;
+			}
+			if (count < entities.size())
+				entities[count++] = entity;
+			return true;
+		}
+
+		std::array<void*, 128> entities{};
+		size_t count = 0;
+	};
+
+	static ManualCarryImpactTargetKind ManualCarryImpactClassifyTarget(
+		void* entity,
+		char* className,
+		size_t classNameCapacity)
+	{
+		int team = 0;
+		unsigned char lifeState = 1;
+		if (!ManualCarryImpactReadTargetState(entity, team, lifeState) || team != 3 || lifeState != 0)
+			return ManualCarryImpactTargetKind::None;
+
+		const bool hasClassName = ManualCarryImpactReadServerClassName(
+			entity,
+			className,
+			classNameCapacity);
+		if (!hasClassName)
+			return ManualCarryImpactTargetKind::InfectedFallback;
+
+		std::string lowered(className);
+		std::transform(
+			lowered.begin(),
+			lowered.end(),
+			lowered.begin(),
+			[](unsigned char value) { return static_cast<char>(std::tolower(value)); });
+
+		if (lowered.find("witch") != std::string::npos)
+			return ManualCarryImpactTargetKind::Witch;
+		if (lowered.find("infected") != std::string::npos)
+			return ManualCarryImpactTargetKind::CommonInfected;
+		if (lowered.find("player") != std::string::npos ||
+			lowered.find("terror") != std::string::npos)
+		{
+			return ManualCarryImpactTargetKind::SpecialInfected;
+		}
+
+		// A readable, known non-infected classname is a stronger signal than the
+		// team netvar alone and prevents accidental impulses on unusual team-3 entities.
+		return ManualCarryImpactTargetKind::None;
+	}
+
+	static bool ManualCarryImpactReadOrigin(void* entity, Vector& origin)
+	{
+		origin = {};
+		if (!entity || !Hooks::m_Game || !Hooks::m_Game->m_Offsets ||
+			!Hooks::m_Game->m_Offsets->CBaseEntity_GetAbsOrigin_Server.valid)
+		{
+			return false;
+		}
+
+		using GetAbsOriginFn = Vector* (__thiscall*)(void*);
+		auto getAbsOrigin = reinterpret_cast<GetAbsOriginFn>(
+			Hooks::m_Game->m_Offsets->CBaseEntity_GetAbsOrigin_Server.address);
+#ifdef _MSC_VER
+		__try
+		{
+#endif
+			Vector* source = getAbsOrigin(entity);
+			if (!source || !IsReadableMemoryRange(source, sizeof(Vector)))
+				return false;
+			origin = *source;
+			return ManualThrowIsFiniteVector(origin);
+#ifdef _MSC_VER
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			origin = {};
+			return false;
+		}
+#endif
+	}
+
+	static bool ManualCarryImpactEnumerateArea(
+		const Vector& minimums,
+		const Vector& maximums,
+		ManualCarryImpactEntityCollector& collector)
+	{
+		if (!Hooks::m_Game || !Hooks::m_Game->m_EngineTraceServer)
+			return false;
+
+		constexpr size_t kEnumerateEntitiesBoxVtableSlot = 11;
+		void** vtable = nullptr;
+#ifdef _MSC_VER
+		__try
+		{
+			vtable = *reinterpret_cast<void***>(Hooks::m_Game->m_EngineTraceServer);
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			vtable = nullptr;
+		}
+#else
+		vtable = *reinterpret_cast<void***>(Hooks::m_Game->m_EngineTraceServer);
+#endif
+		if (!vtable || !IsReadableMemoryRange(
+			vtable + kEnumerateEntitiesBoxVtableSlot,
+			sizeof(void*)))
+		{
+			return false;
+		}
+
+		void* target = vtable[kEnumerateEntitiesBoxVtableSlot];
+		HMODULE engineModule = GetModuleHandleA("engine.dll");
+		MODULEINFO moduleInfo{};
+		const bool targetInEngine = engineModule && target &&
+			GetModuleInformation(GetCurrentProcess(), engineModule, &moduleInfo, sizeof(moduleInfo)) &&
+			reinterpret_cast<uintptr_t>(target) >= reinterpret_cast<uintptr_t>(moduleInfo.lpBaseOfDll) &&
+			reinterpret_cast<uintptr_t>(target) <
+				reinterpret_cast<uintptr_t>(moduleInfo.lpBaseOfDll) +
+				static_cast<uintptr_t>(moduleInfo.SizeOfImage);
+		if (!targetInEngine)
+			return false;
+
+		using EnumerateEntitiesBoxFn = void(__thiscall*)(
+			void*,
+			const Vector&,
+			const Vector&,
+			ManualCarryImpactEntityCollector*);
+		auto enumerate = reinterpret_cast<EnumerateEntitiesBoxFn>(target);
+#ifdef _MSC_VER
+		__try
+		{
+			enumerate(Hooks::m_Game->m_EngineTraceServer, minimums, maximums, &collector);
+			return true;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+#else
+		enumerate(Hooks::m_Game->m_EngineTraceServer, minimums, maximums, &collector);
+		return true;
+#endif
+	}
+
+	static bool ManualCarryImpactHasWorldLineOfSight(
+		const Vector& impactOrigin,
+		const Vector& targetOrigin)
+	{
+		if (!Hooks::m_Game || !Hooks::m_Game->m_EngineTraceServer)
+			return false;
+
+		Ray_t ray;
+		ray.Init(impactOrigin, targetOrigin + Vector(0.0f, 0.0f, 32.0f));
+		ManualCarryImpactWorldOnlyTraceFilter worldFilter;
+		CGameTrace trace{};
+		TraceRoomscaleServerRay(
+			Hooks::m_Game->m_EngineTraceServer,
+			ray,
+			MASK_NPCWORLDSTATIC | CONTENTS_PLAYERCLIP,
+			&worldFilter,
+			trace);
+		return !trace.startsolid && !trace.allsolid && trace.fraction >= 0.999f;
+	}
+
+	static bool ManualCarryImpactApplyNativeShove(
+		void* target,
+		ManualCarryImpactTargetKind targetKind,
+		void* pusher,
+		const Vector& shoveDirection)
+	{
+		if (!target || !pusher || !Hooks::m_Game || !Hooks::m_Game->m_Offsets)
+			return false;
+
+#ifdef _MSC_VER
+		__try
+		{
+#endif
+			if (targetKind == ManualCarryImpactTargetKind::SpecialInfected)
+			{
+				using OnShovedBySurvivorFn = void(__thiscall*)(
+					void*,
+					void*,
+					const Vector&);
+				auto onShoved = reinterpret_cast<OnShovedBySurvivorFn>(
+					Hooks::m_Game->m_Offsets->CTerrorPlayer_OnShovedBySurvivor_Server.address);
+				if (!onShoved)
+					return false;
+				Vector nativeDirection = shoveDirection * 100.0f;
+				onShoved(target, pusher, nativeDirection);
+				return true;
+			}
+
+			using RTDynamicCastFn = void* (__cdecl*)(void*, int, void*, void*, int);
+			auto runtimeCast = reinterpret_cast<RTDynamicCastFn>(
+				Hooks::m_Game->m_Offsets->Server_RTDynamicCast.address);
+			if (!runtimeCast)
+				return false;
+
+			void* nextBot = runtimeCast(
+				target,
+				0,
+				reinterpret_cast<void*>(Hooks::m_Game->m_Offsets->Server_RTTI_CBaseEntity.address),
+				reinterpret_cast<void*>(Hooks::m_Game->m_Offsets->Server_RTTI_INextBot.address),
+				0);
+			if (!nextBot)
+				return false;
+
+			// Call the RTTI-verified L4D2 propagation routine directly. This is the
+			// one-argument slot-28 event; the public Source SDK's slot-35 layout does
+			// not match L4D2 and calling that slot corrupts the x86 caller stack.
+			using NextBotOnShovedFn = void(__thiscall*)(void*, void*);
+			auto onShoved = reinterpret_cast<NextBotOnShovedFn>(
+				Hooks::m_Game->m_Offsets->INextBotEventResponder_OnShoved_Server.address);
+			if (!onShoved)
+				return false;
+			onShoved(nextBot, pusher);
+			return true;
+#ifdef _MSC_VER
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+#endif
+	}
+
+	static int ManualCarryImpactApplyNativeAreaShove(
+		ManualCarryImpactTrack& track,
+		void* primaryTarget,
+		const Vector& impactOrigin,
+		const char* detectionPath,
+		float& effectRadius,
+		int& commonCount,
+		int& specialCount,
+		int& witchCount)
+	{
+		effectRadius = 48.0f + 80.0f * std::clamp(track.knockbackFraction, 0.25f, 1.0f);
+		commonCount = 0;
+		specialCount = 0;
+		witchCount = 0;
+
+		ManualCarryImpactEntityCollector collector;
+		collector.EnumEntity(reinterpret_cast<IHandleEntity*>(primaryTarget));
+		const Vector extent(effectRadius, effectRadius, effectRadius);
+		const bool enumerated = ManualCarryImpactEnumerateArea(
+			impactOrigin - extent,
+			impactOrigin + extent,
+			collector);
+
+		int appliedCount = 0;
+		for (size_t i = 0; i < collector.count; ++i)
+		{
+			void* candidate = collector.entities[i];
+			if (!candidate || candidate == track.entity || candidate == track.owner)
+				continue;
+
+			char className[64]{};
+			const ManualCarryImpactTargetKind kind = ManualCarryImpactClassifyTarget(
+				candidate,
+				className,
+				sizeof(className));
+			if (kind == ManualCarryImpactTargetKind::None)
+				continue;
+
+			Vector targetOrigin{};
+			if (!ManualCarryImpactReadOrigin(candidate, targetOrigin))
+				continue;
+			const float distance = (targetOrigin - impactOrigin).Length();
+			if (!std::isfinite(distance) || distance > effectRadius)
+				continue;
+			if (candidate != primaryTarget &&
+				!ManualCarryImpactHasWorldLineOfSight(impactOrigin, targetOrigin))
+			{
+				continue;
+			}
+
+			Vector shoveDirection = targetOrigin - impactOrigin;
+			shoveDirection.z = 0.0f;
+			if (VectorNormalize(shoveDirection) <= 0.0001f)
+			{
+				shoveDirection = track.launchDirection;
+				shoveDirection.z = 0.0f;
+				if (VectorNormalize(shoveDirection) <= 0.0001f)
+					shoveDirection = Vector(1.0f, 0.0f, 0.0f);
+			}
+
+			if (!ManualCarryImpactApplyNativeShove(
+				candidate,
+				kind,
+				track.owner,
+				shoveDirection))
+			{
+				continue;
+			}
+
+			++appliedCount;
+			switch (kind)
+			{
+			case ManualCarryImpactTargetKind::CommonInfected:
+			case ManualCarryImpactTargetKind::InfectedFallback:
+				++commonCount;
+				break;
+			case ManualCarryImpactTargetKind::SpecialInfected:
+				++specialCount;
+				break;
+			case ManualCarryImpactTargetKind::Witch:
+				++witchCount;
+				break;
+			default:
+				break;
+			}
+		}
+
+		Game::logMsg(
+			"[VR][ManualCarryImpact] native shove area path=%s type=%s origin=(%.1f %.1f %.1f) strength=%.0f%% radius=%.1f enumerated=%d candidates=%u applied=%d common=%d special=%d witch=%d",
+			detectionPath ? detectionPath : "unknown",
+			ManualCarryThrowWeaponName(track.weaponId),
+			impactOrigin.x,
+			impactOrigin.y,
+			impactOrigin.z,
+			track.knockbackFraction * 100.0f,
+			effectRadius,
+			enumerated ? 1 : 0,
+			static_cast<unsigned int>(collector.count),
+			appliedCount,
+			commonCount,
+			specialCount,
+			witchCount);
+		return appliedCount;
+	}
+
+	static bool ManualCarryImpactResolveSweptPropContact(
+		const ManualCarryImpactTrack& track,
+		const Vector& contactOrigin)
+	{
+		if (!track.entity || !ManualThrowIsFiniteVector(contactOrigin))
+			return false;
+
+		Vector impactDirection = track.launchDirection;
+		if (VectorNormalize(impactDirection) <= 0.0001f)
+			impactDirection = Vector(1.0f, 0.0f, 0.0f);
+
+		// These carry props do not normally collide with infected.  Place the prop
+		// at the swept-hull contact point and give it a small rebound so the visual
+		// result matches the synthetic hit instead of letting it pass through.
+		ManualThrowPending contactMove{};
+		contactMove.origin = contactOrigin - impactDirection * 2.0f;
+		const float reboundSpeed = std::clamp(track.launchSpeed * 0.18f, 30.0f, 180.0f);
+		contactMove.velocity = impactDirection * -reboundSpeed;
+		contactMove.velocity.z = (std::max)(contactMove.velocity.z, 30.0f);
+		return ManualCarryThrowTeleportDroppedEntity(track.entity, contactMove);
+	}
+
+	static bool ManualCarryImpactApplyTrackedTarget(
+		ManualCarryImpactTrack& track,
+		void* target,
+		const Vector* contactVelocity,
+		const Vector* contactOrigin,
+		const char* detectionPath)
+	{
+		(void)contactVelocity;
+		if (!target || target == track.entity || target == track.owner)
+			return false;
+
+		char className[64]{};
+		const ManualCarryImpactTargetKind targetKind = ManualCarryImpactClassifyTarget(
+			target,
+			className,
+			sizeof(className));
+		if (targetKind == ManualCarryImpactTargetKind::None)
+			return false;
+
+		Vector areaOrigin{};
+		if (contactOrigin && ManualThrowIsFiniteVector(*contactOrigin))
+			areaOrigin = *contactOrigin;
+		else if (!ManualCarryImpactReadOrigin(target, areaOrigin))
+			areaOrigin = track.previousOrigin;
+
+		float effectRadius = 0.0f;
+		int commonCount = 0;
+		int specialCount = 0;
+		int witchCount = 0;
+		const int appliedCount = ManualCarryImpactApplyNativeAreaShove(
+			track,
+			target,
+			areaOrigin,
+			detectionPath,
+			effectRadius,
+			commonCount,
+			specialCount,
+			witchCount);
+
+		Game::logMsg(
+			"[VR][ManualCarryImpact] %s path=%s type=%s directTarget=%s class=%s entity=%p targetEntity=%p speed=%.1f collisionSpeed=%.1f strength=%.0f%% radius=%.1f affected=%d",
+			appliedCount > 0 ? "native-shove" : "native-shove-failed",
+			detectionPath ? detectionPath : "unknown",
+			ManualCarryThrowWeaponName(track.weaponId),
+			ManualCarryImpactTargetKindName(targetKind),
+			className[0] ? className : "<unknown>",
+			track.entity,
+			target,
+			track.launchSpeed,
+			track.collisionSpeed,
+			track.knockbackFraction * 100.0f,
+			effectRadius,
+			appliedCount);
+		return appliedCount > 0;
+	}
+
+	static void ManualCarryImpactQueuePhysicsCollision(
+		void* entity,
+		int index,
+		void* collisionEvent)
+	{
+		if (!Hooks::s_ManualCarryImpactKnockbackReady || !entity ||
+			(index != 0 && index != 1) || !collisionEvent ||
+			!IsReadableMemoryRange(collisionEvent, sizeof(ManualCarryGameVCollisionEvent)))
+		{
+			return;
+		}
+
+		ManualCarryImpactTrack* matchingTrack = nullptr;
+		for (ManualCarryImpactTrack& track : s_ManualCarryImpactTracks)
+		{
+			if (track.active && track.entity == entity)
+			{
+				matchingTrack = &track;
+				break;
+			}
+		}
+		if (!matchingTrack || matchingTrack->collisionPending)
+			return;
+
+		const ManualCarryGameVCollisionEvent* event =
+			reinterpret_cast<const ManualCarryGameVCollisionEvent*>(collisionEvent);
+		void* target = event->entities[index == 0 ? 1 : 0];
+		if (!target || target == matchingTrack->entity || target == matchingTrack->owner)
+			return;
+
+		int team = 0;
+		unsigned char lifeState = 1;
+		if (!ManualCarryImpactReadTargetState(target, team, lifeState) ||
+			team != 3 || lifeState != 0)
+		{
+			return;
+		}
+
+		matchingTrack->collisionPending = true;
+		matchingTrack->collisionTarget = target;
+		matchingTrack->collisionTargetVtable = ManualThrowReadEntityVtable(target);
+		matchingTrack->collisionVelocity = event->preVelocity[index];
+		matchingTrack->collisionSpeed = std::isfinite(event->collisionSpeed)
+			? event->collisionSpeed
+			: matchingTrack->collisionVelocity.Length();
+		Game::logMsg(
+			"[VR][ManualCarryImpact] collision queued type=%s entity=%p targetEntity=%p index=%d collisionSpeed=%.1f preVel=(%.1f %.1f %.1f)",
+			ManualCarryThrowWeaponName(matchingTrack->weaponId),
+			entity,
+			target,
+			index,
+			matchingTrack->collisionSpeed,
+			matchingTrack->collisionVelocity.x,
+			matchingTrack->collisionVelocity.y,
+			matchingTrack->collisionVelocity.z);
+	}
+
+	static void ManualCarryImpactArm(void* entity, const ManualThrowPending& pending)
+	{
+		if (!Hooks::s_ManualCarryImpactKnockbackReady || !entity || !Hooks::m_VR)
+			return;
+
+		const float launchSpeed = pending.velocity.Length();
+		if (!std::isfinite(launchSpeed))
+			return;
+
+		const float maximumThrowSpeed = (std::max)(1.0f, Hooks::m_VR->m_ManualThrowMaxVelocity);
+		const float normalizedStrength = std::clamp(launchSpeed / maximumThrowSpeed, 0.0f, 1.0f);
+		const float knockbackFraction = 0.25f + normalizedStrength * 0.75f;
+
+		Vector launchDirection = pending.velocity;
+		if (VectorNormalize(launchDirection) <= 0.0001f)
+		{
+			QAngle::AngleVectors(pending.angles, &launchDirection, nullptr, nullptr);
+			if (VectorNormalize(launchDirection) <= 0.0001f)
+				launchDirection = Vector(1.0f, 0.0f, 0.0f);
+		}
+
+		ManualCarryImpactTrack* selected = nullptr;
+		for (ManualCarryImpactTrack& track : s_ManualCarryImpactTracks)
+		{
+			if (track.active && track.entity == entity)
+			{
+				selected = &track;
+				break;
+			}
+			if (!track.active && !selected)
+				selected = &track;
+		}
+		if (!selected)
+		{
+			selected = &*std::min_element(
+				s_ManualCarryImpactTracks.begin(),
+				s_ManualCarryImpactTracks.end(),
+				[](const ManualCarryImpactTrack& lhs, const ManualCarryImpactTrack& rhs)
+				{
+					return lhs.armedAt < rhs.armedAt;
+				});
+		}
+
+		*selected = {};
+		selected->active = true;
+		selected->entity = entity;
+		selected->entityVtable = ManualThrowReadEntityVtable(entity);
+		selected->owner = pending.owner;
+		selected->weaponId = pending.weaponId;
+		selected->previousOrigin = pending.origin;
+		selected->launchDirection = launchDirection;
+		selected->launchSpeed = launchSpeed;
+		selected->knockbackFraction = knockbackFraction;
+		selected->armedAt = std::chrono::steady_clock::now();
+
+		Game::logMsg(
+			"[VR][ManualCarryImpact] armed type=%s entity=%p speed=%.1f strength=%.0f%%",
+			ManualCarryThrowWeaponName(pending.weaponId),
+			entity,
+			launchSpeed,
+			knockbackFraction * 100.0f);
+	}
+
+	static void ManualCarryImpactUpdate()
+	{
+		if (!Hooks::s_ManualCarryImpactKnockbackReady || !Hooks::m_Game ||
+			!Hooks::m_Game->m_EngineTraceServer)
+		{
+			return;
+		}
+
+		const auto now = std::chrono::steady_clock::now();
+		constexpr float kTrackLifetimeSeconds = 4.0f;
+		constexpr float kMinimumTraceDistance = 0.25f;
+		constexpr float kMaximumTraceDistance = 512.0f;
+		// Approximate the carried objects' collision volume rather than tracing only
+		// their center. This is deliberately a little generous for the fireworks box.
+		const Vector traceMins(-18.0f, -18.0f, -18.0f);
+		const Vector traceMaxs(18.0f, 18.0f, 18.0f);
+
+		for (ManualCarryImpactTrack& track : s_ManualCarryImpactTracks)
+		{
+			if (!track.active)
+				continue;
+			const float trackAge = std::chrono::duration<float>(now - track.armedAt).count();
+			if (trackAge > kTrackLifetimeSeconds)
+			{
+				Game::logMsg(
+					"[VR][ManualCarryImpact] expired type=%s entity=%p speed=%.1f without infected hit",
+					ManualCarryThrowWeaponName(track.weaponId),
+					track.entity,
+					track.launchSpeed);
+				track = {};
+				continue;
+			}
+			if (ManualThrowReadEntityVtable(track.entity) != track.entityVtable)
+			{
+				Game::logMsg(
+					"[VR][ManualCarryImpact] cancelled type=%s entity=%p reason=vtable-changed",
+					ManualCarryThrowWeaponName(track.weaponId),
+					track.entity);
+				track = {};
+				continue;
+			}
+
+			if (track.collisionPending)
+			{
+				void* collisionTarget = track.collisionTarget;
+				const Vector collisionVelocity = track.collisionVelocity;
+				const bool targetStillValid =
+					ManualThrowReadEntityVtable(collisionTarget) == track.collisionTargetVtable;
+				if (targetStillValid && ManualCarryImpactApplyTrackedTarget(
+					track,
+					collisionTarget,
+					&collisionVelocity,
+					nullptr,
+					"physics-collision"))
+				{
+					track = {};
+					continue;
+				}
+				track.collisionPending = false;
+				track.collisionTarget = nullptr;
+				track.collisionTargetVtable = nullptr;
+				track.collisionVelocity = {};
+				track.collisionSpeed = 0.0f;
+			}
+
+			Vector currentOrigin{};
+			if (!ManualCarryImpactReadOrigin(track.entity, currentOrigin))
+			{
+				Game::logMsg(
+					"[VR][ManualCarryImpact] cancelled type=%s entity=%p reason=origin-read-failed",
+					ManualCarryThrowWeaponName(track.weaponId),
+					track.entity);
+				track = {};
+				continue;
+			}
+
+			const float movementDistance = (currentOrigin - track.previousOrigin).Length();
+			if (!std::isfinite(movementDistance) || movementDistance > kMaximumTraceDistance)
+			{
+				Game::logMsg(
+					"[VR][ManualCarryImpact] cancelled type=%s entity=%p reason=invalid-move distance=%.1f",
+					ManualCarryThrowWeaponName(track.weaponId),
+					track.entity,
+					movementDistance);
+				track = {};
+				continue;
+			}
+			if (movementDistance < kMinimumTraceDistance)
+				continue;
+
+			Ray_t ray;
+			ray.Init(track.previousOrigin, currentOrigin, traceMins, traceMaxs);
+			ManualCarryImpactInfectedTraceFilter filter(
+				reinterpret_cast<IHandleEntity*>(track.entity),
+				reinterpret_cast<IHandleEntity*>(track.owner));
+			CGameTrace trace{};
+			TraceRoomscaleServerRay(
+				Hooks::m_Game->m_EngineTraceServer,
+				ray,
+				MASK_SHOT,
+				&filter,
+				trace);
+			track.previousOrigin = currentOrigin;
+
+			void* target = trace.m_pEnt;
+			if (!target || target == track.entity || target == track.owner)
+				continue;
+
+			const bool propContactResolved =
+				ManualCarryImpactResolveSweptPropContact(track, trace.endpos);
+			if (ManualCarryImpactApplyTrackedTarget(
+				track,
+				target,
+				nullptr,
+				&trace.endpos,
+				"trace-fallback"))
+			{
+				Game::logMsg(
+					"[VR][ManualCarryImpact] swept contact propResponse=%s type=%s entity=%p contact=(%.1f %.1f %.1f)",
+					propContactResolved ? "rebound" : "failed",
+					ManualCarryThrowWeaponName(track.weaponId),
+					track.entity,
+					trace.endpos.x,
+					trace.endpos.y,
+					trace.endpos.z);
+				// Each carried prop creates one native shove pulse. This prevents a
+				// resting or bouncing prop from repeatedly staggering the same group.
+				track = {};
+			}
+		}
 	}
 
 	static bool ManualCarryThrowApplyPendingAfterWeaponDetached(
@@ -550,18 +1558,33 @@ namespace
 			return false;
 		}
 
-		const ManualThrowPending consumed = pending;
+		ManualThrowPending consumed = pending;
 		pending = {};
-		const bool applied = ManualCarryThrowTeleportDroppedWeapon(
-			consumed.sourceWeapon,
+		const bool usesSpawnedPhysicsProp =
+			ManualCarryThrowWeaponIdUsesSpawnedPhysicsProp(consumed.weaponId);
+		if (usesSpawnedPhysicsProp && !consumed.spawnedPhysicsProp)
+		{
+			consumed.spawnedPhysicsProp = ManualCarryThrowClaimSpawnedPhysicsProp(
+				consumed.sourceWeapon,
+				consumed.weaponId);
+		}
+		void* droppedEntity = usesSpawnedPhysicsProp
+			? consumed.spawnedPhysicsProp
+			: consumed.sourceWeapon;
+		const bool applied = ManualCarryThrowTeleportDroppedEntity(
+			droppedEntity,
 			consumed);
+		if (applied)
+			ManualCarryImpactArm(droppedEntity, consumed);
 		Game::logMsg(
-			"[VR][ManualCarryThrow] %s detached type=%s player=%d tick=%d source=%p active=%p finalVel=(%.1f %.1f %.1f) origin=(%.1f %.1f %.1f)",
+			"[VR][ManualCarryThrow] %s detached type=%s player=%d tick=%d source=%p dropped=%p spawned=%d active=%p finalVel=(%.1f %.1f %.1f) origin=(%.1f %.1f %.1f)",
 			applied ? "apply" : "failed to apply",
 			ManualCarryThrowWeaponName(consumed.weaponId),
 			playerIndex,
 			consumed.releaseTick,
 			consumed.sourceWeapon,
+			droppedEntity,
+			usesSpawnedPhysicsProp ? 1 : 0,
 			activeWeaponAfterUsercmd,
 			consumed.velocity.x,
 			consumed.velocity.y,
@@ -572,6 +1595,74 @@ namespace
 		return applied;
 	}
 
+}
+
+void* __fastcall Hooks::dManualCarryCreatePhysicsProp(void* ecx, void* edx)
+{
+	(void)edx;
+	void* droppedEntity = hkManualCarryCreatePhysicsProp.fOriginal
+		? hkManualCarryCreatePhysicsProp.fOriginal(ecx)
+		: nullptr;
+	if (droppedEntity && ecx)
+	{
+		const int weaponId = ManualCarryThrowReadServerWeaponId(ecx);
+		ManualCarryThrowCacheSpawnedPhysicsProp(
+			ecx,
+			droppedEntity,
+			weaponId,
+			"CWeaponCarry::CreatePhysicsProp");
+	}
+	return droppedEntity;
+}
+
+void* __cdecl Hooks::dManualCarryCreateEntityByName(
+	const char* className,
+	int forcedEdictIndex,
+	bool runScriptHook)
+{
+	void* droppedEntity = hkManualCarryCreateEntityByName.fOriginal
+		? hkManualCarryCreateEntityByName.fOriginal(className, forcedEdictIndex, runScriptHook)
+		: nullptr;
+	if (!droppedEntity || !s_ManualCarryThrowPropSpawnHookReady ||
+		!m_ServerProcessingUsercmd || !m_Game || !m_VR ||
+		!m_VR->m_ManualThrowEnabled ||
+		!className || _stricmp(className, "physics_prop") != 0 ||
+		!m_Game->IsValidPlayerIndex(m_ServerProcessingUsercmdPlayerIndex))
+	{
+		return droppedEntity;
+	}
+
+	Player& player = m_Game->m_PlayersVRInfo[
+		static_cast<size_t>(m_ServerProcessingUsercmdPlayerIndex)];
+	ManualThrowPending& pending = player.manualThrowPending;
+	if (player.isUsingVR && pending.valid &&
+		pending.owner == m_ServerProcessingUsercmdPlayer &&
+		!pending.spawnedPhysicsProp &&
+		ManualCarryThrowWeaponIdUsesSpawnedPhysicsProp(pending.weaponId))
+	{
+		pending.spawnedPhysicsProp = droppedEntity;
+		Game::logMsg(
+			"[VR][ManualCarryThrow] captured spawned physics_prop type=%s player=%d tick=%d source=%p dropped=%p",
+			ManualCarryThrowWeaponName(pending.weaponId),
+			m_ServerProcessingUsercmdPlayerIndex,
+			pending.releaseTick,
+			pending.sourceWeapon,
+			droppedEntity);
+	}
+
+	return droppedEntity;
+}
+
+void __fastcall Hooks::dCBaseEntityVPhysicsCollision(
+	void* ecx,
+	void* edx,
+	int index,
+	void* collisionEvent)
+{
+	(void)edx;
+	ManualCarryImpactQueuePhysicsCollision(ecx, index, collisionEvent);
+	if (hkCBaseEntityVPhysicsCollision.fOriginal)
+		hkCBaseEntityVPhysicsCollision.fOriginal(ecx, index, collisionEvent);
 }
 
 void* __cdecl Hooks::dMolotovProjectileCreate(

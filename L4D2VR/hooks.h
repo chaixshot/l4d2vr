@@ -92,6 +92,9 @@ typedef void(__thiscall* tStartMeleeSwing)(void* thisptr, void* player, bool a3)
 typedef int(__thiscall* tPrimaryAttack)(void* thisptr);
 typedef void(__thiscall* tItemPostFrame)(void* thisptr);
 typedef void* (__cdecl* tThrowableProjectileCreate)(const Vector& position, const QAngle& angles, const Vector& velocity, const Vector& angularVelocity, void* owner);
+typedef void* (__cdecl* tManualCarryCreateEntityByName)(const char* className, int forcedEdictIndex, bool runScriptHook);
+typedef void* (__thiscall* tManualCarryCreatePhysicsProp)(void* thisptr);
+typedef void(__thiscall* tCBaseEntityVPhysicsCollision)(void* thisptr, int index, void* collisionEvent);
 typedef int(__thiscall* tGetPrimaryAttackActivity)(void* thisptr, void* meleeInfo);
 typedef Vector* (__thiscall* tEyePosition)(void* thisptr, Vector* eyePos);
 typedef void(__thiscall* tEyeVectors)(void* thisptr, Vector* forward, Vector* right, Vector* up);
@@ -149,6 +152,9 @@ public:
 	static inline Hook<tThrowableProjectileCreate> hkMolotovProjectileCreate;
 	static inline Hook<tThrowableProjectileCreate> hkPipeBombProjectileCreate;
 	static inline Hook<tThrowableProjectileCreate> hkVomitJarProjectileCreate;
+	static inline Hook<tManualCarryCreateEntityByName> hkManualCarryCreateEntityByName;
+	static inline Hook<tManualCarryCreatePhysicsProp> hkManualCarryCreatePhysicsProp;
+	static inline Hook<tCBaseEntityVPhysicsCollision> hkCBaseEntityVPhysicsCollision;
 	static inline Hook<tGetPrimaryAttackActivity> hkGetPrimaryAttackActivity;
 	static inline Hook<tEyePosition> hkEyePosition;
 	static inline Hook<tEyePosition> hkServerPlayerEyePosition;
@@ -184,6 +190,8 @@ public:
 	static bool s_ServerUnderstandsVR;
 	static inline bool s_ManualThrowHooksReady = false;
 	static inline bool s_ManualCarryThrowHookReady = false;
+	static inline bool s_ManualCarryThrowPropSpawnHookReady = false;
+	static inline bool s_ManualCarryImpactKnockbackReady = false;
 
 	Hooks() {};
 	Hooks(Game* game);
@@ -216,6 +224,9 @@ public:
 	static void* __cdecl dMolotovProjectileCreate(const Vector& position, const QAngle& angles, const Vector& velocity, const Vector& angularVelocity, void* owner);
 	static void* __cdecl dPipeBombProjectileCreate(const Vector& position, const QAngle& angles, const Vector& velocity, const Vector& angularVelocity, void* owner);
 	static void* __cdecl dVomitJarProjectileCreate(const Vector& position, const QAngle& angles, const Vector& velocity, const Vector& angularVelocity, void* owner);
+	static void* __cdecl dManualCarryCreateEntityByName(const char* className, int forcedEdictIndex, bool runScriptHook);
+	static void* __fastcall dManualCarryCreatePhysicsProp(void* ecx, void* edx);
+	static void __fastcall dCBaseEntityVPhysicsCollision(void* ecx, void* edx, int index, void* collisionEvent);
 	static int __fastcall dGetPrimaryAttackActivity(void* ecx, void* edx, void* meleeInfo);
 	static Vector* __fastcall dEyePosition(void* ecx, void* edx, Vector* eyePos);
 	static Vector* __fastcall dServerPlayerEyePosition(void* ecx, void* edx, Vector* eyePos);

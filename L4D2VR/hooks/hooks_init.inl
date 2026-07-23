@@ -35,11 +35,38 @@ Hooks::Hooks(Game* game)
 	hkStartMeleeSwingServer.enableHook();
 	hkPrimaryAttackServer.enableHook();
 	hkItemPostFrameServer.enableHook();
+	if (s_ManualCarryThrowPropSpawnHookReady)
+	{
+		bool propSpawnHookEnabled = false;
+		if (hkManualCarryCreatePhysicsProp.pTarget)
+			propSpawnHookEnabled = hkManualCarryCreatePhysicsProp.enableHook() == 0;
+		if (hkManualCarryCreateEntityByName.pTarget)
+			propSpawnHookEnabled =
+				hkManualCarryCreateEntityByName.enableHook() == 0 || propSpawnHookEnabled;
+		s_ManualCarryThrowPropSpawnHookReady = propSpawnHookEnabled;
+	}
+	if (s_ManualCarryImpactKnockbackReady && hkCBaseEntityVPhysicsCollision.pTarget)
+	{
+		s_ManualCarryImpactKnockbackReady =
+			hkCBaseEntityVPhysicsCollision.enableHook() == 0;
+	}
 	if (s_ManualCarryThrowHookReady)
 	{
 		Game::logMsg(
-			"[VR][ManualCarryThrow] detached-weapon apply armed teleportSlot=118");
+			"[VR][ManualCarryThrow] detached-weapon apply armed teleportSlot=118 createPhysicsHook=%p entityFactoryHook=%p propSpawnReady=%d",
+			hkManualCarryCreatePhysicsProp.pTarget,
+			hkManualCarryCreateEntityByName.pTarget,
+			s_ManualCarryThrowPropSpawnHookReady ? 1 : 0);
 	}
+	Game::logMsg(
+		"[VR][ManualCarryImpact] native area shove %s collisionHook=%p getOrigin=%p terrorShove=%p commonShove=%p rttiCast=%p trace=%p",
+		s_ManualCarryImpactKnockbackReady ? "ready" : "unavailable",
+		hkCBaseEntityVPhysicsCollision.pTarget,
+		reinterpret_cast<void*>(m_Game->m_Offsets->CBaseEntity_GetAbsOrigin_Server.address),
+		reinterpret_cast<void*>(m_Game->m_Offsets->CTerrorPlayer_OnShovedBySurvivor_Server.address),
+		reinterpret_cast<void*>(m_Game->m_Offsets->INextBotEventResponder_OnShoved_Server.address),
+		reinterpret_cast<void*>(m_Game->m_Offsets->Server_RTDynamicCast.address),
+		m_Game->m_EngineTraceServer);
 	if (s_ManualThrowHooksReady)
 	{
 		const bool molotovEnabled = hkMolotovProjectileCreate.enableHook() == 0;
@@ -207,6 +234,42 @@ int Hooks::initSourceHooks()
 	hkItemPostFrameServer.createHook(ItemPostFrameServerAddr, &dItemPostFrameServer);
 
 	s_ManualCarryThrowHookReady = true;
+	s_ManualCarryThrowPropSpawnHookReady = false;
+	if (m_Game->m_Offsets->ManualCarryCreatePhysicsProp.valid)
+	{
+		hkManualCarryCreatePhysicsProp.createHook(
+			reinterpret_cast<LPVOID>(m_Game->m_Offsets->ManualCarryCreatePhysicsProp.address),
+			reinterpret_cast<LPVOID>(&dManualCarryCreatePhysicsProp));
+	}
+	if (m_Game->m_Offsets->ManualCarryCreateEntityByName.valid)
+	{
+		hkManualCarryCreateEntityByName.createHook(
+			reinterpret_cast<LPVOID>(m_Game->m_Offsets->ManualCarryCreateEntityByName.address),
+			reinterpret_cast<LPVOID>(&dManualCarryCreateEntityByName));
+	}
+	s_ManualCarryThrowPropSpawnHookReady =
+		hkManualCarryCreatePhysicsProp.pTarget != nullptr ||
+		hkManualCarryCreateEntityByName.pTarget != nullptr;
+	if (!s_ManualCarryThrowPropSpawnHookReady)
+	{
+		Game::logMsg(
+			"[VR][ManualCarryThrow] spawned physics-prop hook unavailable; propane/oxygen/gnome/fireworks manual throw disabled");
+	}
+	if (m_Game->m_Offsets->CBaseEntity_VPhysicsCollision_Server.valid)
+	{
+		hkCBaseEntityVPhysicsCollision.createHook(
+			reinterpret_cast<LPVOID>(m_Game->m_Offsets->CBaseEntity_VPhysicsCollision_Server.address),
+			reinterpret_cast<LPVOID>(&dCBaseEntityVPhysicsCollision));
+	}
+	s_ManualCarryImpactKnockbackReady =
+		m_Game->m_EngineTraceServer &&
+		m_Game->m_Offsets->CBaseEntity_GetAbsOrigin_Server.valid &&
+		m_Game->m_Offsets->CTerrorPlayer_OnShovedBySurvivor_Server.valid &&
+		m_Game->m_Offsets->Server_RTDynamicCast.valid &&
+		m_Game->m_Offsets->Server_RTTI_CBaseEntity.valid &&
+		m_Game->m_Offsets->Server_RTTI_INextBot.valid &&
+		m_Game->m_Offsets->INextBotEventResponder_OnShoved_Server.valid &&
+		hkCBaseEntityVPhysicsCollision.pTarget != nullptr;
 
 	s_ManualThrowHooksReady = false;
 	if (m_Game->m_Offsets->MolotovProjectileCreate.valid &&

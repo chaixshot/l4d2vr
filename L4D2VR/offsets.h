@@ -102,6 +102,22 @@ public:
     Offset MolotovProjectileCreate =     { "server.dll", 0x003DA4E0, "51 8B CE E8 ? ? ? ? D9 EE 6A 00 51 D9 1C 24 68 ? ? ? ? 8B CE E8 ? ? ? ? D9 EE 6A 00 51 D9 1C 24 68 ? ? ? ? 8B CE E8 ? ? ? ? 8B 0D ? ? ? ? 8B 11 8B 42 18 6A 00 6A 00 68 ? ? ? ? FF D0 8B F8 85 FF 74 ? 85 DB 74 ?", -0x1E0, true };
     Offset PipeBombProjectileCreate =    { "server.dll", 0x003DE720, "55 8B EC 8B 45 18 8B 4D 0C 53 8B 5D 08 56 57 50 51 53 68 ? ? ? ? E8 ? ? ? ? 8B 7D 10 D9 47 08 83 EC 20 DD 5C 24 28 8B F0 D9 47 04 DD 5C 24 20 D9 07 DD 5C 24 18 D9 43 08 DD 5C 24 10 D9 43 04 DD 5C 24 08 D9 03 DD 1C 24 68 ? ? ? ? E8 ? ? ? ? 8B 15 ? ? ? ? D9 42 2C 83 C4 30 8B CE D9 1C 24 E8 ? ? ? ?", 0, true };
     Offset VomitJarProjectileCreate =    { "server.dll", 0x003F4190, "8B 3E 8B CB E8 ? ? ? ? 50 8B 87 90 01 00 00 8B CE FF D0 8B 4D 14 51 8B CE E8 ? ? ? ? 5F 8B C6 5E 5B 5D C3", -0x1BE, true };
+    // Global CreateEntityByName wrapper. The normal carry-weapon release path can
+    // bypass CWeaponCarry::CreatePhysicsProp, but every replacement physics_prop
+    // still passes through this factory.
+    Offset ManualCarryCreateEntityByName = { "server.dll", 0x001196B0,
+        "55 8B EC 56 8B 75 0C 57 8B 7D 08 83 FE FF 74 27 8B 0D ? ? ? ? 8B 01 8B 50 58 56 FF D2 A3 ? ? ? ?",
+        0,
+        true
+    };
+    // CWeaponCarry::CreatePhysicsProp. Unlike the global entity factory, this
+    // gives us the source carry weapon as `this`, so a prop created before the
+    // release command can be paired with that release later.
+    Offset ManualCarryCreatePhysicsProp = { "server.dll", 0x003C8210,
+        "55 8B EC 81 EC A0 02 00 00 A1 ? ? ? ? 33 C5 89 45 FC 56 57 8B F1 E8 ? ? ? ? 8B F8 85 FF 74 10 8B 07 8B 90 68 01 00 00",
+        0,
+        true
+    };
     Offset GetPrimaryAttackActivity =    { "server.dll", 0x3E7630, "55 8B EC 53 8B 5D 08 56 57 8B BB ? ? ? ?" };
     Offset GetActiveWeapon =             { "server.dll", 0x464F0, "55 8B EC 8B 45 0C 56 8B 75 08 50 56 E8 ? ? ? ? 84 C0 74 47 8B", -64 };
     Offset GetMeleeWeaponInfo =          { "server.dll", 0x3E67D0, "8B 81 ? ? ? ? 50 B9 ? ? ? ? E8 ? ? ? ? C3" };
@@ -129,6 +145,45 @@ public:
     // Server CBaseEntity helpers used by VR-only roomscale movement on local/listen servers.
     Offset CBaseEntity_GetAbsOrigin_Server = { "server.dll", 0x28D10,
         "56 8B F1 8B 86 ? ? ? ? C1 E8 0B A8 01 74 05 E8 ? ? ? ? 8D 86 ? ? ? ? 5E C3",
+        0,
+        true
+    };
+    // CBaseEntity::VPhysicsCollision. CPhysicsProp and the carry weapon
+    // implementations route their real VPhysics contacts through this base
+    // method, whose event includes both server entities and pre-impact speed.
+    Offset CBaseEntity_VPhysicsCollision_Server = { "server.dll", 0x56590,
+        "55 8B EC 51 53 56 8B 75 0C 33 DB 57 8B 7D 08 85 FF 0F 94 C3 89 4D FC 8B 44 9E 68 89 45 0C 85 C0",
+        0,
+        true
+    };
+    // CTerrorPlayer::OnShovedBySurvivor. This is the native survivor-push
+    // reaction used for player-controlled and AI special infected.
+    Offset CTerrorPlayer_OnShovedBySurvivor_Server = { "server.dll", 0x32BB00,
+        "55 8B EC 81 EC F8 00 00 00 A1 ? ? ? ? 33 C5 89 45 FC 53 8B 5D 08 56 57 8B 7D 0C 8B F1 89 5D 80 E8 ? ? ? ? 84 C0 0F 85 ? ? ? ?",
+        0,
+        true
+    };
+    // server.dll statically links the VC10 RTTI helper. It is used to obtain
+    // the INextBot responder implemented by common infected and witches.
+    Offset Server_RTDynamicCast = { "server.dll", 0x55E1EE,
+        "6A 24 68 ? ? ? ? E8 ? ? ? ? 8B 75 08 85 F6 75 08 33 C0 E8 ? ? ? ? C3 83 65 FC 00 8B CE E8 ? ? ? ? 8B D0 89 55 E4",
+        0,
+        true
+    };
+    Offset Server_RTTI_CBaseEntity = { "server.dll", 0x74A1D0,
+        "? ? ? ? 00 00 00 00 2E 3F 41 56 43 42 61 73 65 45 6E 74 69 74 79 40 40 00",
+        0,
+        true
+    };
+    Offset Server_RTTI_INextBot = { "server.dll", 0x76AB48,
+        "? ? ? ? 00 00 00 00 2E 3F 41 56 49 4E 65 78 74 42 6F 74 40 40 00",
+        0,
+        true
+    };
+    // INextBotEventResponder::OnShoved(CBaseEntity*). The current L4D2
+    // responder vtable exposes this propagation routine at slot 28.
+    Offset INextBotEventResponder_OnShoved_Server = { "server.dll", 0x298FE0,
+        "55 8B EC 56 57 8B F9 8B 07 8B 50 04 FF D2 8B F0 85 F6 74 1F 53 8B 5D 08 8B 06 8B 50 70 53 8B CE FF D2 8B 07 8B 50 08 56 8B CF FF D2 8B F0 85 F6 75 E6 5B 5F 5E 5D C2 04 00",
         0,
         true
     };

@@ -1649,7 +1649,7 @@ bool __fastcall Hooks::dCreateMove(void* ecx, void* edx, float flInputSampleTime
 				m_VR->m_IsVREnabled &&
 				m_VR->m_ManualThrowEnabled &&
 				s_ServerUnderstandsVR &&
-				s_ManualCarryThrowHookReady &&
+				ManualCarryThrowBackendIsReady(carryWeaponId) &&
 				carryWeaponId != static_cast<int>(C_WeaponCSBase::WeaponID::NONE);
 
 			if (!carryThrowActive)

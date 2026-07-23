@@ -1645,6 +1645,7 @@ float __fastcall Hooks::dProcessUsercmds(void* ecx, void* edx, edict_t* player,
 		pPlayer,
 		activeWeaponAfterUsercmd,
 		activeWeaponReadSucceeded);
+	ManualCarryImpactUpdate();
 	m_ServerProcessingUsercmd = false;
 	m_ServerProcessingUsercmdPlayer = nullptr;
 	m_ServerProcessingUsercmdPlayerIndex = -1;
@@ -1976,7 +1977,9 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 		const bool releasedThrowable = previousWeaponThrowable && previousAttackDown && !attackDown;
 		const int releasedWeaponId = activeWeaponIsThrowable ? serverWeaponId : previousThrowableWeaponId;
 		const bool manualThrowActive = s_ManualThrowHooksReady && m_VR && m_VR->m_ManualThrowEnabled;
-		const bool manualCarryThrowActive = s_ManualCarryThrowHookReady && m_VR && m_VR->m_ManualThrowEnabled;
+		const bool manualCarryThrowActive =
+			ManualCarryThrowBackendIsReady(encodedCarryWeaponId) &&
+			m_VR && m_VR->m_ManualThrowEnabled;
 		bool commandControllerAim = false;
 		int commandControllerAimReason = 0;
 

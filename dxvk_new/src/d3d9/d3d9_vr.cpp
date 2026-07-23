@@ -53,10 +53,8 @@ namespace dxvk {
 
       const auto& desc = tex->Desc();
       const auto& image = tex->GetImage();
-      if (unlikely(image == nullptr || image->info().sampleCount != VK_SAMPLE_COUNT_1_BIT)) {
-        Logger::warn("D3D9VR::GetVRDesc: refusing non-submit-ready multisampled texture");
+      if (unlikely(image == nullptr))
         return D3DERR_INVALIDCALL;
-      }
 
       const auto& device = tex->Device()->GetDXVKDevice();
 

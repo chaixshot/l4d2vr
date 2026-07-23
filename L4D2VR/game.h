@@ -52,6 +52,7 @@ struct ManualThrowPending
     void* owner = nullptr;
     void* sourceWeapon = nullptr;
     void* sourceWeaponVtable = nullptr;
+    void* spawnedPhysicsProp = nullptr;
     bool velocityMismatchLogged = false;
     Vector origin = { 0.f, 0.f, 0.f };
     QAngle angles = { 0.f, 0.f, 0.f };

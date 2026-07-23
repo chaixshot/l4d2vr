@@ -78,6 +78,21 @@ static bool ManualCarryThrowWeaponIdIsSupported(C_WeaponCSBase::WeaponID weaponI
 		weaponId == C_WeaponCSBase::WeaponID::FIREWORKS_BOX;
 }
 
+static bool ManualCarryThrowWeaponIdUsesSpawnedPhysicsProp(int weaponId)
+{
+	return weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::PROPANE_TANK) ||
+		weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::OXYGEN_TANK) ||
+		weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::GNOME_CHOMPSKI) ||
+		weaponId == static_cast<int>(C_WeaponCSBase::WeaponID::FIREWORKS_BOX);
+}
+
+static bool ManualCarryThrowBackendIsReady(int weaponId)
+{
+	return Hooks::s_ManualCarryThrowHookReady &&
+		(!ManualCarryThrowWeaponIdUsesSpawnedPhysicsProp(weaponId) ||
+			Hooks::s_ManualCarryThrowPropSpawnHookReady);
+}
+
 static int ResolveVRManualCarryThrowWeaponId(C_WeaponCSBase* weapon, const char* weaponName, const char* weaponNetClass)
 {
 	if (weapon && ManualCarryThrowWeaponIdIsSupported(weapon->GetWeaponID()))
