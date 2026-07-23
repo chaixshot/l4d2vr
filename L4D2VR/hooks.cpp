@@ -113,6 +113,9 @@ static bool ManualInventoryThrowWeaponIdDoesShove(int weaponId)
 {
 	switch (static_cast<C_WeaponCSBase::WeaponID>(weaponId))
 	{
+	case C_WeaponCSBase::WeaponID::MOLOTOV:
+	case C_WeaponCSBase::WeaponID::PIPE_BOMB:
+	case C_WeaponCSBase::WeaponID::VOMITJAR:
 	case C_WeaponCSBase::WeaponID::FIRST_AID_KIT:
 	case C_WeaponCSBase::WeaponID::PAIN_PILLS:
 	case C_WeaponCSBase::WeaponID::AMMO_PACK:

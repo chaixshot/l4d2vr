@@ -2028,7 +2028,8 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 				m_Game->m_CurrentUsercmdPlayer,
 				serverWeapon,
 				releasedWeaponId,
-				move->tick_count);
+				move->tick_count,
+				false);
 		}
 		if (vrPlayerState && manualCarryThrowActive && encodedCarryRelease &&
 			vrPlayerState->manualCarryThrowLastDecodedReleaseTick != move->tick_count)
@@ -2043,7 +2044,8 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 					m_Game->m_CurrentUsercmdPlayer,
 					serverWeapon,
 					encodedCarryWeaponId,
-					move->tick_count);
+					move->tick_count,
+					false);
 				Game::logMsg(
 					"[VR][ManualCarryThrow] release decoded player=%d tick=%d encodedWeaponId=%d serverWeaponId=%d source=%p sourceMatch=1 detachedApply=1 prepared=%d velocity=(%.1f %.1f %.1f)",
 					i,
@@ -2081,7 +2083,8 @@ int Hooks::dReadUsercmd(void* buf, CUserCmd* move, CUserCmd* from)
 					m_Game->m_CurrentUsercmdPlayer,
 					serverWeapon,
 					encodedCarryWeaponId,
-					move->tick_count);
+					move->tick_count,
+					true);
 				Game::logMsg(
 					"[VR][ManualInventoryThrow] release decoded player=%d tick=%d weaponId=%d source=%p prepared=%d velocity=(%.1f %.1f %.1f)",
 					i,

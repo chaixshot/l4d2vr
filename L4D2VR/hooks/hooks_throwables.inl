@@ -52,6 +52,8 @@ namespace
 		switch (weaponId)
 		{
 		case C_WeaponCSBase::WeaponID::PISTOL: return "pistol";
+		case C_WeaponCSBase::WeaponID::MOLOTOV: return "molotov";
+		case C_WeaponCSBase::WeaponID::PIPE_BOMB: return "pipe_bomb";
 		case C_WeaponCSBase::WeaponID::UZI: return "smg";
 		case C_WeaponCSBase::WeaponID::PUMPSHOTGUN: return "pumpshotgun";
 		case C_WeaponCSBase::WeaponID::AUTOSHOTGUN: return "autoshotgun";
@@ -85,6 +87,7 @@ namespace
 		case C_WeaponCSBase::WeaponID::AWP: return "awp";
 		case C_WeaponCSBase::WeaponID::SCOUT: return "scout";
 		case C_WeaponCSBase::WeaponID::M60: return "m60";
+		case C_WeaponCSBase::WeaponID::VOMITJAR: return "vomitjar";
 		default: return "unknown";
 		}
 	}
@@ -287,15 +290,24 @@ namespace
 		void* owner,
 		void* sourceWeapon,
 		int weaponId,
-		int releaseTick)
+		int releaseTick,
+		bool inventoryDropRequest)
 	{
 		player.manualThrowPending = {};
 
 		if (!Hooks::m_VR || !Hooks::m_VR->m_ManualThrowEnabled)
 			return false;
-		const bool projectileThrow = ManualThrowWeaponIdIsThrowable(weaponId);
-		const bool carryableThrow = ManualThrowWeaponIdIsCarryable(weaponId);
-		const bool inventoryDropThrow = ManualInventoryThrowWeaponIdRequiresCustomDrop(weaponId);
+		// Grenade-slot weapons deliberately support two different paths. A plain
+		// trigger pull is still Source's native projectile attack; Use+trigger is
+		// an inventory drop. Keep the requested path explicit so the same weaponId
+		// can never create a projectile and execute Weapon_Drop together.
+		const bool inventoryDropThrow =
+			inventoryDropRequest &&
+			ManualInventoryThrowWeaponIdRequiresCustomDrop(weaponId);
+		const bool projectileThrow =
+			!inventoryDropRequest && ManualThrowWeaponIdIsThrowable(weaponId);
+		const bool carryableThrow =
+			!inventoryDropRequest && ManualThrowWeaponIdIsCarryable(weaponId);
 		if (!owner || !sourceWeapon || (!projectileThrow && !carryableThrow && !inventoryDropThrow))
 			return false;
 		if (projectileThrow && !Hooks::s_ManualThrowHooksReady)
