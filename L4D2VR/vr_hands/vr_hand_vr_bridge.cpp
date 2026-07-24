@@ -4500,6 +4500,8 @@ bool VR::UpdateMagazineInteraction(
     C_BasePlayer* localPlayer,
     bool leftGripDown,
     bool leftGripJustPressed,
+    bool leftSupportHandDown,
+    bool leftSupportHandJustPressed,
     bool allowGameplayInputOnTwoHandedGripRelease)
 {
     const auto now = std::chrono::steady_clock::now();
@@ -4622,6 +4624,7 @@ bool VR::UpdateMagazineInteraction(
     VrHandMatrix4 inputSocketWorld{};
     VrHandMatrix4 inputSocketCaptureWorld{};
     bool inputSocketValid = false;
+    bool isSeparateInput = m_MagazineInteractionSeparateButtonInput;
 
     auto rebuildInputSocketFromSessionBox = [&]() -> bool
     {
@@ -5645,7 +5648,12 @@ bool VR::UpdateMagazineInteraction(
     {
         clearMountFriendlyGripContact();
 
-        if ((m_VrHandsTwoHandedGripHeldMode ? !leftGripDown : leftGripJustPressed) && twoHandedGripRuntimeAllowed && m_VrHandsTwoHandedGripActive)
+        if ((
+                (!isSeparateInput && (m_VrHandsTwoHandedGripHeldMode ? !leftGripDown : leftGripJustPressed)) ||
+                (isSeparateInput && (m_VrHandsTwoHandedGripHeldMode ? !leftSupportHandDown : leftSupportHandJustPressed))
+            ) &&
+            twoHandedGripRuntimeAllowed &&
+            m_VrHandsTwoHandedGripActive)
         {
             m_VrHandsTwoHandedGripActive = false;
             m_VrHandsTwoHandedGripWeaponId = 0;
@@ -5661,11 +5669,14 @@ bool VR::UpdateMagazineInteraction(
             return false;
         }
 
-        if (leftGripJustPressed &&
+        if ((
+                (!isSeparateInput && leftGripJustPressed) ||
+                (isSeparateInput && leftSupportHandJustPressed)
+            ) &&
             twoHandedGripRuntimeAllowed &&
             (!IsMagazineInteractionManualActive() || activeWeaponUsesShotgunShells) &&
             !m_MagazineInteractionLeftHandHolding &&
-            !leftHandTouchesMagazineForGripExclusion())
+            (!leftHandTouchesMagazineForGripExclusion() || isSeparateInput))
         {
             float twoHandTargetDistance = FLT_MAX;
             if (leftHandTouchesTwoHandedGripTarget(twoHandTargetDistance))
