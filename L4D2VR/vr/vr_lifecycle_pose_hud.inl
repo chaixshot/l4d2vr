@@ -755,6 +755,8 @@ void VR::ProcessMenuInput()
         vr::VREvent_t vrEvent;
         while (vr::VROverlay()->PollNextOverlayEvent(currentOverlay, &vrEvent, sizeof(vrEvent)))
         {
+            int button = vrEvent.data.controller.button;
+            
             switch (vrEvent.eventType)
             {
             case vr::VREvent_MouseMove:
@@ -800,6 +802,13 @@ void VR::ProcessMenuInput()
 
             case vr::VREvent_ScrollDiscrete:
                 m_Game->m_VguiInput->InternalMouseWheeled((int)vrEvent.data.scroll.ydelta);
+                break;
+            case vr::VREvent_ButtonPress:
+                if (button == vr::k_EButton_IndexController_A)
+                {
+                    g_Game->ClientCmd_Unrestricted("gameui_hide\n");
+                    g_Game->ClientCmd("gameui_hide\n");
+                }
                 break;
             }
         }
