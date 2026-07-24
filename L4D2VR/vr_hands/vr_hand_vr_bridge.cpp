@@ -6368,11 +6368,17 @@ bool VR::UpdateMagazineInteraction(
         {
             if (activeClip == 0) // Chamber was left one, but the clip just went empty.
             {
-                m_MagazineInteractionChamberEmpty = true;
-                m_MagazineInteractionOneInChamber = false;
-                m_MagazineInteractionViewmodelFreezeDeferredUntil =
-                    now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                        std::chrono::duration<float>(GetMagazineInteractionEmptyClipAutoEjectFreezeDelaySeconds(activeWeaponId)));
+                if (m_MagazineInteractionChamberEmpty && (
+                    m_MagazineInteractionViewmodelFreezeDeferredUntil.time_since_epoch().count() == 0 ||
+                    now >= m_MagazineInteractionViewmodelFreezeDeferredUntil)) // Wait for animation before set m_MagazineInteractionOneInChamber
+                        m_MagazineInteractionOneInChamber = false;
+                else if (!m_MagazineInteractionChamberEmpty) // Chamber empty animation
+                {
+                    m_MagazineInteractionChamberEmpty = true;
+                    m_MagazineInteractionViewmodelFreezeDeferredUntil =
+                        now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                            std::chrono::duration<float>(GetMagazineInteractionEmptyClipAutoEjectFreezeDelaySeconds(activeWeaponId)));
+                }
             }
         }
         else
