@@ -4624,6 +4624,7 @@ bool VR::UpdateMagazineInteraction(
     VrHandMatrix4 inputSocketWorld{};
     VrHandMatrix4 inputSocketCaptureWorld{};
     bool inputSocketValid = false;
+    bool isSeparateInput = m_MagazineInteractionSeparateButtonInput;
 
     auto rebuildInputSocketFromSessionBox = [&]() -> bool
     {
@@ -5647,8 +5648,10 @@ bool VR::UpdateMagazineInteraction(
     {
         clearMountFriendlyGripContact();
 
-        if (((!m_MagazineInteractionSeparateButtonInput && (m_VrHandsTwoHandedGripHeldMode ? !leftGripDown : leftGripJustPressed)) ||
-                (m_MagazineInteractionSeparateButtonInput && (m_VrHandsTwoHandedGripHeldMode ? !leftSupportHandDown : leftSupportHandJustPressed))) &&
+        if ((
+                (!isSeparateInput && (m_VrHandsTwoHandedGripHeldMode ? !leftGripDown : leftGripJustPressed)) ||
+                (isSeparateInput && (m_VrHandsTwoHandedGripHeldMode ? !leftSupportHandDown : leftSupportHandJustPressed))
+            ) &&
             twoHandedGripRuntimeAllowed &&
             m_VrHandsTwoHandedGripActive)
         {
@@ -5666,8 +5669,10 @@ bool VR::UpdateMagazineInteraction(
             return false;
         }
 
-        if (((!m_MagazineInteractionSeparateButtonInput && leftGripJustPressed) ||
-                (m_MagazineInteractionSeparateButtonInput && leftSupportHandJustPressed)) &&
+        if ((
+                (!isSeparateInput && leftGripJustPressed) ||
+                (isSeparateInput && leftSupportHandJustPressed)
+            ) &&
             twoHandedGripRuntimeAllowed &&
             (!IsMagazineInteractionManualActive() || activeWeaponUsesShotgunShells) &&
             !m_MagazineInteractionLeftHandHolding &&

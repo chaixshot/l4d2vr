@@ -1527,6 +1527,7 @@ namespace
             return vrHandsEntryEnabled && CfgIsEnabled(s, "MagazineInteractionEnabled", false);
         if (std::strcmp(key, "MagazineInteractionSeparateButtonInput") == 0)
             return vrHandsEntryEnabled &&
+                CfgIsEnabled(s, "MagazineInteractionUseButtonGripInput", false) &&
                 CfgIsEnabled(s, "MagazineInteractionEnabled", false);
         if (std::strcmp(key, "MagazineInteractionUseButtonDisbleReloadCommand") == 0)
             return vrHandsEntryEnabled && CfgIsEnabled(s, "MagazineInteractionUseButtonGripInput", false) && CfgIsEnabled(s, "MagazineInteractionEnabled", false);
